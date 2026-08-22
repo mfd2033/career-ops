@@ -94,6 +94,7 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { extractTrackerReportNumbers, resolveColumns, parseTrackerRow, normalizeTextKey } from './tracker-parse.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
+import { localToday } from './lib/local-today.mjs';
 import {
   rebuildRow, resolveTrackerPath, writeFileAtomic, loadCanonicalStates, resolveCanonicalState,
   normalizeCompany, cell, CLI_EXIT, makeCliFailWith, acquireTrackerLockForCli,
@@ -199,7 +200,13 @@ if (flags.on !== null) {
   const d = m ? new Date(`${flags.on}T00:00:00Z`) : null;
   const roundTrips = d && !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === flags.on;
   if (!roundTrips) failUsage(`--on expects a real date as YYYY-MM-DD, got "${flags.on}"`);
-  if (flags.on > new Date().toISOString().slice(0, 10)) failUsage(`--on date is in the future: "${flags.on}"`);
+  // LOCAL today, not the UTC day. At a positive UTC offset the UTC day is
+  // still yesterday for the first hours of the local day, so comparing against
+  // it rejected the user's own today: `TZ=Pacific/Auckland --on 2026-08-16`
+  // failed with "date is in the future" on 2026-08-16 (#2932). The round-trip
+  // check above deliberately stays on UTC — that is date PARSING, not "what
+  // day is it here".
+  if (flags.on > localToday()) failUsage(`--on date is in the future: "${flags.on}"`);
 }
 
 const selector = explicitSelector ? null : positional[0];
@@ -313,7 +320,7 @@ function resolveRow(rows) {
   if (flags.report !== null) {
     const num = parseInt(flags.report, 10);
     return resolveCandidates(
-      rows.filter(r => extractTrackerReportNumbers(r.report).includes(num)),
+      rows.filter(r => extractTrackerReportNumbers(r.report, r.notes).includes(num)),
       {
         notFound: `No tracker row links report #${num}. (Report IDs and tracker row IDs differ — ` +
           'use --row N to select by tracker #.)',
@@ -392,7 +399,7 @@ const target = resolveRow(rows);
 // teaches callers to pass --force, which disables it everywhere including the
 // cases it was written for.
 if (isBareNumericSelector && !flags.force) {
-  const reportNums = extractTrackerReportNumbers(target.report);
+  const reportNums = extractTrackerReportNumbers(target.report, target.notes);
   const mismatched = reportNums.filter(num => num !== target.num);
   if (mismatched.length > 0) {
     failWith(
@@ -418,7 +425,7 @@ if (isBareNumericSelector && !flags.force) {
   // not see. Bare "#N" then names two applications at once and must not write.
   if (reportNums.length === 0) {
     const num = parseInt(selector, 10);
-    const linkers = rows.filter(r => r !== target && extractTrackerReportNumbers(r.report).includes(num));
+    const linkers = rows.filter(r => r !== target && extractTrackerReportNumbers(r.report, r.notes).includes(num));
     if (linkers.length > 0) {
       const listing = linkers.map(r => `#${r.num}\t${r.company}\t${r.role}`).join('\n');
       failWith(
@@ -537,7 +544,12 @@ if (changed && !flags.dryRun) {
 let statusLogged = false;
 if (statusChanged && !flags.dryRun) {
   const logPath = join(dirname(APPS_FILE), 'status-log.tsv');
-  const eventDate = flags.on ?? new Date().toISOString().slice(0, 10);
+  // LOCAL today: the UTC day is TOMORROW for a west-of-Greenwich evening run,
+  // so this appended a status-log row dated a day that had not happened yet
+  // (#2932, mirroring #2765). status-log.tsv is what funnel-velocity reads for
+  // time-between-stages, so a future-dated transition skews the interval it
+  // measures rather than just looking odd in the file.
+  const eventDate = flags.on ?? localToday();
   try {
     appendFileSync(logPath, `${target.num}\t${eventDate}\t${oldStatus}\t${newStatus}\t${flags.source ?? 'set-status'}\t\n`);
     statusLogged = true;
