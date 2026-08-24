@@ -313,10 +313,32 @@ func (m appModel) View() string {
 	}
 }
 
+// defaultOpsPath returns the career-ops root the dashboard reads from. An
+// explicitly passed --path always wins; otherwise the path is anchored on the
+// executable's own directory, so the binary works when double-clicked from
+// anywhere — not just when the current working directory happens to be the
+// repo root. A bare executable name has no directory and falls back to ".".
+func defaultOpsPath(explicit string, explicitSet bool, exe string) string {
+	if explicitSet {
+		return explicit
+	}
+	if dir := filepath.Dir(exe); dir != "." {
+		return dir
+	}
+	return explicit
+}
+
 func main() {
 	pathFlag := flag.String("path", ".", "Path to career-ops directory")
 	langFlag := flag.String("lang", "", "Language for UI (en, tr). Defaults to auto-detect/en.")
 	flag.Parse()
+
+	explicitPath := false
+	flag.Visit(func(f *flag.Flag) {
+		if f.Name == "path" {
+			explicitPath = true
+		}
+	})
 
 	if *langFlag != "" {
 		i18n.SetLang(*langFlag)
@@ -324,7 +346,7 @@ func main() {
 		i18n.SetLang(os.Getenv("LANG"))
 	}
 
-	careerOpsPath := *pathFlag
+	careerOpsPath := defaultOpsPath(*pathFlag, explicitPath, os.Args[0])
 
 	// Load applications
 	apps := data.ParseApplications(careerOpsPath)
