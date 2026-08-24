@@ -377,6 +377,8 @@ npm run serve:dashboard   # launch the TUI
 npm run build:dashboard   # optional: build the standalone binary
 ```
 
+On Windows, a prebuilt `career-dashboard.exe` sits in the repo root — double-click it to launch the TUI. It anchors itself on its own location and auto-detects the data files. Rebuild it from `dashboard/` with `go build -o ..\career-dashboard.exe .` (changes to the dashboard require a rebuild + you're back to `npm run serve:dashboard`).
+
 Features: 6 filter tabs, 4 sort modes, grouped/flat view, lazy-loaded previews, inline status changes.
 
 There is also an **experimental web UI** (alpha, opt-in — nothing runs unless you start it): see [`web/README.md`](web/README.md).
