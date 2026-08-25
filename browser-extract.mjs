@@ -37,6 +37,7 @@ import { fileURLToPath, pathToFileURL } from 'url';
 import * as yaml from 'js-yaml';
 import { LIVENESS_CONTEXT_OPTIONS, rejectPrivateOrInvalid } from './liveness-browser.mjs';
 import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
+import { isZhJobHost } from './lib/zh-jobs.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 
@@ -123,12 +124,12 @@ export function normalizeListing(anchors, finalUrl, max = DEFAULT_LISTING_MAX) {
   return { url: finalUrl, jobs };
 }
 
-const VALUE_FLAGS = ['--mode', '--max', '--max-chars', '--timeout'];
+const VALUE_FLAGS = ['--mode', '--max', '--max-chars', '--timeout', '--extractor'];
 const KNOWN_FLAGS = [...VALUE_FLAGS, '--help', '-h'];
 
 // One synopsis, used by both --help and the no_url error, so the two cannot
 // drift apart: the error's own copy already omitted --timeout.
-const USAGE_SYNOPSIS = 'browser-extract.mjs <url> [--mode jd|listing] [--max N] [--max-chars N] [--timeout MS]';
+const USAGE_SYNOPSIS = 'browser-extract.mjs <url> [--mode jd|listing] [--max N] [--max-chars N] [--timeout MS] [--extractor auto|playwright|bsk]';
 
 const USAGE = `Usage:
   node ${USAGE_SYNOPSIS}
@@ -137,6 +138,11 @@ const USAGE = `Usage:
   --max N             listing: maximum postings to return (default ${DEFAULT_LISTING_MAX})
   --max-chars N       jd: text cap (default ${JD_TEXT_CAP}); raise it for a long JD
   --timeout MS        navigation timeout (default ${DEFAULT_TIMEOUT_MS})
+  --extractor M       auto (default): zh boards (zhipin/liepin/zhaopin) → bsk (user's
+                      logged-in browser), everything else → Playwright; playwright:
+                      never use bsk; bsk: always use bsk — the zh boards block
+                      headless AND logged-out browsers with captcha walls, and bsk
+                      hands slider captchas to the user via request-help
   --help, -h          Show this help`;
 
 /**
@@ -185,6 +191,7 @@ export function parseArgs(argv) {
   };
 
   const modeVal = hasFlag(args, '--mode') ? flagValue(args, '--mode') : undefined;
+  const extractorVal = hasFlag(args, '--extractor') ? flagValue(args, '--extractor') : undefined;
 
   return {
     url,
@@ -192,7 +199,27 @@ export function parseArgs(argv) {
     max: num('--max', (n) => n >= 0, DEFAULT_LISTING_MAX),
     maxChars: num('--max-chars', (n) => n > 0, JD_TEXT_CAP),
     timeout: num('--timeout', (n) => n > 0, DEFAULT_TIMEOUT_MS),
+    extractor: extractorVal === 'playwright' || extractorVal === 'bsk' ? extractorVal : 'auto',
   };
+}
+
+/**
+ * Pick which extractor handles a URL given an --extractor CLI value.
+ *
+ * On `auto`, only the zh job boards known to wall off headless / logged-out
+ * browsers (zhipin, liepin, zhaopin) route to bsk; everything else stays on
+ * Playwright. An explicit `playwright` never uses bsk. An explicit `bsk`
+ * always does — with `allowNonZh: true` so the user can force bsk for a URL
+ * outside the zh board list too.
+ *
+ * @param {string} extractor - CLI value, already normalized to bsk|playwright|auto
+ * @param {string} url - the URL being extracted
+ * @returns {'bsk'|'playwright'}
+ */
+export function pickExtractor(extractor, url) {
+  if (extractor === 'bsk') return 'bsk';
+  if (extractor === 'playwright') return 'playwright';
+  return isZhJobHost(url) ? 'bsk' : 'playwright';
 }
 
 // Read the raw DOM inside the page: title, main visible text, and visible
@@ -241,7 +268,7 @@ async function main() {
   // CodeRabbit caught on #2961).
   validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS, requireOperand: true });
 
-  const { url, mode, max, maxChars, timeout } = parseArgs(args);
+  const { url, mode, max, maxChars, timeout, extractor } = parseArgs(args);
 
   if (!url) {
     console.error(JSON.stringify({ error: `usage: ${USAGE_SYNOPSIS}`, code: 'no_url' }));
@@ -256,6 +283,25 @@ async function main() {
   if (guard) {
     console.error(JSON.stringify({ error: guard.reason, code: guard.code }));
     process.exit(1);
+  }
+
+  // Zh boards (zhipin/liepin/zhaopin) wall off headless AND logged-out
+  // browsers with captcha challenges. When bsk is selected for this URL, hand
+  // the fetch to the user's logged-in browser first; only fall back to
+  // Playwright if bsk is missing or the extraction fails. The import is lazy
+  // (bsk-extract statically imports this file's normalizers, so a top-level
+  // import here would create an import cycle) and stays ahead of the
+  // Playwright import below.
+  if (pickExtractor(extractor, url) === 'bsk') {
+    const { extractWithBsk } = await import('./bsk-extract.mjs');
+    try {
+      const result = await extractWithBsk({ url, mode, max, maxChars, allowNonZh: extractor === 'bsk' });
+      process.stdout.write(JSON.stringify(result));
+      return;
+    } catch (err) {
+      const why = String(err?.code || err?.message || err).split('\n')[0].slice(0, 200);
+      console.error(`[browser-extract] bsk path failed (${why}); falling back to Playwright`);
+    }
   }
 
   let chromium;
