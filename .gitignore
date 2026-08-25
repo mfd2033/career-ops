@@ -156,3 +156,23 @@ documents/*
 # Intake fingerprints — the recorded source filenames may themselves carry
 # PII (e.g. cv/jane-doe-master-cv.pdf). #1723
 data/intake-state.json
+
+# Local environment notes (machine-specific paths / PII, never commit)
+MEMORY.md
+
+# OpenCode run-continuation scratchpad (session JSON, machine-local)
+.omo/
+
+# Browser profile cache — may hold cookies / saved passwords; NEVER commit
+.cache/
+
+# Build/temp artifacts and one-off screenshots
+career-dashboard.exe~
+uu-job-header.png
+
+# Log / error scratch files
+update-apply*.log
+update-apply*.err
+
+# Archived evaluation reports (PII — keep out of VCS)
+reports/archive/
