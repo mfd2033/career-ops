@@ -245,6 +245,16 @@ npm run build:dashboard   # optional: build the standalone binary
 
 功能包括：6 个筛选标签、4 种排序模式、分组/平铺视图、懒加载预览、行内状态修改。
 
+### 网页版 Dashboard——自包含应用（Windows）
+
+同一个 web UI 被封装成了可直接双击运行的 Windows 应用 **`career-dashboard-ui.exe`**（位于仓库根目录）。把它放到你的 career-ops 数据旁边，双击即可：它会将内嵌的 Next.js standalone 服务器 + Node 运行时解压到 `%LOCALAPPDATA%\career-ops-dashboard-ui`，在空闲端口上启动服务器，并打开你的默认浏览器——无需安装 Node、没有控制台窗口、也不需要运行任何其他东西。和 TUI 一样，它以自身所在位置为锚点，从 exe 所在目录读取你的 `cv.md` / `data/` / `reports/`。如果它已在运行，再次启动只会重新打开浏览器。
+
+源码与构建位于 `dashboard-ui/`（`main.go` Go 启动器、`gen-icon.py` 图标、`build-dashboard-ui.mjs` 打包脚本）。在 web 更新后重建：
+
+```bash
+node dashboard-ui/build-dashboard-ui.mjs
+```
+
 ## 项目结构
 
 ```
@@ -269,6 +279,7 @@ career-ops/
 │   ├── batch-prompt.md          # 自包含 worker 提示词
 │   └── batch-runner.sh          # 编排脚本
 ├── dashboard/                   # Go TUI 管道查看器
+├── dashboard-ui/                # 网页版 Dashboard exe 启动器（Go + 图标 + 打包脚本）
 ├── data/                        # 你的追踪数据（已 gitignore）
 ├── reports/                     # 评估报告（已 gitignore）
 ├── output/                      # 生成的 PDF（已 gitignore）

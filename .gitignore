@@ -129,6 +129,7 @@ opencode.json
 .mcp.json
 career-dashboard
 career-dashboard.exe
+career-dashboard-ui.exe
 package-lock.json
 !web/package-lock.json
 
@@ -168,6 +169,7 @@ MEMORY.md
 
 # Build/temp artifacts and one-off screenshots
 career-dashboard.exe~
+career-dashboard-ui.exe~
 uu-job-header.png
 
 # Log / error scratch files
