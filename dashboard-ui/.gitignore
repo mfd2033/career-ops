@@ -1,0 +1,12 @@
+# career-dashboard-ui — generated build inputs & toolchain. The tracked sources
+# are main.go, open_*.go, go.mod/go.sum, winres/winres.json, winres/icon.ico,
+# gen-icon.py and build-dashboard-ui.mjs; everything below is (re)produced by
+# build-dashboard-ui.mjs or gen-icon.py and must never be committed.
+#
+# NOTE: icon.ico IS tracked — winres/winres.json references it, so a fresh clone
+# can run `go-winres make` without regenerating it first.
+app/
+node.exe
+.gobin/
+*.syso
+icon-*.png
