@@ -44,8 +44,10 @@
 
 ## 智能解析 URL 职位描述
 
+**中文招聘站（猎聘 `liepin.com` / BOSS直聘 `zhipin.com`·`kanzhun.com` / 智联招聘 `zhaopin.com`）：** 这些站点对无头浏览器**和**未登录浏览器都会弹出验证码/反爬墙，`browser_navigate`、`WebFetch`、`WebSearch` 在上面全部拿不到内容。凡是命中这些域名的 URL，**跳过下面三步**，直接运行 `node browser-extract.mjs <url>`（默认 `--extractor auto` 会自动把中文站路由到候选人**自己已登录的浏览器**，经由 `bsk`，遇到滑块验证码时会通过 `request-help` 交给候选人手动解除）。用其返回的 `text` 作为 JD。若它以 `bsk_*` 错误码（如 `bsk_missing`）非零退出，**立即停止并提示候选人安装 browser-skill 并运行 `bsk status`**——绝不要靠同类岗位「推断」JD。`bsk` CLI 与 browser-skill 扩展必须处于连接状态才能生效。
+
 1. **Playwright (首选)**：`browser_navigate` + `browser_snapshot`。能够稳定处理所有单页面应用 (SPA)。
-   - **可选 — CLI 提取器（`config/profile.yml` 中的 `scan.extractor: cli`）：** 改为运行 `node browser-extract.mjs <url>`（`--mode jd`）——紧凑的 `{ "url", "title", "text" }`，更少 token（因门户而异）。出错或缺失时**静默**回退到 `browser_navigate` + `browser_snapshot`。
+   - **可选 — CLI 提取器（`config/profile.yml` 中的 `scan.extractor: cli`）：** 改为运行 `node browser-extract.mjs <url>`（`--mode jd`）——紧凑的 `{ "url", "title", "text" }`，更少 token（因门户而异）。对中文站而言这条路径是**必须的（而非可选）**——它是唯一能经 `bsk` 路由的路径。出错或缺失时**静默**回退到 `browser_navigate` + `browser_snapshot`（仅限非中文站 URL）。
 2. **WebFetch (备选)**：适用于静态页面，或在 Playwright 环境不可用时作为后备。
 3. **WebSearch (最终手段)**：在第三方招聘聚合平台上查找同名职位的快照。
 
