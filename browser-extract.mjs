@@ -299,8 +299,17 @@ async function main() {
       process.stdout.write(JSON.stringify(result));
       return;
     } catch (err) {
-      const why = String(err?.code || err?.message || err).split('\n')[0].slice(0, 200);
-      console.error(`[browser-extract] bsk path failed (${why}); falling back to Playwright`);
+      // The zh boards (zhipin/liepin/zhaopin) and any explicit `bsk` request wall
+      // off headless AND logged-out browsers, so a Playwright fallback here cannot
+      // succeed — it would only hit the same captcha wall and return empty or
+      // misleading content. Surface the real cause (e.g. bsk_missing,
+      // session_failed, captcha help timeout) as a structured error so the caller
+      // can tell the candidate to install/connect browser-skill, instead of
+      // silently producing an inferred/empty JD.
+      const code = String(err?.code || 'bsk_extract_error');
+      const msg = String(err?.message || err).split('\n')[0].slice(0, 300);
+      console.error(JSON.stringify({ error: `bsk extraction failed: ${msg}`, code }));
+      process.exit(1);
     }
   }
 
