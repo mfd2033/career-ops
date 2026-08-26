@@ -61,6 +61,12 @@ npx tsc --noEmit     # typecheck
 npm run build        # production build
 ```
 
+> Fonts are self-hosted (`public/fonts`, Fontsource woff2 wired through
+> `next/font/local`), so a production build needs no network access to Google
+> Fonts — this is what lets the offline `career-dashboard-ui.exe` packager run.
+> The app also honors `WEB_STANDALONE=1` to emit an `output: "standalone"`
+> server for that packager without changing the default build shape.
+
 Set `CAREER_OPS_ROOT=/path/to/checkout` in `web/.env.local` to point the app at
 a different career-ops directory (useful for testing against sample data).
 

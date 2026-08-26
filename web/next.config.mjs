@@ -8,6 +8,10 @@ const nextConfig = {
   // Allow a throwaway build dir (e.g. BUILD_DIST=.next-prod) so a production
   // `next build` can run without clobbering a live `next dev` .next.
   ...(process.env.BUILD_DIST ? { distDir: process.env.BUILD_DIST } : {}),
+  // Opt-in standalone output (WEB_STANDALONE=1) used only by the exe packager —
+  // a self-contained server that ships without the dev toolchain. Off by
+  // default so a normal `next build` keeps its current output shape.
+  ...(process.env.WEB_STANDALONE ? { output: "standalone" } : {}),
 };
 
 export default nextConfig;
