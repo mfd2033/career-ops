@@ -7,17 +7,21 @@ import type { AtsSource } from "@/lib/explore";
 import { ATS_LABEL } from "@/lib/explore";
 import { Badge } from "@/components/ui/badge";
 import { CompanyLogo } from "@/components/company-logo";
+import { useI18n } from "@/lib/i18n/context";
 import { cn } from "@/lib/cn";
 
 export type RowScore = { score: number | null; tone: "good" | "warn" | "bad" | "muted"; jobId: string; running: boolean };
 
-function agoLabel(age: number | null): string | null {
+function agoLabel(
+  age: number | null,
+  t: (key: string, params?: Record<string, string | number>) => string,
+): string | null {
   if (age == null) return null;
-  if (age <= 0) return "today";
-  if (age === 1) return "yesterday";
-  if (age < 7) return `${age}d ago`;
-  if (age < 30) return `${Math.floor(age / 7)}w ago`;
-  return `${Math.floor(age / 30)}mo ago`;
+  if (age <= 0) return t("inbox.today");
+  if (age === 1) return t("inbox.yesterday");
+  if (age < 7) return t("inbox.daysAgo", { n: age });
+  if (age < 30) return t("inbox.weeksAgo", { n: Math.floor(age / 7) });
+  return t("inbox.monthsAgo", { n: Math.floor(age / 30) });
 }
 
 // One raw posting in the triage list. Shows ONLY cheap, free signals + an honest
@@ -44,7 +48,8 @@ export function TriageRow({
   onSave: () => void;
   onSkip: () => void;
 }) {
-  const ago = agoLabel(age);
+  const { t } = useI18n();
+  const ago = agoLabel(age, t);
   const evaluated = !!scored && (scored.running || scored.score != null);
 
   return (
@@ -60,7 +65,7 @@ export function TriageRow({
         type="checkbox"
         checked={selected}
         onChange={onToggleSelect}
-        aria-label={`Select ${job.company} ${job.role}`}
+        aria-label={t("inbox.selectAria", { company: job.company, role: job.role })}
         className="size-4 shrink-0 accent-brand max-sm:min-h-[44px] max-sm:min-w-[24px]"
       />
 
@@ -76,7 +81,7 @@ export function TriageRow({
           {source && <span className="rounded bg-surface-hover px-1 py-px font-medium text-muted">{ATS_LABEL[source]}</span>}
           {ago && <span>{ago}</span>}
           {/* 🔴 CRUDA: honest "not scored" — no fabricated match%. */}
-          {!evaluated && <span className="italic text-muted">not scored</span>}
+          {!evaluated && <span className="italic text-muted">{t("inbox.notScored")}</span>}
         </p>
       </div>
 
@@ -86,7 +91,7 @@ export function TriageRow({
           {scored!.running ? (
             <>
               <Loader2 className="size-3.5 animate-spin text-brand" />
-              <span className="text-brand max-sm:hidden">Scoring…</span>
+              <span className="text-brand max-sm:hidden">{t("inbox.scoring")}</span>
             </>
           ) : (
             <Badge tone={scored!.tone}>{scored!.score}/5</Badge>
@@ -97,7 +102,7 @@ export function TriageRow({
           <button
             type="button"
             onClick={onSave}
-            title={shortlisted ? "In your shortlist" : "Save to shortlist"}
+            title={shortlisted ? t("inbox.inShortlist") : t("inbox.saveToShortlist")}
             aria-pressed={shortlisted}
             className={cn(
               "inline-flex items-center justify-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors max-sm:min-h-[44px] max-sm:min-w-[44px]",
@@ -105,12 +110,12 @@ export function TriageRow({
             )}
           >
             {shortlisted ? <BookmarkCheck className="size-4" /> : <Bookmark className="size-4" />}
-            <span className="max-sm:hidden">{shortlisted ? "Saved" : "Save"}</span>
+            <span className="max-sm:hidden">{shortlisted ? t("inbox.saved") : t("inbox.save")}</span>
           </button>
           <button
             type="button"
             onClick={onSkip}
-            title="Skip — hide from the inbox"
+            title={t("inbox.skipTitle")}
             className="inline-flex items-center justify-center rounded-md p-1 text-faint transition-colors hover:bg-surface-hover hover:text-foreground max-sm:min-h-[44px] max-sm:min-w-[44px]"
           >
             <X className="size-4" />

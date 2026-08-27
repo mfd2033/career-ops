@@ -3,6 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { scoreTone } from "@/lib/format";
 import { readSavedCliId, resolveCliId } from "@/lib/saved-cli";
+import { useI18n } from "@/lib/i18n/context";
 
 export type JobStep = { kind: "tool" | "status"; label: string; ts: number };
 export type JobResult = { score: number | null; summary: string; tone: "good" | "warn" | "bad" | "muted" };
@@ -60,6 +61,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
   const [jobs, setJobs] = useState<Job[]>([]);
   const seq = useRef(0);
   const loaded = useRef(false);
+  const { t } = useI18n();
 
   // restore history
   useEffect(() => {
@@ -68,7 +70,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
       const arr = raw ? JSON.parse(raw) : null;
       if (Array.isArray(arr)) {
         // anything left "running" from a previous session is stale → mark interrupted
-        setJobs(arr.map((j: Job) => (j.status === "running" ? { ...j, status: "error", steps: [...(j.steps || []), { kind: "status", label: "Interrupted (page reloaded)", ts: Date.now() }] } : j)));
+        setJobs(arr.map((j: Job) => (j.status === "running" ? { ...j, status: "error", steps: [...(j.steps || []), { kind: "status", label: t("jobs.stepInterrupted"), ts: Date.now() }] } : j)));
       }
     } catch {
       /* ignore */
@@ -102,7 +104,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
         kind: opts.kind,
         batchId: opts.batchId,
         status: "running",
-        steps: [{ kind: "status", label: "Starting…", ts: Date.now() }],
+        steps: [{ kind: "status", label: t("jobs.stepStarting"), ts: Date.now() }],
         text: "",
         startedAt: Date.now(),
       };
@@ -115,7 +117,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
             ...j,
             status: "error",
             endedAt: Date.now(),
-            steps: [...j.steps, { kind: "status", label: "No CLI configured — open Config and click Save config", ts: Date.now() }],
+            steps: [...j.steps, { kind: "status", label: t("jobs.stepNoCli"), ts: Date.now() }],
           }));
           return;
         }
@@ -158,7 +160,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
           });
           if (!res.ok || !res.body) {
             const e = await res.json().catch(() => ({}));
-            finish("error", e.error || "Failed to start");
+            finish("error", e.error || t("jobs.stepFailedToStart"));
             return;
           }
           const reader = res.body.getReader();
@@ -192,7 +194,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
                   if (typeof ev.tokens === "number") doneTokens = ev.tokens;
                   if (typeof ev.costUsd === "number") doneCostUsd = ev.costUsd;
                 } else if (ev.type === "error") {
-                  finish("error", ev.msg || "Error");
+                   finish("error", ev.msg || t("jobs.stepError"));
                   return;
                 }
               } catch {
@@ -200,15 +202,15 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
               }
             }
           }
-          finish("done", "Done");
+          finish("done", t("jobs.stepDone"));
         } catch {
-          finish("error", "Connection error");
+          finish("error", t("jobs.stepConnectionError"));
         }
       })();
 
       return id;
     },
-    [patch],
+    [patch, t],
   );
 
   const removeJob = useCallback((id: string) => setJobs((js) => js.filter((j) => j.id !== id)), []);

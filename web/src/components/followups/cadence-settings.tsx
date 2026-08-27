@@ -4,21 +4,23 @@ import { useCallback, useEffect, useState } from "react";
 import { Check, Loader2 } from "lucide-react";
 import { PROFILE_CADENCE_KEYS, type ProfileCadenceKey } from "@/lib/followups";
 import { cn } from "@/lib/cn";
+import { useI18n } from "@/lib/i18n/context";
 
 // Follow-up cadence knobs → config/profile.yml (followup_cadence). Server-
 // persisted (unlike the localStorage engine prefs above) because the core
 // followup-cadence.mjs reads the same keys — the CLI and the web must agree.
 
 const FIELDS: { key: ProfileCadenceKey; label: string; hint: string }[] = [
-  { key: "applied_first_days", label: "First follow-up", hint: "days after applying before the 1st nudge is due" },
-  { key: "applied_subsequent_days", label: "Between follow-ups", hint: "days between nudges while Applied" },
-  { key: "applied_max_followups", label: "Max follow-ups", hint: "after this many with no reply the lead goes cold" },
-  { key: "responded_initial_days", label: "Reply window", hint: "answer a company response within this many days" },
-  { key: "responded_subsequent_days", label: "Responded cadence", hint: "days between touches while in Responded" },
-  { key: "interview_thankyou_days", label: "Thank-you note", hint: "due within this many days of reaching Interview" },
+  { key: "applied_first_days", label: "followups.field.firstFollowup", hint: "followups.field.firstFollowupHint" },
+  { key: "applied_subsequent_days", label: "followups.field.between", hint: "followups.field.betweenHint" },
+  { key: "applied_max_followups", label: "followups.field.max", hint: "followups.field.maxHint" },
+  { key: "responded_initial_days", label: "followups.field.replyWindow", hint: "followups.field.replyWindowHint" },
+  { key: "responded_subsequent_days", label: "followups.field.respondedCadence", hint: "followups.field.respondedCadenceHint" },
+  { key: "interview_thankyou_days", label: "followups.field.thankyou", hint: "followups.field.thankyouHint" },
 ];
 
 export function CadenceSettings() {
+  const { t } = useI18n();
   const [values, setValues] = useState<Record<ProfileCadenceKey, string> | null>(null);
   const [loadError, setLoadError] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -57,7 +59,7 @@ export function CadenceSettings() {
       const raw = values[k].trim();
       const n = raw === "" ? Number.NaN : Number(raw);
       if (!Number.isInteger(n) || n < 0) {
-        setError(`"${FIELDS.find((f) => f.key === k)?.label}" must be a whole number ≥ 0.`);
+        setError(t("followups.fieldNumberError", { label: t(FIELDS.find((f) => f.key === k)?.label ?? "") }));
         return;
       }
       payload[k] = n;
@@ -72,13 +74,13 @@ export function CadenceSettings() {
       });
       const j = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setError(typeof j.error === "string" ? j.error : "Could not save.");
+        setError(typeof j.error === "string" ? j.error : t("followups.saveError"));
       } else {
         setSaved(true);
         setTimeout(() => setSaved(false), 2000);
       }
     } catch {
-      setError("Could not save.");
+      setError(t("followups.saveError"));
     }
     setSaving(false);
   };
@@ -86,38 +88,42 @@ export function CadenceSettings() {
   return (
     <div>
       <label className="mt-8 mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-muted">
-        Follow-up cadence
+        {t("followups.cadenceTitle")}
       </label>
       <div className="rounded-xl border border-border bg-surface/50 p-4">
         <p className="text-xs leading-relaxed text-faint">
-          When the <span className="text-muted">Follow-ups</span> tracker nudges you. Saved to{" "}
-          <span className="font-mono text-muted">config/profile.yml</span> — the CLI uses the same values.
+          {t("followups.cadenceDescPre")}
+          <span className="text-muted">{t("followups.cadenceFeature")}</span>
+          {t("followups.cadenceDescMid")}
+          <span className="font-mono text-muted">config/profile.yml</span>
+          {t("followups.cadenceDescPost")}
         </p>
         {loadError ? (
           <div className="mt-3 text-sm text-muted">
             <p className="text-red-500">
-              Couldn&apos;t read your current cadence settings — not showing defaults, to avoid overwriting real values in{" "}
-              <span className="font-mono">config/profile.yml</span>.
+              {t("followups.cadenceLoadErrorPre")}
+              <span className="font-mono">config/profile.yml</span>
+              {t("followups.cadenceLoadErrorPost")}
             </p>
             <button
               type="button"
               onClick={load}
               className="mt-2 rounded-md border border-border bg-surface px-3 py-1.5 text-xs font-medium transition-colors hover:bg-surface-hover"
             >
-              Retry
+              {t("followups.retry")}
             </button>
           </div>
         ) : values === null ? (
           <div className="mt-3 flex items-center gap-2 text-sm text-muted">
-            <Loader2 className="size-4 animate-spin" /> Loading…
+            <Loader2 className="size-4 animate-spin" /> {t("followups.loading")}
           </div>
         ) : (
           <>
             <div className="mt-3 grid gap-3 sm:grid-cols-2">
               {FIELDS.map((f) => (
                 <label key={f.key} className="block">
-                  <span className="block text-sm font-medium text-foreground">{f.label}</span>
-                  <span className="mt-0.5 block text-xs text-faint">{f.hint}</span>
+                  <span className="block text-sm font-medium text-foreground">{t(f.label)}</span>
+                  <span className="mt-0.5 block text-xs text-faint">{t(f.hint)}</span>
                   <input
                     type="number"
                     min={0}
@@ -140,7 +146,7 @@ export function CadenceSettings() {
               )}
             >
               {saving ? <Loader2 className="size-3.5 animate-spin" /> : saved ? <Check className="size-3.5 text-emerald-400" /> : null}
-              {saved ? "Saved" : "Save cadence"}
+              {saved ? t("followups.saved") : t("followups.saveCadence")}
             </button>
           </>
         )}

@@ -5,8 +5,10 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Check, Loader2 } from "lucide-react";
 import { cn } from "@/lib/cn";
+import { useI18n } from "@/lib/i18n/context";
 
 export function CvEditor() {
+  const { t } = useI18n();
   const [content, setContent] = useState("");
   const [loaded, setLoaded] = useState(false);
   const [exists, setExists] = useState(true);
@@ -47,10 +49,10 @@ export function CvEditor() {
     <div className="mx-auto max-w-6xl px-6 py-8">
       <div className="flex items-end justify-between gap-4">
         <div>
-          <h1 className="font-display text-2xl tracking-tight text-landing">CV editor</h1>
+          <h1 className="font-display text-2xl tracking-tight text-landing">{t("cv.editor.title")}</h1>
           <p className="mt-1 text-sm text-muted">
-            Edit <code className="text-foreground">cv.md</code> with live preview.
-            {!exists && loaded && <span className="ml-1 text-faint">No cv.md yet — start typing to create it.</span>}
+            {t("cv.editor.introEdit")} <code className="text-foreground">cv.md</code> {t("cv.editor.introPreview")}
+            {!exists && loaded && <span className="ml-1 text-faint">{t("cv.editor.noCvYet")}</span>}
           </p>
         </div>
         <button
@@ -65,12 +67,12 @@ export function CvEditor() {
           )}
         >
           {saving ? <Loader2 className="size-4 animate-spin" /> : saved ? <Check className="size-4" /> : null}
-          {saved ? "Saved" : "Save"}
+          {saved ? t("cv.editor.saved") : t("cv.editor.save")}
         </button>
       </div>
 
       {!loaded ? (
-        <div className="mt-6 text-sm text-muted">Loading…</div>
+        <div className="mt-6 text-sm text-muted">{t("cv.editor.loading")}</div>
       ) : (
         <div className="mt-6 grid gap-4 lg:grid-cols-2">
           <textarea
@@ -80,14 +82,14 @@ export function CvEditor() {
               setDirty(true);
             }}
             spellCheck={false}
-            placeholder="# Your Name&#10;&#10;## Summary&#10;..."
+            placeholder={t("cv.editor.placeholder")}
             className="min-h-[60vh] w-full resize-none rounded-2xl border border-border bg-surface/50 p-4 font-mono text-sm leading-relaxed outline-none transition-colors placeholder:text-faint focus:border-brand/40"
           />
           <article className="report-prose min-h-[60vh] overflow-auto rounded-2xl border border-border bg-surface/30 p-5">
             {content.trim() ? (
               <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
             ) : (
-              <p className="text-muted">Preview appears here.</p>
+              <p className="text-muted">{t("cv.editor.previewHere")}</p>
             )}
           </article>
         </div>

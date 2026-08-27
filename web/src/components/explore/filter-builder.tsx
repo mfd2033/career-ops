@@ -4,6 +4,7 @@ import { useState } from "react";
 import { X, Ban, Clock, MapPin, ChevronDown, SlidersHorizontal } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { ATS_LABEL, ATS_SOURCES, cleanChips, type AtsSource, type ExploreFilters } from "@/lib/explore";
+import { useI18n } from "@/lib/i18n/context";
 
 const RECENCY = [
   { label: "24h", days: 1 },
@@ -36,6 +37,7 @@ function KeywordField({
   placeholder: string;
   onChange: (v: string[]) => void;
 }) {
+  const { t } = useI18n();
   const [draft, setDraft] = useState("");
   // Split only on UNAMBIGUOUS item separators (comma / newline / semicolon) — never
   // bare spaces, which are legitimate inside multi-word entries ("AI platform",
@@ -52,7 +54,7 @@ function KeywordField({
         <span key={v} className={cn("co-fb__chip", tone === "inc" ? "inc" : "border-border bg-surface-hover text-muted")}>
           {tone === "exc" && <Ban className="size-3 opacity-70" />}
           {v}
-          <button type="button" aria-label={`Remove ${v}`} onClick={() => onChange(values.filter((x) => x !== v))}>
+          <button type="button" aria-label={t("explore.filter.remove", { v })} onClick={() => onChange(values.filter((x) => x !== v))}>
             <X className="size-3" />
           </button>
         </span>
@@ -107,6 +109,7 @@ export function FilterBuilder({
   onChange: (f: ExploreFilters) => void;
   seededFrom?: string[];
 }) {
+  const { t } = useI18n();
   const [advanced, setAdvanced] = useState(false);
   const set = (patch: Partial<ExploreFilters>) => onChange({ ...filters, ...patch });
   const toggleAts = (a: AtsSource) => {
@@ -120,23 +123,23 @@ export function FilterBuilder({
       <style>{STYLE}</style>
 
       <div>
-        <Label hint={filters.positive.length === 0 ? "empty = every fresh posting" : undefined}>Roles to find</Label>
-        <KeywordField values={filters.positive} tone="inc" placeholder="AI platform, ML infrastructure, staff engineer…" onChange={(v) => set({ positive: v })} />
+        <Label hint={filters.positive.length === 0 ? t("explore.filter.rolesHint") : undefined}>{t("explore.filter.rolesToFind")}</Label>
+        <KeywordField values={filters.positive} tone="inc" placeholder={t("explore.filter.rolesPlaceholder")} onChange={(v) => set({ positive: v })} />
         {seededFrom.length > 0 && filters.positive.length > 0 && (
-          <p className="mt-1 text-[11px] text-faint">Seeded from your {seededFrom.join(" + ")} — edit freely.</p>
+          <p className="mt-1 text-[11px] text-faint">{t("explore.filter.seededFrom", { sources: seededFrom.join(" + ") })}</p>
         )}
       </div>
 
       <div>
-        <Label>Exclude</Label>
-        <KeywordField values={filters.negative} tone="exc" placeholder="manager, sales, contract…" onChange={(v) => set({ negative: v })} />
+        <Label>{t("explore.filter.exclude")}</Label>
+        <KeywordField values={filters.negative} tone="exc" placeholder={t("explore.filter.excludePlaceholder")} onChange={(v) => set({ negative: v })} />
       </div>
 
       <div className="flex flex-wrap items-end gap-x-8 gap-y-4">
         <div>
-          <Label hint="postings published in this window">
+          <Label hint={t("explore.filter.postedHint")}>
             <span className="inline-flex items-center gap-1.5">
-              <Clock className="size-3.5 text-muted" /> Posted within
+              <Clock className="size-3.5 text-muted" /> {t("explore.filter.postedWithin")}
             </span>
           </Label>
           <div className="inline-flex rounded-lg border border-border bg-surface/40 p-0.5">
@@ -157,7 +160,7 @@ export function FilterBuilder({
         </div>
 
         <div>
-          <Label hint={filters.ats.length === 0 ? "pick at least one" : undefined}>Sources</Label>
+          <Label hint={filters.ats.length === 0 ? t("explore.filter.sourcesHint") : undefined}>{t("explore.filter.sources")}</Label>
           <div className="flex flex-wrap gap-1.5">
             {ATS_SOURCES.map((a) => {
               const on = filters.ats.includes(a);
@@ -185,35 +188,35 @@ export function FilterBuilder({
         className="inline-flex items-center gap-1.5 text-[12px] text-muted hover:text-foreground transition-colors max-sm:min-h-[44px]"
       >
         <SlidersHorizontal className="size-3.5" />
-        Location &amp; scope
+        {t("explore.filter.locationScope")}
         <ChevronDown className={cn("size-3.5 transition-transform", advanced && "rotate-180")} />
       </button>
 
       {advanced && (
         <div className="space-y-3 rounded-xl border border-border bg-surface/30 p-3">
-          <div className="flex items-center gap-1.5 text-[12px] text-muted">
-            <MapPin className="size-3.5" /> Location
-          </div>
+            <div className="flex items-center gap-1.5 text-[12px] text-muted">
+              <MapPin className="size-3.5" /> {t("explore.filter.location")}
+            </div>
           <div className="grid gap-3 sm:grid-cols-3">
             <div>
-              <Label hint="rescues multi-loc posts">Always include</Label>
-              <KeywordField values={filters.alwaysAllow} tone="inc" placeholder="London…" onChange={(v) => set({ alwaysAllow: v })} />
+              <Label hint={t("explore.filter.alwaysIncludeHint")}>{t("explore.filter.alwaysInclude")}</Label>
+              <KeywordField values={filters.alwaysAllow} tone="inc" placeholder={t("explore.filter.alwaysIncludePlaceholder")} onChange={(v) => set({ alwaysAllow: v })} />
             </div>
             <div>
-              <Label>Only in</Label>
-              <KeywordField values={filters.allow} tone="inc" placeholder="Remote, EMEA…" onChange={(v) => set({ allow: v })} />
+              <Label>{t("explore.filter.onlyIn")}</Label>
+              <KeywordField values={filters.allow} tone="inc" placeholder={t("explore.filter.onlyInPlaceholder")} onChange={(v) => set({ allow: v })} />
             </div>
             <div>
-              <Label>Never in</Label>
-              <KeywordField values={filters.block} tone="exc" placeholder="India…" onChange={(v) => set({ block: v })} />
+              <Label>{t("explore.filter.neverIn")}</Label>
+              <KeywordField values={filters.block} tone="exc" placeholder={t("explore.filter.neverInPlaceholder")} onChange={(v) => set({ block: v })} />
             </div>
           </div>
           <div>
-            <Label hint="hard reject — overrides Always include">Never in (hard)</Label>
-            <KeywordField values={filters.blockHard} tone="exc" placeholder="USA, Brazil…" onChange={(v) => set({ blockHard: v })} />
+            <Label hint={t("explore.filter.neverInHardHint")}>{t("explore.filter.neverInHard")}</Label>
+            <KeywordField values={filters.blockHard} tone="exc" placeholder={t("explore.filter.neverInHardPlaceholder")} onChange={(v) => set({ blockHard: v })} />
           </div>
           <div>
-            <Label hint={`${filters.limitPerAts} companies / source`}>Scan depth</Label>
+            <Label hint={t("explore.filter.scanDepthHint", { n: filters.limitPerAts })}>{t("explore.filter.scanDepth")}</Label>
             <input
               type="range"
               min={50}

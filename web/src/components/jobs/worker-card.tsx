@@ -3,24 +3,28 @@
 import { useEffect, useState } from "react";
 import { Check, X, Loader2, AlertTriangle } from "lucide-react";
 import type { Job } from "@/components/jobs/job-store";
+import { useI18n } from "@/lib/i18n/context";
 import { cn } from "@/lib/cn";
 
 // Humanize raw agent tool names into what the user actually cares about, so a
 // multi-minute evaluation reads as progress instead of a cryptic tool dump (#8).
-const STEP_LABELS: Record<string, string> = {
-  WebFetch: "Reading the posting",
-  WebSearch: "Searching the web",
-  Read: "Reading your CV & profile",
-  Glob: "Looking through your files",
-  Grep: "Looking through your files",
-  Write: "Writing the report",
-  Edit: "Updating the report",
-  NotebookEdit: "Updating the report",
-  Bash: "Saving to your tracker",
-  TodoWrite: "Planning the steps",
-  Task: "Working",
+const STEP_LABEL_KEYS: Record<string, string> = {
+  WebFetch: "jobs.stepWebFetch",
+  WebSearch: "jobs.stepWebSearch",
+  Read: "jobs.stepRead",
+  Glob: "jobs.stepGlob",
+  Grep: "jobs.stepGrep",
+  Write: "jobs.stepWrite",
+  Edit: "jobs.stepEdit",
+  NotebookEdit: "jobs.stepNotebookEdit",
+  Bash: "jobs.stepBash",
+  TodoWrite: "jobs.stepTodoWrite",
+  Task: "jobs.stepTask",
 };
-const humanizeStep = (label: string): string => STEP_LABELS[label] ?? label;
+const humanizeStep = (
+  label: string,
+  t: (key: string, params?: Record<string, string | number>) => string,
+): string => t(STEP_LABEL_KEYS[label] ?? label);
 
 // Auth/sign-in failures are the most common real error — detect them so we can give
 // a concrete next step instead of a dead end (#8).
@@ -80,8 +84,9 @@ export function WorkerCard({
   const tone = TONE[pillTone(job)];
   const running = job.status === "running";
   const elapsed = useElapsed(running, job.startedAt);
+  const { t } = useI18n();
   const rawLast = job.steps[job.steps.length - 1]?.label;
-  const last = rawLast ? humanizeStep(rawLast) : undefined;
+  const last = rawLast ? humanizeStep(rawLast, t) : undefined;
   const bottom = job.status === "done" && job.result?.summary ? job.result.summary : last;
   const inline = variant === "inline";
   const hasScore = job.result?.score != null;
@@ -123,17 +128,17 @@ export function WorkerCard({
       </div>
       {(bottom || running) && (
         <div className={cn("mt-1 truncate text-faint", inline ? "text-xs" : "text-[10px]")}>
-          {running ? `${last ?? "Working"} · ${fmtElapsed(elapsed)}` : bottom}
+          {running ? `${last ?? t("jobs.working")} · ${fmtElapsed(elapsed)}` : bottom}
         </div>
       )}
       {authError && (
         <div className={cn("mt-1 text-amber-700 dark:text-amber-400", inline ? "text-xs" : "text-[10px]")}>
-          Sign your CLI in from Config, then re-run.
+          {t("jobs.authErrorHint")}
         </div>
       )}
       {tokens > 0 && (
         <div className={cn("mt-1 text-faint tabular-nums", inline ? "text-xs" : "text-[10px]")}>
-          {fmtTokens(tokens)} tokens{job.cost?.usd != null ? ` · $${job.cost.usd.toFixed(2)}` : ""}
+          {fmtTokens(tokens)} {t("jobs.tokens")}{job.cost?.usd != null ? ` · $${job.cost.usd.toFixed(2)}` : ""}
         </div>
       )}
     </div>

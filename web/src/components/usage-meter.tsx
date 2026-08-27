@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Gauge } from "lucide-react";
 import { cn } from "@/lib/cn";
+import { useI18n } from "@/lib/i18n/context";
 
 type Usage = { window5h: { tokens: number }; window7d: { tokens: number } };
 
@@ -22,6 +23,7 @@ function tone(pct: number): string {
 }
 
 export function UsageMeter() {
+  const { t } = useI18n();
   const [data, setData] = useState<Usage | null>(null);
   const [cli, setCli] = useState<string | null>(null);
   const [budget, setBudget] = useState(DEFAULT_BUDGET);
@@ -66,13 +68,13 @@ export function UsageMeter() {
   return (
     <div className="border-t border-border pt-3">
       <div className="mb-1.5 flex items-center gap-1.5 px-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-faint">
-        <Gauge className="size-3" /> Usage
+        <Gauge className="size-3" /> {t("shared.usage")}
       </div>
       <div className="space-y-2 px-1">
         {rows.map((r) => {
           const pct = Math.min(100, Math.round((r.tokens / r.budget) * 100));
           return (
-            <div key={r.label} title={`${r.tokens.toLocaleString()} tokens in the last ${r.label}`}>
+            <div key={r.label} title={t("shared.usageTitle", { tokens: r.tokens.toLocaleString(), label: r.label })}>
               <div className="flex items-center justify-between text-[10px] text-faint">
                 <span>{r.label}</span>
                 <span className="tabular-nums">

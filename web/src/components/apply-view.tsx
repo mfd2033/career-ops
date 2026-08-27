@@ -7,6 +7,7 @@ import { useApply } from "@/components/apply/apply-provider";
 import { needsLeaveConfirmation, resolveReturnPath } from "@/lib/apply/exit.mjs";
 import type { ApplyField } from "@/lib/apply/extract";
 import { cn } from "@/lib/cn";
+import { useI18n } from "@/lib/i18n/context";
 import { Fragment, useEffect, useRef, useState } from "react";
 
 // Co-located UI animations (HMR-proof vs Tailwind v4's stale globals.css):
@@ -31,6 +32,7 @@ const STYLE = `
 // bring it to the front for them to submit. We never submit.
 export function ApplyView() {
   const a = useApply();
+  const { t } = useI18n();
   const [input, setInput] = useState("");
 
   if (a.status === "idle" || a.status === "error") {
@@ -41,14 +43,14 @@ export function ApplyView() {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && a.open(input.trim())}
-            placeholder="Paste an application form URL (Ashby, Lever, Greenhouse…)"
+            placeholder={t("apply.formUrlPlaceholder")}
             className="min-w-0 flex-1 bg-transparent py-1.5 text-sm outline-none placeholder:text-faint"
           />
           <button
             onClick={() => a.open(input.trim())}
             className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-brand px-4 py-1.5 text-sm font-medium text-brand-foreground transition-colors hover:bg-brand-200"
           >
-            <Wand2 className="size-4" /> Read form
+            <Wand2 className="size-4" /> {t("apply.readForm")}
           </button>
         </div>
         {a.error && (
@@ -59,7 +61,7 @@ export function ApplyView() {
                 <p className="text-sm text-amber-800 dark:text-amber-300">{a.error}</p>
                 {a.url && /^https?:\/\//.test(a.url) && (
                   <a href={a.url} target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-brand hover:underline">
-                    Open the form directly <ExternalLink className="size-3" />
+                    {t("apply.openFormDirectly")} <ExternalLink className="size-3" />
                   </a>
                 )}
               </div>
@@ -90,9 +92,9 @@ export function ApplyView() {
 
       {!busy && (
         <div className="co-rise mb-4 flex items-baseline justify-between gap-3">
-          <h2 className="font-display text-xl text-landing drop-shadow-sm">{a.title || "Application"}</h2>
+          <h2 className="font-display text-xl text-landing drop-shadow-sm">{a.title || t("apply.application")}</h2>
           <button onClick={a.reset} className="inline-flex items-center gap-1 text-xs text-faint transition-colors hover:text-foreground">
-            <RotateCcw className="size-3" /> new
+            <RotateCcw className="size-3" /> {t("apply.new")}
           </button>
         </div>
       )}
@@ -100,7 +102,7 @@ export function ApplyView() {
       {/* opening: big magic hero + skeleton fields (no layout jump when real ones arrive) */}
       {opening && (
         <>
-          <ProcessingHero title="Reading your form…" subtitle="Opening the real application on your machine and reading every field." />
+          <ProcessingHero title={t("apply.readingFormTitle")} subtitle={t("apply.readingFormSubtitle")} />
           <FieldSkeleton />
         </>
       )}
@@ -125,7 +127,7 @@ export function ApplyView() {
                 <Sparkles className="size-4 text-brand" />
               </span>
               <div className="min-w-0">
-                <div className="text-sm font-medium text-foreground">Drafting your answers…</div>
+                <div className="text-sm font-medium text-foreground">{t("apply.draftingAnswers")}</div>
                 <RotatingStatus />
               </div>
               <Loader2 className="ml-auto size-4 shrink-0 animate-spin text-brand" />
@@ -139,17 +141,17 @@ export function ApplyView() {
               className="inline-flex items-center gap-1.5 rounded-full border border-brand/40 bg-brand-soft px-3.5 py-1.5 text-sm font-medium text-brand transition-colors hover:bg-brand/15 disabled:opacity-50"
             >
               {prefilling ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
-              {prefilling ? "Drafting from your CV…" : "Pre-fill from my CV"}
+              {prefilling ? t("apply.draftingFromCv") : t("apply.prefillFromCv")}
             </button>
-            <span className="text-xs text-muted">…or ask the corner assistant to write/revise any answer.</span>
+            <span className="text-xs text-muted">{t("apply.askAssistant")}</span>
           </div>
 
           {(prefilling || a.prefillLog.length > 0) && (
             <details className="mb-4 rounded-lg border border-border bg-surface/60 backdrop-blur-sm" open={false}>
               <summary className="flex cursor-pointer select-none items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-muted">
-                <Terminal className="size-3.5" /> Pre-fill diagnostics
+                <Terminal className="size-3.5" /> {t("apply.prefillDiagnostics")}
                 {prefilling && <Loader2 className="size-3 animate-spin text-brand" />}
-                <span className="ml-auto text-faint">{a.prefillLog.length} steps</span>
+                <span className="ml-auto text-faint">{t("apply.steps", { count: a.prefillLog.length })}</span>
               </summary>
               <div className="max-h-52 overflow-y-auto border-t border-border px-3 py-2">
                 <ol className="space-y-0.5 font-mono text-[11px] leading-relaxed text-muted">
@@ -188,18 +190,18 @@ export function ApplyView() {
               className="inline-flex items-center gap-2 rounded-full bg-brand px-5 py-2.5 text-sm font-medium text-brand-foreground shadow-lg shadow-brand/25 transition-all hover:bg-brand-200 hover:shadow-brand/40 disabled:opacity-50"
             >
               {filling ? <Loader2 className="size-4 animate-spin" /> : <ArrowUpRight className="size-4" />}
-              {filling ? "Filling the real form…" : "Fill the real form & review"}
+              {filling ? t("apply.fillingRealForm") : t("apply.fillRealFormReview")}
             </button>
             <button
               onClick={a.agentFill}
               disabled={filling || prefilling}
-              title="Let the AI drive the real form and fill it field-by-field (for tricky / multi-step forms). It never submits."
+              title={t("apply.letAiFillTitle")}
               className="inline-flex items-center gap-1.5 rounded-full border border-border px-4 py-2.5 text-sm font-medium text-muted transition-colors hover:border-brand/40 hover:text-brand disabled:opacity-50"
             >
-              <MousePointerClick className="size-4" /> Let the AI fill it
+              <MousePointerClick className="size-4" /> {t("apply.letAiFillIt")}
             </button>
             <p className="inline-flex items-center gap-1.5 text-xs text-muted">
-              <ShieldCheck className="size-3.5 text-emerald-500" /> Never submits — you click Submit yourself.
+              <ShieldCheck className="size-3.5 text-emerald-500" /> {t("apply.neverSubmits")}
             </p>
           </div>
 
@@ -208,7 +210,7 @@ export function ApplyView() {
 
           {(filling || done) && a.steps.length > 0 && (
             <div className="co-rise mt-6">
-              <div className="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-faint">Behind the scenes</div>
+              <div className="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-faint">{t("apply.behindTheScenes")}</div>
               <div className="flex gap-2 overflow-x-auto pb-2">
                 {a.steps.map((s, i) => (
                   <figure key={i} className="shrink-0">
@@ -218,7 +220,7 @@ export function ApplyView() {
                     ) : (
                       <div className="flex h-24 w-36 items-center justify-center rounded-md border border-dashed border-border text-faint">…</div>
                     )}
-                    <figcaption className={cn("mt-1 w-36 truncate text-[10px]", s.ok ? "text-faint" : "text-amber-500")}>{s.label || "field"}</figcaption>
+                     <figcaption className={cn("mt-1 w-36 truncate text-[10px]", s.ok ? "text-faint" : "text-amber-500")}>{s.label || t("apply.field")}</figcaption>
                   </figure>
                 ))}
               </div>
@@ -228,8 +230,8 @@ export function ApplyView() {
             <div className="co-rise mt-4 flex items-start gap-2.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm backdrop-blur-sm">
               <CheckCircle2 className="mt-0.5 size-5 shrink-0 text-emerald-500" />
               <div>
-                <span className="font-medium text-emerald-700 dark:text-emerald-400">The real form is now in front, pre-filled.</span>{" "}
-                <span className="text-muted">Review it and click Submit yourself — career-ops never submits for you.</span>
+                <span className="font-medium text-emerald-700 dark:text-emerald-400">{t("apply.realFormPrefilled")}</span>{" "}
+                <span className="text-muted">{t("apply.reviewAndSubmit")}</span>
               </div>
             </div>
           )}
@@ -249,6 +251,7 @@ export function ApplyView() {
 // status control uses, so there is only ever one writer to the table.
 function ApplyExitBar() {
   const a = useApply();
+  const { t } = useI18n();
   const router = useRouter();
   const [confirming, setConfirming] = useState(false);
   const [marking, setMarking] = useState(false);
@@ -297,7 +300,7 @@ function ApplyExitBar() {
       if (!res.ok) {
         const d = await res.json().catch(() => ({}));
         if (!onPage.current) return; // moved on already; the row is unchanged
-        setError(d.error || "Couldn't mark it applied — the tracker row is unchanged.");
+        setError(d.error || t("apply.couldntMarkApplied"));
         setMarking(false);
         return;
       }
@@ -307,7 +310,7 @@ function ApplyExitBar() {
       // The route writes the tracker before it answers, so a connection that
       // drops on the way back leaves the write's fate genuinely unknown —
       // claiming the row is untouched here would be a guess.
-      setError("Couldn't confirm the update — check the row in your tracker before relying on it.");
+      setError(t("apply.couldntConfirmUpdate"));
       setMarking(false);
     }
   }
@@ -315,20 +318,20 @@ function ApplyExitBar() {
   if (confirming) {
     return (
       <div className="co-rise mt-8 rounded-xl border border-amber-500/40 bg-amber-500/10 p-4 backdrop-blur-sm">
-        <p className="text-sm font-medium text-foreground">Leave this application?</p>
-        <p className="mt-1 text-xs text-muted">Your drafted answers live only on this page. Going back discards them and closes the form.</p>
+        <p className="text-sm font-medium text-foreground">{t("apply.leaveApplication")}</p>
+        <p className="mt-1 text-xs text-muted">{t("apply.draftedAnswersDiscard")}</p>
         <div className="mt-3 flex flex-wrap gap-2">
           <button
             onClick={leave}
             className="inline-flex items-center gap-1.5 rounded-md bg-amber-500 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-amber-600 max-sm:min-h-[44px]"
           >
-            <ArrowLeft className="size-3.5" /> Leave and discard
+            <ArrowLeft className="size-3.5" /> {t("apply.leaveAndDiscard")}
           </button>
           <button
             onClick={() => setConfirming(false)}
             className="rounded-md border border-border px-3 py-1.5 text-xs text-muted transition-colors hover:text-foreground max-sm:min-h-[44px]"
           >
-            Stay here
+            {t("apply.stayHere")}
           </button>
         </div>
       </div>
@@ -342,20 +345,20 @@ function ApplyExitBar() {
           onClick={() => (needsLeaveConfirmation({ status: a.status, answers: a.answers }) ? setConfirming(true) : leave())}
           className="inline-flex items-center gap-1.5 rounded-full border border-border px-4 py-2 text-sm font-medium text-muted transition-colors hover:border-brand/40 hover:text-brand max-sm:min-h-[44px]"
         >
-          <ArrowLeft className="size-4" /> Back
+          <ArrowLeft className="size-4" /> {t("apply.back")}
         </button>
         {a.n && (
           <button
             onClick={markApplied}
             disabled={marking}
-            title={`Set tracker row #${a.n} to Applied and go back`}
+            title={t("apply.markAppliedTitle", { n: a.n })}
             className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-4 py-2 text-sm font-medium text-emerald-700 transition-colors hover:bg-emerald-500/20 disabled:opacity-50 dark:text-emerald-400 max-sm:min-h-[44px]"
           >
             {marking ? <Loader2 className="size-4 animate-spin" /> : <ClipboardCheck className="size-4" />}
-            {marking ? "Updating your tracker…" : "Mark applied"}
+            {marking ? t("apply.updatingTracker") : t("apply.markApplied")}
           </button>
         )}
-        {a.n && <span className="text-xs text-muted">Click this once you have submitted the real form yourself.</span>}
+         {a.n && <span className="text-xs text-muted">{t("apply.clickOnceSubmitted")}</span>}
       </div>
       {error && <p className="mt-2 text-xs text-red-500">{error}</p>}
     </div>
@@ -363,8 +366,8 @@ function ApplyExitBar() {
 }
 
 // ── Watch the agent reach the form live (it navigates, never submits) ───────
-const DRIVE_VERB: Record<string, string> = { click: "Clicked", type: "Typed into", select: "Selected", scroll: "Scrolled", "parse-error": "Thinking…", stuck: "Stuck", reached_form: "Reached the form" };
 function DrivePanel({ steps, filling }: { steps: DriveStep[]; filling?: boolean }) {
+  const { t } = useI18n();
   const last = steps[steps.length - 1];
   return (
     <div className="co-rise">
@@ -374,8 +377,8 @@ function DrivePanel({ steps, filling }: { steps: DriveStep[]; filling?: boolean 
           <span className="co-ring absolute inset-0 rounded-full border-2 border-brand/30 border-t-brand" />
           <MousePointerClick className="size-6 text-brand" />
         </span>
-        <div className="font-display text-2xl text-landing">{filling ? "AI is filling the form…" : "Reaching your form…"}</div>
-        <p className="max-w-sm text-sm text-muted">{filling ? "The AI is driving the real form field-by-field on your machine — it never submits; you review and submit." : "The AI is navigating the real application on your machine to reach the form — it never submits."}</p>
+        <div className="font-display text-2xl text-landing">{filling ? t("apply.aiFillingForm") : t("apply.reachingForm")}</div>
+        <p className="max-w-sm text-sm text-muted">{filling ? t("apply.aiFillingDesc") : t("apply.aiReachingDesc")}</p>
       </div>
       {last?.thumb ? (
         // eslint-disable-next-line @next/next/no-img-element
@@ -388,7 +391,11 @@ function DrivePanel({ steps, filling }: { steps: DriveStep[]; filling?: boolean 
           {steps.map((s, i) => (
             <li key={i} className={cn("flex items-center gap-2 text-xs", i === steps.length - 1 ? "text-foreground" : "text-muted")}>
               <span className="grid size-5 shrink-0 place-items-center rounded-full bg-brand-soft text-[10px] font-semibold text-brand">{s.turn}</span>
-              <span className="shrink-0 font-medium">{DRIVE_VERB[s.action] ?? s.action}</span>
+               <span className="shrink-0 font-medium">{(() => {
+                 const verbKey = `apply.driveVerb.${s.action}`;
+                 const verb = t(verbKey);
+                 return verb === verbKey ? s.action : verb;
+               })()}</span>
               <span className="truncate text-faint">{s.detail}</span>
               {s.note && <span className="shrink-0 text-amber-500">· {s.note}</span>}
             </li>
@@ -401,6 +408,7 @@ function DrivePanel({ steps, filling }: { steps: DriveStep[]; filling?: boolean 
 
 // ── Issues the interpreter surfaced — never fail mute ───────────────────────
 function ApplyIssues({ issues }: { issues: ApplyIssue[] }) {
+  const { t } = useI18n();
   if (!issues.length) return null;
   const warns = issues.filter((i) => i.level === "warn" || i.level === "block");
   const infos = issues.filter((i) => i.level === "info");
@@ -409,7 +417,7 @@ function ApplyIssues({ issues }: { issues: ApplyIssue[] }) {
       {warns.length > 0 && (
         <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 backdrop-blur-sm">
           <div className="mb-1.5 flex items-center gap-1.5 text-sm font-medium text-amber-700 dark:text-amber-400">
-            <AlertTriangle className="size-4" /> A few things to check
+            <AlertTriangle className="size-4" /> {t("apply.fewThingsToCheck")}
           </div>
           <ul className="space-y-1 text-xs text-amber-800/90 dark:text-amber-300/90">
             {warns.map((i, k) => (
@@ -431,10 +439,11 @@ function ApplyIssues({ issues }: { issues: ApplyIssue[] }) {
 
 // ── Journey rail: Reading → Drafting → Review ───────────────────────────────
 function PhaseRail({ phase }: { phase: number }) {
+  const { t } = useI18n();
   const steps = [
-    { label: "Reading form", icon: ScanLine },
-    { label: "Drafting answers", icon: PenLine },
-    { label: "Review & submit", icon: CheckCircle2 },
+    { label: t("apply.phaseReading"), icon: ScanLine },
+    { label: t("apply.phaseDrafting"), icon: PenLine },
+    { label: t("apply.phaseReview"), icon: CheckCircle2 },
   ];
   return (
     <div className="mb-6 flex items-center gap-2.5">
@@ -471,22 +480,23 @@ function PhaseRail({ phase }: { phase: number }) {
 
 // Honest, calming rotation of what the planner is actually doing, so the (~1-2min)
 // draft doesn't feel stalled. Crossfades every ~2.8s.
-const DRAFT_MSGS = [
-  "Reading your CV…",
-  "Reading the role and company…",
-  "Matching your experience to each question…",
-  "Writing every answer in your own voice…",
-  "Flagging anything that needs your call…",
+const DRAFT_MSG_KEYS = [
+  "apply.draft.readingCv",
+  "apply.draft.readingRole",
+  "apply.draft.matching",
+  "apply.draft.writingVoice",
+  "apply.draft.flagging",
 ];
 function RotatingStatus() {
+  const { t } = useI18n();
   const [i, setI] = useState(0);
   useEffect(() => {
-    const t = setInterval(() => setI((n) => (n + 1) % DRAFT_MSGS.length), 2800);
-    return () => clearInterval(t);
+    const t2 = setInterval(() => setI((n) => (n + 1) % DRAFT_MSG_KEYS.length), 2800);
+    return () => clearInterval(t2);
   }, []);
   return (
     <div key={i} className="co-rise truncate text-xs text-muted">
-      {DRAFT_MSGS[i]}
+      {t(DRAFT_MSG_KEYS[i])}
     </div>
   );
 }
@@ -533,6 +543,7 @@ function FieldRow({
   drafting: boolean;
   onChange: (v: string) => void;
 }) {
+  const { t } = useI18n();
   // Flash brand-orange the moment a drafted answer first lands (empty → value).
   const prev = useRef(value);
   const [flash, setFlash] = useState(false);
@@ -557,17 +568,17 @@ function FieldRow({
   return (
     <div className={flash ? "co-flash" : ""} style={flash ? { animationDelay: `${Math.min(index * 70, 900)}ms` } : undefined}>
       <label className="mb-1.5 flex items-center gap-1 text-sm font-medium">
-        {f.label || <span className="text-faint">Untitled field</span>}
+        {f.label || <span className="text-faint">{t("apply.untitledField")}</span>}
         {f.required && <Asterisk className="size-3 text-brand" />}
-        {needs && <span className="ml-1 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-600 dark:text-amber-400">you confirm</span>}
+        {needs && <span className="ml-1 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-600 dark:text-amber-400">{t("apply.youConfirm")}</span>}
       </label>
       {writing ? (
         <div className={cn("co-skel", f.type === "textarea" ? "h-[68px]" : "h-9")} />
       ) : f.type === "textarea" ? (
-        <textarea rows={3} maxLength={f.maxLength} value={value} onChange={(e) => onChange(e.target.value)} placeholder={needs ? "You fill this one." : "…"} className={cn(base, "resize-none")} />
+        <textarea rows={3} maxLength={f.maxLength} value={value} onChange={(e) => onChange(e.target.value)} placeholder={needs ? t("apply.youFillThisOne") : "…"} className={cn(base, "resize-none")} />
       ) : (f.type === "select" || f.type === "radio") && f.options && f.options.length > 0 ? (
         <select value={value} onChange={(e) => onChange(e.target.value)} className={base}>
-          <option value="">Choose…</option>
+          <option value="">{t("apply.choose")}</option>
           {f.options.map((o, i) => (
             <option key={i} value={o}>
               {o}
@@ -576,20 +587,20 @@ function FieldRow({
         </select>
       ) : f.type === "checkbox" ? (
         <label className="flex items-center gap-2 text-sm text-muted">
-          <input type="checkbox" checked={value === "true" || value === "yes"} onChange={(e) => onChange(e.target.checked ? "true" : "")} className="size-4 accent-brand" /> {f.label || "Yes"}
+           <input type="checkbox" checked={value === "true" || value === "yes"} onChange={(e) => onChange(e.target.checked ? "true" : "")} className="size-4 accent-brand" /> {f.label || t("apply.yes")}
         </label>
       ) : f.type === "file" ? (
         /resume|résumé|\bcv\b|curriculum|currículum|lebenslauf/i.test(f.label || "") ? (
           <div className="flex items-center gap-2 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700 dark:text-emerald-400">
-            <FileCheck2 className="size-4 shrink-0" /> Your tailored CV (PDF) will be attached automatically — you can swap it on the real form.
+            <FileCheck2 className="size-4 shrink-0" /> {t("apply.cvAttachedAuto")}
           </div>
         ) : (
           <div className="flex items-center gap-2 rounded-lg border border-dashed border-border px-3 py-2 text-sm text-muted">
-            <Paperclip className="size-4 shrink-0" /> Attach this file yourself on the real form at the handoff.
+            <Paperclip className="size-4 shrink-0" /> {t("apply.attachFileYourself")}
           </div>
         )
       ) : (
-        <input type={["email", "tel", "url", "number", "date"].includes(f.type) ? f.type : "text"} maxLength={f.maxLength} value={value} onChange={(e) => onChange(e.target.value)} placeholder={needs ? "You fill this one." : "…"} className={base} />
+        <input type={["email", "tel", "url", "number", "date"].includes(f.type) ? f.type : "text"} maxLength={f.maxLength} value={value} onChange={(e) => onChange(e.target.value)} placeholder={needs ? t("apply.youFillThisOne") : "…"} className={base} />
       )}
     </div>
   );

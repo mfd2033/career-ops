@@ -1,3 +1,5 @@
+"use client";
+
 import Link from "next/link";
 import { ArrowLeft, FileText, ExternalLink, ChevronDown } from "lucide-react";
 import ReactMarkdown from "react-markdown";
@@ -12,6 +14,7 @@ import { ScoreMethodology } from "@/components/score-methodology";
 import { GeneratePdfButton } from "@/components/generate-pdf-button";
 import { ApplyButton } from "@/components/apply-button";
 import { DeleteFromTracker } from "@/components/delete-from-tracker";
+import { useI18n } from "@/lib/i18n/context";
 
 // Progressive disclosure of the report. The core writes prose blocks
 // "## F) Verdict (lead)", "## A) Role Summary", "## B) Match with CV", then
@@ -60,6 +63,33 @@ export function ReportView({
   file?: string | null;
   canDelete?: boolean;
 }) {
+  const { t } = useI18n();
+  const translateSectionHeading = (heading: string): string => {
+    const map: Record<string, string> = {
+      "Role Summary": t("pipeline.section.roleSummary"),
+      "Match with CV": t("pipeline.section.matchWithCv"),
+      "Strategy": t("pipeline.section.strategy"),
+      "Compensation": t("pipeline.section.compensation"),
+      "Personalization": t("pipeline.section.personalization"),
+      "Interview Prep": t("pipeline.section.interviewPrep"),
+      "Posting Legitimacy": t("pipeline.section.postingLegitimacy"),
+      "Machine Summary": t("pipeline.section.machineSummary"),
+      "Submitted": t("pipeline.section.submitted"),
+      "Submit Log": t("pipeline.section.submitLog"),
+      "Application Answers": t("pipeline.section.applicationAnswers"),
+    };
+    return map[heading] ?? heading;
+  };
+  const translateLegitimacy = (value: string): string => {
+    const map: Record<string, string> = {
+      "High Confidence": t("pipeline.legitimacy.highConfidence"),
+      "Medium Confidence": t("pipeline.legitimacy.mediumConfidence"),
+      "Low Confidence": t("pipeline.legitimacy.lowConfidence"),
+      "Caution": t("pipeline.legitimacy.caution"),
+      "Suspicious": t("pipeline.legitimacy.suspicious"),
+    };
+    return map[value] ?? value;
+  };
   const meta = report ? parseReport(report) : null;
   const field = (label: string) => meta?.fields.find((f) => f.label === label)?.value;
   const score = app?.score || field("Score");
@@ -73,7 +103,7 @@ export function ReportView({
         href="/pipeline"
         className="inline-flex items-center gap-1.5 text-sm text-muted transition-colors hover:text-brand"
       >
-        <ArrowLeft className="size-4" /> Pipeline
+        <ArrowLeft className="size-4" /> {t("pipeline.report.backToPipeline")}
       </Link>
 
       <header className="mt-5">
@@ -93,9 +123,9 @@ export function ReportView({
           {(() => {
             const n = scoreNum(score ?? "");
             if (Number.isNaN(n)) return null;
-            return n >= 4.0 ? <Badge tone="good">Recommended</Badge> : <Badge tone="muted">Below the apply line</Badge>;
+            return n >= 4.0 ? <Badge tone="good">{t("pipeline.report.recommended")}</Badge> : <Badge tone="muted">{t("pipeline.report.belowApplyLine")}</Badge>;
           })()}
-          {meta?.legitimacy && <Badge tone={legitimacyTone(meta.legitimacy)}>{meta.legitimacy}</Badge>}
+          {meta?.legitimacy && <Badge tone={legitimacyTone(meta.legitimacy)}>{translateLegitimacy(meta.legitimacy)}</Badge>}
           {app && <StatusSelect n={id} current={app.status} />}
           <GeneratePdfButton n={id} company={app?.company ?? meta?.title ?? id} pdfReady={(app?.pdf ?? "").includes("✅")} />
           <ApplyButton n={id} url={url && url.startsWith("http") ? url : undefined} company={app?.company ?? meta?.title ?? id} pdfReady={(app?.pdf ?? "").includes("✅")} />
@@ -118,7 +148,7 @@ export function ReportView({
                 rel="noreferrer"
                 className="inline-flex items-center justify-center gap-1 text-brand hover:underline max-sm:min-h-[44px]"
               >
-                posting <ExternalLink className="size-3" />
+                {t("pipeline.report.posting")} <ExternalLink className="size-3" />
               </a>
             )}
           </div>
@@ -157,7 +187,7 @@ export function ReportView({
 
                 {verdict && (
                   <div className="rounded-2xl border border-brand/25 bg-brand-soft/50 px-5 py-4">
-                    <p className="mb-1 font-mono text-[11px] uppercase tracking-[0.16em] text-brand/80">Verdict</p>
+                    <p className="mb-1 font-mono text-[11px] uppercase tracking-[0.16em] text-brand/80">{t("pipeline.report.verdict")}</p>
                     <article className="report-prose [&_p]:font-medium [&_p]:text-foreground">
                       <ReactMarkdown remarkPlugins={[remarkGfm]}>{verdict.content}</ReactMarkdown>
                     </article>
@@ -169,14 +199,14 @@ export function ReportView({
                   if (expanded) {
                     return (
                       <article key={i} className="report-prose mt-6">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{`## ${cleanHeading(s.heading)}\n\n${s.content}`}</ReactMarkdown>
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{`## ${translateSectionHeading(cleanHeading(s.heading))}\n\n${s.content}`}</ReactMarkdown>
                       </article>
                     );
                   }
                   return (
                     <details key={i} className="group mt-3 overflow-hidden rounded-xl border border-border bg-surface/30">
                       <summary className="flex min-h-[44px] cursor-pointer list-none items-center gap-2 px-4 py-3 transition-colors hover:bg-surface-hover">
-                        <span className="text-sm font-medium">{cleanHeading(s.heading)}</span>
+                        <span className="text-sm font-medium">{translateSectionHeading(cleanHeading(s.heading))}</span>
                         <span className="hidden truncate text-xs text-faint sm:inline">{preview(s.content)}</span>
                         <ChevronDown className="ml-auto size-4 shrink-0 text-faint transition-transform group-open:rotate-180" />
                       </summary>
@@ -191,13 +221,13 @@ export function ReportView({
                   <>
                     <div className="mt-6 flex items-center gap-3 text-[11px] uppercase tracking-[0.14em] text-faint">
                       <span className="h-px flex-1 bg-border" />
-                      Technical details · for developers
+                      {t("pipeline.report.technicalDetails")}
                       <span className="h-px flex-1 bg-border" />
                     </div>
                     {machine.map((s, i) => (
                       <details key={i} className="group mt-2 overflow-hidden rounded-xl border border-border/60 bg-surface/20">
                         <summary className="flex min-h-[44px] cursor-pointer list-none items-center gap-2 px-4 py-3 font-mono text-xs text-muted transition-colors hover:bg-surface-hover">
-                          {cleanHeading(s.heading)}
+                          {translateSectionHeading(cleanHeading(s.heading))}
                           <ChevronDown className="ml-auto size-4 shrink-0 text-faint transition-transform group-open:rotate-180" />
                         </summary>
                         <div className="report-prose border-t border-border/60 px-4 py-3 opacity-80">
@@ -215,7 +245,7 @@ export function ReportView({
       ) : (
         <div className="mt-8 flex items-center gap-3 rounded-2xl border border-dashed border-border bg-surface/30 p-5 text-sm text-muted">
           <FileText className="size-5 shrink-0 text-faint" />
-          No report file found for #{id} in <code className="text-foreground">reports/</code>.
+          {t("pipeline.report.noReport", { id })}
         </div>
       )}
     </div>

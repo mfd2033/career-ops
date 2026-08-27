@@ -2,23 +2,24 @@ import { LayoutDashboard, Compass, ListChecks, Send, Radar, BarChart3, FileText,
 import type { ComponentType, SVGProps } from "react";
 
 // Single source of truth for the app's primary destinations — shared by the
-// desktop sidebar and the mobile nav so they can never drift.
+// desktop sidebar and the mobile nav so they can never drift. `labelKey` is an
+// i18n dictionary key (nav.*) resolved through the language provider.
 export type NavItem = {
   href: string;
-  label: string;
+  labelKey: string;
   icon: ComponentType<SVGProps<SVGSVGElement>>;
-  chip?: string;
+  chipKey?: string;
 };
 
 export const NAV_ITEMS: NavItem[] = [
-  { href: "/", label: "Today", icon: LayoutDashboard },
-  { href: "/explore", label: "Explore", icon: Compass, chip: "New" },
-  { href: "/pipeline", label: "Pipeline", icon: ListChecks },
-  { href: "/followups", label: "Follow-ups", icon: Send },
-  { href: "/portals", label: "Portals", icon: Radar },
-  { href: "/analytics", label: "Analytics", icon: BarChart3 },
-  { href: "/cv", label: "CV", icon: FileText },
-  { href: "/config", label: "Config", icon: Settings },
+  { href: "/", labelKey: "nav.today", icon: LayoutDashboard },
+  { href: "/explore", labelKey: "nav.explore", icon: Compass, chipKey: "nav.newChip" },
+  { href: "/pipeline", labelKey: "nav.pipeline", icon: ListChecks },
+  { href: "/followups", labelKey: "nav.followups", icon: Send },
+  { href: "/portals", labelKey: "nav.portals", icon: Radar },
+  { href: "/analytics", labelKey: "nav.analytics", icon: BarChart3 },
+  { href: "/cv", labelKey: "nav.cv", icon: FileText },
+  { href: "/config", labelKey: "nav.config", icon: Settings },
 ];
 
 export function isActivePath(href: string, pathname: string): boolean {

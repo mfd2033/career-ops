@@ -7,6 +7,7 @@ import { instrumentSerif } from "@/lib/fonts";
 import { ATS_LABEL, type AtsSource, type DiscoveredOffer } from "@/lib/explore";
 import { useJobs } from "@/components/jobs/job-store";
 import { useExplore } from "./explore-provider";
+import { useI18n } from "@/lib/i18n/context";
 
 function freshness(postedAt: string): string {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(postedAt)) return "";
@@ -36,11 +37,16 @@ function Logo({ company }: { company: string }) {
 }
 
 // What a running worker is doing on this exact posting → the live CTA label.
-const WORKER_LABEL: Record<string, string> = { evaluate: "Evaluating…", pdf: "Preparing CV…", research: "Researching…", apply: "Filling…" };
-
 export function DiscoveryCard({ offer, inPipeline, evaluatedN }: { offer: DiscoveredOffer; inPipeline: boolean; evaluatedN?: string }) {
+  const { t } = useI18n();
   const { added, adding, addToPipeline } = useExplore();
   const { jobs, startJob } = useJobs();
+  const WORKER_LABEL: Record<string, string> = {
+    evaluate: t("explore.card.evaluating"),
+    pdf: t("explore.card.preparingCv"),
+    research: t("explore.card.researching"),
+    apply: t("explore.card.filling"),
+  };
 
   // GLOBAL worker awareness: any worker acting on this URL drives the CTA, here
   // and on every other surface that renders this offer (the jobs store is global).
@@ -50,7 +56,7 @@ export function DiscoveryCard({ offer, inPipeline, evaluatedN }: { offer: Discov
   );
   const working = job?.status === "running";
   const doneEval = job?.status === "done" && job.kind === "evaluate";
-  const statusLabel = WORKER_LABEL[job?.kind ?? ""] ?? "Working…";
+  const statusLabel = WORKER_LABEL[job?.kind ?? ""] ?? t("explore.card.working");
 
   const isAdded = added.has(offer.url) || inPipeline || working || doneEval;
   const isAdding = adding.has(offer.url);
@@ -59,7 +65,7 @@ export function DiscoveryCard({ offer, inPipeline, evaluatedN }: { offer: Discov
 
   const evaluate = () => {
     addToPipeline([offer]); // evaluating implies it's in the pipeline — record it
-    startJob({ title: `Evaluate · ${offer.company}`, subtitle: offer.title, kind: "evaluate", input: offer.url, page: "/explore" });
+    startJob({ title: `${t("explore.card.evaluatePrefix")} ${offer.company}`, subtitle: offer.title, kind: "evaluate", input: offer.url, page: "/explore" });
   };
 
   return (
@@ -77,8 +83,8 @@ export function DiscoveryCard({ offer, inPipeline, evaluatedN }: { offer: Discov
           href={offer.url}
           target="_blank"
           rel="noopener noreferrer"
-          title="Open the posting"
-          aria-label="Open the posting"
+          title={t("explore.card.openPosting")}
+          aria-label={t("explore.card.openPosting")}
           className="-m-1 inline-flex shrink-0 items-center justify-center rounded p-1 text-faint transition-colors hover:text-foreground max-sm:min-h-[44px] max-sm:min-w-[44px]"
         >
           <ExternalLink className="size-4" />
@@ -91,13 +97,13 @@ export function DiscoveryCard({ offer, inPipeline, evaluatedN }: { offer: Discov
         {unverified && (
           <span
             className="inline-flex items-center gap-1 rounded border border-amber-500/25 bg-amber-500/10 px-1.5 py-0.5 font-medium text-amber-600 dark:text-amber-300"
-            title="Found by AI on the public web — we can't confirm it's still live without opening it. Evaluating runs a real browser check and sets the verdict."
+            title={t("explore.card.unverifiedTitle")}
           >
-            <ShieldQuestion className="size-3" /> unverified
+            <ShieldQuestion className="size-3" /> {t("explore.card.unverified")}
           </span>
         )}
         {offer.matchedKeyword && (
-          <span className="text-faint" title="Keyword match — not yet scored. Evaluate to get an A–F fit score.">
+          <span className="text-faint"             title={t("explore.card.keywordTitle")}>
             · matched <span className="text-brand/80">{offer.matchedKeyword}</span>
           </span>
         )}
@@ -116,13 +122,13 @@ export function DiscoveryCard({ offer, inPipeline, evaluatedN }: { offer: Discov
             href={evaluatedN ? `/pipeline/${evaluatedN}` : job ? `/jobs/${job.id}` : "/pipeline"}
             className="inline-flex w-full items-center justify-center gap-1.5 rounded-md bg-brand-soft px-2.5 py-2 text-xs font-medium text-brand max-sm:min-h-[44px]"
           >
-            <Check className="size-3.5" /> Evaluated · view report
+            <Check className="size-3.5" /> {t("explore.card.evaluatedView")}
           </a>
         ) : working ? (
           <div className="inline-flex w-full items-center justify-center gap-1.5 rounded-md border border-brand/30 bg-brand-soft/60 px-2.5 py-2 text-xs font-medium text-brand">
             <Loader2 className="size-3.5 animate-spin" />
             {statusLabel}
-            <span className="text-brand/60">· in pipeline</span>
+            <span className="text-brand/60">{t("explore.card.inPipeline")}</span>
           </div>
         ) : (
           <div className="flex items-center gap-2">
@@ -135,16 +141,16 @@ export function DiscoveryCard({ offer, inPipeline, evaluatedN }: { offer: Discov
                 isAdded ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" : "bg-surface-hover text-foreground hover:bg-brand-soft hover:text-brand",
               )}
             >
-              {isAdding ? <Loader2 className="size-3.5 animate-spin" /> : isAdded ? <Check className="size-3.5" /> : <Plus className="size-3.5" />}
-              {isAdded ? "In pipeline" : "Add to pipeline"}
+               {isAdding ? <Loader2 className="size-3.5 animate-spin" /> : isAdded ? <Check className="size-3.5" /> : <Plus className="size-3.5" />}
+              {isAdded ? t("explore.card.inPipelineLabel") : t("explore.card.addToPipeline")}
             </button>
             <button
               type="button"
               onClick={evaluate}
-              title={unverified ? "Runs a real evaluation — and verifies the posting is live. Uses tokens." : "Runs a real A–F evaluation. Uses tokens."}
+              title={unverified ? t("explore.card.evaluateTitleUnverified") : t("explore.card.evaluateTitle")}
               className="inline-flex flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-brand/30 px-2.5 py-2 text-xs font-medium text-brand transition-colors hover:bg-brand-soft max-sm:min-h-[44px]"
             >
-              Evaluate <Coins className="size-3.5 opacity-80" />
+              {t("explore.card.evaluate")} <Coins className="size-3.5 opacity-80" />
             </button>
           </div>
         )}

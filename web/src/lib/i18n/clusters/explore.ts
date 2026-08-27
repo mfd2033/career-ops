@@ -1,0 +1,397 @@
+﻿import type { Dict } from "../types";
+
+// Cluster: explore
+// English (source) strings. Each key is dotted and namespaced by cluster, e.g.
+// "explore.something". Add keys here and their Chinese counterpart in zh below.
+export const en: Dict = {
+  // ── Page header / mode toggle ──
+  "explore.title": "Explore",
+  "explore.badgeNew": "New",
+  "explore.mode.scan": "Scan",
+  "explore.mode.aiSearch": "AI search",
+  "explore.mode.needsCli": "needs a CLI",
+
+  // ── Mode descriptions ──
+  "explore.scanDesc": "Scan the public ATS network — Greenhouse, Lever, Ashby, Workday. Fresh postings matched to you, zero tokens. You only spend when you choose to evaluate one.",
+  "explore.aiDesc": "Describe the role in plain language — an AI hunts the open web for it, on your own AI. Candidates are unverified until you evaluate.",
+
+  "explore.rootNotSetup": "Your career-ops home isn’t set up yet — discovery needs a checkout with a profile to seed from.",
+
+  // ── Refine / discover bars ──
+  "explore.refineSearch": "Refine search",
+  "explore.recastFree": "Re-cast (free)",
+  "explore.discoverFree": "Discover (free)",
+  "explore.discoverNote": "Evaluating a role later costs tokens. Discovering never does.",
+
+  // ── First-run reveal banner ──
+  "explore.firstRun.lead": "These are live roles that match your CV. ",
+  "explore.firstRun.emph": "Nothing here cost you a token.",
+  "explore.firstRun.tail": " Pick the one you're most curious about — Evaluate it and I'll tell you exactly how you score, and why.",
+
+  // ── Empty states ──
+  "explore.empty.aiLooseTitle": "No public matches — yet.",
+  "explore.empty.aiLooseBody": "AI search reads what's public. Try broader intent, or run the free Scan over the ATS network.",
+  "explore.empty.aiLooseRerun": "Run the free Scan",
+  "explore.empty.caughtUpTitle": "You're all caught up.",
+  "explore.empty.caughtUpBody": "Nothing new since your last scan. Your pipeline is current — that's the goal.",
+  "explore.empty.lookBack30": "Look back 30 days",
+  "explore.empty.scanLooseTitle": "No fresh matches — yet.",
+  "explore.empty.scanLooseBody": "Discovery is free — loosen and re-cast as often as you want.",
+  "explore.empty.scanLooseRerun": "Widen to 30 days · clear location",
+
+  // ── Degraded card ──
+  "explore.degraded.titleDefault": "The scan ran, but couldn’t reach any sources.",
+  "explore.degraded.bodyDefault": "The public ATS directories didn’t respond — usually a transient network hiccup or rate-limit, so nothing could be searched. This isn’t “all caught up”; a retry in a moment usually clears it.",
+  "explore.degraded.titleCapped": "No matches in the slice we searched.",
+  "explore.degraded.bodyCapped": "The scan is capped, so it only searched {scanned}{avail} companies — not the whole network. Raise scan depth (Refine search) or narrow your roles, then re-cast to look deeper.",
+  "explore.degraded.ofAvailable": " of {n}",
+  "explore.degraded.titleDropped": "Fresh-looking roles were skipped for missing dates.",
+  "explore.degraded.bodyDroppedOne": "{n} posting matched but had no clear publish date, so the freshness filter dropped it. Widening the time window often brings dated equivalents back.",
+  "explore.degraded.bodyDroppedMany": "{n} postings matched but had no clear publish date, so the freshness filter dropped them. Widening the time window often brings dated equivalents back.",
+  "explore.degraded.titlePartial": "Some job boards were unreachable.",
+  "explore.degraded.bodyPartial": "The scan searched {n} companies, but one or more sources didn’t respond — so this is a partial result, not “all caught up”. A retry usually clears it.",
+  "explore.degraded.retry": "Retry the scan",
+
+  // ── Capped banner ──
+  "explore.capped.banner": "Showing a capped slice — searched {n}{avail} companies.",
+  "explore.capped.raiseDepth": "Raise scan depth to search deeper",
+
+  // ── Failed card ──
+  "explore.failed.fullToolkitTitle": "Discovery needs the full toolkit",
+  "explore.failed.fullToolkitBody": "Your career-ops home looks data-only or is on an older version. The free scanner ships with a complete checkout — update career-ops, or paste a job URL on the pipeline to evaluate it directly.",
+  "explore.failed.openPipeline": "Open pipeline",
+  "explore.failed.openConfig": "Open Config",
+  "explore.failed.title": "Couldn’t finish the search.",
+  "explore.failed.tryAgain": "Try again",
+
+  // ── Blocked card ──
+  "explore.blocked.title": "AI search needs a CLI",
+  "explore.blocked.body": "Connect Claude Code, Gemini, or any agent CLI — your key, your tokens, your machine. The free Scan stays available without one.",
+
+  // ── Scan note (empty-state footer) ──
+  "explore.scanNoteOne": "Scanned {n}{avail} company{partial}.",
+  "explore.scanNoteMany": "Scanned {n}{avail} companies{partial}.",
+  "explore.scanNotePartial": " · some sources were unreachable",
+
+  // ── AI hunt trace ──
+  "explore.ai.reasoningLive": "Reasoning live",
+
+  // ── AI hunt view ──
+  "explore.ai.huntingOpenWeb": "Hunting the open web",
+  "explore.ai.candidateOne": "{n} candidate",
+  "explore.ai.candidateMany": "{n} candidates",
+  "explore.ai.foundReview": "found — review them below",
+  "explore.ai.foundStreaming": "found so far · streaming in",
+  "explore.ai.castingWeb": "casting across the public web…",
+  "explore.ai.yourCli": "your CLI",
+  "explore.ai.searchingOpenWeb": "· searching the open web",
+  "explore.ai.searches": "· {n} searches",
+  "explore.ai.foundCount": "· {n} found",
+
+  // ── AI search box ──
+  "explore.ai.example1": "AI infra roles at climate startups, remote EU",
+  "explore.ai.example2": "Forward-deployed engineer at Series A devtools, US-remote",
+  "explore.ai.example3": "Head of Applied AI at healthtech, posted this week",
+  "explore.ai.describeRole": "Describe the role — an AI hunts the open web for it",
+  "explore.ai.placeholder": "“AI infra at climate startups, remote EU, not staff-level” — plain language, your words",
+  "explore.ai.readsWebPrefix": "Reads the public web with ",
+  "explore.ai.readsWebSuffix": " — it costs your tokens.",
+  "explore.ai.connectCli": "Connect an AI CLI in Config to use AI search.",
+  "explore.ai.searchButton": "Search the open web",
+  "explore.ai.orScan": "or run the free Scan instead →",
+
+  // ── Discovering state ──
+  "explore.disc.skipped": "~{n} skipped",
+  "explore.disc.ledger": "0 tokens · $0.00",
+  "explore.disc.companies": "· {n} companies",
+  "explore.disc.freshFound": "fresh roles found — free",
+  "explore.disc.counting": "fresh roles and counting…",
+  "explore.disc.scanning": "scanning the network…",
+  "explore.disc.castingNet": "Casting the net across the ATS network…",
+  "explore.disc.walking": "Walking {ats} — {n} companies",
+  "explore.disc.foundFreeOne": "{n} fresh role found — free.",
+  "explore.disc.foundFreeMany": "{n} fresh roles found — free.",
+  "explore.disc.loadingFresh": "Loading fresh matches…",
+  "explore.disc.castingWeb": "Casting across the open web…",
+  "explore.disc.candidatesFoundOne": "{n} candidate found.",
+  "explore.disc.candidatesFoundMany": "{n} candidates found.",
+
+  // ── Discovery card ──
+  "explore.card.evaluating": "Evaluating…",
+  "explore.card.preparingCv": "Preparing CV…",
+  "explore.card.researching": "Researching…",
+  "explore.card.filling": "Filling…",
+  "explore.card.working": "Working…",
+  "explore.card.evaluatePrefix": "Evaluate ·",
+  "explore.card.openPosting": "Open the posting",
+  "explore.card.unverifiedTitle": "Found by AI on the public web — we can't confirm it's still live without opening it. Evaluating runs a real browser check and sets the verdict.",
+  "explore.card.unverified": "unverified",
+  "explore.card.keywordTitle": "Keyword match — not yet scored. Evaluate to get an A–F fit score.",
+  "explore.card.evaluatedView": "Evaluated · view report",
+  "explore.card.inPipeline": "· in pipeline",
+  "explore.card.inPipelineLabel": "In pipeline",
+  "explore.card.addToPipeline": "Add to pipeline",
+  "explore.card.evaluateTitleUnverified": "Runs a real evaluation — and verifies the posting is live. Uses tokens.",
+  "explore.card.evaluateTitle": "Runs a real A–F evaluation. Uses tokens.",
+  "explore.card.evaluate": "Evaluate",
+
+  // ── Filter builder ──
+  "explore.filter.remove": "Remove {v}",
+  "explore.filter.rolesToFind": "Roles to find",
+  "explore.filter.rolesHint": "empty = every fresh posting",
+  "explore.filter.rolesPlaceholder": "AI platform, ML infrastructure, staff engineer…",
+  "explore.filter.seededFrom": "Seeded from your {sources} — edit freely.",
+  "explore.filter.exclude": "Exclude",
+  "explore.filter.excludePlaceholder": "manager, sales, contract…",
+  "explore.filter.postedHint": "postings published in this window",
+  "explore.filter.postedWithin": "Posted within",
+  "explore.filter.sourcesHint": "pick at least one",
+  "explore.filter.sources": "Sources",
+  "explore.filter.locationScope": "Location & scope",
+  "explore.filter.location": "Location",
+  "explore.filter.alwaysIncludeHint": "rescues multi-loc posts",
+  "explore.filter.alwaysInclude": "Always include",
+  "explore.filter.alwaysIncludePlaceholder": "London…",
+  "explore.filter.onlyIn": "Only in",
+  "explore.filter.onlyInPlaceholder": "Remote, EMEA…",
+  "explore.filter.neverIn": "Never in",
+  "explore.filter.neverInPlaceholder": "India…",
+  "explore.filter.neverInHardHint": "hard reject — overrides Always include",
+  "explore.filter.neverInHard": "Never in (hard)",
+  "explore.filter.neverInHardPlaceholder": "USA, Brazil…",
+  "explore.filter.scanDepthHint": "{n} companies / source",
+  "explore.filter.scanDepth": "Scan depth",
+
+  // ── First score view ──
+  "explore.firstScore.strongMatch": "You're a strong match for this role — open the full report for the breakdown.",
+  "explore.firstScore.ariaLabel": "Your first score",
+  "explore.firstScore.kicker": "the job we found you — scored",
+  "explore.firstScore.fitLabel": "/ 5 fit",
+  "explore.firstScore.legitimacy": "Legitimacy: {legit}",
+  "explore.firstScore.ranOnAi": "That ran on your own AI. Everything before it — finding this job — was free.",
+  "explore.firstScore.seeReport": "See the full report",
+  "explore.firstScore.findMore": "Find more like this",
+
+  // ── Results list ──
+  "explore.results.candidateOne": "candidate",
+  "explore.results.candidateMany": "candidates",
+  "explore.results.freshRoleOne": "fresh role",
+  "explore.results.freshRoleMany": "fresh roles",
+  "explore.results.aiSubtext": "found by AI on the open web · unverified until you evaluate",
+  "explore.results.companiesScanned": "{n} companies scanned · ",
+  "explore.results.zeroTokens": "0 tokens spent",
+  "explore.results.partialNote": " · some boards were unreachable (normal for public directories)",
+  "explore.results.filterPlaceholder": "Filter results…",
+  "explore.results.sortFresh": "fresh",
+  "explore.results.sortCompany": "company",
+  "explore.results.addAll": "Add all {n}",
+  "explore.results.noMatch": "No results match “{q}”.",
+
+  // ── Provider status / error strings ──
+  "explore.err.scannerUnavailable": "The scanner isn't available.",
+  "explore.err.discoveryFailed": "Discovery failed ({status}).",
+  "explore.err.noStream": "No response stream.",
+  "explore.err.streamError": "stream error",
+  "explore.err.loadFreshFailed": "Couldn't load fresh matches ({status}).",
+  "explore.err.loadFreshUnexpected": "Couldn't load fresh matches — unexpected response.",
+  "explore.err.loadFresh": "Couldn't load fresh matches.",
+  "explore.err.aiUnavailable": "AI search isn't available.",
+  "explore.err.aiFailed": "AI search failed ({status}).",
+};
+
+// Simplified Chinese strings. Every key in en must have a matching key here.
+export const zh: Dict = {
+  // ── 页面标题 / 模式切换 ──
+  "explore.title": "探索",
+  "explore.badgeNew": "新",
+  "explore.mode.scan": "扫描",
+  "explore.mode.aiSearch": "AI 搜索",
+  "explore.mode.needsCli": "需要 CLI",
+
+  // ── 模式说明 ──
+  "explore.scanDesc": "扫描公开 ATS 网络 — Greenhouse、Lever、Ashby、Workday。为你匹配的新职位，零 token。只有在你选择评估时才消耗。",
+  "explore.aiDesc": "用自然语言描述岗位 — AI 会在全网替你搜寻，运行在你自己的 AI 上。候选在评估前均为未验证。",
+
+  "explore.rootNotSetup": "你的 career-ops 主目录尚未配置 — 发现功能需要一个带有 profile 的 checkout 作为种子。",
+
+  // ── 优化 / 发现栏 ──
+  "explore.refineSearch": "优化搜索",
+  "explore.recastFree": "重新投放（免费）",
+  "explore.discoverFree": "发现（免费）",
+  "explore.discoverNote": "稍后评估岗位会消耗 token。发现永远不会。",
+
+  // ── 首次揭示横幅 ──
+  "explore.firstRun.lead": "这些是与你的 CV 匹配的真实岗位。",
+  "explore.firstRun.emph": "这里没有任何一项消耗你的 token。",
+  "explore.firstRun.tail": "挑一个你最感兴趣的 — 评估它，我会准确告诉你得分及原因。",
+
+  // ── 空状态 ──
+  "explore.empty.aiLooseTitle": "暂无公开匹配 — 尚未。",
+  "explore.empty.aiLooseBody": "AI 搜索读取公开内容。尝试更宽泛的意图，或在 ATS 网络运行免费扫描。",
+  "explore.empty.aiLooseRerun": "运行免费扫描",
+  "explore.empty.caughtUpTitle": "你已经全部跟上了。",
+  "explore.empty.caughtUpBody": "自上次扫描以来没有新内容。你的管道是最新的 — 这正是目标。",
+  "explore.empty.lookBack30": "回溯 30 天",
+  "explore.empty.scanLooseTitle": "暂无新匹配 — 尚未。",
+  "explore.empty.scanLooseBody": "发现是免费的 — 随时放宽条件并重新投放。",
+  "explore.empty.scanLooseRerun": "放宽到 30 天 · 清除地点",
+
+  // ── 降级卡片 ──
+  "explore.degraded.titleDefault": "扫描已运行，但无法连接到任何来源。",
+  "explore.degraded.bodyDefault": "公开 ATS 目录没有响应 — 通常是暂时的网络波动或限流，因此无法搜索任何内容。这并非“全部跟上”；稍后重试通常能解决。",
+  "explore.degraded.titleCapped": "在我们搜索的范围内没有匹配。",
+  "explore.degraded.bodyCapped": "扫描受限，因此只搜索了 {scanned}{avail} 家公司 — 并非整个网络。提高扫描深度（优化搜索）或收窄岗位范围，然后重新投放以深入查找。",
+  "explore.degraded.ofAvailable": " / {n}",
+  "explore.degraded.titleDropped": "因缺少日期而跳过了看似新鲜的岗位。",
+  "explore.degraded.bodyDroppedOne": "{n} 个岗位匹配但因缺少明确发布日期而被新鲜度过滤器丢弃。放宽时间窗口通常能找回带日期的等效岗位。",
+  "explore.degraded.bodyDroppedMany": "{n} 个岗位匹配但因缺少明确发布日期而被新鲜度过滤器丢弃。放宽时间窗口通常能找回带日期的等效岗位。",
+  "explore.degraded.titlePartial": "部分招聘板无法连接。",
+  "explore.degraded.bodyPartial": "扫描搜索了 {n} 家公司，但一个或多个来源没有响应 — 因此这是部分结果，并非“全部跟上”。重试通常能解决。",
+  "explore.degraded.retry": "重试扫描",
+
+  // ── 受限横幅 ──
+  "explore.capped.banner": "显示受限的切片 — 已搜索 {n}{avail} 家公司。",
+  "explore.capped.raiseDepth": "提高扫描深度以深入搜索",
+
+  // ── 失败卡片 ──
+  "explore.failed.fullToolkitTitle": "发现功能需要完整工具包",
+  "explore.failed.fullToolkitBody": "你的 career-ops 主目录看起来只有数据，或版本较旧。免费扫描器随完整 checkout 提供 — 更新 career-ops，或在 pipeline 粘贴职位 URL 直接评估。",
+  "explore.failed.openPipeline": "打开 pipeline",
+  "explore.failed.openConfig": "打开 Config",
+  "explore.failed.title": "无法完成搜索。",
+  "explore.failed.tryAgain": "重试",
+
+  // ── 受阻卡片 ──
+  "explore.blocked.title": "AI 搜索需要 CLI",
+  "explore.blocked.body": "连接 Claude Code、Gemini 或任意 agent CLI — 你的密钥、你的 token、你的机器。免费扫描无需 CLI 也可用。",
+
+  // ── 扫描备注（空状态页脚） ──
+  "explore.scanNoteOne": "已扫描 {n}{avail} 家公司{partial}。",
+  "explore.scanNoteMany": "已扫描 {n}{avail} 家公司{partial}。",
+  "explore.scanNotePartial": " · 部分来源无法连接",
+
+  // ── AI 推理面板 ──
+  "explore.ai.reasoningLive": "推理进行中",
+
+  // ── AI 搜寻视图 ──
+  "explore.ai.huntingOpenWeb": "正在全网搜寻",
+  "explore.ai.candidateOne": "{n} 个候选",
+  "explore.ai.candidateMany": "{n} 个候选",
+  "explore.ai.foundReview": "已找到 — 在下方查看",
+  "explore.ai.foundStreaming": "已找到 · 持续流入中",
+  "explore.ai.castingWeb": "正在全网撒网…",
+  "explore.ai.yourCli": "你的 CLI",
+  "explore.ai.searchingOpenWeb": "· 正在全网搜寻",
+  "explore.ai.searches": "· {n} 次搜索",
+  "explore.ai.foundCount": "· 已找到 {n} 个",
+
+  // ── AI 搜索框 ──
+  "explore.ai.example1": "气候初创公司的 AI 基础设施岗位，远程（欧洲）",
+  "explore.ai.example2": "A 轮开发工具公司的前向部署工程师，美国远程",
+  "explore.ai.example3": "健康科技公司的应用 AI 负责人，本周发布",
+  "explore.ai.describeRole": "描述这个岗位 — AI 会替你在全网搜寻",
+  "explore.ai.placeholder": "“气候初创公司的 AI 基础设施岗，欧洲远程，非高管级别” — 用你自己的话，自然语言即可",
+  "explore.ai.readsWebPrefix": "通过 ",
+  "explore.ai.readsWebSuffix": " 读取公开网络 — 这会消耗你的 token。",
+  "explore.ai.connectCli": "在 Config 中连接一个 AI CLI 才能使用 AI 搜索。",
+  "explore.ai.searchButton": "搜索全网",
+  "explore.ai.orScan": "或改用免费的扫描 →",
+
+  // ── 发现状态 ──
+  "explore.disc.skipped": "约 {n} 个已跳过",
+  "explore.disc.ledger": "0 token · $0.00",
+  "explore.disc.companies": "· {n} 家公司",
+  "explore.disc.freshFound": "已找到新岗位 — 免费",
+  "explore.disc.counting": "新岗位持续增加中…",
+  "explore.disc.scanning": "正在扫描网络…",
+  "explore.disc.castingNet": "正在 ATS 网络撒网…",
+  "explore.disc.walking": "正在遍历 {ats} — {n} 家公司",
+  "explore.disc.foundFreeOne": "{n} 个新岗位已找到 — 免费。",
+  "explore.disc.foundFreeMany": "{n} 个新岗位已找到 — 免费。",
+  "explore.disc.loadingFresh": "正在加载新匹配…",
+  "explore.disc.castingWeb": "正在全网撒网…",
+  "explore.disc.candidatesFoundOne": "{n} 个候选已找到。",
+  "explore.disc.candidatesFoundMany": "{n} 个候选已找到。",
+
+  // ── 发现卡片 ──
+  "explore.card.evaluating": "评估中…",
+  "explore.card.preparingCv": "准备简历中…",
+  "explore.card.researching": "研究中…",
+  "explore.card.filling": "填写中…",
+  "explore.card.working": "处理中…",
+  "explore.card.evaluatePrefix": "评估 ·",
+  "explore.card.openPosting": "打开职位",
+  "explore.card.unverifiedTitle": "由 AI 在公开网络发现 — 不打开我们无法确认它是否仍然有效。评估会运行真实浏览器检查并给出结论。",
+  "explore.card.unverified": "未验证",
+  "explore.card.keywordTitle": "关键词匹配 — 尚未评分。评估后可获得 A–F 匹配分。",
+  "explore.card.evaluatedView": "已评估 · 查看报告",
+  "explore.card.inPipeline": "· 已在管道中",
+  "explore.card.inPipelineLabel": "已在管道中",
+  "explore.card.addToPipeline": "加入管道",
+  "explore.card.evaluateTitleUnverified": "运行真实评估 — 并验证职位是否有效。消耗 token。",
+  "explore.card.evaluateTitle": "运行真实 A–F 评估。消耗 token。",
+  "explore.card.evaluate": "评估",
+
+  // ── 筛选构建器 ──
+  "explore.filter.remove": "移除 {v}",
+  "explore.filter.rolesToFind": "要找的岗位",
+  "explore.filter.rolesHint": "留空 = 每个新职位",
+  "explore.filter.rolesPlaceholder": "AI 平台、ML 基础设施、高级工程师…",
+  "explore.filter.seededFrom": "已从你的 {sources} 播种 — 可自由编辑。",
+  "explore.filter.exclude": "排除",
+  "explore.filter.excludePlaceholder": "经理、销售、合同…",
+  "explore.filter.postedHint": "在此时间窗口内发布的职位",
+  "explore.filter.postedWithin": "发布于",
+  "explore.filter.sourcesHint": "至少选择一个",
+  "explore.filter.sources": "来源",
+  "explore.filter.locationScope": "地点与范围",
+  "explore.filter.location": "地点",
+  "explore.filter.alwaysIncludeHint": "挽救多地点职位",
+  "explore.filter.alwaysInclude": "始终包含",
+  "explore.filter.alwaysIncludePlaceholder": "伦敦…",
+  "explore.filter.onlyIn": "仅限",
+  "explore.filter.onlyInPlaceholder": "远程、EMEA…",
+  "explore.filter.neverIn": "绝不在",
+  "explore.filter.neverInPlaceholder": "印度…",
+  "explore.filter.neverInHardHint": "硬拒绝 — 覆盖“始终包含”",
+  "explore.filter.neverInHard": "绝不在（硬）",
+  "explore.filter.neverInHardPlaceholder": "美国、巴西…",
+  "explore.filter.scanDepthHint": "{n} 家公司 / 来源",
+  "explore.filter.scanDepth": "扫描深度",
+
+  // ── 首个评分视图 ──
+  "explore.firstScore.strongMatch": "你与这个岗位高度匹配 — 打开完整报告查看详细分析。",
+  "explore.firstScore.ariaLabel": "你的首个评分",
+  "explore.firstScore.kicker": "我们为你找到的岗位 — 已评分",
+  "explore.firstScore.fitLabel": "/ 5 匹配度",
+  "explore.firstScore.legitimacy": "合法性：{legit}",
+  "explore.firstScore.ranOnAi": "那运行在你自己的 AI 上。在此之前的一切 — 找到这个岗位 — 都是免费的。",
+  "explore.firstScore.seeReport": "查看完整报告",
+  "explore.firstScore.findMore": "查找更多类似岗位",
+
+  // ── 结果列表 ──
+  "explore.results.candidateOne": "候选",
+  "explore.results.candidateMany": "候选",
+  "explore.results.freshRoleOne": "新岗位",
+  "explore.results.freshRoleMany": "新岗位",
+  "explore.results.aiSubtext": "由 AI 在公开网络发现 · 评估前未验证",
+  "explore.results.companiesScanned": "{n} 家公司已扫描 · ",
+  "explore.results.zeroTokens": "0 token 消耗",
+  "explore.results.partialNote": " · 部分招聘板无法连接（公开目录中属正常）",
+  "explore.results.filterPlaceholder": "筛选结果…",
+  "explore.results.sortFresh": "最新",
+  "explore.results.sortCompany": "公司",
+  "explore.results.addAll": "全部添加 {n}",
+  "explore.results.noMatch": "没有结果匹配“{q}”。",
+
+  // ── Provider 状态 / 错误字符串 ──
+  "explore.err.scannerUnavailable": "扫描器不可用。",
+  "explore.err.discoveryFailed": "发现失败（{status}）。",
+  "explore.err.noStream": "无响应流。",
+  "explore.err.streamError": "流错误",
+  "explore.err.loadFreshFailed": "无法加载新匹配（{status}）。",
+  "explore.err.loadFreshUnexpected": "无法加载新匹配 — 响应异常。",
+  "explore.err.loadFresh": "无法加载新匹配。",
+  "explore.err.aiUnavailable": "AI 搜索不可用。",
+  "explore.err.aiFailed": "AI 搜索失败（{status}）。",
+};

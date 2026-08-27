@@ -21,6 +21,7 @@ import {
   urgencyTone,
 } from "@/lib/followups";
 import { cn } from "@/lib/cn";
+import { useI18n } from "@/lib/i18n/context";
 
 // The /followups tracker: WHO needs a nudge today, HOW urgent, WHEN the next
 // touch is due, and the permanent history of every follow-up sent. The verdict
@@ -31,15 +32,15 @@ const URGENCY_TABS = ["ALL", "OVERDUE", "URGENT", "WAITING", "COLD"] as const;
 type UrgencyTab = (typeof URGENCY_TABS)[number];
 
 const COLUMNS = [
-  { key: "company", label: "Company" },
-  { key: "role", label: "Role" },
-  { key: "score", label: "Score" },
-  { key: "status", label: "Status" },
-  { key: "urgency", label: "Urgency" },
-  { key: "days", label: "Days since app" },
-  { key: "next", label: "Next follow-up" },
-  { key: "count", label: "Follow-ups done" },
-  { key: "since", label: "Days since F/U" },
+  { key: "company" },
+  { key: "role" },
+  { key: "score" },
+  { key: "status" },
+  { key: "urgency" },
+  { key: "days" },
+  { key: "next" },
+  { key: "count" },
+  { key: "since" },
 ] as const;
 type SortKey = (typeof COLUMNS)[number]["key"];
 const SORT_KEYS = COLUMNS.map((c) => c.key);
@@ -79,6 +80,7 @@ type CadenceResponse = {
 };
 
 export function FollowupsView() {
+  const { t } = useI18n();
   const params = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
@@ -162,10 +164,10 @@ export function FollowupsView() {
       });
       if (!res.ok) {
         const j = (await res.json().catch(() => ({}))) as { error?: string };
-        setActionError(typeof j.error === "string" ? `Couldn't remove the follow-up: ${j.error}` : "Couldn't remove the follow-up.");
+        setActionError(typeof j.error === "string" ? `Couldn't remove the follow-up: ${j.error}` : t("followups.removeError"));
       }
     } catch {
-      setActionError("Couldn't remove the follow-up.");
+      setActionError(t("followups.removeError"));
     }
     refetch();
   };
@@ -180,15 +182,18 @@ export function FollowupsView() {
 
   const subtitle = !data ? (
     <span className="inline-flex items-center gap-1.5">
-      <Loader2 className="size-3.5 animate-spin" /> Computing cadence…
+      <Loader2 className="size-3.5 animate-spin" /> {t("followups.computing")}
     </span>
   ) : !data.available || !meta ? (
-    "Cadence unavailable"
+    t("followups.unavailable")
   ) : (
     <>
-      <span className="tabular-nums">{meta.actionable}</span> active ·{" "}
-      <span className="tabular-nums">{meta.urgent}</span> urgent ·{" "}
-      <span className="tabular-nums">{meta.overdue}</span> overdue
+      <span className="tabular-nums">{meta.actionable}</span>
+      {t("followups.subtitleActive")}
+      <span className="tabular-nums">{meta.urgent}</span>
+      {t("followups.subtitleUrgent")}
+      <span className="tabular-nums">{meta.overdue}</span>
+      {t("followups.subtitleOverdue")}
     </>
   );
 
@@ -196,7 +201,7 @@ export function FollowupsView() {
     <div className="mx-auto max-w-none px-6 py-8">
       <div className="flex items-end justify-between gap-4">
         <div>
-          <h1 className="font-display text-2xl tracking-tight text-landing">Follow-up Tracker</h1>
+          <h1 className="font-display text-2xl tracking-tight text-landing">{t("followups.title")}</h1>
           <p className="mt-1 text-sm text-muted">{subtitle}</p>
         </div>
         <div className="relative w-56 max-w-[35vw]">
@@ -204,7 +209,7 @@ export function FollowupsView() {
           <input
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="Search company or role…"
+            placeholder={t("followups.searchPlaceholder")}
             className="w-full rounded-md border border-border bg-surface/60 py-2 pl-9 pr-3 text-sm outline-none transition-colors placeholder:text-faint focus:border-brand/50 focus-visible:ring-2 focus-visible:ring-brand/40"
           />
         </div>
@@ -214,18 +219,18 @@ export function FollowupsView() {
 
       {/* urgency filter */}
       <div className="mt-6 flex flex-wrap gap-1 border-b border-border">
-        {URGENCY_TABS.map((t) => {
-          const count = t === "ALL" ? entries.length : entries.filter((e) => e.urgency.toUpperCase() === t).length;
+        {URGENCY_TABS.map((tabKey) => {
+          const count = tabKey === "ALL" ? entries.length : entries.filter((e) => e.urgency.toUpperCase() === tabKey).length;
           return (
             <button
-              key={t}
-              onClick={() => setParams({ urgency: t === "ALL" ? null : t })}
+              key={tabKey}
+              onClick={() => setParams({ urgency: tabKey === "ALL" ? null : tabKey })}
               className={cn(
                 "-mb-px border-b-2 px-3 py-2 text-xs font-medium transition-colors",
-                tab === t ? "border-brand text-foreground" : "border-transparent text-muted hover:text-foreground",
+                tab === tabKey ? "border-brand text-foreground" : "border-transparent text-muted hover:text-foreground",
               )}
             >
-              {t} <span className="text-faint tabular-nums">{count}</span>
+              {t(`followups.tab.${tabKey.toLowerCase()}`)} <span className="text-faint tabular-nums">{count}</span>
             </button>
           );
         })}
@@ -234,33 +239,33 @@ export function FollowupsView() {
       {actionError && <p className="mt-3 text-xs text-red-500">{actionError}</p>}
 
       {!data ? null : !data.available ? (
-        <EmptyPanel title="Cadence unavailable" body="The cadence engine (followup-cadence.mjs) returned nothing — check that the core scripts are present." />
+        <EmptyPanel title={t("followups.unavailable")} body={t("followups.emptyCadenceBody")} />
       ) : filtered.length === 0 ? (
         filtering ? (
-          <EmptyPanel title="No matches" body="Try a different urgency filter or clear the search." />
+          <EmptyPanel title={t("followups.emptyNoMatches")} body={t("followups.emptyNoMatchesBody")} />
         ) : (
-          <EmptyPanel title="Nothing to chase" body="No active applications need a follow-up. Apply to roles (or update statuses) and the cadence starts tracking them." />
+          <EmptyPanel title={t("followups.emptyNothing")} body={t("followups.emptyNothingBody")} />
         )
       ) : (
         <div className="mt-4 overflow-x-auto rounded-2xl border border-border">
           <table className="w-full min-w-[880px] text-sm">
             <thead className="bg-surface/60 text-left text-xs uppercase tracking-wide text-faint">
               <tr>
-                <th className="w-8 px-2 py-2.5" aria-label="Expand" />
-                {COLUMNS.map((c) => {
-                  const active = sortKey === c.key;
-                  return (
-                    <th key={c.key} aria-sort={active ? (dir === 1 ? "ascending" : "descending") : "none"} className="px-2.5 py-2.5 font-medium">
-                      <button
-                        type="button"
-                        className="inline-flex cursor-pointer select-none items-center gap-1 uppercase tracking-wide hover:text-foreground"
-                        onClick={() =>
-                          // First click on Urgency descends (most pressing first —
-                          // how ▼ reads); other columns start ascending.
-                          setParams({ sort: c.key, dir: active ? dir * -1 : c.key === "urgency" ? -1 : 1 })
-                        }
-                      >
-                        {c.label}
+                 <th className="w-8 px-2 py-2.5" aria-label={t("followups.expandColAria")} />
+                 {COLUMNS.map((c) => {
+                   const active = sortKey === c.key;
+                   return (
+                     <th key={c.key} aria-sort={active ? (dir === 1 ? "ascending" : "descending") : "none"} className="px-2.5 py-2.5 font-medium">
+                       <button
+                         type="button"
+                         className="inline-flex cursor-pointer select-none items-center gap-1 uppercase tracking-wide hover:text-foreground"
+                         onClick={() =>
+                           // First click on Urgency descends (most pressing first —
+                           // how ▼ reads); other columns start ascending.
+                           setParams({ sort: c.key, dir: active ? dir * -1 : c.key === "urgency" ? -1 : 1 })
+                         }
+                       >
+                         {t(`followups.col.${c.key}`)}
                         <span aria-hidden="true" className={cn(!active && "text-faint")}>
                           {active ? (dir === 1 ? "▲" : "▼") : "⇅"}
                         </span>
@@ -268,7 +273,7 @@ export function FollowupsView() {
                     </th>
                   );
                 })}
-                <th className="px-2.5 py-2.5 font-medium">Action</th>
+                <th className="px-2.5 py-2.5 font-medium">{t("followups.col.action")}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
@@ -297,6 +302,7 @@ export function FollowupsView() {
 /** The one-sentence "what to do first" card — only when something is due and no
  *  filter narrows the view (spec: hidden while any filter/search is active). */
 function NarrativeCard({ meta, entries }: { meta: CadenceMetadata; entries: CadenceEntry[] }) {
+  const { t } = useI18n();
   const due = meta.overdue + meta.urgent;
   if (due <= 0) return null;
 
@@ -306,13 +312,18 @@ function NarrativeCard({ meta, entries }: { meta: CadenceMetadata; entries: Cade
     .slice(0, 4);
 
   const parts: string[] = [];
-  if (meta.overdue > 0) parts.push(`Overdue follow-ups: ${meta.overdue}`);
-  if (meta.urgent > 0) parts.push(`Urgent: ${meta.urgent}`);
+  if (meta.overdue > 0) parts.push(t("followups.narrativeOverdue", { n: meta.overdue }));
+  if (meta.urgent > 0) parts.push(t("followups.narrativeUrgent", { n: meta.urgent }));
   if (pressing.length > 0) {
-    parts.push(`most pressing today: ${oxfordJoin(pressing.map((e) => `${e.company} (#${e.num})`))}`);
+    const list = oxfordJoin(pressing.map((e) => t("followups.narrativeCompany", { company: e.company, num: e.num })));
+    parts.push(t("followups.narrativePressing", { list }));
     const days = pressing.map((e) => e.daysSinceApplication);
     const max = Math.max(...days);
-    parts.push(days.every((d) => d === max) ? `all ${max} days since applied` : `up to ${max} days since applied`);
+    parts.push(
+      days.every((d) => d === max)
+        ? t("followups.narrativeAllDays", { n: max })
+        : t("followups.narrativeUpToDays", { n: max }),
+    );
   }
 
   return (
@@ -342,6 +353,7 @@ function FollowupRow({
   onPin: () => void;
   onRemove: (num: number) => void;
 }) {
+  const { t } = useI18n();
   const statusLabel = e.status.charAt(0).toUpperCase() + e.status.slice(1);
   const Chevron = expanded ? ChevronDown : ChevronRight;
   return (
@@ -352,7 +364,10 @@ function FollowupRow({
             type="button"
             onClick={onToggle}
             aria-expanded={expanded}
-            aria-label={`${expanded ? "Hide" : "Show"} follow-up history for ${e.company}`}
+            aria-label={t("followups.rowHistoryAria", {
+              action: t(expanded ? "followups.hide" : "followups.show"),
+              company: e.company,
+            })}
             className="rounded p-1 text-faint transition hover:text-foreground"
           >
             <Chevron className="size-4" />
@@ -391,11 +406,11 @@ function FollowupRow({
             </span>
           )}
           {e.nextOverride && (
-            <span
-              className="ml-1.5 inline-flex align-[-1px]"
-              title={`Pinned to ${e.nextOverride} — cleared when you log a follow-up`}
-              aria-label="Pinned manually"
-            >
+              <span
+               className="ml-1.5 inline-flex align-[-1px]"
+               title={t("followups.pinnedTitle", { date: e.nextOverride ?? "" })}
+               aria-label={t("followups.pinnedAria")}
+             >
               <Pin className="size-3 text-brand" />
             </span>
           )}
@@ -406,18 +421,18 @@ function FollowupRow({
         </td>
         <td className="whitespace-nowrap px-2.5 py-3">
           <span className="inline-flex items-center gap-0.5">
-            <button
-              type="button"
-              onClick={onLog}
-              title="Log a follow-up (date, channel, contact, notes)"
-              className="rounded-md px-2 py-1 text-xs font-medium text-muted transition-colors hover:bg-brand-soft hover:text-brand"
-            >
-              Log
-            </button>
-            <button
-              type="button"
-              onClick={onPin}
-              title={e.nextOverride ? `Next date pinned to ${e.nextOverride} — change or clear` : "Pin a custom next follow-up date"}
+              <button
+               type="button"
+               onClick={onLog}
+               title={t("followups.logTitle")}
+               className="rounded-md px-2 py-1 text-xs font-medium text-muted transition-colors hover:bg-brand-soft hover:text-brand"
+             >
+               {t("followups.log")}
+             </button>
+             <button
+               type="button"
+               onClick={onPin}
+               title={e.nextOverride ? t("followups.pinnedChangeTitle", { date: e.nextOverride }) : t("followups.pinTitle")}
               className={cn(
                 "rounded-md p-1 transition-colors hover:bg-brand-soft hover:text-brand",
                 e.nextOverride ? "text-brand" : "text-faint",
@@ -440,13 +455,14 @@ function FollowupRow({
 }
 
 function HistoryPanel({ entry: e, onRemove }: { entry: CadenceEntry; onRemove: (num: number) => void }) {
+  const { t } = useI18n();
   // Tolerate an older core engine (CAREER_OPS_ROOT can point at a separate
   // checkout whose followup-cadence.mjs predates the per-entry followups[]).
   const history = e.followups ?? [];
   return (
     <div className="space-y-2 pl-7 text-sm">
       {history.length === 0 ? (
-        <p className="text-faint">No follow-ups logged yet.</p>
+        <p className="text-faint">{t("followups.noHistory")}</p>
       ) : (
         <ul className="space-y-1.5">
           {history.map((f, i) => (
@@ -458,8 +474,8 @@ function HistoryPanel({ entry: e, onRemove }: { entry: CadenceEntry; onRemove: (
                   <button
                     type="button"
                     onClick={() => onRemove(f.num!)}
-                    title="Remove this logged follow-up (added by mistake?)"
-                    aria-label={`Remove follow-up logged ${f.date}`}
+                     title={t("followups.removeTitle")}
+                     aria-label={t("followups.removeAria", { date: f.date })}
                     className="rounded p-0.5 text-faint opacity-0 transition group-hover/item:opacity-100 hover:text-red-500 focus-visible:opacity-100"
                   >
                     <Trash2 className="size-3.5" />
@@ -475,8 +491,8 @@ function HistoryPanel({ entry: e, onRemove }: { entry: CadenceEntry; onRemove: (
         </ul>
       )}
       {e.contacts.length > 0 && (
-        <p className="text-xs text-faint">
-          Suggested contacts:{" "}
+         <p className="text-xs text-faint">
+           {t("followups.suggestedContacts")}{" "}
           {e.contacts.map((c, i) => (
             <span key={c.email}>
               {i > 0 && ", "}

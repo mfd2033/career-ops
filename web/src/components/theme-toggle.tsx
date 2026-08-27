@@ -4,11 +4,13 @@ import { useEffect, useState } from "react";
 import { Sun, Moon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
+import { useI18n } from "@/lib/i18n/context";
 
 const KEY = "career-ops:theme";
 
 export function ThemeToggle({ className }: { className?: string }) {
   const [dark, setDark] = useState(true);
+  const { t } = useI18n();
 
   useEffect(() => {
     setDark(document.documentElement.classList.contains("dark"));
@@ -35,8 +37,8 @@ export function ThemeToggle({ className }: { className?: string }) {
       size="icon"
       type="button"
       onClick={toggle}
-      aria-label={dark ? "Switch to light mode" : "Switch to dark mode"}
-      title={dark ? "Light mode" : "Dark mode"}
+      aria-label={dark ? t("shared.theme.switchToLight") : t("shared.theme.switchToDark")}
+      title={dark ? t("shared.theme.light") : t("shared.theme.dark")}
       className={cn("text-muted", className)}
     >
       {dark ? <Sun className="size-4" /> : <Moon className="size-4" />}
