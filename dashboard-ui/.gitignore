@@ -10,3 +10,7 @@ node.exe
 .gobin/
 *.syso
 icon-*.png
+# Stray exe built in-place (the canonical output lives at the repo root as
+# career-dashboard-ui.exe, gitignored there). Ignore here so a stray local
+# build in this dir never gets staged by accident.
+dashboard-ui.exe
