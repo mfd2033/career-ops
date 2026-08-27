@@ -18,6 +18,7 @@ import (
 	"embed"
 	"fmt"
 	"io/fs"
+	"log"
 	"net"
 	"net/http"
 	"os"
@@ -25,7 +26,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
+	"sync/atomic"
 	"time"
 )
 
@@ -35,9 +36,12 @@ var appFS embed.FS
 //go:embed node.exe
 var nodeExe []byte
 
+//go:embed icon.ico
+var trayIcon []byte
+
 // Bump cacheVersion whenever the embedded app changes so stale caches are
 // re-extracted instead of being reused.
-const cacheVersion = "2"
+const cacheVersion = "3"
 
 func main() {
 	exe, err := os.Executable()
@@ -76,17 +80,35 @@ func main() {
 	if cmd == nil {
 		return // fatal already shown
 	}
-	defer func() { _ = os.Remove(filepath.Join(runtimeDir, "LOCK")) }()
 	if err := writeLock(runtimeDir, port); err != nil {
 		fatal("could not write lock: " + err.Error())
 		return
 	}
+	defer func() { _ = os.Remove(filepath.Join(runtimeDir, "LOCK")) }()
 
 	waitReady(port, 60*time.Second)
 	openBrowser(fmt.Sprintf("http://127.0.0.1:%d", port))
 
-	// Stay alive for as long as the server does.
-	_ = cmd.Wait()
+	// Live with the system tray until the user asks to quit: the tray's menu
+	// (Open / Restart / Quit) drives the rest of the process life cycle.
+	setupTrayLog(runtimeDir)
+	runTrayLoop(cmd, nodePath, serverDir, careerRoot, runtimeDir, port)
+}
+
+// setupTrayLog redirects the standard logger to a file so the systray
+// library's internal errors (written to stderr, which a GUI app discards)
+// become visible for diagnostics. The log is always written — gating it on
+// an environment variable proved unreliable when the exe is launched by
+// double-click (Explorer doesn't inherit the caller's env, and a second
+// launch while an instance is alive exits before setupTrayLog runs). The
+// file is append-only and small, so it is safe to always create.
+func setupTrayLog(dir string) {
+	f, err := os.OpenFile(filepath.Join(dir, "tray-debug.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return
+	}
+	log.SetOutput(f)
+	log.Printf("tray log started: pid=%d", os.Getpid())
 }
 
 // ensureRuntime extracts the embedded app + node runtime to dir on first use.
@@ -132,26 +154,9 @@ func extractFS(fsys fs.FS, root, dest string) error {
 	})
 }
 
-// startServer launches node server.js hidden from the console, pointed at the
-// career-ops root anchored on the exe's own directory.
-func startServer(nodePath, serverDir, careerRoot string, port int) *exec.Cmd {
-	cmd := exec.Command(nodePath, "server.js")
-	cmd.Dir = serverDir
-	cmd.Env = append(os.Environ(),
-		"CAREER_OPS_ROOT="+careerRoot,
-		"PORT="+strconv.Itoa(port),
-		"HOSTNAME=127.0.0.1",
-	)
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		HideWindow:    true,
-		CreationFlags: 0x08000000, // CREATE_NO_WINDOW
-	}
-	if err := cmd.Start(); err != nil {
-		fatal("failed to start the dashboard server: " + err.Error())
-		return nil
-	}
-	return cmd
-}
+// startServer launches the dashboard server process hidden from the console,
+// pointed at the career-ops root anchored on the exe's own directory.
+// Platform-specific: see platform_windows.go (hidden window) / platform_other.go (no-op).
 
 // pickFreePort returns a free TCP port on 127.0.0.1 (preferring 3000+).
 func pickFreePort() int {
@@ -219,4 +224,113 @@ func appDataDir() string {
 	}
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, "AppData", "Local")
+}
+
+// runTrayLoop owns the process life cycle once the server is up: it installs
+// the system tray, watches the server process for unexpected exits, and
+// reacts to tray menu commands (Open / Restart / Quit). It returns only when
+// the tray has been torn down and the caller should exit.
+func runTrayLoop(cmd *exec.Cmd, nodePath, serverDir, careerRoot, runtimeDir string, port int) {
+	tray := newTray(trayIcon)
+	defer tray.Quit()
+
+	// curCmd is the live server process; restart() swaps it atomically so the
+	// watch loop always waits on the current one.
+	curCmd := &atomic.Pointer[exec.Cmd]{}
+	curCmd.Store(cmd)
+
+	serviceExit := make(chan error, 1)
+	go watchServer(curCmd, serviceExit)
+
+	for {
+		select {
+		case err := <-serviceExit:
+			// The server died on its own (not via our restart/quit). Keep the
+			// tray alive so the user can restart the server or quit cleanly.
+			msg := "The dashboard server exited unexpectedly."
+			if err != nil {
+				msg += "\n\n" + err.Error()
+			}
+			fatal(msg + "\n\nUse the tray menu to restart the server or quit.")
+
+		case c := <-tray.Commands():
+			switch c {
+			case trayOpen:
+				log.Printf("tray: open command")
+				openBrowser(fmt.Sprintf("http://127.0.0.1:%d", port))
+			case trayRestart:
+				log.Printf("tray: restart command")
+				port = restartServer(curCmd, nodePath, serverDir, careerRoot, runtimeDir, port)
+				log.Printf("tray: restart done, new port %d", port)
+			case trayQuit:
+				log.Printf("tray: quit command")
+				stopServer(curCmd, runtimeDir)
+				log.Printf("tray: server stopped, quitting tray")
+				tray.Quit()
+				<-tray.Done()
+				log.Printf("tray: done, exiting main loop")
+				return
+			}
+
+		case <-tray.Done():
+			return
+		}
+	}
+}
+
+// watchServer waits on the current server process. When a restart swaps
+// curCmd, the old process exit is expected and the loop moves on to wait on
+// the new process instead of reporting it as an unexpected exit.
+func watchServer(curCmd *atomic.Pointer[exec.Cmd], serviceExit chan<- error) {
+	for {
+		cmd := curCmd.Load()
+		if cmd == nil || cmd.Process == nil {
+			return
+		}
+		err := cmd.Wait()
+		if curCmd.Load() != cmd {
+			continue // old process killed by a restart; wait on the new one
+		}
+		serviceExit <- err
+		return
+	}
+}
+
+// restartServer kills the current server and starts a fresh one on a
+// newly-picked free port, then re-opens the browser. The tray icon is
+// unaffected. Returns the new port.
+func restartServer(curCmd *atomic.Pointer[exec.Cmd], nodePath, serverDir, careerRoot, runtimeDir string, port int) int {
+	old := curCmd.Load()
+
+	newPort := pickFreePort()
+	cmd := startServer(nodePath, serverDir, careerRoot, newPort)
+	if cmd == nil {
+		return port // fatal already shown; keep the old port
+	}
+
+	// Swap curCmd BEFORE killing the old process: the watcher goroutine is
+	// blocked in old.Wait(), and it compares curCmd against the process that
+	// died to distinguish an expected restart from a crash. If we killed first
+	// and stored after, the watcher could observe the old process's death
+	// before the swap and report a spurious "server exited unexpectedly".
+	curCmd.Store(cmd)
+	if old != nil && old.Process != nil {
+		_ = old.Process.Kill()
+	}
+
+	if err := writeLock(runtimeDir, newPort); err != nil {
+		fatal("could not write lock during restart: " + err.Error())
+	}
+
+	waitReady(newPort, 30*time.Second)
+	openBrowser(fmt.Sprintf("http://127.0.0.1:%d", newPort))
+	return newPort
+}
+
+// stopServer kills the running server (if any) and clears the port lock.
+func stopServer(curCmd *atomic.Pointer[exec.Cmd], runtimeDir string) {
+	if cmd := curCmd.Load(); cmd != nil && cmd.Process != nil {
+		_ = cmd.Process.Kill()
+	}
+	_ = os.Remove(filepath.Join(runtimeDir, "LOCK"))
 }

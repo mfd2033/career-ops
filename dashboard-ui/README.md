@@ -23,6 +23,22 @@ On launch it:
    (reusing an already-running instance if one is up — double-clicking again
    just re-opens the browser).
 
+Once up, the process lives in the **system tray** (not the taskbar). Right-click
+the tray icon for a menu:
+
+- **打开面板** — re-open the dashboard in the default browser,
+- **重启服务** — kill and restart the embedded server (picks a fresh free
+  port, updates the lock file, re-opens the browser),
+- **退出** — stop the server, remove the lock file, and exit the launcher.
+
+Left-clicking the tray icon does nothing (menu only, matching the tray menu
+wording). The icon reuses the embedded `icon.ico`.
+
+The launcher always redirects the tray library's log output to
+`%LOCALAPPDATA%\career-ops-dashboard-ui\v{N}\tray-debug.log` (append-only, small), so
+troubleshooting never requires setting an environment variable — just launch the exe,
+reproduce, and read the log. Each line carries the launcher PID.
+
 It is a Windows GUI app (`-H windowsgui`): no console window, no Node install
 required on the user's machine.
 
@@ -30,9 +46,14 @@ required on the user's machine.
 
 | File | Purpose |
 |------|---------|
-| `main.go` | Go launcher — embed, extract, run server, open browser |
+| `main.go` | Go launcher — embed, extract, run server, tray life cycle |
+| `tray.go` | Tray controller interface (commands channel, quit/done) |
+| `tray_windows.go` | Windows tray implementation (systray menu: 打开面板/重启服务/退出) |
+| `tray_other.go` | Non-Windows tray stub (no-op) |
+| `platform_windows.go` / `platform_other.go` | Platform `startServer` (hidden window vs no-op) |
 | `open_windows.go` / `open_other.go` | Platform open-browser / error-dialog helpers |
-| `go.mod` / `go.sum` | Module (only dependency: `golang.org/x/sys`) |
+| `go.mod` / `go.sum` | Module (deps: `golang.org/x/sys` + `fyne.io/systray`, the latter `replace`d by the local vendored fork) |
+| `third_party/systray/` | Local vendored fork of `fyne.io/systray` v1.12.2 with a one-line Windows fix (see `third_party/systray/PATCH.md`) — upstream never posts `WM_NULL` after `TrackPopupMenu`, so the tray context menu only showed on the first right-click |
 | `gen-icon.py` | Pillow script that draws the app icon (`icon.ico`) |
 | `winres/winres.json` | go-winres resource definition (icon + version info) |
 | `winres/icon.ico` | The app icon (tracked; regenerable via `gen-icon.py`) |
