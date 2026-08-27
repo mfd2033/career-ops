@@ -1,0 +1,289 @@
+﻿import type { Dict } from "../types";
+
+// Cluster: pipeline
+// English (source) strings. Each key is dotted and namespaced by cluster, e.g.
+// "pipeline.something". Add keys here and their Chinese counterpart in zh below.
+export const en: Dict = {
+  // ── Pipeline view (pipeline-view.tsx) ──
+  "pipeline.title": "Pipeline",
+  "pipeline.inboxSummary": "{count} in inbox · {total} tracked",
+  "pipeline.searchPlaceholder": "Search company or role…",
+  "pipeline.filtered": "Filtered:",
+  "pipeline.clearScoreFilter": "Clear score filter",
+  "pipeline.scoreGte": "score ≥ {min}",
+  "pipeline.noMatches": "No matches",
+  "pipeline.noMatchesHint": "Try a different tab or clear the search.",
+  "pipeline.clearSearchInbox": "Clear the search to see the full inbox.",
+  "pipeline.inboxHeader": "career-ops · inbox",
+  "pipeline.inboxEmpty": "Your inbox is empty.",
+  "pipeline.inboxEmptyPending": "Nothing pending right now.",
+  "pipeline.inboxEmptyFind": "Find roles that match your CV — free, no tokens spent.",
+  "pipeline.runFirstScan": "Run your first free scan",
+  "pipeline.inboxEmptyTerminal": "Prefer the terminal? Run career-ops scan, or add job URLs to data/pipeline.md.",
+
+  // Tabs (display labels; URL param stays canonical English)
+  "pipeline.tab.inbox": "INBOX",
+  "pipeline.tab.all": "ALL",
+  "pipeline.tab.evaluated": "EVALUATED",
+  "pipeline.tab.applied": "APPLIED",
+  "pipeline.tab.responded": "RESPONDED",
+  "pipeline.tab.interview": "INTERVIEW",
+  "pipeline.tab.offer": "OFFER",
+  "pipeline.tab.hired": "HIRED",
+  "pipeline.tab.rejected": "REJECTED",
+  "pipeline.tab.discarded": "DISCARDED",
+  "pipeline.tab.skip": "SKIP",
+
+  // Table column headers (display labels; sort param stays canonical English)
+  "pipeline.col.company": "company",
+  "pipeline.col.role": "role",
+  "pipeline.col.score": "score",
+  "pipeline.col.status": "status",
+  "pipeline.col.date": "date",
+
+  // Canonical status names (display labels; option value stays canonical English)
+  "pipeline.status.evaluated": "Evaluated",
+  "pipeline.status.applied": "Applied",
+  "pipeline.status.responded": "Responded",
+  "pipeline.status.interview": "Interview",
+  "pipeline.status.offer": "Offer",
+  "pipeline.status.hired": "Hired",
+  "pipeline.status.rejected": "Rejected",
+  "pipeline.status.discarded": "Discarded",
+  "pipeline.status.skip": "SKIP",
+
+  // ── Quick evaluate (quick-evaluate.tsx) ──
+  "pipeline.evaluatePlaceholder": "Paste a job URL to evaluate…",
+  "pipeline.evaluate": "Evaluate",
+  "pipeline.evaluateUrlHint": "Paste a full job-posting URL (https://…).",
+  "pipeline.evaluating": "Evaluating — watch it in the Workers tray.",
+  "pipeline.evaluateNote": "Evaluation runs on your own AI — your key, your machine.",
+
+  // ── Score methodology (score-methodology.tsx) ──
+  "pipeline.methodologySummary": "How career-ops scored this — and why it's for you",
+  "pipeline.methodologyIntro": "Every role is scored 1.0–5.0 across six dimensions. 4.0 is the apply / don't-apply line — below it, career-ops recommends against applying.",
+  "pipeline.dimensionsTitle": "The six dimensions",
+  "pipeline.dim.match": "Match",
+  "pipeline.dim.matchDesc": "how well your CV maps to the role's requirements",
+  "pipeline.dim.northstar": "North-star alignment",
+  "pipeline.dim.northstarDesc": "how far the role moves you toward your stated career goal",
+  "pipeline.dim.comp": "Compensation",
+  "pipeline.dim.compDesc": "the offer vs market rates (says “insufficient data” when comp is missing — never invents numbers)",
+  "pipeline.dim.culture": "Cultural signals",
+  "pipeline.dim.cultureDesc": "team, values and ways-of-working signals from the posting",
+  "pipeline.dim.redflags": "Red flags",
+  "pipeline.dim.redflagsDesc": "ghost-job, scam or mismatch warnings",
+  "pipeline.dim.overall": "Overall",
+  "pipeline.dim.overallDesc": "the single judgment that rolls the above into the score",
+  "pipeline.blocksTitle": "What each report block means",
+  "pipeline.block.a": "Plain-English summary of the role",
+  "pipeline.block.b": "A table of how your CV matches each requirement, plus the gaps",
+  "pipeline.block.c": "Strategy — how to position yourself for this role",
+  "pipeline.block.d": "Compensation research, comparing the offer to market rates",
+  "pipeline.block.e": "Personalization notes for your application",
+  "pipeline.block.f": "Interview prep — STAR stories tailored to this job",
+  "pipeline.block.g": "Posting legitimacy — a check that the listing is real, not a scam or ghost job",
+  "pipeline.methodologyFull": "Full methodology",
+  "pipeline.methodologyAria": "Full methodology (opens in a new tab)",
+
+  // ── Status select (status-select.tsx) ──
+  "pipeline.statusLabel": "status",
+  "pipeline.saved": "saved",
+
+  // ── Delete from tracker (delete-from-tracker.tsx) ──
+  "pipeline.removeFromTracker": "Remove from tracker",
+  "pipeline.removeConfirm": "Permanently remove application #{n} from your tracker?",
+  "pipeline.removeWarn": "This can't be undone.",
+  "pipeline.removeOrphan": " Its report file ({file}) is left on disk.",
+  "pipeline.removeErrCant": "This row can't be removed.",
+  "pipeline.removeErrReach": "Couldn't reach the tracker.",
+  "pipeline.removeErrFailed": "Delete failed.",
+  "pipeline.delete": "Delete",
+  "pipeline.cancel": "Cancel",
+
+  // ── Generate PDF button (generate-pdf-button.tsx) ──
+  "pipeline.generatingCv": "Generating CV…",
+  "pipeline.viewCv": "View tailored CV",
+  "pipeline.regenerateTitle": "Regenerate the tailored CV",
+  "pipeline.generateTitle": "Generate an ATS-optimized CV tailored to this role",
+  "pipeline.generateCv": "Generate tailored CV (PDF)",
+
+  // ── Copyable command (copyable-command.tsx) ──
+  "pipeline.copied": "Copied",
+  "pipeline.copyAriaCopied": "Copied to clipboard",
+  "pipeline.copyAria": "Copy command",
+  "pipeline.copyTitleCopied": "Copied",
+  "pipeline.copyTitle": "Copy",
+
+  // ── Report view (report-view.tsx) ──
+  "pipeline.report.backToPipeline": "Pipeline",
+  "pipeline.report.recommended": "Recommended",
+  "pipeline.report.belowApplyLine": "Below the apply line",
+  "pipeline.report.posting": "posting",
+  "pipeline.report.verdict": "Verdict",
+  "pipeline.report.technicalDetails": "Technical details · for developers",
+  "pipeline.report.noReport": "No report file found for #{id} in reports/.",
+
+  // ── Section headings (from report markdown) ──
+  "pipeline.section.roleSummary": "Role Summary",
+  "pipeline.section.matchWithCv": "Match with CV",
+  "pipeline.section.strategy": "Strategy",
+  "pipeline.section.compensation": "Compensation",
+  "pipeline.section.personalization": "Personalization",
+  "pipeline.section.interviewPrep": "Interview Prep",
+  "pipeline.section.postingLegitimacy": "Posting Legitimacy",
+  "pipeline.section.machineSummary": "Machine Summary",
+  "pipeline.section.submitted": "Submitted",
+  "pipeline.section.submitLog": "Submit Log",
+  "pipeline.section.applicationAnswers": "Application Answers",
+
+  // ── Legitimacy badge values (from report data) ──
+  "pipeline.legitimacy.highConfidence": "High Confidence",
+  "pipeline.legitimacy.mediumConfidence": "Medium Confidence",
+  "pipeline.legitimacy.lowConfidence": "Low Confidence",
+  "pipeline.legitimacy.caution": "Caution",
+  "pipeline.legitimacy.suspicious": "Suspicious",
+};
+
+// Simplified Chinese strings. Every key in en must have a matching key here.
+export const zh: Dict = {
+  // ── Pipeline view (pipeline-view.tsx) ──
+  "pipeline.title": "求职管道",
+  "pipeline.inboxSummary": "{count} 在收件箱 · {total} 已追踪",
+  "pipeline.searchPlaceholder": "搜索公司或职位…",
+  "pipeline.filtered": "已筛选：",
+  "pipeline.clearScoreFilter": "清除分数筛选",
+  "pipeline.scoreGte": "分数 ≥ {min}",
+  "pipeline.noMatches": "无匹配结果",
+  "pipeline.noMatchesHint": "试试其他标签或清除搜索。",
+  "pipeline.clearSearchInbox": "清除搜索以查看完整收件箱。",
+  "pipeline.inboxHeader": "career-ops · 收件箱",
+  "pipeline.inboxEmpty": "你的收件箱是空的。",
+  "pipeline.inboxEmptyPending": "目前没有待处理项。",
+  "pipeline.inboxEmptyFind": "找到与你简历匹配的职位——免费，不消耗 token。",
+  "pipeline.runFirstScan": "运行你的首次免费扫描",
+  "pipeline.inboxEmptyTerminal": "更喜欢终端？运行 career-ops scan，或将职位 URL 添加到 data/pipeline.md。",
+
+  // Tabs
+  "pipeline.tab.inbox": "收件箱",
+  "pipeline.tab.all": "全部",
+  "pipeline.tab.evaluated": "已评估",
+  "pipeline.tab.applied": "已申请",
+  "pipeline.tab.responded": "已回复",
+  "pipeline.tab.interview": "面试中",
+  "pipeline.tab.offer": "录用通知",
+  "pipeline.tab.hired": "已入职",
+  "pipeline.tab.rejected": "已拒绝",
+  "pipeline.tab.discarded": "已放弃",
+  "pipeline.tab.skip": "跳过",
+
+  // Table column headers
+  "pipeline.col.company": "公司",
+  "pipeline.col.role": "职位",
+  "pipeline.col.score": "分数",
+  "pipeline.col.status": "状态",
+  "pipeline.col.date": "日期",
+
+  // Canonical status names
+  "pipeline.status.evaluated": "已评估",
+  "pipeline.status.applied": "已申请",
+  "pipeline.status.responded": "已回复",
+  "pipeline.status.interview": "面试中",
+  "pipeline.status.offer": "录用通知",
+  "pipeline.status.hired": "已入职",
+  "pipeline.status.rejected": "已拒绝",
+  "pipeline.status.discarded": "已放弃",
+  "pipeline.status.skip": "跳过",
+
+  // ── Quick evaluate (quick-evaluate.tsx) ──
+  "pipeline.evaluatePlaceholder": "粘贴职位 URL 以评估…",
+  "pipeline.evaluate": "评估",
+  "pipeline.evaluateUrlHint": "请粘贴完整的职位链接 (https://…)。",
+  "pipeline.evaluating": "评估中——在 Workers 面板中查看进度。",
+  "pipeline.evaluateNote": "评估运行在你自己的 AI 上——你的密钥，你的机器。",
+
+  // ── Score methodology (score-methodology.tsx) ──
+  "pipeline.methodologySummary": "career-ops 如何为这份职位打分——以及为何是为你而打",
+  "pipeline.methodologyIntro": "每个职位都会从六个维度打出 1.0–5.0 分。4.0 是申请与否的分界线——低于它，career-ops 建议不要申请。",
+  "pipeline.dimensionsTitle": "六个维度",
+  "pipeline.dim.match": "匹配度",
+  "pipeline.dim.matchDesc": "你的简历与职位要求的契合程度",
+  "pipeline.dim.northstar": "北极星对齐",
+  "pipeline.dim.northstarDesc": "该职位在多大程度上推动你实现既定职业目标",
+  "pipeline.dim.comp": "薪酬",
+  "pipeline.dim.compDesc": "薪酬与市场水平对比（缺少薪酬数据时显示“数据不足”——绝不编造数字）",
+  "pipeline.dim.culture": "文化信号",
+  "pipeline.dim.cultureDesc": "来自招聘信息的团队、价值观与工作方式信号",
+  "pipeline.dim.redflags": "危险信号",
+  "pipeline.dim.redflagsDesc": "幽灵职位、诈骗或错配警告",
+  "pipeline.dim.overall": "综合",
+  "pipeline.dim.overallDesc": "将上述维度综合为最终分数的整体判断",
+  "pipeline.blocksTitle": "每个报告区块的含义",
+  "pipeline.block.a": "用通俗语言概述该职位",
+  "pipeline.block.b": "你的简历与各要求的匹配情况表，以及差距",
+  "pipeline.block.c": "策略——如何为这个职位定位自己",
+  "pipeline.block.d": "薪酬调研，将薪酬与市场水平对比",
+  "pipeline.block.e": "针对你申请的个性化备注",
+  "pipeline.block.f": "面试准备——针对该职位的 STAR 故事",
+  "pipeline.block.g": "招聘信息真实性——核实该职位真实存在，而非诈骗或幽灵职位",
+  "pipeline.methodologyFull": "完整方法论",
+  "pipeline.methodologyAria": "完整方法论（在新标签页打开）",
+
+  // ── Status select (status-select.tsx) ──
+  "pipeline.statusLabel": "状态",
+  "pipeline.saved": "已保存",
+
+  // ── Delete from tracker (delete-from-tracker.tsx) ──
+  "pipeline.removeFromTracker": "从追踪器移除",
+  "pipeline.removeConfirm": "永久从你的追踪器中移除申请 #{n}？",
+  "pipeline.removeWarn": "此操作无法撤销。",
+  "pipeline.removeOrphan": " 其报告文件（{file}）仍保留在磁盘上。",
+  "pipeline.removeErrCant": "此行无法移除。",
+  "pipeline.removeErrReach": "无法连接到追踪器。",
+  "pipeline.removeErrFailed": "删除失败。",
+  "pipeline.delete": "删除",
+  "pipeline.cancel": "取消",
+
+  // ── Generate PDF button (generate-pdf-button.tsx) ──
+  "pipeline.generatingCv": "正在生成简历…",
+  "pipeline.viewCv": "查看定制简历",
+  "pipeline.regenerateTitle": "重新生成定制简历",
+  "pipeline.generateTitle": "生成针对该职位优化的 ATS 简历",
+  "pipeline.generateCv": "生成定制简历（PDF）",
+
+  // ── Copyable command (copyable-command.tsx) ──
+  "pipeline.copied": "已复制",
+  "pipeline.copyAriaCopied": "已复制到剪贴板",
+  "pipeline.copyAria": "复制命令",
+  "pipeline.copyTitleCopied": "已复制",
+  "pipeline.copyTitle": "复制",
+
+  // ── Report view (report-view.tsx) ──
+  "pipeline.report.backToPipeline": "返回管道",
+  "pipeline.report.recommended": "推荐申请",
+  "pipeline.report.belowApplyLine": "低于申请线",
+  "pipeline.report.posting": "职位链接",
+  "pipeline.report.verdict": "评估结论",
+  "pipeline.report.technicalDetails": "技术细节 · 面向开发者",
+  "pipeline.report.noReport": "在 reports/ 中未找到 #{id} 的报告文件。",
+
+  // ── Section headings (from report markdown) ──
+  "pipeline.section.roleSummary": "职位概述",
+  "pipeline.section.matchWithCv": "简历匹配度",
+  "pipeline.section.strategy": "策略建议",
+  "pipeline.section.compensation": "薪酬分析",
+  "pipeline.section.personalization": "个性化备注",
+  "pipeline.section.interviewPrep": "面试准备",
+  "pipeline.section.postingLegitimacy": "招聘信息真实性",
+  "pipeline.section.machineSummary": "机器摘要",
+  "pipeline.section.submitted": "已提交",
+  "pipeline.section.submitLog": "提交日志",
+  "pipeline.section.applicationAnswers": "申请答案",
+
+  // ── Legitimacy badge values (from report data) ──
+  "pipeline.legitimacy.highConfidence": "高置信度",
+  "pipeline.legitimacy.mediumConfidence": "中等置信度",
+  "pipeline.legitimacy.lowConfidence": "低置信度",
+  "pipeline.legitimacy.caution": "谨慎",
+  "pipeline.legitimacy.suspicious": "可疑",
+};

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { ChevronDown, Coins, Settings, Sparkles, X } from "lucide-react";
 import { CompanyLogo } from "@/components/company-logo";
 import { CostBadge } from "@/components/cost/cost-badge";
+import { useI18n } from "@/lib/i18n/context";
 import { cn } from "@/lib/cn";
 
 export type ShortItem = { url: string; company: string; role: string };
@@ -35,12 +36,13 @@ export function ShortlistTray({
 }) {
   const [open, setOpen] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const { t } = useI18n();
   if (items.length === 0) return null;
 
   const n = items.length;
   const costText = estimate.tokens
-    ? `≈ ${fmtTokens(estimate.tokens)} tokens${estimate.usd != null ? ` · ≈ $${estimate.usd.toFixed(2)}` : ""}`
-    : "uses your tokens";
+    ? `≈ ${fmtTokens(estimate.tokens)} ${t("inbox.tokens")}${estimate.usd != null ? ` · ≈ $${estimate.usd.toFixed(2)}` : ""}`
+    : t("inbox.usesTokens");
 
   return (
     <div className="fixed inset-x-0 bottom-0 z-30 sm:bottom-4">
@@ -76,12 +78,12 @@ export function ShortlistTray({
               className="inline-flex items-center gap-1.5 text-sm font-medium max-sm:min-h-[44px]"
             >
               <ChevronDown className={cn("size-4 text-muted transition-transform", open && "rotate-180")} />
-              Shortlist <span className="tabular-nums text-brand-text">({n})</span>
+              {t("inbox.shortlist")} <span className="tabular-nums text-brand-text">({n})</span>
             </button>
 
             {open && (
               <button type="button" onClick={onClear} className="text-xs text-faint transition-colors hover:text-foreground max-sm:min-h-[44px]">
-                Clear
+                {t("inbox.clear")}
               </button>
             )}
 
@@ -93,7 +95,7 @@ export function ShortlistTray({
                   className="inline-flex items-center gap-2 rounded-full bg-brand px-4 py-2 text-sm font-medium text-brand-foreground transition-colors hover:bg-brand-200 max-sm:min-h-[44px]"
                 >
                   <Sparkles className="size-4" />
-                  <span>Score {n}</span>
+                  <span>{t("inbox.scoreN", { n })}</span>
                   <span className="hidden text-xs font-normal text-brand-foreground/80 sm:inline">· {costText}</span>
                 </button>
               ) : (
@@ -105,7 +107,7 @@ export function ShortlistTray({
           {/* cost line — always visible on mobile (where it doesn't fit in the button) */}
           <div className="flex items-center gap-2 border-t border-border/60 px-3 py-1.5 text-[11px] text-muted sm:hidden">
             <CostBadge kind="spend" size="xs" />
-            <span>{costText} — the only step that spends</span>
+            <span>{costText} — {t("inbox.onlySpends")}</span>
           </div>
         </div>
       </div>
@@ -126,15 +128,16 @@ function ConfirmScore({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
+  const { t } = useI18n();
   if (!hasCli) {
     return (
       <div className="flex items-center gap-2 text-xs">
-        <span className="text-muted">No AI configured.</span>
+        <span className="text-muted">{t("inbox.noAi")}</span>
         <Link href="/config" className="inline-flex items-center gap-1 rounded-full border border-brand/40 bg-brand-soft px-3 py-1.5 font-medium text-brand max-sm:min-h-[44px]">
-          <Settings className="size-3.5" /> Set up
+          <Settings className="size-3.5" /> {t("inbox.setup")}
         </Link>
         <button type="button" onClick={onCancel} className="text-faint hover:text-foreground max-sm:min-h-[44px]">
-          Cancel
+          {t("inbox.cancel")}
         </button>
       </div>
     );
@@ -144,16 +147,16 @@ function ConfirmScore({
       <span className="hidden items-center gap-1 text-[11px] text-muted sm:inline-flex">
         <Coins className="size-3.5 text-brand" /> {costText}
       </span>
-      <button
-        type="button"
-        onClick={onConfirm}
-        className="inline-flex items-center gap-1.5 rounded-full bg-brand px-4 py-2 text-sm font-medium text-brand-foreground transition-colors hover:bg-brand-200 max-sm:min-h-[44px]"
-      >
-        Score {n} now
-      </button>
-      <button type="button" onClick={onCancel} className="rounded-full px-2 py-2 text-xs text-faint transition-colors hover:text-foreground max-sm:min-h-[44px]">
-        Cancel
-      </button>
+        <button
+          type="button"
+          onClick={onConfirm}
+          className="inline-flex items-center gap-1.5 rounded-full bg-brand px-4 py-2 text-sm font-medium text-brand-foreground transition-colors hover:bg-brand-200 max-sm:min-h-[44px]"
+        >
+          {t("inbox.scoreNow", { n })}
+        </button>
+        <button type="button" onClick={onCancel} className="rounded-full px-2 py-2 text-xs text-faint transition-colors hover:text-foreground max-sm:min-h-[44px]">
+          {t("inbox.cancel")}
+        </button>
     </div>
   );
 }

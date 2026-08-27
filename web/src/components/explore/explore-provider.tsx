@@ -18,6 +18,7 @@ import {
 import { makeAiStreamParser, type AiTraceChunk } from "@/lib/explore-ai";
 import { MAX_OFFER_LIMIT } from "@/lib/whats-new.mjs";
 import { isScannerMissing } from "@/lib/explore-error.mjs";
+import { useI18n } from "@/lib/i18n/context";
 
 export type Phase =
   | "idle"
@@ -115,6 +116,7 @@ type ResultSnapshot = {
 
 export function ExploreProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
+  const { t } = useI18n();
   const [filters, setFiltersState] = useState<ExploreFilters>({ ...DEFAULT_FILTERS, ats: [...DEFAULT_FILTERS.ats] });
   const touched = useRef(false);
   const [phase, setPhase] = useState<Phase>("idle");
@@ -168,7 +170,7 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     setPartial(false);
     setError("");
     setScannerMissing(false);
-    setStatus("Casting the net across the ATS network…");
+    setStatus(t("explore.disc.castingNet"));
     const init: Partial<Record<AtsSource, SourceState>> = {};
     for (const a of f.ats) init[a] = { state: "queued" };
     setSources(init);
@@ -197,9 +199,9 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
       if (!r.ok) {
         const d = await r.json().catch(() => ({}));
         sawScannerMissing = isScannerMissing(d);
-        sawError = d.error || (sawScannerMissing ? "The scanner isn't available." : `Discovery failed (${r.status}).`);
+        sawError = d.error || (sawScannerMissing ? t("explore.err.scannerUnavailable") : t("explore.err.discoveryFailed", { status: r.status }));
       } else if (!r.body) {
-        sawError = "No response stream.";
+        sawError = t("explore.err.noStream");
       } else {
         const reader = r.body.getReader();
         const dec = new TextDecoder();
@@ -222,7 +224,7 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
             switch (ev.kind) {
               case "atsStart":
                 setPhase("scanning");
-                setStatus(`Walking ${ATS_LABEL[ev.ats as AtsSource] ?? ev.ats} — ${ev.companies.toLocaleString()} companies`);
+                setStatus(t("explore.disc.walking", { ats: ATS_LABEL[ev.ats as AtsSource] ?? ev.ats, n: ev.companies.toLocaleString() }));
                 setSources((s) => ({ ...s, [ev.ats]: { ...s[ev.ats as AtsSource], state: "active", companies: ev.companies } }));
                 break;
               case "progress":
@@ -265,7 +267,7 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
         }
       }
     } catch (e) {
-      sawError = e instanceof Error ? e.message : "stream error";
+      sawError = e instanceof Error ? e.message : t("explore.err.streamError");
     }
 
     // Mark any still-active sources as swept (stream ended).
@@ -279,7 +281,7 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     if (acc.length > 0) {
       setMatchCount(acc.length);
       setPhase("revealing");
-      setStatus(`${acc.length} fresh role${acc.length === 1 ? "" : "s"} found — free.`);
+      setStatus(t(acc.length === 1 ? "explore.disc.foundFreeOne" : "explore.disc.foundFreeMany", { n: acc.length }));
       window.setTimeout(() => setPhase("results"), 850);
     } else if (sawError) {
       setError(sawError);
@@ -294,7 +296,7 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     } else {
       setPhase(isBroadSearch(f) ? "empty-current" : "empty-loose");
     }
-  }, []);
+  }, [t]);
 
   // Today's "See all N" link (#84) routes here with ?view=fresh instead of leaving
   // the user on a bare config form. Re-fetch the same free, zero-token /api/whats-new
@@ -304,7 +306,7 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     if (runningRef.current) return;
     runningRef.current = true;
     setPhase("casting");
-    setStatus("Loading fresh matches…");
+    setStatus(t("explore.disc.loadingFresh"));
     setOffers([]);
     setMatchCount(0);
     setCompaniesScanned(0);
@@ -320,13 +322,13 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
       // complete total, which is what the header actually reports.
       const r = await fetch(`/api/whats-new?limit=${MAX_OFFER_LIMIT}`);
       if (!r.ok) {
-        setError(`Couldn't load fresh matches (${r.status}).`);
+        setError(t("explore.err.loadFreshFailed", { status: r.status }));
         setPhase("failed");
         return;
       }
       const d = await r.json().catch(() => null);
       if (!d || !Array.isArray(d.offers)) {
-        setError("Couldn't load fresh matches — unexpected response.");
+        setError(t("explore.err.loadFreshUnexpected"));
         setPhase("failed");
         return;
       }
@@ -336,12 +338,12 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
       setMatchCount(Number.isFinite(count) ? Math.max(0, Math.trunc(count)) : list.length);
       setPhase(list.length > 0 ? "results" : "empty-current");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Couldn't load fresh matches.");
+      setError(e instanceof Error ? e.message : t("explore.err.loadFresh"));
       setPhase("failed");
     } finally {
       runningRef.current = false;
     }
-  }, []);
+  }, [t]);
 
   const addToPipeline = useCallback(async (list: DiscoveredOffer[]) => {
     const fresh = list.filter((o) => !added.has(o.url));
@@ -427,7 +429,7 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     setAiCost({ searches: 0, candidates: 0, fetches: 0 });
     setError("");
     setScannerMissing(false);
-    setStatus("Casting across the open web…");
+    setStatus(t("explore.disc.castingWeb"));
     if (typeof window !== "undefined") window.history.replaceState(null, "", `/explore?${aiToParams(intent)}`);
 
     let knownUrls = new Set<string>();
@@ -481,9 +483,9 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
       if (!r.ok) {
         const d = await r.json().catch(() => ({}));
         sawScannerMissing = isScannerMissing(d);
-        sawError = d.error || (sawScannerMissing ? "AI search isn't available." : `AI search failed (${r.status}).`);
+        sawError = d.error || (sawScannerMissing ? t("explore.err.aiUnavailable") : t("explore.err.aiFailed", { status: r.status }));
       } else if (!r.body) {
-        sawError = "No response stream.";
+        sawError = t("explore.err.noStream");
       } else {
         const reader = r.body.getReader();
         const dec = new TextDecoder();
@@ -495,14 +497,14 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
         handle(parser.flush());
       }
     } catch (e) {
-      sawError = e instanceof Error ? e.message : "stream error";
+      sawError = e instanceof Error ? e.message : t("explore.err.streamError");
     }
 
     runningRef.current = false;
     if (acc.length > 0) {
       setMatchCount(acc.length);
       setPhase("revealing");
-      setStatus(`${acc.length} candidate${acc.length === 1 ? "" : "s"} found.`);
+      setStatus(t(acc.length === 1 ? "explore.disc.candidatesFoundOne" : "explore.disc.candidatesFoundMany", { n: acc.length }));
       window.setTimeout(() => setPhase("results"), 850);
     } else if (sawError) {
       setError(sawError);
@@ -511,7 +513,7 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     } else {
       setPhase("empty-loose");
     }
-  }, []);
+  }, [t]);
 
   // Switch surface but PRESERVE the current results + filters — toggling scan↔AI must
   // not throw away a completed search (disc#5). A new search (discover/discoverAI)

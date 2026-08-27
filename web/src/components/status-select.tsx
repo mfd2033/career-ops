@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Check } from "lucide-react";
 import { CANONICAL_STATES } from "@/lib/format";
+import { useI18n } from "@/lib/i18n/context";
 
 // Status writeback control. Updates the existing tracker row (status cell) via
 // /api/status — never adds rows. Reverts on failure; confirms with the
@@ -13,6 +14,7 @@ export function StatusSelect({ n, current }: { n: string; current: string }) {
   const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
   const router = useRouter();
+  const { t } = useI18n();
 
   async function onChange(e: React.ChangeEvent<HTMLSelectElement>) {
     const next = e.target.value;
@@ -39,7 +41,7 @@ export function StatusSelect({ n, current }: { n: string; current: string }) {
   const known = (CANONICAL_STATES as readonly string[]).includes(status);
   return (
     <span className="inline-flex items-center gap-2">
-      <label className="text-xs text-faint">status</label>
+      <label className="text-xs text-faint">{t("pipeline.statusLabel")}</label>
       <select
         value={status}
         onChange={onChange}
@@ -49,13 +51,13 @@ export function StatusSelect({ n, current }: { n: string; current: string }) {
         {!known && <option value={status}>{status}</option>}
         {CANONICAL_STATES.map((s) => (
           <option key={s} value={s}>
-            {s}
+            {t(`pipeline.status.${s.toLowerCase()}`)}
           </option>
         ))}
       </select>
       {saved && (
         <span className="animate-terminal-popup inline-flex items-center gap-1 text-xs font-medium text-brand">
-          <Check className="size-3" /> saved
+          <Check className="size-3" /> {t("pipeline.saved")}
         </span>
       )}
     </span>

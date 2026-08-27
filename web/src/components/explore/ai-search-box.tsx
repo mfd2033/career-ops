@@ -3,12 +3,7 @@
 import { useRef } from "react";
 import { ArrowRight, Sparkles } from "lucide-react";
 import { CostBadge } from "@/components/cost/cost-badge";
-
-const EXAMPLES = [
-  "AI infra roles at climate startups, remote EU",
-  "Forward-deployed engineer at Series A devtools, US-remote",
-  "Head of Applied AI at healthtech, posted this week",
-];
+import { useI18n } from "@/lib/i18n/context";
 
 // The "magic" natural-language box: a soft contained halo at rest that intensifies
 // on focus (erupts into the full-viewport hunt on submit). Effect CSS co-located
@@ -38,6 +33,8 @@ export function AiSearchBox({
   cliName?: string;
   onRunScan: () => void;
 }) {
+  const { t } = useI18n();
+  const examples = [t("explore.ai.example1"), t("explore.ai.example2"), t("explore.ai.example3")];
   const ref = useRef<HTMLTextAreaElement>(null);
   const grow = () => {
     const t = ref.current;
@@ -51,9 +48,9 @@ export function AiSearchBox({
     <div>
       <style>{STYLE}</style>
       <div className="co-aibox p-4">
-        <div className="mb-2 flex items-center gap-2 text-[12px] font-medium text-brand">
-          <Sparkles className="size-3.5" /> Describe the role — an AI hunts the open web for it
-        </div>
+          <div className="mb-2 flex items-center gap-2 text-[12px] font-medium text-brand">
+            <Sparkles className="size-3.5" /> {t("explore.ai.describeRole")}
+          </div>
         <textarea
           ref={ref}
           rows={2}
@@ -68,16 +65,18 @@ export function AiSearchBox({
               if (intent.trim()) onSubmit();
             }
           }}
-          placeholder="“AI infra at climate startups, remote EU, not staff-level” — plain language, your words"
+          placeholder={t("explore.ai.placeholder")}
         />
         <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
           <span className="text-[12px] text-muted">
             {cliConfigured ? (
               <>
-                Reads the public web with <span className="text-foreground">{cliName || "your CLI"}</span> — it costs your tokens.
+                {t("explore.ai.readsWebPrefix")}
+                <span className="text-foreground">{cliName || t("explore.ai.yourCli")}</span>
+                {t("explore.ai.readsWebSuffix")}
               </>
             ) : (
-              "Connect an AI CLI in Config to use AI search."
+              t("explore.ai.connectCli")
             )}
           </span>
           <button
@@ -86,7 +85,7 @@ export function AiSearchBox({
             onClick={onSubmit}
             className="inline-flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-brand-foreground shadow-sm transition hover:brightness-110 disabled:opacity-50"
           >
-            Search the open web
+            {t("explore.ai.searchButton")}
             <CostBadge kind="spend" size="xs" />
             <ArrowRight className="size-4" />
           </button>
@@ -94,7 +93,7 @@ export function AiSearchBox({
       </div>
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
-        {EXAMPLES.map((ex) => (
+        {examples.map((ex) => (
           <button
             key={ex}
             type="button"
@@ -105,7 +104,7 @@ export function AiSearchBox({
           </button>
         ))}
         <button type="button" onClick={onRunScan} className="ml-auto inline-flex items-center gap-1 text-[12px] text-faint transition hover:text-foreground">
-          or run the free Scan instead →
+          {t("explore.ai.orScan")}
         </button>
       </div>
     </div>

@@ -7,6 +7,7 @@ import { useCountUp } from "./discovering-state";
 import { AiHuntTrace } from "./ai-hunt-trace";
 import { DiscoveryCard } from "./discovery-card";
 import { useExplore } from "./explore-provider";
+import { useI18n } from "@/lib/i18n/context";
 
 // The AI hunt surface — apply-mode polish: an animated orb, a serif headline that
 // folds in the live count (no lonely giant "0"), a brand-orange effort ledger
@@ -25,6 +26,7 @@ html.dark .co-ailedger{color:hsl(26 86% 67%)}
 
 export function AiHuntView({ cliName }: { cliName?: string }) {
   const { phase, matchCount, aiTrace, aiCost, offers } = useExplore();
+  const { t } = useI18n();
   const shown = useCountUp(matchCount);
   const revealing = phase === "revealing";
 
@@ -42,18 +44,19 @@ export function AiHuntView({ cliName }: { cliName?: string }) {
 
         <div>
           <h2 className={`${instrumentSerif.className} text-3xl leading-tight text-foreground`}>
-            {matchCount > 0 ? `${shown} candidate${shown === 1 ? "" : "s"}` : "Hunting the open web"}
+            {matchCount > 0 ? t(shown === 1 ? "explore.ai.candidateOne" : "explore.ai.candidateMany", { n: shown }) : t("explore.ai.huntingOpenWeb")}
           </h2>
           <p className="mt-1 text-sm text-muted">
-            {revealing ? "found — review them below" : matchCount > 0 ? "found so far · streaming in" : "casting across the public web…"}
+            {revealing ? t("explore.ai.foundReview") : matchCount > 0 ? t("explore.ai.foundStreaming") : t("explore.ai.castingWeb")}
           </p>
         </div>
 
         <div className="co-ailedger">
           <Sparkles className="size-3.5" />
-          {cliName || "your CLI"} · searching the open web
-          {aiCost.searches > 0 && <span className="opacity-75">· {aiCost.searches} searches</span>}
-          {matchCount > 0 && <span className="opacity-75">· {matchCount} found</span>}
+          {cliName || t("explore.ai.yourCli")}{" "}
+          {t("explore.ai.searchingOpenWeb")}
+          {aiCost.searches > 0 && <span className="opacity-75">{t("explore.ai.searches", { n: aiCost.searches })}</span>}
+          {matchCount > 0 && <span className="opacity-75">{t("explore.ai.foundCount", { n: matchCount })}</span>}
         </div>
 
         <AiHuntTrace trace={aiTrace} />

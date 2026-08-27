@@ -7,11 +7,13 @@ import { cn } from "@/lib/cn";
 import { CompanyLogo } from "@/components/company-logo";
 import { scoreNum, scoreTone } from "@/lib/format";
 import type { Application } from "@/lib/career-ops";
+import { useI18n } from "@/lib/i18n/context";
 
 // Awaiting-decision row: a scored role with no terminal status. Primary action
 // opens the report (PDF + Apply live there). Skip / Applied still write status.
 export function DecisionCard({ app }: { app: Application }) {
   const router = useRouter();
+  const { t } = useI18n();
   const [busy, setBusy] = useState<"" | "Applied" | "Discarded">("");
   const [done, setDone] = useState<string | null>(null);
   const score = scoreNum(app.score);
@@ -58,7 +60,7 @@ export function DecisionCard({ app }: { app: Application }) {
           href={`/pipeline/${app.n}`}
           className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-md bg-brand-soft px-2.5 py-1.5 text-xs font-medium text-brand-text transition hover:bg-brand/15 max-sm:min-h-[44px]"
         >
-          <FileText className="size-3.5" /> Review
+          <FileText className="size-3.5" /> {t("home.review")}
         </a>
         <button
           type="button"
@@ -66,17 +68,17 @@ export function DecisionCard({ app }: { app: Application }) {
           onClick={() => setStatus("Discarded")}
           className="inline-flex items-center justify-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs font-medium text-muted transition hover:text-foreground disabled:opacity-60 max-sm:min-h-[44px] max-sm:px-4"
         >
-          {busy === "Discarded" ? <Loader2 className="size-3.5 animate-spin" /> : <X className="size-3.5" />} Skip
+          {busy === "Discarded" ? <Loader2 className="size-3.5 animate-spin" /> : <X className="size-3.5" />} {t("home.skip")}
         </button>
         <button
           type="button"
           disabled={!!busy}
           onClick={() => setStatus("Applied")}
-          title="Record Applied without opening the apply flow"
+          title={t("home.recordAppliedTitle")}
           className="inline-flex shrink-0 items-center justify-center gap-1 rounded-md px-2 py-1.5 text-xs font-medium text-faint transition hover:text-foreground disabled:opacity-60 max-sm:min-h-[44px]"
         >
           {busy === "Applied" ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
-          Applied
+          {t("home.applied")}
         </button>
       </div>
     </div>

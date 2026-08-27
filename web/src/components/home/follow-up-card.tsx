@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Check, Clock, FileText, Loader2 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { CompanyLogo } from "@/components/company-logo";
+import { useI18n } from "@/lib/i18n/context";
 
 export type FollowUp = { num?: number; company: string; role?: string; status?: string; appliedDate?: string; notes?: string };
 
@@ -13,6 +14,7 @@ export type FollowUp = { num?: number; company: string; role?: string; status?: 
 export function FollowUpCard({ followup, onLogged }: { followup: FollowUp; onLogged?: () => void }) {
   const [state, setState] = useState<"idle" | "logging" | "done" | "snoozed" | "error">("idle");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const { t } = useI18n();
   if (state === "snoozed" || state === "done") return null;
 
   const log = async () => {
@@ -57,7 +59,7 @@ export function FollowUpCard({ followup, onLogged }: { followup: FollowUp; onLog
             {followup.role && <span className="text-muted"> · {followup.role}</span>}
           </p>
           <p className="flex items-center gap-1 text-[11px] text-faint">
-            <Clock className="size-3" /> {followup.appliedDate ? `applied ${followup.appliedDate}` : "follow-up due"}
+            <Clock className="size-3" /> {followup.appliedDate ? t("home.appliedOn", { date: followup.appliedDate }) : t("home.followUpDue")}
           </p>
         </div>
       </div>
@@ -73,16 +75,16 @@ export function FollowUpCard({ followup, onLogged }: { followup: FollowUp; onLog
           )}
         >
           {state === "logging" ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}{" "}
-          <span className="hidden max-w-48 truncate sm:inline">{state === "error" ? `${errorMsg ?? "Failed"} — retry` : "Mark followed up"}</span>
-          <span className="sm:hidden">{state === "error" ? "Retry" : "Followed up"}</span>
+          <span className="hidden max-w-48 truncate sm:inline">{state === "error" ? `${errorMsg ?? t("home.failed")} — ${t("home.retry")}` : t("home.markFollowedUp")}</span>
+          <span className="sm:hidden">{state === "error" ? t("home.retry") : t("home.followedUp")}</span>
         </button>
         {followup.num != null && (
-          <a href={`/pipeline/${followup.num}`} title="Open report" className="inline-flex shrink-0 items-center justify-center rounded p-1 text-faint transition hover:text-brand max-sm:min-h-[44px] max-sm:min-w-[44px]">
+          <a href={`/pipeline/${followup.num}`} title={t("home.openReport")} className="inline-flex shrink-0 items-center justify-center rounded p-1 text-faint transition hover:text-brand max-sm:min-h-[44px] max-sm:min-w-[44px]">
             <FileText className="size-4" />
           </a>
         )}
         <button type="button" onClick={() => setState("snoozed")} className="inline-flex shrink-0 items-center justify-center text-[11px] text-faint transition hover:text-foreground max-sm:min-h-[44px] max-sm:min-w-[44px]">
-          Snooze
+          {t("home.snooze")}
         </button>
       </div>
     </div>

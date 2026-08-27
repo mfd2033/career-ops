@@ -5,6 +5,7 @@ import type { AtsSource } from "@/lib/explore";
 import { ATS_LABEL } from "@/lib/explore";
 import { FRESHNESS_WINDOWS, SENIORITY_LABEL, type Seniority } from "@/lib/inbox";
 import { CostBadge } from "@/components/cost/cost-badge";
+import { useI18n } from "@/lib/i18n/context";
 import { cn } from "@/lib/cn";
 
 // Free, client-side facets over the raw firehose — 0 tokens, instant. Mirrors the
@@ -45,6 +46,7 @@ export function FacetChips({
   anyActive: boolean;
   onClear: () => void;
 }) {
+  const { t } = useI18n();
   return (
     <div className="space-y-2.5">
       {/* keyword search + live count */}
@@ -54,7 +56,7 @@ export function FacetChips({
           <input
             value={kw}
             onChange={(e) => setKw(e.target.value)}
-            placeholder="Filter by company or role…"
+            placeholder={t("inbox.filterPlaceholder")}
             className="w-full rounded-lg border border-border bg-surface/60 py-2 pl-9 pr-3 text-sm outline-none transition-colors placeholder:text-faint focus:border-brand/50 focus-visible:ring-2 focus-visible:ring-brand/40 max-sm:min-h-[44px]"
           />
         </div>
@@ -99,7 +101,7 @@ export function FacetChips({
         <input
           value={locQ}
           onChange={(e) => setLocQ(e.target.value)}
-          placeholder="location…"
+          placeholder={t("inbox.locationPlaceholder")}
           className="w-28 shrink-0 rounded-full border border-border bg-surface/40 px-3 text-xs outline-none transition-colors placeholder:text-faint focus:border-brand/40 max-sm:min-h-[44px] py-1"
         />
 
@@ -109,7 +111,7 @@ export function FacetChips({
             onClick={onClear}
             className="inline-flex shrink-0 items-center gap-1 rounded-full px-2 text-xs text-faint transition-colors hover:text-foreground max-sm:min-h-[44px]"
           >
-            <X className="size-3" /> Clear
+            <X className="size-3" /> {t("inbox.clear")}
           </button>
         )}
       </div>
@@ -118,7 +120,7 @@ export function FacetChips({
           as the tray's "spend" cue (mobile + desktop) — never desktop-only. */}
       <div className="flex items-center gap-1.5">
         <CostBadge kind="free" size="xs" />
-        <span className="text-[11px] text-faint">Filtering is free — only scoring uses tokens.</span>
+        <span className="text-[11px] text-faint">{t("inbox.filterFree")}</span>
       </div>
     </div>
   );

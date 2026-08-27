@@ -17,9 +17,12 @@ import { WorkerPills } from "@/components/jobs/worker-pills";
 import { UsageMeter } from "@/components/usage-meter";
 import { instrumentSerif } from "@/lib/fonts";
 import { NAV_ITEMS, isActivePath } from "@/lib/nav-items";
+import { useI18n } from "@/lib/i18n/context";
+import { LanguageToggle } from "@/components/language-toggle";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const { t } = useI18n();
   return (
     <JobsProvider>
       <PipelineProvider>
@@ -35,7 +38,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </span>
           </Link>
           <nav className="flex flex-col gap-1">
-            {NAV_ITEMS.map(({ href, label, icon: Icon, chip }) => {
+            {NAV_ITEMS.map(({ href, labelKey, icon: Icon, chipKey }) => {
               const active = isActivePath(href, pathname);
               return (
                 <Link
@@ -49,10 +52,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   )}
                 >
                   <Icon className="size-4" />
-                  {label}
-                  {chip && (
+                  {t(labelKey)}
+                  {chipKey && (
                     <span className="ml-auto rounded-full border border-brand/30 bg-brand-soft px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-brand-text">
-                      {chip}
+                      {t(chipKey)}
                     </span>
                   )}
                 </Link>
@@ -64,8 +67,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
           <div className="mt-auto space-y-3 pt-4">
             <UsageMeter />
+            <LanguageToggle />
             <div className="flex items-center justify-between px-1">
-              <span className={`${instrumentSerif.className} text-sm text-faint`}>local-first · v0</span>
+              <span className={`${instrumentSerif.className} text-sm text-faint`}>{t("nav.localFirst")}</span>
               <ThemeToggle />
             </div>
           </div>
