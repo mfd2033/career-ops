@@ -179,7 +179,8 @@ MEMORY.md
 # Build/temp artifacts and one-off screenshots
 career-dashboard.exe~
 career-dashboard-ui.exe~
-uu-job-header.png
+# 根目录级 UI 截图 / 一次性图片（不入库），如 uu-job-header.png、config-model-select.png
+/*.png
 
 # Log / error scratch files
 update-apply*.log
