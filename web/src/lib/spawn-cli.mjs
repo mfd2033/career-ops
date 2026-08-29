@@ -7,6 +7,36 @@ import { spawn } from "node:child_process";
 // JS modules must be fully specified.
 
 /**
+ * Windows: resolve how to actually start a CLI binary so the web routes don't
+ * half-start it and report a bare "spawn ... ENOENT/EINVAL".
+ *
+ * On Windows an npm global install lays down three files for one `bin`:
+ *   - `opencode`        — a POSIX shim (bash script), no extension. Windows
+ *                         cannot execute it → `spawn ... ENOENT`.
+ *   - `opencode.cmd`    — the real launcher, but `child_process.spawn` cannot
+ *                         run a `.cmd`/`.bat` directly on Node < 22.9 (returns
+ *                         EINVAL) — the no-shell support only landed in v22.9.
+ *   - `opencode.ps1`    — PowerShell, not spawnable either.
+ * The one reliable path is `cmd.exe /d /s /c <script> <args...>`, which is what
+ * Node itself uses internally once it does support no-shell `.cmd` spawning.
+ * Pass the script and args as SEPARATE argv entries: doing it with
+ * `shell: true` instead hands a pre-joined string to cmd.exe, and a prompt
+ * containing `&`, `|`, `<`, `>` then breaks — the metacharacters land outside
+ * cmd.exe's own quoting and get interpreted as operators.
+ *
+ * @param {string} file
+ * @param {string[]} args
+ * @param {string} [platform] test hook; defaults to process.platform
+ * @returns {{ file: string, args: string[] }}
+ */
+export function rewriteCliSpawn(file, args, platform = process.platform) {
+  if (platform !== "win32") return { file, args };
+  if (!/\.(cmd|bat)$/i.test(file)) return { file, args };
+  const comspec = process.env.ComSpec || "cmd.exe";
+  return { file: comspec, args: ["/d", "/s", "/c", file, ...args] };
+}
+
+/**
  * Spawn a headless agent CLI with stdin closed.
  *
  * CLIs such as `codex exec` read additional prompt text from stdin when a pipe
@@ -27,7 +57,8 @@ import { spawn } from "node:child_process";
  * @param {import("node:child_process").SpawnOptionsWithoutStdio} options
  */
 export function spawnHeadlessCli(binPath, args, options) {
-  const child = spawn(binPath, args, options);
+  const { file, args: argv } = rewriteCliSpawn(binPath, args);
+  const child = spawn(file, argv, options);
   child.stdin?.end();
   return child;
 }
