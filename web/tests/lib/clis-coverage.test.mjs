@@ -57,6 +57,44 @@ test("Grok Build CLI is wired up", () => {
 });
 
 test("no CLI is listed twice", () => {
-  const ids = [...src.matchAll(/id:\s*"([^"]+)"/g)].map((m) => m[1]);
+  // id followed by name: distinguishes KNOWN rows from the model options inside
+  // MODELS, which also carry `id:` keys (opus, sonnet, auto, …).
+  const ids = [...src.matchAll(/id:\s*"([^"]+)",\s*name:/g)].map((m) => m[1]);
   assert.equal(new Set(ids).size, ids.length, `duplicate id in KNOWN: ${ids.join(", ")}`);
+});
+
+test("every KNOWN CLI carries model metadata (flag + non-empty options)", () => {
+  // The config page's model picker is keyed by id → MODELS entry. A CLI that
+  // reaches KNOWN without model metadata silently disappears from the picker,
+  // and its runs never get a --model — the same drift that hid Grok.
+  const ids = [...src.matchAll(/id:\s*"([^"]+)",\s*name:/g)].map((m) => m[1]);
+  for (const id of ids) {
+    assert.match(src, new RegExp(`${id}:\\s*\\{\\s*flag:`), `MODELS is missing a '${id}' entry (modelFlag)`);
+    assert.match(src, new RegExp(`${id}:\\s*\\{[\\s\\S]*?default:`), `MODELS['${id}'] is missing a default model`);
+    assert.match(src, new RegExp(`${id}:\\s*\\{[\\s\\S]*?options:\\s*\\[`), `MODELS['${id}'] is missing a non-empty options list`);
+  }
+  // And each KNOWN row wires the model field to its MODELS entry.
+  for (const id of ids) {
+    assert.match(src, new RegExp(`id: "${id}"[\\s\\S]*?model: MODELS\\.${id}`), `KNOWN row for '${id}' must set model: MODELS.${id}`);
+  }
+});
+
+test("the default model of every CLI is one of its own options", () => {
+  // The "current model" readout falls back to MODELS[id].default when nothing
+  // is saved. A default that is not in options renders as an unselectable
+  // phantom in the dropdown — detect that here.
+  const defaultRe = /(\w+):\s*\{\s*flag:\s*"[^"]*",\s*default:\s*"([^"]*)"/g;
+  let m;
+  while ((m = defaultRe.exec(src))) {
+    const [, id, def] = m;
+    if (!def) continue; // antigravity's default is deliberately empty (account-dependent)
+    const optionsRe = new RegExp(`${id}:\\s*\\{[\\s\\S]*?options:\\s*\\[([\\s\\S]*?)\\]`);
+    const optsMatch = optionsRe.exec(src);
+    assert.ok(optsMatch, `no options parsed for ${id}`);
+    const optionIds = [...optsMatch[1].matchAll(/id:\s*"([^"]+)"/g)].map((x) => x[1]);
+    assert.ok(
+      optionIds.includes(def),
+      `${id}: default "${def}" is not among its options (${optionIds.join(", ")})`,
+    );
+  }
 });

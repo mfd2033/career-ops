@@ -1,6 +1,7 @@
 import { spawnHeadlessCli } from "@/lib/spawn-cli.mjs";
 import type { Page, Frame } from "playwright-core";
 import { resolveCli } from "@/lib/clis";
+import { withModelFlag } from "@/lib/run-cli-support.mjs";
 import { careerOpsRoot } from "@/lib/career-ops";
 import { dropNewTabs } from "./diagnose";
 import type { DriveStep } from "./issue";
@@ -55,9 +56,10 @@ async function snapshot(frame: Frame): Promise<{ text: string; n: number }> {
 }
 
 /** One planner turn (Claude-first: --resume keeps the loop's context cheaply). */
-function plannerTurn(binPath: string, prompt: string, resumeId: string | null): Promise<{ out: string; sessionId: string | null }> {
+function plannerTurn(binPath: string, modelMeta: { flag?: string }, prompt: string, resumeId: string | null, model?: string): Promise<{ out: string; sessionId: string | null }> {
   const base = resumeId ? ["-p", "--resume", resumeId, prompt] : ["-p", prompt];
-  const args = [...base, "--output-format", "json", "--strict-mcp-config", "--disallowedTools", "Bash,Read,Write,Edit,NotebookEdit,Task,WebFetch,WebSearch,Glob,Grep"];
+  const scoped = [...base, "--output-format", "json", "--strict-mcp-config", "--disallowedTools", "Bash,Read,Write,Edit,NotebookEdit,Task,WebFetch,WebSearch,Glob,Grep"];
+  const args = withModelFlag(scoped, modelMeta, model);
   return new Promise((resolve) => {
     const child = spawnHeadlessCli(binPath, args, { cwd: careerOpsRoot(), env: process.env });
     let buf = "";
@@ -113,6 +115,7 @@ export async function driveSession(
   emit: (s: DriveStep) => void,
   budget = 10,
   answers?: { label: string; value: string }[],
+  model?: string,
 ): Promise<DriveResult> {
   const resolved = resolveCli(cliId);
   const steps: DriveStep[] = [];
@@ -164,7 +167,7 @@ ${snap.text}
 
 Reply ONE action JSON.`;
 
-    const { out, sessionId } = await plannerTurn(resolved.binPath, prompt, resumeId);
+    const { out, sessionId } = await plannerTurn(resolved.binPath, resolved.spec.model, prompt, resumeId, model);
     if (sessionId) resumeId = sessionId;
     const act = parseAction(out);
     if (!act) {

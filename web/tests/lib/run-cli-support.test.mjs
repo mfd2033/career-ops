@@ -20,6 +20,7 @@ import {
   isFatalOpenCodeStderr,
   parseClaudeEvent,
   parseCodexEvent,
+  withModelFlag,
 } from "../../src/lib/run-cli-support.mjs";
 import { createCvEnvelopeFilter } from "../../src/lib/cv-envelope.mjs";
 
@@ -474,6 +475,50 @@ test("the argv keeps --json and the parser reads the JSONL it turns on", () => {
 // entries in KNOWN reach this path. It lived as an inline regex inside route.ts's
 // stream closure, where nothing could assert it — which is how `auth` came to match
 // inside "author" and a success message came to fail a run.
+
+// ── withModelFlag (#model-select) ────────────────────────────────────────────
+//
+// The config page's model picker must reach the spawn argv for EVERY CLI, but the
+// argv builders differ per CLI (claudeCliArgs, spec.streamArgs, spec.args, inline
+// arrays). One pure helper appends the model flag uniformly, so no route has to
+// know how each CLI spells "--model".
+
+test("withModelFlag appends [flag, model] to a plain args array", () => {
+  // Given an argv without a model flag and a selected model
+  const args = withModelFlag(["-p", "prompt"], { flag: "--model" }, "claude-sonnet-5");
+  // Then the flag+value pair is appended
+  assert.deepEqual(args, ["-p", "prompt", "--model", "claude-sonnet-5"]);
+});
+
+test("withModelFlag keeps the prompt last even when a stream argv appends the model", () => {
+  // Given a codex stream argv where the prompt is a trailing positional
+  const args = withModelFlag(["exec", "--json", "--color", "never", "PROMPT"], { flag: "-m" }, "gpt-5.4");
+  // Then the model flag goes after it — every CLI parses flags position-independently
+  assert.deepEqual(args, ["exec", "--json", "--color", "never", "PROMPT", "-m", "gpt-5.4"]);
+});
+
+test("withModelFlag leaves args untouched when no model is selected", () => {
+  // Given the common case: the user never picked a model → the CLI keeps its default
+  const base = ["-p", "prompt"];
+  assert.deepEqual(withModelFlag(base, { flag: "--model" }, undefined), base);
+  assert.deepEqual(withModelFlag(base, { flag: "--model" }, ""), base);
+});
+
+test("withModelFlag leaves args untouched when the CLI spells no model flag", () => {
+  // Given a CLI that offers no model selection (spec has no flag)
+  const base = ["-p", "prompt"];
+  assert.deepEqual(withModelFlag(base, {}, "some-model"), base);
+  assert.deepEqual(withModelFlag(base, { flag: "" }, "some-model"), base);
+});
+
+test("withModelFlag never mutates the caller's array", () => {
+  // Given a shared argv that a route may reuse
+  const base = ["-p", "prompt"];
+  const out = withModelFlag(base, { flag: "--model" }, "claude-opus-5");
+  // Then the original is untouched and a new array is returned
+  assert.deepEqual(base, ["-p", "prompt"]);
+  assert.notEqual(out, base);
+});
 
 test("the fallback does not fail a run because a word appeared", () => {
   for (const line of [

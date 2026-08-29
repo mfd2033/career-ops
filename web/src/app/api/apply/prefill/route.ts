@@ -2,6 +2,7 @@ import { spawnHeadlessCli } from "@/lib/spawn-cli.mjs";
 import fs from "node:fs";
 import path from "node:path";
 import { resolveCli } from "@/lib/clis";
+import { withModelFlag } from "@/lib/run-cli-support.mjs";
 import { careerOpsRoot, readMemory } from "@/lib/career-ops";
 import { getSession } from "@/lib/apply/session";
 
@@ -73,13 +74,13 @@ function extractJsonObject(text: string): { obj: Record<string, unknown> | null;
 // exit code/signal, parse outcome) so a stuck/empty prefill is observable on the
 // page AND written to <root>/.career-ops-web/apply-prefill.log for debugging.
 export async function POST(req: Request) {
-  let body: { sessionId?: string; cliId?: string };
+  let body: { sessionId?: string; cliId?: string; model?: string };
   try {
     body = await req.json();
   } catch {
     return Response.json({ error: "bad json" }, { status: 400 });
   }
-  const { sessionId, cliId } = body;
+  const { sessionId, cliId, model } = body;
   const t0 = Date.now();
   const encoder = new TextEncoder();
   const logPath = path.join(careerOpsRoot(), ".career-ops-web", "apply-prefill.log");
@@ -148,9 +149,10 @@ Output ONLY a compact JSON object mapping each field id → {"value": "...", "ne
       // --strict-mcp-config with no --mcp-config = load ZERO MCP servers → much
       // faster startup (skips the user's global playwright/gmail/linear/… servers
       // the planner doesn't need; it only reads local files).
-      const args = isClaude
+      const baseArgs = isClaude
         ? ["-p", prompt, "--permission-mode", "acceptEdits", "--strict-mcp-config", "--allowedTools", "Read,Glob,Grep", "--disallowedTools", "Bash,Write,Edit,NotebookEdit,Task,WebFetch,WebSearch"]
         : spec.args(prompt);
+      const args = withModelFlag(baseArgs, spec.model, model);
       // Scale the timeout with form size (big forms = more drafting). Cap < maxDuration.
       const killMs = Math.min(300_000, 150_000 + s.fields.length * 6_000);
       log(`Spawning planner (timeout ${Math.round(killMs / 1000)}s)…`);

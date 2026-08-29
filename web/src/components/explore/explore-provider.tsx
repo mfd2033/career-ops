@@ -412,10 +412,14 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     const intent = aiIntentRef.current.trim();
     if (!intent) return;
     let cliId: string | null = null;
+    let model: string | null = null;
     try {
-      cliId = JSON.parse(localStorage.getItem("career-ops:config") || "{}").cliId || null;
+      const cfg = JSON.parse(localStorage.getItem("career-ops:config") || "{}");
+      cliId = cfg.cliId || null;
+      model = cfg.model || null;
     } catch {
       cliId = null;
+      model = null;
     }
     if (!cliId) {
       setPhase("blocked");
@@ -468,7 +472,7 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
       const r = await fetch("/api/explore/ai", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: intent, cliId }),
+        body: JSON.stringify({ query: intent, cliId, model: model || undefined }),
       });
       if (r.status === 404) {
         runningRef.current = false;

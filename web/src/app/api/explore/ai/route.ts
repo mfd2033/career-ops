@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { resolveCli } from "@/lib/clis";
+import { withModelFlag } from "@/lib/run-cli-support.mjs";
 import { careerOpsRoot, readMemory } from "@/lib/career-ops";
 import { assembleDedupContext } from "@/lib/core/discover";
 
@@ -131,7 +132,7 @@ Follow modes/discover.md exactly. You are running headless for the web:
 `;
 
 export async function POST(req: Request) {
-  let body: { query?: string; cliId?: string };
+  let body: { query?: string; cliId?: string; model?: string };
   try {
     body = await req.json();
   } catch {
@@ -139,6 +140,7 @@ export async function POST(req: Request) {
   }
   const query = (body.query || "").trim();
   const cliId = body.cliId;
+  const model = body.model;
   if (!query || !cliId) return Response.json({ error: "query and cliId required" }, { status: 400 });
 
   const resolved = resolveCli(cliId);
@@ -202,7 +204,7 @@ export async function POST(req: Request) {
     ? path.join(childCwd, "final-response.txt")
     : undefined;
 
-  const args = isClaude
+  const baseArgs = isClaude
     ? [
         "-p",
         prompt,
@@ -234,6 +236,7 @@ export async function POST(req: Request) {
           prompt,
         ]
       : spec.args(prompt);
+  const args = withModelFlag(baseArgs, spec.model, model);
 
   // POSIX detached children become process-group leaders. Keeping stdio
   // piped means Node still tracks the Codex process normally.

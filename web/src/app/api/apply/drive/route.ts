@@ -10,13 +10,13 @@ export const maxDuration = 300;
 // REACH a fillable application form (the user watches each step live), then we
 // extract + finalize. NEVER submits (enforced in driveSession).
 export async function POST(req: Request) {
-  let body: { sessionId?: string; cliId?: string; goal?: "reach" | "full"; answers?: { label: string; value: string }[] };
+  let body: { sessionId?: string; cliId?: string; model?: string; goal?: "reach" | "full"; answers?: { label: string; value: string }[] };
   try {
     body = await req.json();
   } catch {
     return Response.json({ error: "bad json" }, { status: 400 });
   }
-  const { sessionId, cliId = "", goal = "reach", answers } = body;
+  const { sessionId, cliId = "", model, goal = "reach", answers } = body;
   const s = sessionId ? getSession(sessionId) : undefined;
   if (!s) return Response.json({ error: "apply session not found (it may have expired)" }, { status: 404 });
 
@@ -40,7 +40,7 @@ export async function POST(req: Request) {
           }
         };
         const budget = goal === "full" ? 16 : 7;
-        const result = await driveSession(page, cliId, goal, isFormReady, (step) => emit({ t: "step", ...step }), budget, answers);
+        const result = await driveSession(page, cliId, goal, isFormReady, (step) => emit({ t: "step", ...step }), budget, answers, model);
 
         if (goal === "full") {
           // The agent filled the real form — bring it to the front for the human
@@ -52,7 +52,7 @@ export async function POST(req: Request) {
         }
 
         if (result.reached) {
-          const fin = await finalizeDrivenSession(s.id, cliId);
+          const fin = await finalizeDrivenSession(s.id, cliId, model);
           if (fin) {
             emit({ t: "done", reached: true, turns: result.turns, title: fin.title, fields: fin.fields, issues: fin.issues });
             controller.close();
