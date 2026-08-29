@@ -15,6 +15,7 @@ import {
 import { cn } from "@/lib/cn";
 import { CadenceSettings } from "@/components/followups/cadence-settings";
 import { persistCliId, persistModel, readSavedCliId, readSavedModel } from "@/lib/saved-cli";
+import { resolveModelPicker } from "@/lib/model-picker.mjs";
 import { useI18n } from "@/lib/i18n/context";
 
 type ModelOption = { id: string; label: string };
@@ -46,7 +47,17 @@ export function ConfigForm() {
   const [mode, setMode] = useState<Mode>("cli");
   const [clis, setClis] = useState<Cli[] | null>(null);
   const [cliId, setCliId] = useState<string>("");
+  // The model currently being edited in the dropdown (may be unsaved).
   const [model, setModel] = useState<string>("");
+  // The model that is actually persisted and in effect — the "current model"
+  // readout reads THIS, not the in-flight dropdown value, so it stays on the
+  // last-saved model until the user clicks Save.
+  const [savedModel, setSavedModel] = useState<string>("");
+  // The CLI the current model pick was saved under. Distinct from cliId so the
+  // saved model is only dropped when the user explicitly switches CLI — never
+  // when the freshly-fetched options just don't list it. "" (legacy configs)
+  // means "unknown → belongs to the current CLI".
+  const [modelCliId, setModelCliId] = useState<string>("");
   const [provider, setProvider] = useState("anthropic");
   const [apiKey, setApiKey] = useState("");
   const [logos, setLogos] = useState(true);
@@ -63,6 +74,13 @@ export function ConfigForm() {
         if (v.mode === "cli") setMode("cli");
         if (v.cliId) setCliId(v.cliId);
         if (v.model) setModel(v.model);
+        // "Current model" reflects the last-saved (persisted) pick, not the
+        // in-flight dropdown value.
+        setSavedModel(v.model ?? "");
+        // Legacy configs predate modelCliId — infer that the saved model
+        // belongs to the CLI saved alongside it, so it is never dropped.
+        if (v.modelCliId) setModelCliId(v.modelCliId);
+        else if (v.model && v.cliId) setModelCliId(v.cliId);
         if (v.provider) setProvider(v.provider);
         if (typeof v.logos === "boolean") setLogos(v.logos);
       }
@@ -95,25 +113,41 @@ export function ConfigForm() {
     // The API key is deliberately NOT persisted: nothing reads it yet (the
     // key/manual panel is unwired) and a secret must never sit in clear-text
     // localStorage. Keys belong in the user's own CLI/provider config.
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ mode, cliId, model, provider, logos }));
+    // model/modelCliId come from the picker: after a CLI switch the picker has
+    // already dropped a stale model, so a Save can never resurrect it.
+    const nextModel = picker?.model ?? model;
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ mode, cliId, model: nextModel, modelCliId: nextModel ? modelCliId : "", provider, logos }),
+    );
+    // The persisted value is now the "current model" — only after Save.
+    setSavedModel(nextModel);
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   }
 
   const installed = clis?.filter((c) => c.installed) ?? [];
   const selectedCli = clis?.find((c) => c.id === cliId) ?? null;
-  // The model the CLI would run with: the user's saved pick, else the CLI's own
-  // default. Honest before any choice is made — no phantom "current model".
-  const currentModel = model || selectedCli?.model.default || "";
+  // The model the CLI runs with: the last-saved pick (always preserved — even
+  // when the dynamic option list doesn't list it, it's injected back into the
+  // dropdown so it renders as the selected value), else the CLI's own default.
+  const picker = selectedCli
+    ? resolveModelPicker({ model, modelCliId, cliId, options: selectedCli.model.options })
+    : null;
+  // The "current model" readout follows the PERSISTED pick — it must not jump
+  // to whatever the user is previewing in the dropdown before clicking Save.
+  const currentModel = savedModel || selectedCli?.model.default || "";
 
-  // The model picker follows the selected CLI: if the saved model isn't one of
-  // the currently-selected CLI's options (the user switched CLI, or a stale
-  // pick survived), fall back to the CLI's own default rather than spawning a
-  // model that CLI doesn't know.
+  // The model picker follows the selected CLI — but only when the user actually
+  // switched CLI: the saved model stays untouched on page load even if the
+  // freshly-fetched options don't list it (it must always display the saved
+  // config). Dropping happens inside resolveModelPicker; here we just reconcile
+  // state so a later Save doesn't persist a model the new CLI doesn't know.
   useEffect(() => {
-    if (!model || !selectedCli) return;
-    if (!selectedCli.model.options.some((o) => o.id === model)) setModel("");
-  }, [model, selectedCli]);
+    if (!picker || picker.model === model) return;
+    setModel(picker.model);
+    if (picker.model === "" && modelCliId) setModelCliId("");
+  }, [picker, model, modelCliId]);
 
   return (
     <div className="mx-auto max-w-2xl px-6 py-10">
@@ -244,14 +278,17 @@ export function ConfigForm() {
                     <p className="mb-2 text-xs text-faint">{t("config.modelDesc")}</p>
                     <div className="relative">
                       <select
-                        value={model}
-                        onChange={(e) => setModel(e.target.value)}
+                        value={picker?.model ?? model}
+                        onChange={(e) => {
+                          setModel(e.target.value);
+                          setModelCliId(cliId);
+                        }}
                         className="w-full appearance-none rounded-lg border border-border bg-surface/60 px-3 py-2 pr-9 text-sm text-foreground outline-none transition-colors focus:border-brand/50 focus-visible:ring-2 focus-visible:ring-brand/40"
                       >
                         <option value="">
                           {t("config.modelDefault", { model: selectedCli.model.default || t("config.modelAuto") })}
                         </option>
-                        {selectedCli.model.options.map((o) => (
+                        {(picker?.options ?? selectedCli.model.options).map((o) => (
                           <option key={o.id} value={o.id}>
                             {o.label}
                           </option>
