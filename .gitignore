@@ -188,3 +188,6 @@ update-apply*.err
 
 # Archived evaluation reports (PII — keep out of VCS)
 reports/archive/
+
+# Web dev-server scratch logs (local dev noise, never commit)
+web/dev-server*.log*
