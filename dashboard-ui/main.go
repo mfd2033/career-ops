@@ -46,7 +46,7 @@ var trayIcon []byte
 // re-extracted instead of being reused. Failing to bump means an old
 // .dashboard-runtime\v{N} is reused and the running dashboard silently shows
 // an old build (e.g. a feature committed after the last build appears missing).
-const cacheVersion = "11"
+const cacheVersion = "12"
 
 func main() {
 	exe, err := os.Executable()
