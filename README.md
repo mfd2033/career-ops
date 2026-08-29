@@ -385,13 +385,15 @@ There is also an **experimental web UI** (alpha, opt-in — nothing runs unless 
 
 ### Web Dashboard — self-contained app (Windows)
 
-The same web UI is packaged as a double-clickable Windows app, **`career-dashboard-ui.exe`** (in the repo root). Drop it next to your career-ops data and double-click: it extracts an embedded Next.js standalone server + Node runtime to `%LOCALAPPDATA%\career-ops-dashboard-ui`, starts the server on a free port, and opens your default browser — no Node install, no console window, nothing else to run. Like the TUI, it anchors on its own location and reads your `cv.md` / `data/` / `reports/` from wherever the exe sits. Launching it again while it is already running just re-opens the browser.
+The same web UI is packaged as a double-clickable Windows app, **`career-dashboard-ui.exe`** (in the repo root). Drop it next to your career-ops data and double-click: it extracts an embedded Next.js standalone server + Node runtime to a `.dashboard-runtime\v{N}` cache dir next to the exe, starts the server on a free port, and opens your default browser — no Node install, no console window, nothing else to run. Like the TUI, it anchors on its own location and reads your `cv.md` / `data/` / `reports/` from wherever the exe sits. Launching it again while it is already running just re-opens the browser.
 
 Sources and build live in `dashboard-ui/` (`main.go` Go launcher, `gen-icon.py` icon, `build-dashboard-ui.mjs` packager). Rebuild after a web update with:
 
 ```bash
 node dashboard-ui/build-dashboard-ui.mjs
 ```
+
+Requires **Node 20+** and **Go 1.24+** on the build machine (go-winres is auto-installed on first run); the packaged exe needs neither. The build takes ~1–3 minutes and writes `career-dashboard-ui.exe` (≈120 MB) to the repo root. **After every web change, bump `cacheVersion` in `dashboard-ui/main.go`** so existing installs re-extract the embedded app instead of reusing the stale cache. Full packaging guide, verification steps, and troubleshooting: [`dashboard-ui/README.md`](dashboard-ui/README.md) (中文: [`dashboard-ui/README.cn.md`](dashboard-ui/README.cn.md)).
 
 ## Project Structure
 

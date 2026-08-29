@@ -76,7 +76,56 @@ The script:
 6. compiles `career-dashboard-ui.exe` into the repo root.
 
 Requires **Node 20+** (Next 16 engines floor), **Go 1.24+**, and **go-winres**
-(auto-installed on first run into `.gobin/`).
+(auto-installed on first run into `.gobin/`). Check the prerequisites:
+
+```bash
+node --version   # ≥ v20
+go version       # ≥ go1.24
+```
+
+### What the build produces
+
+The script builds `web/` (Next standalone), embeds it with the running Node
+binary, and compiles the launcher into the repo root:
+
+- **Output:** `career-dashboard-ui.exe` (≈120 MB) at the repo root
+- **Time:** ~1–3 minutes on a typical machine (longer on first run, when
+  go-winres is installed). Running a `next dev` server alongside does not
+  conflict — the build writes to a separate output.
+- **Embedded cache version:** bump `cacheVersion` in `main.go` whenever the
+  embedded app changes, so existing installs re-extract instead of reusing a
+  stale `.dashboard-runtime\v{N}` cache.
+
+### Verifying a build
+
+```bash
+# 1. Confirm the exe exists and its timestamp is fresh
+Get-Item career-dashboard-ui.exe
+
+# 2. Smoke-test: launch it (GUI app, no console) and wait a few seconds
+.\career-dashboard-ui.exe
+
+# 3. It extracts `.dashboard-runtime\v{N}` next to the exe, picks a free port
+#    (3000+), and serves the dashboard — verify the API answers:
+#    (the port is written to .dashboard-runtime\v{N}\LOCK)
+Invoke-WebRequest "http://127.0.0.1:3000/api/version"   # expect HTTP 200
+
+# 4. Diagnostics: if anything looks wrong, read the tray log
+Get-Content .dashboard-runtime\v{N}\tray-debug.log
+```
+
+### Troubleshooting
+
+| Symptom | Fix |
+|---------|-----|
+| `go: command not found` | Install Go 1.24+ and add it to `PATH` |
+| go-winres install fails on first run | Check network / `GOPROXY`; retry — it is cached in `.gobin/` afterwards |
+| exe launches but nothing appears | Read `.dashboard-runtime\v{N}\tray-debug.log` (always written) |
+| Old web version still shows after a rebuild | You forgot to bump `cacheVersion` in `main.go` — stale cache is being reused |
+| Server "exited unexpectedly" dialog | Check the tray log; use the tray menu "重启服务" to retry |
+
+The exe is a Windows GUI app (`-H windowsgui`): it has **no console output** by
+design — the tray log is the one and only diagnostics channel.
 
 ## Notes
 
