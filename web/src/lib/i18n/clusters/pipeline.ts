@@ -101,6 +101,10 @@ export const en: Dict = {
   "pipeline.delete": "Delete",
   "pipeline.cancel": "Cancel",
 
+  // ── Skip from tracker (skip-from-tracker.tsx) ──
+  "pipeline.skip": "Skip",
+  "pipeline.skipTitle": "Mark this role as skipped (Discarded) — same as the Today page skip",
+
   // ── Generate PDF button (generate-pdf-button.tsx) ──
   "pipeline.generatingCv": "Generating CV…",
   "pipeline.viewCv": "View tailored CV",
@@ -243,6 +247,10 @@ export const zh: Dict = {
   "pipeline.removeErrFailed": "删除失败。",
   "pipeline.delete": "删除",
   "pipeline.cancel": "取消",
+
+  // ── Skip from tracker (skip-from-tracker.tsx) ──
+  "pipeline.skip": "跳过",
+  "pipeline.skipTitle": "将此职位标记为跳过（已放弃）——与今日页面的跳过相同",
 
   // ── Generate PDF button (generate-pdf-button.tsx) ──
   "pipeline.generatingCv": "正在生成简历…",
