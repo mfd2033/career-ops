@@ -3,6 +3,7 @@ import path from "node:path";
 import * as yaml from "js-yaml";
 import { careerOpsRoot } from "@/lib/career-ops";
 import { atomicWriteWithBackup } from "@/lib/core/safe-write";
+import { patchToProfile } from "@/lib/profile-patch.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -22,6 +23,10 @@ type ProfilePatch = {
   compMax?: number;
   currency?: string;
   remote?: string;
+  /** JD evaluation/exclusion rules (config page). string[] → narrative.deal_breakers. */
+  dealBreakers?: string[];
+  /** JD evaluation/exclusion rules (config page). string → compensation.location_flexibility. */
+  locationFlexibility?: string;
 };
 
 function isObj(v: unknown): v is Record<string, unknown> {
@@ -37,22 +42,31 @@ function deepMerge(dst: unknown, src: Record<string, unknown>): Record<string, u
   return out;
 }
 
-function patchToProfile(p: ProfilePatch): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  const candidate: Record<string, unknown> = {};
-  if (p.name) candidate.full_name = p.name;
-  if (p.email) candidate.email = p.email;
-  if (p.location) candidate.location = p.location;
-  if (Object.keys(candidate).length) out.candidate = candidate;
-  if (p.roles?.length) out.target_roles = { primary: p.roles.slice(0, 6) };
-  const comp: Record<string, unknown> = {};
-  if (p.compMin && p.compMax) comp.target_range = `${p.compMin}-${p.compMax}`;
-  if (p.currency) comp.currency = p.currency;
-  if (p.remote) comp.location_flexibility = p.remote;
-  if (Object.keys(comp).length) out.compensation = comp;
-  // seniority intentionally not written (no canonical home in profile.yml);
-  // archetypes/narrative live in modes/_profile.md — this writer never touches them.
-  return out;
+/** Read the current JD evaluation/exclusion rules out of config/profile.yml
+ *  so the config page can prefill its form. Best-effort: any parse/read failure
+ *  yields the empty defaults, never a throw — a malformed profile is surfaced
+ *  by POST's DATA-LOSS GUARD, not by this read path. */
+export async function GET() {
+  const root = careerOpsRoot();
+  const file = path.join(root, "config", "profile.yml");
+  let dealBreakers: string[] = [];
+  let locationFlexibility = "";
+  if (fs.existsSync(file)) {
+    let parsed: unknown;
+    try {
+      parsed = yaml.load(fs.readFileSync(file, "utf8"));
+    } catch {
+      parsed = undefined;
+    }
+    const profile = isObj(parsed) ? (parsed as Record<string, unknown>) : {};
+    const narrative = isObj(profile.narrative) ? (profile.narrative as Record<string, unknown>) : {};
+    if (Array.isArray(narrative.deal_breakers)) {
+      dealBreakers = (narrative.deal_breakers as unknown[]).filter((b): b is string => typeof b === "string");
+    }
+    const comp = isObj(profile.compensation) ? (profile.compensation as Record<string, unknown>) : {};
+    if (typeof comp.location_flexibility === "string") locationFlexibility = comp.location_flexibility;
+  }
+  return Response.json({ dealBreakers, locationFlexibility });
 }
 
 export async function POST(req: Request) {
