@@ -15,8 +15,8 @@ On launch it:
 
 1. anchors the career-ops root on its **own executable directory** — it reads
    `cv.md` / `data/` / `reports/` from wherever the exe sits (like the Go TUI),
-2. extracts the embedded runtime to `%LOCALAPPDATA%\career-ops-dashboard-ui\v{N}`
-   on first use (cached; repeat launches start near-instantly),
+2. extracts the embedded runtime to a `.dashboard-runtime\v{N}` dir next to the
+   exe on first use (cached; repeat launches start near-instantly),
 3. picks a free port (3000+), starts the server with `CAREER_OPS_ROOT` / `PORT` /
    `HOSTNAME` set, and waits until it answers,
 4. opens the default browser at `http://127.0.0.1:<port>`, then stays alive
@@ -35,7 +35,7 @@ Left-clicking the tray icon does nothing (menu only, matching the tray menu
 wording). The icon reuses the embedded `icon.ico`.
 
 The launcher always redirects the tray library's log output to
-`%LOCALAPPDATA%\career-ops-dashboard-ui\v{N}\tray-debug.log` (append-only, small), so
+`.dashboard-runtime\v{N}\tray-debug.log` next to the exe (append-only, small), so
 troubleshooting never requires setting an environment variable — just launch the exe,
 reproduce, and read the log. Each line carries the launcher PID.
 

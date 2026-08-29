@@ -6,8 +6,8 @@
 //
 //  1. anchors the career-ops root on its OWN executable directory (so it reads
 //     cv.md / data/ / reports/ from wherever the exe sits, like the Go TUI),
-//  2. lazily extracts the embedded runtime to %LOCALAPPDATA%\career-ops-dashboard-ui
-//     (versioned, so repeat launches start near-instantly),
+//  2. lazily extracts the embedded runtime to a `.dashboard-runtime` dir next
+//     to the exe (versioned, so repeat launches start near-instantly),
 //  3. picks a free port, starts the server with CAREER_OPS_ROOT / PORT /
 //     HOSTNAME set, waits until it answers,
 //  4. opens the default browser at http://127.0.0.1:<port>, and
@@ -59,7 +59,10 @@ func main() {
 		return
 	}
 
-	cacheBase := filepath.Join(appDataDir(), "career-ops-dashboard-ui")
+	// Keep the extracted runtime next to the exe (inside the career-ops
+	// directory) rather than %LOCALAPPDATA%: everything lives in one place,
+	// and deleting the directory deletes the cached runtime with it.
+	cacheBase := filepath.Join(careerRoot, ".dashboard-runtime")
 	runtimeDir := filepath.Join(cacheBase, "v"+cacheVersion)
 	if err := ensureRuntime(runtimeDir); err != nil {
 		fatal("setup failed: " + err.Error())
@@ -218,13 +221,7 @@ func fileExists(p string) bool {
 	return err == nil
 }
 
-func appDataDir() string {
-	if d := os.Getenv("LOCALAPPDATA"); d != "" {
-		return d
-	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, "AppData", "Local")
-}
+
 
 // runTrayLoop owns the process life cycle once the server is up: it installs
 // the system tray, watches the server process for unexpected exits, and
