@@ -19,7 +19,9 @@ On launch it:
    exe on first use (cached; repeat launches start near-instantly),
 3. picks a free port (3000+), starts the server with `CAREER_OPS_ROOT` / `PORT` /
    `HOSTNAME` set, and waits until it answers,
-4. opens the default browser at `http://127.0.0.1:<port>`, then stays alive
+4. opens the default browser at `http://localhost:<port>` (the server binds
+   127.0.0.1, but the browser opens "localhost" so the origin matches the dev
+   workflow's `http://localhost:3000` and localStorage prefs are shared), then stays alive
    (reusing an already-running instance if one is up — double-clicking again
    just re-opens the browser).
 

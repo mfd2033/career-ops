@@ -1,5 +1,9 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // Next dev only whitelists "localhost" by default; 127.0.0.1 is a distinct
+  // origin whose dev-only assets (/_next/static/chunks, HMR, fonts) would be
+  // blocked, leaving the client app (language toggle, config form) unhydrated.
+  allowedDevOrigins: ["127.0.0.1"],
   // Two lockfiles exist on purpose (repo root + web/), so Next would infer the
   // repo root as the workspace root. On Windows that misinference can send
   // Turbopack's postcss workers into an unbounded respawn loop that exhausts
