@@ -70,14 +70,24 @@ export function ReportView({
       "Role Summary": t("pipeline.section.roleSummary"),
       "Match with CV": t("pipeline.section.matchWithCv"),
       "Strategy": t("pipeline.section.strategy"),
+      "Level and Strategy": t("pipeline.section.levelAndStrategy"),
       "Compensation": t("pipeline.section.compensation"),
+      "Comp and Demand": t("pipeline.section.compAndDemand"),
       "Personalization": t("pipeline.section.personalization"),
+      "Customization Plan": t("pipeline.section.customizationPlan"),
       "Interview Prep": t("pipeline.section.interviewPrep"),
+      "Interview Plan": t("pipeline.section.interviewPlan"),
       "Posting Legitimacy": t("pipeline.section.postingLegitimacy"),
+      "Risk Summary": t("pipeline.section.riskSummary"),
+      "Cover Letter Draft": t("pipeline.section.coverLetterDraft"),
+      "Keywords extracted": t("pipeline.section.keywordsExtracted"),
+      "Extracted Keywords": t("pipeline.section.extractedKeywords"),
+      "Scoring（1-5）": t("pipeline.section.scoring"),
       "Machine Summary": t("pipeline.section.machineSummary"),
       "Submitted": t("pipeline.section.submitted"),
       "Submit Log": t("pipeline.section.submitLog"),
       "Application Answers": t("pipeline.section.applicationAnswers"),
+      "Draft Application Answers": t("pipeline.section.draftApplicationAnswers"),
     };
     return map[heading] ?? heading;
   };
@@ -87,9 +97,16 @@ export function ReportView({
       "Medium Confidence": t("pipeline.legitimacy.mediumConfidence"),
       "Low Confidence": t("pipeline.legitimacy.lowConfidence"),
       "Caution": t("pipeline.legitimacy.caution"),
+      "Proceed with Caution": t("pipeline.legitimacy.proceedCaution"),
       "Suspicious": t("pipeline.legitimacy.suspicious"),
     };
-    return map[value] ?? value;
+    if (map[value]) return map[value];
+    // 带附注的变体（如 "High Confidence（含发布新鲜度提示，见 Block G）"）——
+    // 按最长前缀归类翻译，附注原文保留在译文之后。
+    const prefix = Object.keys(map)
+      .filter((k) => value.startsWith(k))
+      .sort((a, b) => b.length - a.length)[0];
+    return prefix ? `${map[prefix]}${value.slice(prefix.length)}` : value;
   };
   const meta = report ? parseReport(report) : null;
   const field = (label: string) => meta?.fields.find((f) => f.label === label)?.value;

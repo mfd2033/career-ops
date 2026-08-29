@@ -103,7 +103,7 @@ export function PortalsView() {
                   <span className="shrink-0 text-sm font-medium">{c.name}</span>
                   <span className="truncate font-mono text-xs text-faint">{c.detail}</span>
                   <div className="ml-auto flex shrink-0 items-center gap-2">
-                    {c.status === "broken" && <FixAffordance company={c.name} job={fixByCompany.get(c.name)} onFix={() => startJob({ title: `Fix · ${c.name}`, subtitle: "repair portal slug", kind: "fix-portal", input: c.name, page: "/portals" })} />}
+                    {c.status === "broken" && <FixAffordance company={c.name} job={fixByCompany.get(c.name)} onFix={() => startJob({ title: t("jobs.fixPortalTitle", { company: c.name }), subtitle: t("jobs.fixPortalSubtitle"), kind: "fix-portal", input: c.name, page: "/portals" })} />}
                     <span className={cn("rounded px-1.5 py-0.5 text-[10px] font-semibold", tone.chip)}>{t(tone.labelKey)}</span>
                   </div>
                 </li>

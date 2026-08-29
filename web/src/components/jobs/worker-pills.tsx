@@ -57,7 +57,7 @@ export function WorkerPills() {
                         removeJob(j.id);
                       }}
                       className="text-faint opacity-0 transition-opacity hover:text-foreground group-hover:opacity-100"
-                      aria-label="Dismiss job"
+                      aria-label={t("jobs.dismissJob")}
                     >
                       <X className="size-3" />
                     </button>
