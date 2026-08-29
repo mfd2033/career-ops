@@ -133,6 +133,11 @@ export const en: Dict = {
   "pipeline.report.verdict": "Verdict",
   "pipeline.report.technicalDetails": "Technical details · for developers",
   "pipeline.report.noReport": "No report file found for #{id} in reports/.",
+  "pipeline.reevaluate": "Re-evaluate",
+  "pipeline.reevaluating": "Re-evaluating…",
+  "pipeline.reevaluateTitle": "Re-run the evaluation for {company}",
+  "pipeline.reevaluateSubtitle": "Re-running the evaluation",
+  "pipeline.reevaluateNoUrl": "No posting URL in this report — add one to re-evaluate.",
 
   // ── Section headings (from report markdown) ──
   // Newer oferta.md heading forms (current core): "## C) Level and Strategy",
@@ -301,6 +306,11 @@ export const zh: Dict = {
   "pipeline.report.verdict": "评估结论",
   "pipeline.report.technicalDetails": "技术细节 · 面向开发者",
   "pipeline.report.noReport": "在 reports/ 中未找到 #{id} 的报告文件。",
+  "pipeline.reevaluate": "重新评估",
+  "pipeline.reevaluating": "重新评估中…",
+  "pipeline.reevaluateTitle": "重新评估 {company}",
+  "pipeline.reevaluateSubtitle": "正在重新评估",
+  "pipeline.reevaluateNoUrl": "此报告没有职位链接——补充链接后才能重新评估。",
 
   // ── Section headings (from report markdown) ──
   "pipeline.section.roleSummary": "职位概述",

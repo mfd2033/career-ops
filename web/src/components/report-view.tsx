@@ -12,6 +12,7 @@ import { StatusSelect } from "@/components/status-select";
 import { CompanyLogo } from "@/components/company-logo";
 import { ScoreMethodology } from "@/components/score-methodology";
 import { GeneratePdfButton } from "@/components/generate-pdf-button";
+import { ReevaluateButton } from "@/components/reevaluate-button";
 import { OpenCvFolderButton } from "@/components/open-cv-folder-button";
 import { ApplyButton } from "@/components/apply-button";
 import { DeleteFromTracker } from "@/components/delete-from-tracker";
@@ -149,6 +150,7 @@ export function ReportView({
           {app && <StatusSelect n={id} current={app.status} />}
           {app && app.status !== "Discarded" && <SkipFromTracker n={id} />}
           <GeneratePdfButton n={id} company={app?.company ?? meta?.title ?? id} pdfReady={pdfReady} />
+          <ReevaluateButton id={id} url={url && url.startsWith("http") ? url : undefined} company={app?.company ?? meta?.title ?? id} />
           {pdfReady && <OpenCvFolderButton company={app?.company ?? meta?.title ?? id} />}
           <ApplyButton n={id} url={url && url.startsWith("http") ? url : undefined} company={app?.company ?? meta?.title ?? id} pdfReady={pdfReady} />
         </div>
