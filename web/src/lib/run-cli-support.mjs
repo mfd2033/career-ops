@@ -41,6 +41,26 @@ const STATUS_RECONNECTING = "Reconnecting…";
  */
 
 /**
+ * Append a selected model to a CLI argv, uniformly, for every runtime.
+ *
+ * The config page's model picker must reach the spawned process for ALL CLIs, but
+ * each argv is built differently (claudeCliArgs, spec.streamArgs, spec.args, or an
+ * inline array per route). One pure helper keeps the injection identical everywhere
+ * and testable. The flag is appended AFTER the prompt so positional args (e.g. the
+ * codex stream argv's trailing prompt) stay put — every supported CLI parses flags
+ * position-independently.
+ *
+ * @param {string[]} args - the argv before model injection
+ * @param {{flag?: string} | undefined | null} meta - the CLI's model metadata (may lack a flag)
+ * @param {string | undefined | null} model - the user's selected model, or none
+ * @returns {string[]} a NEW array; the caller's array is never mutated
+ */
+export function withModelFlag(args, meta, model) {
+  if (!model || !meta?.flag) return args;
+  return [...args, meta.flag, model];
+}
+
+/**
  * A usage figure, or 0 — guards nulls and junk in a partial usage block.
  *
  * `isSafeInteger`, not `isFinite`: a token count is a whole number, so a

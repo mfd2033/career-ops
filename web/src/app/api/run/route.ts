@@ -6,7 +6,7 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { resolveCli } from "@/lib/clis";
-import { accumulateTokens, hasNewCompletedReport, isFatalGenericStderr } from "@/lib/run-cli-support.mjs";
+import { accumulateTokens, hasNewCompletedReport, isFatalGenericStderr, withModelFlag } from "@/lib/run-cli-support.mjs";
 import { spawnHeadlessCli } from "@/lib/spawn-cli.mjs";
 import { careerOpsRoot, readMemory, findReportFile, readInbox, readScanDates } from "@/lib/career-ops";
 import { resolvePdfPaths, type PdfPaths } from "@/lib/pdf-paths.mjs";
@@ -21,13 +21,13 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 800; // a real oferta evaluation / pdf-mode CV tailoring + render is heavy and multi-step
 
 export async function POST(req: Request) {
-  let body: { kind?: string; input?: string; cliId?: string };
+  let body: { kind?: string; input?: string; cliId?: string; model?: string };
   try {
     body = await req.json();
   } catch {
     return new Response(JSON.stringify({ error: "bad json" }), { status: 400 });
   }
-  const { kind = "evaluate", input, cliId } = body;
+  const { kind = "evaluate", input, cliId, model } = body;
   if (!input || !cliId) {
     return new Response(JSON.stringify({ error: "input and cliId required" }), { status: 400 });
   }
@@ -118,7 +118,11 @@ export async function POST(req: Request) {
   // A CLI with its own structured stream gets the argv that turns it on, so its
   // stdout matches spec.parseEvent below; spec.args stays the plain-text argv the
   // envelope-parsing routes rely on.
-  const args = isClaude ? claudeCliArgs({ kind, prompt }) : (spec.streamArgs ?? spec.args)(prompt);
+  const baseArgs = isClaude ? claudeCliArgs({ kind, prompt }) : (spec.streamArgs ?? spec.args)(prompt);
+  // The config page's model picker applies to EVERY CLI uniformly. Absent a saved
+  // model (or a CLI with no model flag), withModelFlag returns the args untouched
+  // and the CLI keeps its own default.
+  const args = withModelFlag(baseArgs, spec.model, model);
 
   // For write-needing kinds, snapshot reports/ so we can verify the worker
   // actually persisted (non-Claude CLIs lack Write auth and silently no-op).

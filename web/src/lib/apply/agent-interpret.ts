@@ -1,6 +1,7 @@
 import { spawnHeadlessCli } from "@/lib/spawn-cli.mjs";
 import type { Frame } from "playwright-core";
 import { resolveCli } from "@/lib/clis";
+import { withModelFlag } from "@/lib/run-cli-support.mjs";
 import { careerOpsRoot } from "@/lib/career-ops";
 import type { ApplyField } from "./extract";
 
@@ -79,8 +80,9 @@ Return ONLY a JSON array, no prose, no code fence:
 [{"n":0,"skip":false,"label":"First Name","type":"text","options":[],"required":true}, ...]`;
 }
 
-function runPlanner(binPath: string, isClaude: boolean, argsFor: (p: string) => string[], prompt: string): Promise<string> {
-  const args = isClaude ? ["-p", prompt, "--permission-mode", "acceptEdits", "--strict-mcp-config", "--allowedTools", "Read", "--disallowedTools", "Bash,Write,Edit,NotebookEdit,Task,WebFetch,WebSearch"] : argsFor(prompt);
+function runPlanner(binPath: string, modelMeta: { flag?: string }, isClaude: boolean, argsFor: (p: string) => string[], prompt: string, model?: string): Promise<string> {
+  const baseArgs = isClaude ? ["-p", prompt, "--permission-mode", "acceptEdits", "--strict-mcp-config", "--allowedTools", "Read", "--disallowedTools", "Bash,Write,Edit,NotebookEdit,Task,WebFetch,WebSearch"] : argsFor(prompt);
+  const args = withModelFlag(baseArgs, modelMeta, model);
   return new Promise((resolve) => {
     const child = spawnHeadlessCli(binPath, args, { cwd: careerOpsRoot(), env: process.env });
     let buf = "";
@@ -109,13 +111,13 @@ type Interpreted = { n: number; skip?: boolean; label?: string; type?: string; o
 /** The agentic interpreter: capture the live form, let the LLM read+classify it,
  *  re-tag the chosen controls with data-co-field, and return clean ApplyField[].
  *  Returns [] if the CLI is missing or interpretation fails (caller falls back). */
-export async function agentInterpretForm(frame: Frame, cliId: string, title: string): Promise<ApplyField[]> {
+export async function agentInterpretForm(frame: Frame, cliId: string, title: string, model?: string): Promise<ApplyField[]> {
   const resolved = resolveCli(cliId);
   if (!resolved) return [];
   const cands = await captureCandidates(frame).catch(() => [] as Cand[]);
   if (!cands.length) return [];
 
-  const out = await runPlanner(resolved.binPath, cliId === "claude", resolved.spec.args, buildPrompt(title, cands));
+  const out = await runPlanner(resolved.binPath, resolved.spec.model, cliId === "claude", resolved.spec.args, buildPrompt(title, cands), model);
   const m = out.match(/\[[\s\S]*\]/);
   if (!m) return [];
   let parsed: Interpreted[];

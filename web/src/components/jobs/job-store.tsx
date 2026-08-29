@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { scoreTone } from "@/lib/format";
-import { readSavedCliId, resolveCliId } from "@/lib/saved-cli";
+import { readSavedCliId, readSavedModel, resolveCliId } from "@/lib/saved-cli";
 import { useI18n } from "@/lib/i18n/context";
 
 export type JobStep = { kind: "tool" | "status"; label: string; ts: number };
@@ -112,6 +112,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
 
       (async () => {
         const cliId = readSavedCliId() || (await resolveCliId());
+        const model = readSavedModel() || undefined;
         if (!cliId) {
           patch(id, (j) => ({
             ...j,
@@ -156,7 +157,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
           const res = await fetch("/api/run", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ kind: opts.kind, input: opts.input, cliId }),
+            body: JSON.stringify({ kind: opts.kind, input: opts.input, cliId, model }),
           });
           if (!res.ok || !res.body) {
             const e = await res.json().catch(() => ({}));

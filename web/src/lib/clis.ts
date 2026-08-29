@@ -2,9 +2,24 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { codexStreamArgs, isFatalClaudeStderr, isFatalCodexStderr, isFatalOpenCodeStderr, parseClaudeEvent, parseCodexEvent } from "./run-cli-support.mjs";
+import { loadOpencodeModels } from "./opencode-models.mjs";
 
 // Server-only (node imports). The agnostic runtimes career-ops can delegate to
 // in headless mode (AGENTS.md). Install URLs from career-ops-docs.
+export type ModelOption = {
+  id: string; // the exact value passed to the CLI's model flag
+  label: string; // human label for the config dropdown
+};
+
+export type ModelMeta = {
+  /** The CLI's model-selection flag (e.g. "--model" or "-m"). */
+  flag: string;
+  /** The model id the CLI would use when the user selects nothing. */
+  default: string;
+  /** Dropdown options for the config page. */
+  options: ModelOption[];
+};
+
 export type CliSpec = {
   id: string;
   name: string;
@@ -31,6 +46,8 @@ export type CliSpec = {
   /** Structured-output CLIs only: decide whether a stderr line is fatal.
    * Absent → the route falls back to the shared generic error regex. */
   stderrIsFatal?: (line: string) => boolean;
+  /** Model selection metadata — what the config page offers for this CLI. */
+  model: ModelMeta;
 };
 
 /**
@@ -56,19 +73,121 @@ export type CliSpec = {
  * Enforced by tests/lib/clis-permissions.test.mjs, because a rule that only
  * lives in a comment is a rule the next contributor may never read.
  */
+
+/**
+ * Model choices offered on the config page per CLI. `id` is the exact value the
+ * CLI's model flag receives; `label` is what the user sees. `default` is the
+ * value used when the user has not picked one — it matches what the CLI would
+ * use on its own, so the "current model" readout is honest before any choice.
+ *
+ * Sources: official CLI docs/help for each runtime (verified 2026-08); the
+ * model IDs are current-generation. A model ID here must be something the CLI
+ * ACCEPTS on its flag — for Antigravity that is a display name, not an API
+ * slug (google-antigravity/antigravity-cli#83).
+ */
+const MODELS: Record<string, ModelMeta> = {
+  claude: {
+    flag: "--model",
+    default: "sonnet",
+    options: [
+      { id: "opus", label: "Opus (claude-opus-5)" },
+      { id: "sonnet", label: "Sonnet (claude-sonnet-5)" },
+      { id: "haiku", label: "Haiku (claude-haiku-4-5)" },
+      { id: "claude-opus-5", label: "claude-opus-5" },
+      { id: "claude-sonnet-5", label: "claude-sonnet-5" },
+      { id: "claude-sonnet-4-5-20250929", label: "claude-sonnet-4-5-20250929" },
+      { id: "claude-opus-4-8", label: "claude-opus-4-8" },
+    ],
+  },
+  codex: {
+    flag: "--model",
+    default: "gpt-5.4",
+    options: [
+      { id: "gpt-5.4", label: "gpt-5.4 (default)" },
+      { id: "gpt-5.4-mini", label: "gpt-5.4-mini (fast)" },
+      { id: "gpt-5.3-codex", label: "gpt-5.3-codex (deep engineering)" },
+      { id: "gpt-5.3-codex-spark", label: "gpt-5.3-codex-spark (Pro)" },
+    ],
+  },
+  gemini: {
+    flag: "--model",
+    default: "auto",
+    options: [
+      { id: "auto", label: "auto (routed)" },
+      { id: "gemini-3.1-pro-preview", label: "gemini-3.1-pro-preview" },
+      { id: "gemini-3-flash-preview", label: "gemini-3-flash-preview" },
+      { id: "gemini-2.5-pro", label: "gemini-2.5-pro" },
+      { id: "gemini-2.5-flash", label: "gemini-2.5-flash" },
+    ],
+  },
+  opencode: {
+    flag: "--model",
+    default: "anthropic/claude-sonnet-4-5-20250929",
+    options: [
+      { id: "anthropic/claude-sonnet-4-5-20250929", label: "anthropic/claude-sonnet-4-5" },
+      { id: "anthropic/claude-opus-4-5", label: "anthropic/claude-opus-4-5" },
+      { id: "openai/gpt-5", label: "openai/gpt-5" },
+      { id: "opencode/gpt-5.1-codex", label: "opencode/gpt-5.1-codex" },
+      { id: "google/gemini-3-pro", label: "google/gemini-3-pro" },
+      { id: "lmstudio/", label: "lmstudio/ (local, custom)" },
+    ],
+  },
+  copilot: {
+    flag: "--model",
+    default: "auto",
+    options: [
+      { id: "auto", label: "auto (default routing)" },
+      { id: "claude-sonnet-4.5", label: "claude-sonnet-4.5" },
+      { id: "claude-opus-4.5", label: "claude-opus-4.5" },
+      { id: "claude-haiku-4.5", label: "claude-haiku-4.5" },
+      { id: "gpt-5.4", label: "gpt-5.4" },
+      { id: "gpt-5.6", label: "gpt-5.6" },
+    ],
+  },
+  qwen: {
+    flag: "--model",
+    default: "qwen3.5-plus",
+    options: [
+      { id: "qwen3.5-plus", label: "qwen3.5-plus (default)" },
+      { id: "qwen3-coder-plus", label: "qwen3-coder-plus" },
+      { id: "qwen3.6-plus", label: "qwen3.6-plus" },
+      { id: "qwen3.7-plus", label: "qwen3.7-plus" },
+    ],
+  },
+  antigravity: {
+    flag: "--model",
+    default: "",
+    options: [
+      // Display names, not API slugs — the flag accepts what `agy models` prints.
+      { id: "Gemini 3.1 Pro (High)", label: "Gemini 3.1 Pro (High)" },
+      { id: "Gemini 3.5 Flash", label: "Gemini 3.5 Flash" },
+      { id: "Claude Sonnet 4.6", label: "Claude Sonnet 4.6" },
+      { id: "Claude Opus 4.6", label: "Claude Opus 4.6" },
+    ],
+  },
+  grok: {
+    flag: "--model",
+    default: "grok-build",
+    options: [
+      { id: "grok-build", label: "grok-build (default)" },
+      { id: "grok-build-0.1", label: "grok-build-0.1" },
+    ],
+  },
+};
+
 export const KNOWN: CliSpec[] = [
-  { id: "claude", name: "Claude Code", bin: "claude", run: "claude -p", url: "https://claude.ai/code", args: (p) => ["-p", p], parseEvent: parseClaudeEvent, stderrIsFatal: isFatalClaudeStderr },
-  { id: "codex", name: "Codex", bin: "codex", run: "codex exec", url: "https://github.com/openai/codex", args: (p) => ["exec", p], streamArgs: codexStreamArgs, parseEvent: parseCodexEvent, stderrIsFatal: isFatalCodexStderr },
-  { id: "gemini", name: "Gemini CLI", bin: "gemini", run: "gemini -p", url: "https://github.com/google-gemini/gemini-cli", args: (p) => ["-p", p] },
-  { id: "opencode", name: "OpenCode", bin: "opencode", run: "opencode run", url: "https://opencode.ai", args: (p) => ["run", p], stderrIsFatal: isFatalOpenCodeStderr },
-  { id: "copilot", name: "GitHub Copilot CLI", bin: "copilot", run: "copilot -p", url: "https://docs.github.com/en/copilot/github-copilot-in-the-cli", args: (p) => ["-p", p] },
-  { id: "qwen", name: "Qwen CLI", bin: "qwen", run: "qwen -p", url: "https://qwen.ai/qwencode", args: (p) => ["-p", p] },
-  { id: "antigravity", name: "Antigravity CLI", bin: "agy", run: "agy -p", url: "https://antigravity.google", args: (p) => ["-p", p] },
+  { id: "claude", name: "Claude Code", bin: "claude", run: "claude -p", url: "https://claude.ai/code", args: (p) => ["-p", p], model: MODELS.claude, parseEvent: parseClaudeEvent, stderrIsFatal: isFatalClaudeStderr },
+  { id: "codex", name: "Codex", bin: "codex", run: "codex exec", url: "https://github.com/openai/codex", args: (p) => ["exec", p], model: MODELS.codex, streamArgs: codexStreamArgs, parseEvent: parseCodexEvent, stderrIsFatal: isFatalCodexStderr },
+  { id: "gemini", name: "Gemini CLI", bin: "gemini", run: "gemini -p", url: "https://github.com/google-gemini/gemini-cli", args: (p) => ["-p", p], model: MODELS.gemini },
+  { id: "opencode", name: "OpenCode", bin: "opencode", run: "opencode run", url: "https://opencode.ai", args: (p) => ["run", p], model: MODELS.opencode, stderrIsFatal: isFatalOpenCodeStderr },
+  { id: "copilot", name: "GitHub Copilot CLI", bin: "copilot", run: "copilot -p", url: "https://docs.github.com/en/copilot/github-copilot-in-the-cli", args: (p) => ["-p", p], model: MODELS.copilot },
+  { id: "qwen", name: "Qwen CLI", bin: "qwen", run: "qwen -p", url: "https://qwen.ai/qwencode", args: (p) => ["-p", p], model: MODELS.qwen },
+  { id: "antigravity", name: "Antigravity CLI", bin: "agy", run: "agy -p", url: "https://antigravity.google", args: (p) => ["-p", p], model: MODELS.antigravity },
   // Grok Build also speaks `--output-format streaming-json`, but that is its own
   // schema, not Claude's `stream-json` — and the run route only parses the
   // latter. Plain `-p` streams text, which is what every other non-Claude entry
   // here does.
-  { id: "grok", name: "Grok Build CLI", bin: "grok", run: "grok -p", url: "https://docs.x.ai/build/overview", args: (p) => ["-p", p] },
+  { id: "grok", name: "Grok Build CLI", bin: "grok", run: "grok -p", url: "https://docs.x.ai/build/overview", args: (p) => ["-p", p], model: MODELS.grok },
 ];
 
 function searchDirs(): string[] {
@@ -196,11 +315,38 @@ export function findBin(bin: string, dirs = searchDirs()): string | null {
   return null;
 }
 
-export function detectClis() {
+export type DetectedCli = {
+  id: string;
+  name: string;
+  run: string;
+  url: string;
+  installed: boolean;
+  path: string | null;
+  model: ModelMeta;
+};
+
+export function detectClis(): DetectedCli[] {
   const dirs = searchDirs();
   return KNOWN.map((c) => {
     const found = findBin(c.bin, dirs);
-    return { id: c.id, name: c.name, run: c.run, url: c.url, installed: !!found, path: found };
+    let model = c.model;
+    // opencode's model list is user-config-driven (opencode.jsonc providers),
+    // so a static list would diverge from what the opencode TUI/desktop shows.
+    // Read the real config; fall back to the static defaults only when nothing
+    // is found.
+    if (c.id === "opencode") {
+      // The full list opencode actually exposes — built-in free models plus
+      // every configured provider — via the `opencode models` command (config
+      // files as fallback). A static list would diverge from what the opencode
+      // TUI/desktop shows.
+      const dynamic = loadOpencodeModels(found ?? undefined);
+      if (dynamic.length > 0) {
+        // The static default is not in the real list, so it would render as an
+        // unselectable phantom. Fall back to the first real model.
+        model = { ...c.model, options: dynamic, default: dynamic[0].id };
+      }
+    }
+    return { id: c.id, name: c.name, run: c.run, url: c.url, installed: !!found, path: found, model };
   });
 }
 

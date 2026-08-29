@@ -9,7 +9,7 @@ export const maxDuration = 300; // the agentic drive + interpretation fallbacks 
 // cliId enables the agentic fallback (the AI interprets the live form) when
 // deterministic extraction is low-confidence.
 export async function POST(req: Request) {
-  let body: { url?: string; cliId?: string; agent?: boolean; _noApplyBtn?: boolean };
+  let body: { url?: string; cliId?: string; model?: string; agent?: boolean; _noApplyBtn?: boolean };
   try {
     body = await req.json();
   } catch {
@@ -18,7 +18,7 @@ export async function POST(req: Request) {
   const url = (body.url ?? "").trim();
   if (!/^https?:\/\//i.test(url)) return Response.json({ error: "A valid application URL (https://…) is required" }, { status: 400 });
   try {
-    const session = await openSession(url, body.cliId, body.agent, body._noApplyBtn);
+    const session = await openSession(url, body.cliId, body.agent, body._noApplyBtn, body.model);
     return Response.json(session);
   } catch (e) {
     return Response.json({ error: e instanceof Error ? e.message.slice(0, 200) : "could not open the form" }, { status: 500 });

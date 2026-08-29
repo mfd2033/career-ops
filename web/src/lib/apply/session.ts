@@ -173,7 +173,7 @@ async function nudgeScroll(page: Page): Promise<void> {
   await page.evaluate(() => window.scrollTo(0, 0)).catch(() => {});
 }
 
-export async function openSession(url: string, cliId?: string, forceAgent?: boolean, noApplyBtn?: boolean): Promise<{ id: string; title: string; fields: ApplyField[]; shots: string[]; issues: ApplyIssue[]; needsDrive?: boolean }> {
+export async function openSession(url: string, cliId?: string, forceAgent?: boolean, noApplyBtn?: boolean, model?: string): Promise<{ id: string; title: string; fields: ApplyField[]; shots: string[]; issues: ApplyIssue[]; needsDrive?: boolean }> {
   prune();
   if (globalThis.__coIdleTimer) clearTimeout(globalThis.__coIdleTimer); // someone's active
   const browser = await headedBrowser();
@@ -240,7 +240,7 @@ export async function openSession(url: string, cliId?: string, forceAgent?: bool
   // result) — for users who'd rather pay tokens than risk a heuristic miss.
   if (forceAgent && cliId) {
     const aiFrame = await richestControlFrame(page);
-    const aiFields = await agentInterpretForm(aiFrame, cliId, form.title || (await page.title().catch(() => ""))).catch(() => [] as ApplyField[]);
+    const aiFields = await agentInterpretForm(aiFrame, cliId, form.title || (await page.title().catch(() => "")), model).catch(() => [] as ApplyField[]);
     if (aiFields.length) {
       frame = aiFrame;
       form = { ...form, fields: aiFields };
@@ -314,7 +314,7 @@ export function isApplicationFormFn(form: ExtractedForm): boolean {
 /** After the streamed drive loop reaches a form, extract+enrich it (Tier-3
  *  interpret as a last resort), UPDATE the open session, and return the fields +
  *  issues. Returns null if no real application form materialised. */
-export async function finalizeDrivenSession(id: string, cliId?: string): Promise<{ title: string; fields: ApplyField[]; issues: ApplyIssue[] } | null> {
+export async function finalizeDrivenSession(id: string, cliId?: string, model?: string): Promise<{ title: string; fields: ApplyField[]; issues: ApplyIssue[] } | null> {
   const s = SESSIONS.get(id);
   if (!s) return null;
   let { frame, form } = await pickFormFrame(s.page);
@@ -322,7 +322,7 @@ export async function finalizeDrivenSession(id: string, cliId?: string): Promise
   let aiInterpreted = false;
   if (!looksLikeApplicationForm(form) && cliId) {
     const aiFrame = await richestControlFrame(s.page);
-    const aiFields = await agentInterpretForm(aiFrame, cliId, form.title || s.title).catch(() => [] as ApplyField[]);
+    const aiFields = await agentInterpretForm(aiFrame, cliId, form.title || s.title, model).catch(() => [] as ApplyField[]);
     if (aiFields.length && looksLikeApplicationForm({ title: form.title, url: form.url, fields: aiFields })) {
       frame = aiFrame;
       form = { ...form, fields: aiFields };

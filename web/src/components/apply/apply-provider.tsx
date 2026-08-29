@@ -56,6 +56,13 @@ function cliId(): string | null {
     return null;
   }
 }
+function model(): string | null {
+  try {
+    return JSON.parse(localStorage.getItem(CONFIG_KEY) || "{}").model || null;
+  } catch {
+    return null;
+  }
+}
 
 export function ApplyProvider({ children }: { children: React.ReactNode }) {
   const [status, setStatus] = useState<Status>("idle");
@@ -95,7 +102,7 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
     const gen = generation.current;
     setDriveSteps([]);
     try {
-      const r = await fetch("/api/apply/drive", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: id, cliId: cliId(), goal: "reach" }) });
+      const r = await fetch("/api/apply/drive", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: id, cliId: cliId(), model: model() || undefined, goal: "reach" }) });
       if (generation.current !== gen) return; // left mid-drive
       if (!r.body) {
         setError("The agent couldn't start.");
@@ -170,7 +177,7 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
     setFrom(opts?.from ?? "");
     pendingPrefill.current = false;
     try {
-      const r = await fetch("/api/apply/session", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: u, cliId: cliId() }) });
+      const r = await fetch("/api/apply/session", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: u, cliId: cliId(), model: model() || undefined }) });
       const d = await r.json();
       // The user can leave while this is in flight, and the request can't be
       // recalled — a session that lands after they left is closed here or its
@@ -226,7 +233,7 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
       setMeta(m);
     };
     try {
-      const r = await fetch("/api/apply/prefill", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: sessionId.current, cliId: cliId() }) });
+      const r = await fetch("/api/apply/prefill", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: sessionId.current, cliId: cliId(), model: model() || undefined }) });
       if (generation.current !== gen) return; // left mid-prefill
       if (!r.body) {
         setError("Couldn't pre-fill — no response stream.");
@@ -350,7 +357,7 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
     setError("");
     setStatus("filling");
     try {
-      const r = await fetch("/api/apply/drive", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: sessionId.current, cliId: cliId(), goal: "full", answers: ans }) });
+      const r = await fetch("/api/apply/drive", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: sessionId.current, cliId: cliId(), model: model() || undefined, goal: "full", answers: ans }) });
       if (generation.current !== gen) return; // left mid-fill
       if (!r.body) {
         setError("The agent couldn't start filling.");

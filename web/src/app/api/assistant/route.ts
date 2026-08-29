@@ -1,5 +1,6 @@
 import { spawnHeadlessCli } from "@/lib/spawn-cli.mjs";
 import { resolveCli } from "@/lib/clis";
+import { withModelFlag } from "@/lib/run-cli-support.mjs";
 import { careerOpsRoot, readMemory, doctorState } from "@/lib/career-ops";
 
 export const runtime = "nodejs"; // child_process (spawn) requires the Node runtime
@@ -45,13 +46,13 @@ Keep replies short, warm, and useful. Don't dump raw files or narrate internal d
 type Msg = { role: "user" | "assistant"; content: string };
 
 export async function POST(req: Request) {
-  let body: { message?: string; cliId?: string; history?: Msg[]; pageContext?: string };
+  let body: { message?: string; cliId?: string; model?: string; history?: Msg[]; pageContext?: string };
   try {
     body = await req.json();
   } catch {
     return new Response(JSON.stringify({ error: "bad json" }), { status: 400 });
   }
-  const { message, cliId, pageContext } = body;
+  const { message, cliId, model, pageContext } = body;
   if (!message || !cliId) {
     return new Response(JSON.stringify({ error: "message and cliId required" }), { status: 400 });
   }
@@ -92,7 +93,7 @@ export async function POST(req: Request) {
   const isClaude = cliId === "claude";
   // allowedTools must be COMMA-separated; disallowedTools is the hard guardrail
   // so the advisor can read (and WebFetch) but never blind-writes or shells out.
-  const args = isClaude
+  const baseArgs = isClaude
     ? [
         "-p",
         prompt,
@@ -108,6 +109,7 @@ export async function POST(req: Request) {
         "Bash,Write,Edit,NotebookEdit,Task",
       ]
     : spec.args(prompt);
+  const args = withModelFlag(baseArgs, spec.model, model);
 
   const child = spawnHeadlessCli(binPath, args, { cwd: careerOpsRoot(), env: process.env });
 

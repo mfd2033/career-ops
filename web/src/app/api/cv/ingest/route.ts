@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { resolveCli } from "@/lib/clis";
+import { withModelFlag } from "@/lib/run-cli-support.mjs";
 import { careerOpsRoot } from "@/lib/career-ops";
 
 // Parse a CV (pasted text or an uploaded PDF) into clean cv.md markdown by running
@@ -60,19 +61,22 @@ const FILE_SRC = (p: string) => `SOURCE: the user's CV is the file at this local
 export async function POST(req: Request) {
   const ctype = req.headers.get("content-type") || "";
   let cliId = "";
+  let model = "";
   let promptSource = "";
   let tempFile: string | null = null;
 
   try {
     if (ctype.includes("application/json")) {
-      const body = (await req.json()) as { text?: string; cliId?: string };
+      const body = (await req.json()) as { text?: string; cliId?: string; model?: string };
       cliId = body.cliId || "";
+      model = body.model || "";
       const text = (body.text || "").trim();
       if (!text) return Response.json({ error: "empty cv text" }, { status: 400 });
       promptSource = TEXT_SRC(text);
     } else if (ctype.includes("multipart/form-data")) {
       const form = await req.formData();
       cliId = String(form.get("cliId") || "");
+      model = String(form.get("model") || "");
       const file = form.get("file");
       if (!(file instanceof File)) return Response.json({ error: "no file" }, { status: 400 });
       // Reading a PDF/DOCX from a path needs the CLI's file tool, which only Claude
@@ -100,7 +104,7 @@ export async function POST(req: Request) {
   const { spec, binPath } = resolved;
   const prompt = ingestPrompt(promptSource);
   const isClaude = cliId === "claude";
-  const args = isClaude
+  const baseArgs = isClaude
     ? [
         "-p",
         prompt,
@@ -116,6 +120,7 @@ export async function POST(req: Request) {
         "Bash,Write,Edit,NotebookEdit,Task,WebFetch,WebSearch",
       ]
     : spec.args(prompt);
+  const args = withModelFlag(baseArgs, spec.model, model);
 
   let child;
   try {

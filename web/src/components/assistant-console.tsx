@@ -135,6 +135,7 @@ function msgText(m: Msg): string {
 export function AssistantConsole() {
   const [open, setOpen] = useState(false);
   const [cliId, setCliId] = useState<string | null>(null);
+  const [model, setModel] = useState<string | null>(null);
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -166,9 +167,12 @@ export function AssistantConsole() {
     function read() {
       try {
         const raw = localStorage.getItem(CONFIG_KEY);
-        setCliId(raw ? JSON.parse(raw).cliId || null : null);
+        const parsed = raw ? JSON.parse(raw) : {};
+        setCliId(parsed.cliId || null);
+        setModel(parsed.model || null);
       } catch {
         setCliId(null);
+        setModel(null);
       }
     }
     read();
@@ -354,7 +358,7 @@ export function AssistantConsole() {
       const res = await fetch("/api/assistant", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: text, cliId, history, pageContext: describePage(pathname) + pipelineContext() + applyContext() }),
+        body: JSON.stringify({ message: text, cliId, model: model || undefined, history, pageContext: describePage(pathname) + pipelineContext() + applyContext() }),
       });
       if (!res.ok || !res.body) {
         const err = await res.json().catch(() => ({}));

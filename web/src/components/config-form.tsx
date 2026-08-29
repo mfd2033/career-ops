@@ -9,11 +9,16 @@ import {
   Loader2,
   CircleDashed,
   ExternalLink,
+  ChevronDown,
+  Sparkles,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { CadenceSettings } from "@/components/followups/cadence-settings";
-import { persistCliId, readSavedCliId } from "@/lib/saved-cli";
+import { persistCliId, persistModel, readSavedCliId, readSavedModel } from "@/lib/saved-cli";
 import { useI18n } from "@/lib/i18n/context";
+
+type ModelOption = { id: string; label: string };
+type ModelMeta = { flag: string; default: string; options: ModelOption[] };
 
 type Cli = {
   id: string;
@@ -22,6 +27,7 @@ type Cli = {
   url: string;
   installed: boolean;
   path: string | null;
+  model: ModelMeta;
 };
 
 type Mode = "cli" | "key" | "manual";
@@ -40,6 +46,7 @@ export function ConfigForm() {
   const [mode, setMode] = useState<Mode>("cli");
   const [clis, setClis] = useState<Cli[] | null>(null);
   const [cliId, setCliId] = useState<string>("");
+  const [model, setModel] = useState<string>("");
   const [provider, setProvider] = useState("anthropic");
   const [apiKey, setApiKey] = useState("");
   const [logos, setLogos] = useState(true);
@@ -55,6 +62,7 @@ export function ConfigForm() {
         // those dead panels; only the Installed-CLI path is functional.
         if (v.mode === "cli") setMode("cli");
         if (v.cliId) setCliId(v.cliId);
+        if (v.model) setModel(v.model);
         if (v.provider) setProvider(v.provider);
         if (typeof v.logos === "boolean") setLogos(v.logos);
       }
@@ -87,12 +95,25 @@ export function ConfigForm() {
     // The API key is deliberately NOT persisted: nothing reads it yet (the
     // key/manual panel is unwired) and a secret must never sit in clear-text
     // localStorage. Keys belong in the user's own CLI/provider config.
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ mode, cliId, provider, logos }));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ mode, cliId, model, provider, logos }));
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   }
 
   const installed = clis?.filter((c) => c.installed) ?? [];
+  const selectedCli = clis?.find((c) => c.id === cliId) ?? null;
+  // The model the CLI would run with: the user's saved pick, else the CLI's own
+  // default. Honest before any choice is made — no phantom "current model".
+  const currentModel = model || selectedCli?.model.default || "";
+
+  // The model picker follows the selected CLI: if the saved model isn't one of
+  // the currently-selected CLI's options (the user switched CLI, or a stale
+  // pick survived), fall back to the CLI's own default rather than spawning a
+  // model that CLI doesn't know.
+  useEffect(() => {
+    if (!model || !selectedCli) return;
+    if (!selectedCli.model.options.some((o) => o.id === model)) setModel("");
+  }, [model, selectedCli]);
 
   return (
     <div className="mx-auto max-w-2xl px-6 py-10">
@@ -214,6 +235,45 @@ export function ConfigForm() {
                 <p className="mt-2 text-[11px] leading-relaxed text-faint">
                   {t("config.bestOn1")} <span className="text-muted">Claude Code</span> {t("config.bestOn2")}
                 </p>
+
+                {selectedCli && selectedCli.model?.options.length > 0 && (
+                  <div className="mt-4 rounded-xl border border-border bg-surface/50 p-4">
+                    <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-muted">
+                      {t("config.model")}
+                    </label>
+                    <p className="mb-2 text-xs text-faint">{t("config.modelDesc")}</p>
+                    <div className="relative">
+                      <select
+                        value={model}
+                        onChange={(e) => setModel(e.target.value)}
+                        className="w-full appearance-none rounded-lg border border-border bg-surface/60 px-3 py-2 pr-9 text-sm text-foreground outline-none transition-colors focus:border-brand/50 focus-visible:ring-2 focus-visible:ring-brand/40"
+                      >
+                        <option value="">
+                          {t("config.modelDefault", { model: selectedCli.model.default || t("config.modelAuto") })}
+                        </option>
+                        {selectedCli.model.options.map((o) => (
+                          <option key={o.id} value={o.id}>
+                            {o.label}
+                          </option>
+                        ))}
+                      </select>
+                      <ChevronDown className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-faint" />
+                    </div>
+                    {selectedCli.model.flag && (
+                      <p className="mt-2 inline-flex items-center gap-1 text-[11px] text-faint">
+                        <Sparkles className="size-3" />
+                        <span className="font-mono">{t("config.modelFlag")} {selectedCli.model.flag}</span>
+                      </p>
+                    )}
+                    {currentModel && (
+                      <div className="mt-3 flex items-center gap-2 rounded-lg border border-brand/30 bg-brand-soft/40 px-3 py-2 text-sm">
+                        <Sparkles className="size-4 shrink-0 text-brand" />
+                        <span className="text-muted">{t("config.currentModel")}</span>
+                        <span className="min-w-0 truncate font-mono text-foreground">{currentModel}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             )}
           </div>

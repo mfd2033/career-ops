@@ -22,6 +22,14 @@ function cliId(): string | null {
   }
 }
 
+function model(): string | null {
+  try {
+    return JSON.parse(localStorage.getItem("career-ops:config") || "{}").model || null;
+  } catch {
+    return null;
+  }
+}
+
 const STYLE = `
 .co-cvdrop{position:relative;border:1.5px dashed color-mix(in srgb, var(--fg) 22%, transparent);border-radius:1rem;transition:border-color .2s,background .2s}
 .co-cvdrop[data-over="true"]{border-color:hsl(26 73% 51%);background:hsl(26 73% 51% /.05)}
@@ -107,7 +115,7 @@ export function CvIngest({ onSaved }: { onSaved?: () => void }) {
       setPhase("review");
       return;
     }
-    void runStream({ method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: trimmed, cliId: id }) });
+    void runStream({ method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: trimmed, cliId: id, model: model() || undefined }) });
   };
 
   const ingestFile = (file: File) => {
@@ -141,6 +149,7 @@ export function CvIngest({ onSaved }: { onSaved?: () => void }) {
     const form = new FormData();
     form.append("file", file);
     form.append("cliId", id);
+    form.append("model", model() || "");
     void runStream({ method: "POST", body: form });
   };
 
