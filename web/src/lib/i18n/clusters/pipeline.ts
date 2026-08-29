@@ -112,6 +112,12 @@ export const en: Dict = {
   "pipeline.generateTitle": "Generate an ATS-optimized CV tailored to this role",
   "pipeline.generateCv": "Generate tailored CV (PDF)",
 
+  // ── Open tailored CV folder (open-cv-folder-button.tsx) ──
+  "pipeline.openCvFolder": "Open CV folder",
+  "pipeline.openCvFolderTitle": "Reveal the tailored CV PDF in File Explorer",
+  "pipeline.openCvFolderOk": "Opened in file manager",
+  "pipeline.openCvFolderError": "Couldn't open the CV folder: {error}",
+
   // ── Copyable command (copyable-command.tsx) ──
   "pipeline.copied": "Copied",
   "pipeline.copyAriaCopied": "Copied to clipboard",
@@ -273,6 +279,12 @@ export const zh: Dict = {
   "pipeline.regenerateTitle": "重新生成定制简历",
   "pipeline.generateTitle": "生成针对该职位优化的 ATS 简历",
   "pipeline.generateCv": "生成定制简历（PDF）",
+
+  // ── Open tailored CV folder (open-cv-folder-button.tsx) ──
+  "pipeline.openCvFolder": "打开定制简历所在位置",
+  "pipeline.openCvFolderTitle": "在文件管理器中定位定制简历 PDF",
+  "pipeline.openCvFolderOk": "已在文件管理器中打开",
+  "pipeline.openCvFolderError": "无法打开所在位置：{error}",
 
   // ── Copyable command (copyable-command.tsx) ──
   "pipeline.copied": "已复制",

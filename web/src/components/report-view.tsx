@@ -12,6 +12,7 @@ import { StatusSelect } from "@/components/status-select";
 import { CompanyLogo } from "@/components/company-logo";
 import { ScoreMethodology } from "@/components/score-methodology";
 import { GeneratePdfButton } from "@/components/generate-pdf-button";
+import { OpenCvFolderButton } from "@/components/open-cv-folder-button";
 import { ApplyButton } from "@/components/apply-button";
 import { DeleteFromTracker } from "@/components/delete-from-tracker";
 import { SkipFromTracker } from "@/components/skip-from-tracker";
@@ -114,6 +115,7 @@ export function ReportView({
   const date = app?.date || field("Date");
   const archetype = field("Archetype");
   const url = field("URL");
+  const pdfReady = (app?.pdf ?? "").includes("✅");
 
   return (
     <div className="mx-auto max-w-3xl px-6 py-8">
@@ -146,8 +148,9 @@ export function ReportView({
           {meta?.legitimacy && <Badge tone={legitimacyTone(meta.legitimacy)}>{translateLegitimacy(meta.legitimacy)}</Badge>}
           {app && <StatusSelect n={id} current={app.status} />}
           {app && app.status !== "Discarded" && <SkipFromTracker n={id} />}
-          <GeneratePdfButton n={id} company={app?.company ?? meta?.title ?? id} pdfReady={(app?.pdf ?? "").includes("✅")} />
-          <ApplyButton n={id} url={url && url.startsWith("http") ? url : undefined} company={app?.company ?? meta?.title ?? id} pdfReady={(app?.pdf ?? "").includes("✅")} />
+          <GeneratePdfButton n={id} company={app?.company ?? meta?.title ?? id} pdfReady={pdfReady} />
+          {pdfReady && <OpenCvFolderButton company={app?.company ?? meta?.title ?? id} />}
+          <ApplyButton n={id} url={url && url.startsWith("http") ? url : undefined} company={app?.company ?? meta?.title ?? id} pdfReady={pdfReady} />
         </div>
 
         {app && canDelete && (
