@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { CadenceSettings } from "@/components/followups/cadence-settings";
+import { JdRulesSettings } from "@/components/jd-rules-settings";
 import { persistCliId, persistModel, readSavedCliId, readSavedModel } from "@/lib/saved-cli";
 import { resolveModelPicker } from "@/lib/model-picker.mjs";
 import { useI18n } from "@/lib/i18n/context";
@@ -448,6 +449,8 @@ export function ConfigForm() {
       </div>
 
       <CadenceSettings />
+
+      <JdRulesSettings />
 
       <div className="mt-8 flex items-center gap-3">
         <button

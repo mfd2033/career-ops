@@ -45,6 +45,19 @@ export const en: Dict = {
   "config.langChinese": "简体中文",
   "config.currentLang": "Current display language: {lang}",
   "config.switchNow": "Switch now",
+
+  "config.jdRulesTitle": "JD evaluation rules",
+  "config.jdRulesDesc": "Exclusion and flexibility rules applied to every evaluation. Saved to config/profile.yml — they also apply to CLI evaluations and re-evaluations.",
+  "config.dealBreakers": "Deal-breakers",
+  "config.dealBreakersHint": "One per line. Roles matching any of these are treated as a poor fit (e.g. frequent business travel, pure outsourcing).",
+  "config.dealBreakersPlaceholder": "出差较多的职位不考虑（含频繁出差）\n不做纯外包",
+  "config.locationFlexibility": "Location flexibility",
+  "config.locationFlexibilityHint": "Where and how you can work — e.g. local-first, remote-friendly, travel limits, no outsourcing.",
+  "config.locationFlexibilityPlaceholder": "郑州本地优先，可接受远程，不接受出差（含频繁与较多出差），不做纯外包",
+  "config.saveJdRules": "Save rules",
+  "config.jdRulesSaved": "Saved",
+  "config.jdRulesLoadError": "Couldn't read config/profile.yml — refusing to overwrite it.",
+  "config.jdRulesSaveError": "Couldn't save the rules.",
 };
 
 // Simplified Chinese strings. Every key in en must have a matching key here.
@@ -90,4 +103,17 @@ export const zh: Dict = {
   "config.langChinese": "简体中文",
   "config.currentLang": "当前显示语言：{lang}",
   "config.switchNow": "立即切换",
+
+  "config.jdRulesTitle": "JD 评估规则",
+  "config.jdRulesDesc": "每次评估都会应用的排除与灵活性规则。保存到 config/profile.yml——同样适用于 CLI 评估与重新评估。",
+  "config.dealBreakers": "一票否决项",
+  "config.dealBreakersHint": "每行一条。命中任一条的职位视为不匹配（例如频繁出差、纯外包）。",
+  "config.dealBreakersPlaceholder": "出差较多的职位不考虑（含频繁出差）\n不做纯外包",
+  "config.locationFlexibility": "地点灵活性",
+  "config.locationFlexibilityHint": "你可以在哪里、以何种方式工作——例如本地优先、可远程、出差限制、不做外包。",
+  "config.locationFlexibilityPlaceholder": "郑州本地优先，可接受远程，不接受出差（含频繁与较多出差），不做纯外包",
+  "config.saveJdRules": "保存规则",
+  "config.jdRulesSaved": "已保存",
+  "config.jdRulesLoadError": "无法读取 config/profile.yml——拒绝覆盖。",
+  "config.jdRulesSaveError": "无法保存规则。",
 };
