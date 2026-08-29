@@ -205,7 +205,15 @@ export async function POST(req: Request) {
       // generate-pdf.mjs mid-render. 600s agent / ~200s render is ample —
       // a Chromium PDF render normally takes low tens of seconds even with a
       // cold Playwright launch.
-      const killMs = kind === "pdf" ? 600_000 : 285_000;
+      //
+      // An oferta evaluation is heavier than it looks on a CLI that auto-loads
+      // a full MCP surface (Playwright, codegraph, doctor, company-history,
+      // Block-G research) before it even writes the report + TSV + merge. On
+      // OpenCode that chain routinely exceeded the old 285s and the worker was
+      // killed mid-report — the reserve sentinel got written but no report, so
+      // the honesty gate reported "didn't save a report". Evaluate has no
+      // render phase to reserve headroom for, so give it the full 600s too.
+      const killMs = 600_000;
       killer = setTimeout(() => {
         try { child.kill("SIGTERM"); } catch { /* ignore */ }
       }, killMs);
