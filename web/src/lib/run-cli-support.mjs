@@ -109,6 +109,25 @@ export function isFatalClaudeStderr(line) {
 }
 
 /**
+ * Whether one OpenCode stderr line should be treated as a fatal error.
+ *
+ * OpenCode, like Claude/Codex, streams its own progress/telemetry to stderr
+ * (banner, model line, ANSI escapes, and — during an evaluation — the MCP
+ * surface's stdout/stderr pass-through). A bare `\berror\b` / `not found` in
+ * any of that is routine noise, so the generic fallback flagged clean runs as
+ * "hit an error before finishing" even though the report and tracker row were
+ * both written. OpenCode has a meaningful exit code (0 = clean, observed), so
+ * apply the same classifier as Codex: only real auth and quota failures are
+ * fatal on the stderr channel.
+ *
+ * @param {string} line
+ * @returns {boolean}
+ */
+export function isFatalOpenCodeStderr(line) {
+  return FATAL_AUTH_STDERR_RE.test(line) || isFatalQuotaStderr(line);
+}
+
+/**
  * Fallback classifier for a CLI with no `stderrIsFatal` of its own.
  *
  * Only claude and codex define one, so SIX of the eight entries in KNOWN reach

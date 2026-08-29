@@ -41,7 +41,7 @@ var trayIcon []byte
 
 // Bump cacheVersion whenever the embedded app changes so stale caches are
 // re-extracted instead of being reused.
-const cacheVersion = "6"
+const cacheVersion = "7"
 
 func main() {
 	exe, err := os.Executable()
