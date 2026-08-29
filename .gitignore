@@ -28,6 +28,15 @@ batch/batch-state-recovery.d/
 batch/batch-input.tsv
 batch/tracker-additions/**/*.tsv
 !batch/tracker-additions/.gitkeep
+# Local CV-rebuild data (personal profile + tailored CV content) — never tracked.
+batch/cv-rebuild-data.mjs
+# Local Zhipin extraction output (scraped JD text) — personal data, never tracked.
+batch/zhipin*.txt
+batch/zhipin*.json
+# Local Zhipin fetch/extract scripts (personal one-off scraping helpers).
+batch/extract-zhipin.cjs
+batch/extract-zhipin.mjs
+batch/fetch-zhipin.cjs
 jds/*
 !jds/.gitkeep
 
