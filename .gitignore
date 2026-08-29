@@ -34,9 +34,9 @@ batch/cv-rebuild-data.mjs
 batch/zhipin*.txt
 batch/zhipin*.json
 # Local Zhipin fetch/extract scripts (personal one-off scraping helpers).
-batch/extract-zhipin.cjs
-batch/extract-zhipin.mjs
-batch/fetch-zhipin.cjs
+/batch/extract-zhipin.cjs
+/batch/extract-zhipin.mjs
+/fetch-zhipin.cjs
 jds/*
 !jds/.gitkeep
 
