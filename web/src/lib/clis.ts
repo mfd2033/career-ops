@@ -122,16 +122,75 @@ function binCandidates(bin: string): string[] {
   return [...exts.map((ext) => bin + ext), bin];
 }
 
+function isSpawnable(p: string): boolean {
+  try {
+    fs.accessSync(p, fs.constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// An npm global install tucks the REAL native binary under
+// `{prefix}\node_modules\{pkg}\bin\{bin}.exe` (and, for scoped packages,
+// `{prefix}\node_modules\{@scope}\{pkg}\bin\{bin}.exe`). The `{bin}` and
+// `{bin}.cmd` at the prefix root are just a POSIX shim and a cmd shim. Only
+// the `.exe` can be spawned directly — the shims cannot: the extensionless one
+// fails `spawn ... ENOENT`, and the `.cmd` fails `EINVAL` on Node < 22.9, or
+// (routed through cmd.exe) mangles a multi-line prompt by truncating it at the
+// first newline. So on Windows resolve the real `.exe` first.
+function findNpmGlobalExe(dir: string, bin: string): string | null {
+  const nm = path.join(dir, "node_modules");
+  let packages: string[];
+  try {
+    packages = fs.readdirSync(nm);
+  } catch {
+    return null; // no node_modules here (most PATH entries) — cheap to skip
+  }
+  for (const pkg of packages) {
+    // npm stages an install into a transient `.pkg-XXXXXX` dir and renames it
+    // into place; a stale one left behind holds an OLD copy of the native
+    // binary and (sorting first) would shadow the real package. Skip dot-dirs.
+    if (pkg.startsWith(".")) continue;
+    if (pkg.startsWith("@")) {
+      let scoped: string[];
+      try {
+        scoped = fs.readdirSync(path.join(nm, pkg));
+      } catch {
+        continue;
+      }
+      for (const sub of scoped) {
+        if (sub.startsWith(".")) continue;
+        const exe = path.join(nm, pkg, sub, "bin", bin + ".exe");
+        if (isSpawnable(exe)) return exe;
+      }
+    } else {
+      const exe = path.join(nm, pkg, "bin", bin + ".exe");
+      if (isSpawnable(exe)) return exe;
+    }
+  }
+  return null;
+}
+
 export function findBin(bin: string, dirs = searchDirs()): string | null {
+  if (process.platform === "win32") {
+    // Prefer a directly-spawnable native binary, since spawn must pass a
+    // multi-line prompt intact. Look for a real installer's `{bin}.exe`/`.com`
+    // at each dir root, then npm's real `.exe` under node_modules. The
+    // `.cmd`/`.bat`/extensionless shims below are a detectClis fallback only.
+    for (const dir of dirs) {
+      for (const candidate of [bin + ".exe", bin + ".com"]) {
+        const p = path.join(dir, candidate);
+        if (isSpawnable(p)) return p;
+      }
+      const exe = findNpmGlobalExe(dir, bin);
+      if (exe) return exe;
+    }
+  }
   for (const dir of dirs) {
     for (const candidate of binCandidates(bin)) {
       const p = path.join(dir, candidate);
-      try {
-        fs.accessSync(p, fs.constants.X_OK);
-        return p;
-      } catch {
-        /* not here */
-      }
+      if (isSpawnable(p)) return p;
     }
   }
   return null;

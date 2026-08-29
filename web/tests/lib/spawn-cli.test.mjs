@@ -6,7 +6,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { rewriteCliSpawn, spawnHeadlessCli } from "../../src/lib/spawn-cli.mjs";
+import { spawnHeadlessCli } from "../../src/lib/spawn-cli.mjs";
 
 test("spawnHeadlessCli closes stdin so a headless CLI can start", async () => {
   // Given: a child that only speaks once its stdin has reached EOF — a stand-in
@@ -70,35 +70,4 @@ test("spawnHeadlessCli tolerates a caller that passes stdio itself", async () =>
   assert.equal(stdout, "OK");
 });
 
-// rewriteCliSpawn exists because a Windows npm global install lays down three
-// files for one `bin`, only one of which is executable without help:
-// a POSIX shim (bare name, spawn → ENOENT), a `.cmd` launcher (spawn direct →
-// EINVAL on Node < 22.9), and a `.ps1`. The `.cmd` must run through
-// cmd.exe /d /s /c with args kept as separate argv entries so cmd metacharacters
-// in a prompt (`&`, `|`, `<`, `>`) are quoted by CreateProcess, not interpreted
-// by the shell. Testing via the injected `platform` argument keeps these
-// assertions stable on every OS.
 
-test("rewriteCliSpawn leaves POSIX paths untouched", () => {
-  const out = rewriteCliSpawn("/usr/local/bin/claude", ["-p", "hi"], "linux");
-  assert.deepEqual(out, { file: "/usr/local/bin/claude", args: ["-p", "hi"] });
-});
-
-test("rewriteCliSpawn leaves non-cmd Windows executables untouched", () => {
-  const out = rewriteCliSpawn("C:\\tools\\claude.exe", ["-p", "hi"], "win32");
-  assert.deepEqual(out, { file: "C:\\tools\\claude.exe", args: ["-p", "hi"] });
-});
-
-test("rewriteCliSpawn wraps .cmd/.bat through cmd.exe with args as separate argv", () => {
-  const comspec = process.env.ComSpec || "cmd.exe";
-  const out = rewriteCliSpawn("D:\\node_global\\opencode.cmd", ["run", "prompt & | < >"], "win32");
-  assert.equal(out.file, comspec);
-  assert.deepEqual(out.args, ["/d", "/s", "/c", "D:\\node_global\\opencode.cmd", "run", "prompt & | < >"]);
-});
-
-test("rewriteCliSpawn treats .BAT case-insensitively", () => {
-  const comspec = process.env.ComSpec || "cmd.exe";
-  const out = rewriteCliSpawn("C:\\x\\run.BAT", ["a"], "win32");
-  assert.equal(out.file, comspec);
-  assert.deepEqual(out.args, ["/d", "/s", "/c", "C:\\x\\run.BAT", "a"]);
-});
