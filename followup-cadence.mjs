@@ -936,11 +936,18 @@ function printSummary(result) {
 
 // ── CLI flags + help ────────────────────────────────────────────────
 
-const KNOWN_FLAGS = ['--summary', '--overdue-only', '--applied-days', '--help', '-h'];
+// `--json` is an EXPLICIT form of the default JSON output — the web UI has
+// always invoked `followup-cadence.mjs --json` to request the machine-readable
+// payload (it never relied on the bare default), so the strict flag validation
+// added in #3196 must not reject the web's own calling convention. Without it
+// the web's /api/followups and /api/followups/cadence got an empty stdout and
+// reported "Cadence unavailable".
+const KNOWN_FLAGS = ['--summary', '--json', '--overdue-only', '--applied-days', '--help', '-h'];
 const VALUE_FLAGS = ['--applied-days'];
 
 const USAGE = `Usage:
   node followup-cadence.mjs                    # full JSON analysis to stdout
+  node followup-cadence.mjs --json             # explicit JSON output (same as default)
   node followup-cadence.mjs --summary          # human-readable dashboard
   node followup-cadence.mjs --overdue-only     # only show overdue/urgent entries
   node followup-cadence.mjs --applied-days 10  # override applied_first cadence (days)
