@@ -46,7 +46,49 @@ node dashboard-ui/build-dashboard-ui.mjs
 5. 用 go-winres 重新生成 `.syso` 资源（图标 + manifest + 版本），
 6. 把 `career-dashboard-ui.exe` 编译到仓库根目录。
 
-需要 **Node 20+**（Next 16 引擎下限）、**Go 1.24+** 和 **go-winres**（首次运行时自动安装到 `.gobin/`）。
+需要 **Node 20+**（Next 16 引擎下限）、**Go 1.24+** 和 **go-winres**（首次运行时自动安装到 `.gobin/`）。先确认环境：
+
+```bash
+node --version   # 需 ≥ v20
+go version       # 需 ≥ go1.24
+```
+
+### 打包产物
+
+脚本会构建 `web/`（Next standalone），把当前运行的 Node 二进制一并嵌入，并编译启动器到仓库根目录：
+
+- **输出：** 仓库根目录下的 `career-dashboard-ui.exe`（约 120 MB）
+- **耗时：** 一般机器约 1–3 分钟（首次会安装 go-winres，更久一些）。旁边跑着 `next dev` 也不冲突——构建写入的是独立的输出目录。
+- **内嵌缓存版本：** 只要内嵌的应用有变化，就必须递增 `main.go` 里的 `cacheVersion`，否则已安装用户会复用旧的 `.dashboard-runtime\v{N}` 缓存，看不到新代码。
+
+### 验证构建产物
+
+```bash
+# 1. 确认 exe 存在且时间戳是最新的
+Get-Item career-dashboard-ui.exe
+
+# 2. 冒烟测试：启动它（GUI 程序，无控制台），等几秒
+.\career-dashboard-ui.exe
+
+# 3. 它会在 exe 旁解压 .dashboard-runtime\v{N}，选一个空闲端口（3000+）起服务
+#    端口号写在 .dashboard-runtime\v{N}\LOCK 里 —— 验证 API 是否应答：
+Invoke-WebRequest "http://127.0.0.1:3000/api/version"   # 期望 HTTP 200
+
+# 4. 诊断：若行为异常，查看托盘日志
+Get-Content .dashboard-runtime\v{N}\tray-debug.log
+```
+
+### 常见问题
+
+| 现象 | 解决办法 |
+|------|----------|
+| `go: command not found` | 安装 Go 1.24+ 并加入 `PATH` |
+| 首次打包 go-winres 安装失败 | 检查网络 / `GOPROXY` 后重试；成功后缓存在 `.gobin/`，之后不再安装 |
+| exe 启动了但浏览器没弹出来 | 查看 `.dashboard-runtime\v{N}\tray-debug.log`（始终会写） |
+| 重新打包后网页还是旧版 | 忘了递增 `main.go` 的 `cacheVersion`——旧缓存被复用了 |
+| 弹「server exited unexpectedly」对话框 | 看托盘日志，用托盘菜单「重启服务」重试 |
+
+exe 是 Windows GUI 程序（`-H windowsgui`）：**默认没有控制台输出**——托盘日志是唯一的诊断渠道。
 
 ## 说明
 
