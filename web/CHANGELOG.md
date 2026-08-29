@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.2](https://github.com/santifer/career-ops/compare/web-v0.7.1...web-v0.7.2) (2026-08-29)
+
+
+### Bug Fixes
+
+* **web:** config page keeps the last-saved model as the "current model" readout — previewing a dropdown option no longer flips it, and a saved model absent from the dynamic CLI list is no longer wiped ([a252399](https://github.com/santifer/career-ops/commit/a2523990b2c7e0f0dcd95f9be3e4685ef8e5f1d1))
+
 ## [0.7.1](https://github.com/santifer/career-ops/compare/web-v0.7.0...web-v0.7.1) (2026-08-20)
 
 
