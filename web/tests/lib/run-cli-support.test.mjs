@@ -17,6 +17,7 @@ import {
   isFatalClaudeStderr,
   isFatalCodexStderr,
   isFatalGenericStderr,
+  isFatalOpenCodeStderr,
   parseClaudeEvent,
   parseCodexEvent,
 } from "../../src/lib/run-cli-support.mjs";
@@ -277,6 +278,30 @@ test("terminal retry wording does not trigger the transient carve-out", () => {
   assert.equal(isFatalCodexStderr("rate limit: retry limit exhausted"), true);
 });
 
+test("benign OpenCode stderr diagnostics are not fatal", () => {
+  // OpenCode streams its own banner/progress and the MCP surface's stdout/stderr
+  // to stderr — a bare "error"/"not found" in that noise must not fail a clean
+  // run (the generic fallback's false positive on exactly this kind of line).
+  assert.equal(isFatalOpenCodeStderr("error: some MCP tool failed but the run completed"), false);
+  assert.equal(isFatalOpenCodeStderr("command not found: foo (non-fatal)"), false);
+  assert.equal(isFatalOpenCodeStderr("[playwright] Error: element not found, retrying selector"), false);
+});
+
+test("OpenCode auth-failure stderr phrases are fatal", () => {
+  assert.equal(isFatalOpenCodeStderr("Error: unauthorized"), true);
+  assert.equal(isFatalOpenCodeStderr("please log in to continue"), true);
+  assert.equal(isFatalOpenCodeStderr("credential file missing"), true);
+  assert.equal(isFatalOpenCodeStderr("403 forbidden"), true);
+  assert.equal(isFatalOpenCodeStderr("not authenticated"), true);
+  assert.equal(isFatalOpenCodeStderr("sign in required"), true);
+});
+
+test("OpenCode quota/rate-limit stderr is fatal unless self-retrying", () => {
+  assert.equal(isFatalOpenCodeStderr("Error: quota exceeded"), true);
+  assert.equal(isFatalOpenCodeStderr("429 rate limit hit"), true);
+  assert.equal(isFatalOpenCodeStderr("429 rate limit hit, retrying in 2s..."), false);
+});
+
 test("a benign Claude stderr line mentioning an error is not fatal", () => {
   // Given: the generic fallback regex matches a bare "error", which fails a run
   // over any diagnostic that merely says the word — the same false positive the
@@ -445,9 +470,9 @@ test("the argv keeps --json and the parser reads the JSONL it turns on", () => {
 
 // ── the fallback stderr classifier (#1974) ──────────────────────────────────
 //
-// Only claude and codex define `stderrIsFatal`, so six of the eight entries in
-// KNOWN reach this path. It lived as an inline regex inside route.ts's stream
-// closure, where nothing could assert it — which is how `auth` came to match
+// Only claude, codex, and opencode define `stderrIsFatal`, so five of the eight
+// entries in KNOWN reach this path. It lived as an inline regex inside route.ts's
+// stream closure, where nothing could assert it — which is how `auth` came to match
 // inside "author" and a success message came to fail a run.
 
 test("the fallback does not fail a run because a word appeared", () => {
