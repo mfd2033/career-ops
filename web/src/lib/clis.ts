@@ -111,8 +111,15 @@ function binCandidates(bin: string): string[] {
     // Only include extensions that `child_process.spawn()` can execute directly.
     .filter((e) => [".com", ".exe", ".bat", ".cmd"].includes(e.toLowerCase()));
 
-  // Try the bare name too (some environments provide an extensionless shim).
-  return [bin, ...exts.map((ext) => bin + ext)];
+  // On Windows an extensionless file beside the executable is almost always a
+  // POSIX shim — npm writes a bash script on the bare `bin` name (`opencode`)
+  // next to `opencode.cmd`/`opencode.exe`. child_process.spawn cannot execute
+  // that extensionless script and fails with `spawn ... ENOENT`, while
+  // fs.accessSync(X_OK) reports it as "executable" because Windows treats X_OK
+  // as mere existence. Try the real executable extensions first (mirroring the
+  // shell's PATHEXT resolution) and fall back to the bare name only as a last
+  // resort for a rare genuinely-executable extensionless shim.
+  return [...exts.map((ext) => bin + ext), bin];
 }
 
 export function findBin(bin: string, dirs = searchDirs()): string | null {
