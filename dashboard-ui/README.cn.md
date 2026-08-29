@@ -15,7 +15,7 @@ exe 内嵌了：
 1. 以**自身可执行文件目录**为锚点确定 career-ops 根目录——从 exe 所在位置读取 `cv.md` / `data/` / `reports/`（与 Go TUI 一致），
 2. 首次运行时把内嵌运行时解压到 exe 旁的 `.dashboard-runtime\v{N}` 目录（带缓存；重复启动近乎秒开），
 3. 选取空闲端口（3000+），设置 `CAREER_OPS_ROOT` / `PORT` / `HOSTNAME` 后启动服务器，并等待其响应，
-4. 在 `http://127.0.0.1:<port>` 打开默认浏览器，然后保持常驻（若已有实例在运行则复用之——再次双击只会重新打开浏览器）。
+4. 在 `http://localhost:<port>` 打开默认浏览器（服务器绑定 127.0.0.1，但浏览器打开的是 "localhost"，使其与调试工作流 `http://localhost:3000` 同源，localStorage 偏好共享），然后保持常驻（若已有实例在运行则复用之——再次双击只会重新打开浏览器）。
 
 它是 Windows GUI 程序（`-H windowsgui`）：没有控制台窗口，用户机器上无需安装 Node。
 

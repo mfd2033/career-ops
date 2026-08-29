@@ -10,7 +10,10 @@
 //     to the exe (versioned, so repeat launches start near-instantly),
 //  3. picks a free port, starts the server with CAREER_OPS_ROOT / PORT /
 //     HOSTNAME set, waits until it answers,
-//  4. opens the default browser at http://127.0.0.1:<port>, and
+//  4. opens the default browser at http://localhost:<port> (the server binds
+//     127.0.0.1; the browser opens "localhost" so the origin matches the dev
+//     workflow's http://localhost:3000 and localStorage prefs (language, theme,
+//     model) are shared between dev and the exe), and
 //  5. stays alive (reusing a running instance if one is already up).
 package main
 
@@ -40,8 +43,10 @@ var nodeExe []byte
 var trayIcon []byte
 
 // Bump cacheVersion whenever the embedded app changes so stale caches are
-// re-extracted instead of being reused.
-const cacheVersion = "9"
+// re-extracted instead of being reused. Failing to bump means an old
+// .dashboard-runtime\v{N} is reused and the running dashboard silently shows
+// an old build (e.g. a feature committed after the last build appears missing).
+const cacheVersion = "10"
 
 func main() {
 	exe, err := os.Executable()
@@ -74,7 +79,7 @@ func main() {
 
 	// Reuse an already-running instance if one is alive on the locked port.
 	if port, ok := readLock(runtimeDir); ok && httpAlive(port) {
-		openBrowser(fmt.Sprintf("http://127.0.0.1:%d", port))
+		openBrowser(fmt.Sprintf("http://localhost:%d", port))
 		return
 	}
 
@@ -90,7 +95,7 @@ func main() {
 	defer func() { _ = os.Remove(filepath.Join(runtimeDir, "LOCK")) }()
 
 	waitReady(port, 60*time.Second)
-	openBrowser(fmt.Sprintf("http://127.0.0.1:%d", port))
+	openBrowser(fmt.Sprintf("http://localhost:%d", port))
 
 	// Live with the system tray until the user asks to quit: the tray's menu
 	// (Open / Restart / Quit) drives the rest of the process life cycle.
@@ -254,7 +259,7 @@ func runTrayLoop(cmd *exec.Cmd, nodePath, serverDir, careerRoot, runtimeDir stri
 			switch c {
 			case trayOpen:
 				log.Printf("tray: open command")
-				openBrowser(fmt.Sprintf("http://127.0.0.1:%d", port))
+				openBrowser(fmt.Sprintf("http://localhost:%d", port))
 			case trayRestart:
 				log.Printf("tray: restart command")
 				port = restartServer(curCmd, nodePath, serverDir, careerRoot, runtimeDir, port)
@@ -320,7 +325,7 @@ func restartServer(curCmd *atomic.Pointer[exec.Cmd], nodePath, serverDir, career
 	}
 
 	waitReady(newPort, 30*time.Second)
-	openBrowser(fmt.Sprintf("http://127.0.0.1:%d", newPort))
+	openBrowser(fmt.Sprintf("http://localhost:%d", newPort))
 	return newPort
 }
 
