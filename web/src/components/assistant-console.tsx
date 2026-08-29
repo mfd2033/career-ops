@@ -248,6 +248,7 @@ export function AssistantConsole() {
       push: (p) => router.push(p),
       replace: (p) => router.replace(p),
       startJob,
+      t,
       inbox: pipelineRef.current.inbox,
       applications: pipelineRef.current.applications,
       jobForUrl: (url) => {

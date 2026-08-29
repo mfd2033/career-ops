@@ -44,6 +44,17 @@ export const en: Dict = {
   "jobs.historyAria": "Worker history",
   "jobs.historyTitle": "History",
   "jobs.clear": "clear",
+  "jobs.dismissJob": "Dismiss job",
+  "jobs.cvPdfTitle": "CV PDF · {company}",
+  "jobs.pdfSubtitle": "tailored for this role",
+  "jobs.pdfSubtitleShort": "tailored CV",
+  "jobs.evaluateTitle": "Evaluate",
+  "jobs.evaluateCompanyTitle": "Evaluate · {company}",
+  "jobs.evaluatePastedTitle": "Evaluate · pasted URL",
+  "jobs.researchTitle": "Research",
+  "jobs.fixPortalTitle": "Fix · {company}",
+  "jobs.fixPortalSubtitle": "repair portal slug",
+  "jobs.scoreTitle": "Score · {company}",
 };
 
 // Simplified Chinese strings. Every key in en must have a matching key here.
@@ -87,4 +98,15 @@ export const zh: Dict = {
   "jobs.historyAria": "工作器历史",
   "jobs.historyTitle": "历史",
   "jobs.clear": "清除",
+  "jobs.dismissJob": "关闭任务",
+  "jobs.cvPdfTitle": "定制简历 PDF · {company}",
+  "jobs.pdfSubtitle": "针对该职位定制",
+  "jobs.pdfSubtitleShort": "定制简历",
+  "jobs.evaluateTitle": "评估",
+  "jobs.evaluateCompanyTitle": "评估 · {company}",
+  "jobs.evaluatePastedTitle": "评估 · 粘贴的链接",
+  "jobs.researchTitle": "研究",
+  "jobs.fixPortalTitle": "修复 · {company}",
+  "jobs.fixPortalSubtitle": "修复门户 slug",
+  "jobs.scoreTitle": "评分 · {company}",
 };

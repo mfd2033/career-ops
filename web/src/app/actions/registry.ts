@@ -46,6 +46,9 @@ export type ActionCtx = {
   applyExplore?: (patch: Record<string, unknown>, opts?: { merge?: boolean; run?: boolean }) => void; // build a FREE discovery search
   writeProfile?: (patch: Record<string, unknown>) => void; // merge-safe config/profile.yml write
   writePortals?: (roles: string[], location?: string[]) => void; // merge-safe portals.yml title_filter write
+  /** Optional i18n translate fn (the assistant console supplies it); job
+   *  titles/subtitles are localized here so they render in the user's language. */
+  t?: (key: string, params?: Record<string, string | number>) => string;
 };
 
 export type ProfilePatch = {
@@ -146,8 +149,9 @@ const ACTIONS: Record<string, ActionDef> = {
       if (!isStr(url) || !/^https?:\/\//i.test(url)) return { status: "ignored", note: "invalid url" };
       const ex = ctx.jobForUrl(url);
       if (ex && ex.status !== "error" && !raw.rerun) return { status: "ignored", note: "already evaluated" };
+      const t = ctx.t ?? ((k: string) => k);
       const id = ctx.startJob({
-        title: isStr(raw.title) ? String(raw.title) : "Evaluate",
+        title: isStr(raw.title) ? String(raw.title) : t("jobs.evaluateTitle"),
         subtitle: isStr(raw.subtitle) ? String(raw.subtitle) : undefined,
         kind: "evaluate",
         input: url,
@@ -189,10 +193,11 @@ const ACTIONS: Record<string, ActionDef> = {
 
       const fire = (): DoneInfo => {
         const batchId = pending.length > 1 ? genBatchId() : undefined;
+        const t = ctx.t ?? ((k: string) => k);
         const ids = pending
           .map((j) =>
             ctx.startJob({
-              title: `Evaluate · ${j.company}`,
+              title: t("jobs.evaluateCompanyTitle", { company: j.company }),
               subtitle: j.role,
               kind: "evaluate",
               input: j.url,
@@ -232,8 +237,9 @@ const ACTIONS: Record<string, ActionDef> = {
     run: (raw, ctx) => {
       const target = raw.target;
       if (!isStr(target)) return { status: "ignored", note: "missing target" };
+      const t = ctx.t ?? ((k: string) => k);
       const id = ctx.startJob({
-        title: isStr(raw.title) ? String(raw.title) : "Research",
+        title: isStr(raw.title) ? String(raw.title) : t("jobs.researchTitle"),
         kind: "research",
         input: target,
         page: "/pipeline",
@@ -248,7 +254,8 @@ const ACTIONS: Record<string, ActionDef> = {
       const n = String(raw.n ?? "").trim();
       if (!n) return { status: "ignored", note: "need an application #" };
       const app = ctx.applications.find((a) => a.n === n);
-      const id = ctx.startJob({ title: `CV PDF · ${app?.company ?? `#${n}`}`, subtitle: "tailored CV", kind: "pdf", input: n, page: `/pipeline/${n}` });
+      const t = ctx.t ?? ((k: string) => k);
+      const id = ctx.startJob({ title: t("jobs.cvPdfTitle", { company: app?.company ?? `#${n}` }), subtitle: t("jobs.pdfSubtitleShort"), kind: "pdf", input: n, page: `/pipeline/${n}` });
       return { status: "done", jobIds: id ? [id] : [] };
     },
   },

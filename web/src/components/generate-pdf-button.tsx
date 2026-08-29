@@ -19,7 +19,7 @@ export function GeneratePdfButton({ n, company, pdfReady }: { n: string; company
     [jobs, n],
   );
   const generate = () =>
-    startJob({ title: `CV PDF · ${company}`, subtitle: "tailored for this role", kind: "pdf", input: n, page: `/pipeline/${n}` });
+    startJob({ title: t("jobs.cvPdfTitle", { company }), subtitle: t("jobs.pdfSubtitle"), kind: "pdf", input: n, page: `/pipeline/${n}` });
 
   if (job?.status === "running")
     return (

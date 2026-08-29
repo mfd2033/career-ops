@@ -21,7 +21,7 @@ export function QuickEvaluate() {
       setHint(t("pipeline.evaluateUrlHint"));
       return;
     }
-    startJob({ title: "Evaluate · pasted URL", subtitle: u, kind: "evaluate", input: u, page: "/" });
+    startJob({ title: t("jobs.evaluatePastedTitle"), subtitle: u, kind: "evaluate", input: u, page: "/" });
     setUrl("");
     setHint(t("pipeline.evaluating"));
   }
