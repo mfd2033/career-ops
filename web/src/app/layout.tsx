@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import Script from "next/script";
 import { inter, instrumentSerif, instrumentSerifItalic } from "@/lib/fonts";
 import { AppShell } from "@/components/app-shell";
 import { LangProvider } from "@/lib/i18n/context";
@@ -39,8 +40,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       className={`${inter.variable} ${instrumentSerif.variable} ${instrumentSerifItalic.variable}`}
     >
       <body className="font-sans antialiased">
-        <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
-        <script dangerouslySetInnerHTML={{ __html: LANG_SCRIPT }} />
+        <Script id="career-ops-theme" strategy="beforeInteractive" dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
+        <Script id="career-ops-lang" strategy="beforeInteractive" dangerouslySetInnerHTML={{ __html: LANG_SCRIPT }} />
         <LangProvider>
           <AppShell>{children}</AppShell>
         </LangProvider>

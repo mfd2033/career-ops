@@ -21,8 +21,12 @@ type I18nValue = {
 
 const I18nContext = createContext<I18nValue | null>(null);
 
-// The pre-paint script in layout.tsx sets window.__CO_LANG__ so the very first
-// client render already has the right language (no flash of the wrong one).
+// The pre-paint script in layout.tsx sets window.__CO_LANG__ so the persisted
+// language is applied as early as possible. The *initial* state must stay the
+// server default ("en") so hydration sees identical text/aria-labels to the
+// SSR HTML — reading __CO_LANG__ during the first client render would re-render
+// the tree in a different language and fail hydration. The mount effect below
+// then applies the real language before the user perceives a difference.
 function initialLang(): Lang {
   if (typeof window !== "undefined") {
     const w = window as unknown as { __CO_LANG__?: unknown };
@@ -32,7 +36,7 @@ function initialLang(): Lang {
 }
 
 export function LangProvider({ children }: { children: React.ReactNode }) {
-  const [lang, setLangState] = useState<Lang>(initialLang);
+  const [lang, setLangState] = useState<Lang>("en");
   const [defaultLang, setDefaultLangState] = useState<Lang>("en");
 
   // Hydrate persisted values once on mount (localStorage is not available
