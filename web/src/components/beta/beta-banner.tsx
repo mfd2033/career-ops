@@ -39,7 +39,7 @@ async function searchIssues(q: string): Promise<SimilarIssue[]> {
 // telemetry to any server (local-first / firewall) — the user reviews the exact,
 // PII-scrubbed payload (preview-then-confirm) and clicks to open the issue himself.
 export function BetaBanner() {
-  const [meta, setMeta] = useState<{ version: string; channel: string; sha: string } | null>(null);
+  const [meta, setMeta] = useState<{ version: string; channel: string; sha: string; builtAt?: string } | null>(null);
   const [open, setOpen] = useState(false);
   const [desc, setDesc] = useState("");
   const [diag, setDiag] = useState<Diag | null>(null);
@@ -96,7 +96,14 @@ export function BetaBanner() {
         <span className="flex items-center gap-1.5 font-medium text-brand-text">
           <span className="size-1.5 animate-pulse rounded-full bg-brand" /> {meta.version} · {meta.channel}
         </span>
-        {meta.sha && <span className="hidden font-mono text-faint sm:inline">{meta.sha}</span>}
+        {meta.sha && (
+          <span
+            className="hidden font-mono text-faint sm:inline"
+            title={meta.builtAt ? `built ${meta.builtAt}` : undefined}
+          >
+            {meta.sha}
+          </span>
+        )}
         <button onClick={openReport} className="ml-1 inline-flex items-center justify-center gap-1 rounded-full bg-brand-soft px-2 py-0.5 font-medium text-brand-text transition-colors hover:bg-brand/15 max-sm:min-h-[44px]">
           <Bug className="size-3" /> {t("shared.beta.reportBug")}
         </button>

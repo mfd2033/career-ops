@@ -25,7 +25,7 @@ export type Job = {
   endedAt?: number;
 };
 
-type StartOpts = { title: string; subtitle?: string; kind: string; input: string; page?: string; batchId?: string };
+type StartOpts = { title: string; subtitle?: string; kind: string; input: string; page?: string; batchId?: string; urls?: string[] };
 
 type Ctx = {
   jobs: Job[];
@@ -147,17 +147,21 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
             }).catch(() => {});
             // Tell server-snapshot surfaces (Today, pipeline) to refetch — the
             // worker just wrote a real tracker row / report they don't yet see.
-            if (typeof window !== "undefined" && (opts.kind === "evaluate" || opts.kind === "pdf")) {
+            // batch-evaluate writes many rows/reports in one run, same refresh need.
+            if (typeof window !== "undefined" && ["evaluate", "pdf", "batch-evaluate"].includes(opts.kind)) {
               window.dispatchEvent(new CustomEvent("co-job-done", { detail: { kind: opts.kind, input: opts.input } }));
             }
           }
         };
 
         try {
-          const res = await fetch("/api/run", {
+          // Batch mode (opts.urls) goes to the dedicated batch-evaluate endpoint
+          // — one bounded-concurrency evaluator run for all URLs instead of N
+          // single-evaluate agent runs. Everything else stays on /api/run.
+          const res = await fetch(opts.urls ? "/api/batch-evaluate" : "/api/run", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ kind: opts.kind, input: opts.input, cliId, model }),
+            body: JSON.stringify(opts.urls ? { urls: opts.urls, cliId, model } : { kind: opts.kind, input: opts.input, cliId, model }),
           });
           if (!res.ok || !res.body) {
             const e = await res.json().catch(() => ({}));

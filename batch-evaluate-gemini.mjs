@@ -319,6 +319,31 @@ async function main() {
   let CONCURRENCY = concArg ? parseInt(concArg.split("=")[1], 10) : 2; // outdate-bot
   if (isNaN(CONCURRENCY) || CONCURRENCY < 1) CONCURRENCY = 2;
 
+  // Explicit URL mode (--url=<u>, repeatable): evaluate exactly these postings
+  // without touching pipeline.md. This is what the web dashboard's batch
+  // re-evaluate calls — it already knows the URLs from the tracker reports.
+  const urlArgs = process.argv
+    .filter(a => a.startsWith('--url='))
+    .map(a => a.slice('--url='.length).trim())
+    .filter(Boolean);
+
+  if (urlArgs.length > 0) {
+    console.log(`Found ${urlArgs.length} URL(s) passed via --url=...`);
+    const browser = await chromium.launch({ headless: true });
+    await processPipelineBatch(urlArgs.map((_, i) => i), CONCURRENCY, (i, runIdx) =>
+      processOffer(browser, `- [ ] ${urlArgs[i]}`, runIdx)
+    );
+    await browser.close();
+    console.log(`\n🎉 URL batch processing complete! Merging tracker additions...`);
+    try {
+      const mergeOutput = execFileSync(process.execPath, [join(ROOT, 'merge-tracker.mjs')], { cwd: ROOT, encoding: 'utf-8' });
+      console.log(mergeOutput.trim());
+    } catch (err) {
+      console.error(`⚠️ Failed to merge tracker: ${err.message}`);
+    }
+    return;
+  }
+
   if (!existsSync(PATHS.pipeline)) {
     console.log("No pipeline.md found.");
     return;

@@ -18,7 +18,9 @@
 package main
 
 import (
+	"crypto/sha256"
 	"embed"
+	"encoding/hex"
 	"fmt"
 	"io/fs"
 	"log"
@@ -42,11 +44,15 @@ var nodeExe []byte
 //go:embed icon.ico
 var trayIcon []byte
 
-// Bump cacheVersion whenever the embedded app changes so stale caches are
-// re-extracted instead of being reused. Failing to bump means an old
-// .dashboard-runtime\v{N} is reused and the running dashboard silently shows
-// an old build (e.g. a feature committed after the last build appears missing).
-const cacheVersion = "13"
+// cacheVersion keys the extracted runtime directory (.dashboard-runtime\v{...}).
+// The packer (build-dashboard-ui.mjs) injects the git short SHA of the embedded
+// web build via -ldflags "-X github.com/santifer/career-ops/dashboard-ui.cacheVersion=<sha>",
+// so every build from a different commit extracts into a FRESH directory — an
+// old extracted runtime is never silently reused (a stale cache used to make
+// the exe run an old build). MUST stay uninitialized: go -X only overrides
+// string vars without an explicit initializer. Empty → plain `go build`
+// without the packer → "dev".
+var cacheVersion string
 
 func main() {
 	exe, err := os.Executable()
@@ -68,7 +74,11 @@ func main() {
 	// directory) rather than %LOCALAPPDATA%: everything lives in one place,
 	// and deleting the directory deletes the cached runtime with it.
 	cacheBase := filepath.Join(careerRoot, ".dashboard-runtime")
-	runtimeDir := filepath.Join(cacheBase, "v"+cacheVersion)
+	runtimeDirName := cacheVersion
+	if runtimeDirName == "" {
+		runtimeDirName = "dev"
+	}
+	runtimeDir := filepath.Join(cacheBase, "v"+runtimeDirName)
 	if err := ensureRuntime(runtimeDir); err != nil {
 		fatal("setup failed: " + err.Error())
 		return
@@ -119,13 +129,25 @@ func setupTrayLog(dir string) {
 	log.Printf("tray log started: pid=%d", os.Getpid())
 }
 
-// ensureRuntime extracts the embedded app + node runtime to dir on first use.
-// Subsequent runs (dir already marked OK) skip extraction entirely.
+// ensureRuntime extracts the embedded app + node runtime to dir, re-extracting
+// whenever the EMBEDDED content changes. The OK marker stores a fingerprint of
+// the embedded build-info.json (which carries a per-build timestamp): a same-
+// name cacheVersion rebuilt with new code (e.g. two `-dirty` builds from one
+// commit) must NOT reuse the old extraction — this exact trap silently served a
+// stale build before. Missing files fall back to re-extraction too.
 func ensureRuntime(dir string) error {
+	stamp, err := buildStamp()
+	if err != nil {
+		return err
+	}
 	ok := filepath.Join(dir, "OK")
 	if fileExists(ok) && fileExists(filepath.Join(dir, "node.exe")) &&
 		fileExists(filepath.Join(dir, "app", "server.js")) {
-		return nil
+		if b, rerr := os.ReadFile(ok); rerr == nil && string(b) == stamp {
+			return nil
+		}
+		// Stale extraction: a same-version dir holding DIFFERENT embedded
+		// content. Wipe and re-extract below.
 	}
 	if err := os.RemoveAll(dir); err != nil {
 		return err
@@ -139,8 +161,23 @@ func ensureRuntime(dir string) error {
 	if err := extractFS(appFS, "app", filepath.Join(dir, "app")); err != nil {
 		return err
 	}
-	return os.WriteFile(ok, []byte(cacheVersion), 0o644)
+	return os.WriteFile(ok, []byte(stamp), 0o644)
 }
+
+// buildStamp fingerprints the embedded app tree via build-info.json (sha +
+// builtAt — the packer writes a fresh timestamp on every build), so two builds
+// of the same commit with different code always differ.
+func buildStamp() (string, error) {
+	b, err := fs.ReadFile(appFS, "app/build-info.json")
+	if err != nil {
+		// No stamp (plain go build without the packer) — fall back to the
+		// injected cacheVersion so dev builds still cache by name.
+		return cacheVersion, nil
+	}
+	h := sha256.Sum256(b)
+	return hex.EncodeToString(h[:]), nil
+}
+
 
 // extractFS copies an embed.FS subtree (root and below) onto the filesystem.
 func extractFS(fsys fs.FS, root, dest string) error {

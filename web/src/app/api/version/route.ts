@@ -31,6 +31,20 @@ function shortSha(): string {
   }
 }
 
+// Packaged builds (career-dashboard-ui.exe) are stamped by the packer with a
+// build-info.json in the server cwd: the sha it was built FROM and when. This
+// must WIN over the runtime git call below — the exe's cwd sits inside the
+// user's checkout, where `git rev-parse` would report the working tree's CURRENT
+// commit, making a stale exe look fresh. Dev mode has no build-info.json → git.
+type BuildInfo = { sha?: string; builtAt?: string; cacheVersion?: string };
+function readBuildInfo(): BuildInfo | null {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(process.cwd(), "build-info.json"), "utf8")) as BuildInfo;
+  } catch {
+    return null;
+  }
+}
+
 function webVersion(): string {
   try {
     const pkg = JSON.parse(fs.readFileSync(path.join(process.cwd(), "package.json"), "utf8"));
@@ -50,5 +64,14 @@ export async function GET() {
   // stay visible until the web graduates to 1.0.
   const channel = m ? m[1].toLowerCase() : web && /^0\./.test(web) ? "alpha" : "stable";
   const version = web ? `web ${web}` : coreVersion;
-  return Response.json({ version, coreVersion, channel, sha: shortSha() });
+  const buildInfo = readBuildInfo();
+  return Response.json({
+    version,
+    coreVersion,
+    channel,
+    // packaged build → the sha/timestamp frozen at pack time; dev → live git
+    sha: buildInfo?.sha ?? shortSha(),
+    builtAt: buildInfo?.builtAt,
+    packaged: !!buildInfo,
+  });
 }

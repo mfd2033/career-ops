@@ -152,10 +152,12 @@ export function PipelineView({
   // lazily from each row's report `**URL:**` header via /api/pipeline/urls the
   // moment the user checks the first box — never on a plain page visit — so
   // the default pipeline browse path stays free of report-header reads. The
-  // batch then fires one kind:"evaluate" job per selected row that has an
-  // http(s) URL, grouped by a shared batchId so the global Workers tray shows
-  // them together; each completed job emits co-job-done → router.refresh()
-  // picks up the new score / status / report body.
+  // batch fires ONE kind:"batch-evaluate" job carrying all selected http(s)
+  // URLs: the backend (/api/batch-evaluate) runs the SAME engine as single
+  // evaluation — the config-page CLI + model — sequentially over all URLs
+  // while holding the tracker write token, instead of N separate single-evaluate agent
+  // runs. When it finishes it emits co-job-done → router.refresh() picks up
+  // the new scores / statuses / report bodies in one refresh.
   const { startJob } = useJobs();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [urlMap, setUrlMap] = useState<Record<string, string> | null>(null);
@@ -193,13 +195,13 @@ export function PipelineView({
     el.indeterminate = checkedCount > 0 && checkedCount < filtered.length;
   }, [filtered, selected]);
 
-  // Refresh the server snapshot whenever a batch evaluate finishes — each
-  // completed job wrote a real tracker row / report the page doesn't yet see.
+  // Refresh the server snapshot whenever the batch evaluate finishes — the
+  // evaluator wrote real tracker rows / reports the page doesn't yet see.
   useEffect(() => {
     if (!lastBatchId) return;
     const onDone = (e: Event) => {
       const detail = (e as CustomEvent).detail as { kind?: string } | undefined;
-      if (detail?.kind === "evaluate") router.refresh();
+      if (detail?.kind === "evaluate" || detail?.kind === "batch-evaluate") router.refresh();
     };
     window.addEventListener("co-job-done", onDone);
     return () => window.removeEventListener("co-job-done", onDone);
@@ -211,22 +213,20 @@ export function PipelineView({
     if (targets.length === 0) return;
     const batchId = `batch-${Date.now()}`;
     setLastBatchId(batchId);
-    for (const n of targets) {
-      const app = applications.find((a) => a.n === n);
-      startJob({
-        title: t("pipeline.reevaluateTitle", { company: app?.company ?? n }),
-        subtitle: t("pipeline.reevaluateSubtitle"),
-        kind: "evaluate",
-        input: urlMap[n],
-        page: `/pipeline/${n}`,
-        batchId,
-      });
-    }
+    startJob({
+      title: t("pipeline.batchReevaluate", { count: targets.length }),
+      subtitle: t("pipeline.reevaluateSubtitle"),
+      kind: "batch-evaluate",
+      input: targets.map((n) => urlMap[n]).join("\n"),
+      urls: targets.map((n) => urlMap[n]),
+      page: "/pipeline",
+      batchId,
+    });
     // Clear selection + reset URL cache so the next cycle refetches fresh.
     setSelected(new Set());
     setUrlMap(null);
     urlMapFetched.current = false;
-  }, [selected, urlMap, urlMapLoading, applications, startJob, t]);
+  }, [selected, urlMap, urlMapLoading, startJob, t]);
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8 max-sm:pb-24">
