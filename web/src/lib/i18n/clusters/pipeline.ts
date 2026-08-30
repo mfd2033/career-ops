@@ -139,6 +139,16 @@ export const en: Dict = {
   "pipeline.reevaluateSubtitle": "Re-running the evaluation",
   "pipeline.reevaluateNoUrl": "No posting URL in this report — add one to re-evaluate.",
 
+  // ── Batch re-evaluate (pipeline-view.tsx) ──
+  "pipeline.batchSelected": "{count} selected",
+  "pipeline.batchReevaluableHint": "{count} of {total} have a posting URL",
+  "pipeline.batchNoneHasUrl": "None of the selected have a posting URL",
+  "pipeline.batchReevaluate": "Re-evaluate {count}",
+  "pipeline.batchReevaluateTitle": "Re-run the evaluation for the {count} selected postings that have a URL",
+  "pipeline.batchSelectAll": "Select all visible",
+  "pipeline.batchClear": "Clear",
+  "pipeline.batchUrlsLoading": "Resolving posting URLs…",
+
   // ── Section headings (from report markdown) ──
   // Newer oferta.md heading forms (current core): "## C) Level and Strategy",
   // "## D) Comp and Demand", "## E) Customization Plan", "## F) Interview Plan",
@@ -311,6 +321,16 @@ export const zh: Dict = {
   "pipeline.reevaluateTitle": "重新评估 {company}",
   "pipeline.reevaluateSubtitle": "正在重新评估",
   "pipeline.reevaluateNoUrl": "此报告没有职位链接——补充链接后才能重新评估。",
+
+  // ── 批量重新评估（pipeline-view.tsx） ──
+  "pipeline.batchSelected": "已选 {count} 项",
+  "pipeline.batchReevaluableHint": "{total} 项中有 {count} 项含职位链接",
+  "pipeline.batchNoneHasUrl": "所选职位都没有链接",
+  "pipeline.batchReevaluate": "重新评估 {count} 项",
+  "pipeline.batchReevaluateTitle": "为所选 {count} 个有链接的职位重新运行评估",
+  "pipeline.batchSelectAll": "全选当前可见",
+  "pipeline.batchClear": "清除选择",
+  "pipeline.batchUrlsLoading": "正在解析职位链接…",
 
   // ── Section headings (from report markdown) ──
   "pipeline.section.roleSummary": "职位概述",
