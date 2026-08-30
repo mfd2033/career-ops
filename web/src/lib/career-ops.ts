@@ -5,6 +5,9 @@ import { parseApplications } from "@/lib/tracker-table.mjs";
 // One definition of the `{n}-RESERVED.md` convention, shared with
 // run-cli-support.mjs — see report-files.mjs for why it lives there.
 import { isReservedReportFile } from "@/lib/report-files.mjs";
+// Reuse the canonical tolerant report parser (format.ts is explicitly shared
+// by server + client, no fs). One definition of `**URL:**` extraction.
+import { parseReport } from "@/lib/format";
 
 /**
  * Resolve the career-ops "home" — the directory holding the user's sibling
@@ -286,6 +289,72 @@ export function readReport(n: string): ReportData | null {
 
 export function findApplication(n: string): Application | null {
   return readApplications().find((a) => a.n === n) ?? null;
+}
+
+/**
+ * Resolve the report file path for an ALREADY-parsed Application, without the
+ * `readApplications()` re-read that `findReportFile(n)` does. Same containment +
+ * RESERVED-sentinel rules as `findReportFile`. Used by batch read paths that
+ * loop over many applications — re-reading the tracker file per app would be
+ * O(n²) FS reads (#749-class regression). Returns null if the link is missing
+ * or the file can't be resolved safely.
+ */
+function resolveReportPathFor(app: Application): string | null {
+  const root = careerOpsRoot();
+  const linked = app.report.match(/\]\(([^)]+)\)/)?.[1];
+  if (linked) {
+    const p = path.resolve(root, "data", linked);
+    if (p.endsWith(".md") && !isReservedReportFile(p) && containedRealpath(p, root)) return p;
+  }
+  // Fallback: scan reports/ for a file whose leading number matches app.n.
+  // Mirrors findReportFile's fallback so a hand-edited or missing link still
+  // resolves the right report.
+  let files: string[];
+  try {
+    files = fs.readdirSync(path.join(root, "reports"));
+  } catch {
+    return null;
+  }
+  const target = parseInt(app.n, 10);
+  if (Number.isNaN(target)) return null;
+  const match = files.find(
+    (f) => f.endsWith(".md") && !isReservedReportFile(f) && parseInt(f, 10) === target,
+  );
+  if (!match) return null;
+  const p = path.join(root, "reports", match);
+  return containedRealpath(p, root) ? p : null;
+}
+
+/** Read a single application's posting URL from its report's `**URL:**` header
+ *  field. Returns undefined when the report is missing, has no URL field, or
+ *  the URL isn't an http(s) link (the re-evaluate worker requires an absolute
+ *  URL — see ReevaluateButton's `url.startsWith("http")` guard). */
+export function readApplicationUrl(app: Application): string | undefined {
+  const file = resolveReportPathFor(app);
+  if (!file) return undefined;
+  try {
+    const md = fs.readFileSync(file, "utf8");
+    const url = parseReport(md).fields.find((f) => f.label === "URL")?.value;
+    return url && /^https?:\/\//i.test(url) ? url : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Batch read posting URLs for a set of applications → Record<n, url> covering
+ * ONLY the apps whose report resolves to a real http(s) URL. Drives the batch
+ * re-evaluate flow: the client fires one `kind:"evaluate"` job per entry here.
+ * Tolerant by construction — a missing report or non-http URL simply drops
+ * that entry from the map; the caller surfaces "N of M re-evaluatable".
+ */
+export function readApplicationUrls(apps: Application[]): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const app of apps) {
+    const url = readApplicationUrl(app);
+    if (url) out[app.n] = url;
+  }
+  return out;
 }
 
 /** The CANONICAL user-customization file the CLI/TUI reads. Durable facts the

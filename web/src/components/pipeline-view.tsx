@@ -3,12 +3,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Search, ChevronsUpDown, X, Compass, ArrowRight } from "lucide-react";
+import { Search, ChevronsUpDown, X, Compass, ArrowRight, RotateCcw, Loader2 } from "lucide-react";
 import type { Application, InboxJob } from "@/lib/career-ops";
 import { Badge } from "@/components/ui/badge";
 import { CompanyLogo } from "@/components/company-logo";
 import { canonStatus, scoreNum, scoreTone, statusDot } from "@/lib/format";
 import { InboxTriage } from "@/components/inbox/inbox-triage";
+import { useJobs } from "@/components/jobs/job-store";
 import { cn } from "@/lib/cn";
 import { useI18n } from "@/lib/i18n/context";
 
@@ -146,6 +147,87 @@ export function PipelineView({
     });
   }, [applications, tab, q, sort, minFilter]);
 
+  // ── Batch re-evaluate ──
+  // Selection is keyed by application number (r.n). Posting URLs are resolved
+  // lazily from each row's report `**URL:**` header via /api/pipeline/urls the
+  // moment the user checks the first box — never on a plain page visit — so
+  // the default pipeline browse path stays free of report-header reads. The
+  // batch then fires one kind:"evaluate" job per selected row that has an
+  // http(s) URL, grouped by a shared batchId so the global Workers tray shows
+  // them together; each completed job emits co-job-done → router.refresh()
+  // picks up the new score / status / report body.
+  const { startJob } = useJobs();
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [urlMap, setUrlMap] = useState<Record<string, string> | null>(null);
+  const [urlMapLoading, setUrlMapLoading] = useState(false);
+  const [lastBatchId, setLastBatchId] = useState<string | null>(null);
+  const urlMapFetched = useRef(false);
+  const selectAllRef = useRef<HTMLInputElement>(null);
+
+  // Lazy-fetch the URL map the first time a row is checked. Reset on clear so
+  // the next batch cycle refetches against the freshest reports (a finished
+  // job may have written a URL the cache predates).
+  useEffect(() => {
+    if (selected.size === 0 || urlMapFetched.current) return;
+    urlMapFetched.current = true;
+    setUrlMapLoading(true);
+    fetch("/api/pipeline/urls")
+      .then((r) => r.json())
+      .then((m) => setUrlMap(typeof m === "object" && m ? (m as Record<string, string>) : {}))
+      .catch(() => setUrlMap({}))
+      .finally(() => setUrlMapLoading(false));
+  }, [selected.size]);
+
+  const reevaluableCount = useMemo(
+    () => (urlMap ? [...selected].filter((n) => urlMap[n]).length : 0),
+    [selected, urlMap],
+  );
+
+  // Header checkbox checked / indeterminate state tracks the VISIBLE (filtered)
+  // rows, not all applications — so "select all" means "all on this tab".
+  useEffect(() => {
+    const el = selectAllRef.current;
+    if (!el) return;
+    const checkedCount = filtered.filter((r) => selected.has(r.n)).length;
+    el.checked = filtered.length > 0 && checkedCount === filtered.length;
+    el.indeterminate = checkedCount > 0 && checkedCount < filtered.length;
+  }, [filtered, selected]);
+
+  // Refresh the server snapshot whenever a batch evaluate finishes — each
+  // completed job wrote a real tracker row / report the page doesn't yet see.
+  useEffect(() => {
+    if (!lastBatchId) return;
+    const onDone = (e: Event) => {
+      const detail = (e as CustomEvent).detail as { kind?: string } | undefined;
+      if (detail?.kind === "evaluate") router.refresh();
+    };
+    window.addEventListener("co-job-done", onDone);
+    return () => window.removeEventListener("co-job-done", onDone);
+  }, [lastBatchId, router]);
+
+  const reevaluateSelected = useCallback(() => {
+    if (selected.size === 0 || !urlMap || urlMapLoading) return;
+    const targets = [...selected].filter((n) => urlMap[n]);
+    if (targets.length === 0) return;
+    const batchId = `batch-${Date.now()}`;
+    setLastBatchId(batchId);
+    for (const n of targets) {
+      const app = applications.find((a) => a.n === n);
+      startJob({
+        title: t("pipeline.reevaluateTitle", { company: app?.company ?? n }),
+        subtitle: t("pipeline.reevaluateSubtitle"),
+        kind: "evaluate",
+        input: urlMap[n],
+        page: `/pipeline/${n}`,
+        batchId,
+      });
+    }
+    // Clear selection + reset URL cache so the next cycle refetches fresh.
+    setSelected(new Set());
+    setUrlMap(null);
+    urlMapFetched.current = false;
+  }, [selected, urlMap, urlMapLoading, applications, startJob, t]);
+
   return (
     <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8 max-sm:pb-24">
       <div className="flex items-end justify-between gap-4">
@@ -210,6 +292,39 @@ export function PipelineView({
         </div>
       )}
 
+      {tab !== "INBOX" && selected.size > 0 && (
+        <div className="mt-3 flex flex-wrap items-center gap-2 rounded-full border border-brand/30 bg-brand-soft/40 px-3 py-1.5 text-xs">
+          <span className="font-medium text-brand">{t("pipeline.batchSelected", { count: selected.size })}</span>
+          {urlMapLoading ? (
+            <span className="inline-flex items-center gap-1 text-muted">
+              <Loader2 className="size-3 animate-spin" /> {t("pipeline.batchUrlsLoading")}
+            </span>
+          ) : urlMap ? (
+            <span className="text-muted">
+              {reevaluableCount === 0
+                ? t("pipeline.batchNoneHasUrl")
+                : t("pipeline.batchReevaluableHint", { count: reevaluableCount, total: selected.size })}
+            </span>
+          ) : null}
+          <button
+            type="button"
+            onClick={reevaluateSelected}
+            disabled={reevaluableCount === 0 || urlMapLoading || urlMap === null}
+            className="inline-flex items-center gap-1.5 rounded-full bg-brand px-3 py-1 font-medium text-brand-foreground transition-colors hover:bg-brand-200 disabled:cursor-not-allowed disabled:opacity-50 max-sm:min-h-[44px]"
+            title={t("pipeline.batchReevaluateTitle", { count: reevaluableCount })}
+          >
+            <RotateCcw className="size-3.5" /> {t("pipeline.batchReevaluate", { count: reevaluableCount })}
+          </button>
+          <button
+            type="button"
+            onClick={() => setSelected(new Set())}
+            className="inline-flex items-center gap-1 rounded-full border border-border px-2.5 py-1 text-muted transition-colors hover:text-foreground max-sm:min-h-[44px]"
+          >
+            <X className="size-3" /> {t("pipeline.batchClear")}
+          </button>
+        </div>
+      )}
+
       {tab === "INBOX" ? (
         /* ── Inbox: the triage surface (Abundance → Triage → Shortlist → Score) ── */
         pendingInbox.length > 0 ? (
@@ -227,7 +342,21 @@ export function PipelineView({
           <table className="w-full min-w-[44rem] text-sm">
             <thead className="bg-surface/60 text-left text-xs uppercase tracking-wide text-faint">
               <tr>
-                 {SORT_KEYS.map((k) => (
+                <th className="w-10 px-2 py-2.5">
+                  <input
+                    ref={selectAllRef}
+                    type="checkbox"
+                    aria-label={t("pipeline.batchSelectAll")}
+                    onChange={(e) => {
+                      const next = new Set(selected);
+                      if (e.target.checked) filtered.forEach((r) => next.add(r.n));
+                      else filtered.forEach((r) => next.delete(r.n));
+                      setSelected(next);
+                    }}
+                    className="size-4 cursor-pointer rounded border-border text-brand accent-brand align-middle"
+                  />
+                </th>
+                {SORT_KEYS.map((k) => (
                   <th
                     key={k}
                     className="cursor-pointer select-none whitespace-nowrap px-4 py-2.5 font-medium hover:text-foreground"
@@ -244,6 +373,20 @@ export function PipelineView({
             <tbody className="divide-y divide-border">
               {filtered.map((r, i) => (
                 <tr key={`${r.n}-${i}`} className="group transition-colors hover:bg-surface/40">
+                  <td className="w-10 px-2 py-3">
+                    <input
+                      type="checkbox"
+                      checked={selected.has(r.n)}
+                      onChange={(e) => {
+                        const next = new Set(selected);
+                        if (e.target.checked) next.add(r.n);
+                        else next.delete(r.n);
+                        setSelected(next);
+                      }}
+                      className="size-4 cursor-pointer rounded border-border text-brand accent-brand align-middle"
+                      aria-label={r.company}
+                    />
+                  </td>
                   <td className="px-4 py-3 font-medium">
                     <Link href={`/pipeline/${r.n}`} className="flex items-center gap-2.5 transition-colors group-hover:text-brand">
                       <CompanyLogo name={r.company} size={20} />
