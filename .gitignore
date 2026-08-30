@@ -202,3 +202,5 @@ reports/archive/
 
 # Web dev-server scratch logs (local dev noise, never commit)
 web/dev-server*.log*
+# Root-level dev server stdout/stderr captures (e.g. dev-out.log / dev-err.log).
+/dev-*.log
