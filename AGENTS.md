@@ -356,6 +356,20 @@ Two separate axes:
 
 **Exception for batch workers (headless mode):** Playwright is unavailable in headless pipe mode. Use WebFetch as fallback and mark the report header `**Verification:** unconfirmed (batch mode)`; the user can verify manually later.
 
+## Chinese Job Board Extraction -- MANDATORY
+
+**BOSS直聘 (`zhipin.com` / `kanzhun.com`), 猎聘 (`liepin.com`), 智联招聘 (`zhaopin.com`) block ALL headless and logged-out browsers.** `WebFetch`, `WebSearch`, and Playwright `browser_navigate` return empty/loading pages on these sites.
+
+**For ANY URL on these domains, IMMEDIATELY run:**
+```bash
+node browser-extract.mjs <url>
+```
+The `--extractor auto` default routes Chinese boards to the candidate's own logged-in browser via `bsk` (browser-skill). Slider captchas are handed to the candidate via `bsk request-help`. Use its returned `text` as the JD.
+
+**If `browser-extract.mjs` exits non-zero with a `bsk_*` code** (e.g. `bsk_missing`), **STOP and tell the candidate to install browser-skill and run `bsk status`** — never infer the JD from similar postings.
+
+**Do NOT attempt WebFetch, WebSearch, or Playwright as workarounds.** They will fail. The dedicated script exists for this reason.
+
 ---
 
 ## CI/CD, Community and Governance
