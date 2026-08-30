@@ -4,6 +4,7 @@ import * as yaml from "js-yaml";
 import { careerOpsRoot } from "@/lib/career-ops";
 import { atomicWriteWithBackup } from "@/lib/core/safe-write";
 import { patchToProfile } from "@/lib/profile-patch.mjs";
+import { extractDealBreakers, replaceDealBreakersSection } from "@/lib/profile-md-sync.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -66,6 +67,21 @@ export async function GET() {
     const comp = isObj(profile.compensation) ? (profile.compensation as Record<string, unknown>) : {};
     if (typeof comp.location_flexibility === "string") locationFlexibility = comp.location_flexibility;
   }
+  // `modes/_profile.md` is ALSO read by the evaluation pipeline (SKILL.md loads
+  // it for every mode; context-budget injects both files). A rule hand-written
+  // there but absent from profile.yml would be silently dropped by the next web
+  // save if the form only showed profile.yml — so prefill the union (profile.yml
+  // first, order preserved, deduped) and let Save write both back.
+  const profileMd = path.join(root, "modes", "_profile.md");
+  if (fs.existsSync(profileMd)) {
+    const md = fs.readFileSync(profileMd, "utf8");
+    const mdBreakers = extractDealBreakers(md);
+    if (mdBreakers.length) {
+      const merged = [...dealBreakers];
+      for (const b of mdBreakers) if (!merged.includes(b)) merged.push(b);
+      dealBreakers = merged;
+    }
+  }
   return Response.json({ dealBreakers, locationFlexibility });
 }
 
@@ -110,6 +126,29 @@ export async function POST(req: Request) {
     atomicWriteWithBackup(file, yaml.dump(merged, { lineWidth: 100, noRefs: true }));
   } catch (e) {
     return Response.json({ error: e instanceof Error ? e.message : "write failed" }, { status: 500 });
+  }
+
+  // Mirror the deal-breakers into modes/_profile.md — the evaluation pipeline
+  // reads that file too (SKILL.md loads it for every mode). Only when this
+  // patch actually carried deal-breakers, and only by rewriting the
+  // "## Your Deal-Breakers" section: never fabricate it, never touch the rest.
+  const narrative = isObj(proposed.narrative) ? (proposed.narrative as Record<string, unknown>) : {};
+  if (Array.isArray(narrative.deal_breakers)) {
+    const profileMd = path.join(root, "modes", "_profile.md");
+    if (fs.existsSync(profileMd)) {
+      try {
+        const md = fs.readFileSync(profileMd, "utf8");
+        const { markdown, found } = replaceDealBreakersSection(md, narrative.deal_breakers as string[]);
+        if (found) atomicWriteWithBackup(profileMd, markdown);
+      } catch (e) {
+        return Response.json(
+          {
+            error: `profile.yml saved, but could not sync modes/_profile.md: ${e instanceof Error ? e.message : "write failed"}`,
+          },
+          { status: 500 },
+        );
+      }
+    }
   }
   return Response.json({ ok: true, seeded });
 }
