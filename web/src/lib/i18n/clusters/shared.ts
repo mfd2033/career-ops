@@ -40,6 +40,7 @@ export const en: Dict = {
   "shared.assistant.started": "✓ started",
   "shared.assistant.cancelled": "cancelled",
   "shared.assistant.ask": "Ask",
+  "shared.close": "Close",
 
   // suggestion chips
   "shared.suggest.whyScore": "Why this score?",
@@ -135,6 +136,7 @@ export const zh: Dict = {
   "shared.assistant.started": "✓ 已启动",
   "shared.assistant.cancelled": "已取消",
   "shared.assistant.ask": "提问",
+  "shared.close": "关闭",
 
   // suggestion chips
   "shared.suggest.whyScore": "为什么是这个分数？",

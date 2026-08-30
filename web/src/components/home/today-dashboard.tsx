@@ -33,8 +33,8 @@ export function TodayDashboard({
   const [fresh, setFresh] = useState<DiscoveredOffer[]>([]);
   const [freshCount, setFreshCount] = useState(0);
   const router = useRouter();
-  const { t } = useI18n();
-  const dateLabel = useMemo(() => new Date().toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" }), []);
+  const { t, lang } = useI18n();
+  const dateLabel = useMemo(() => new Date().toLocaleDateString(lang === "zh" ? "zh-CN" : "en-US", { weekday: "long", month: "short", day: "numeric" }), [lang]);
 
   const refetch = useCallback(() => {
     fetch("/api/followups")
