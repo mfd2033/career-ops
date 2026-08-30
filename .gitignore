@@ -37,6 +37,8 @@ batch/zhipin*.json
 /batch/extract-zhipin.cjs
 /batch/extract-zhipin.mjs
 /fetch-zhipin.cjs
+# Local QA repro scripts (hardcode a specific report id + localhost, not part of the node:test suite).
+web/qa-*.mjs
 jds/*
 !jds/.gitkeep
 
