@@ -254,24 +254,32 @@ export async function POST(req: Request) {
           };
           pump();
         });
+        // Fold all tracker-additions rows into data/applications.md ONCE.
+        // merge-tracker takes the core tracker lock itself, so this is the only
+        // writer of applications.md for this batch — workers never touched it.
+        // Runs in BOTH branches, cancelled or not: workers may have completed
+        // and written valid reports+TSVs before a client disconnect, and
+        // leaving those rows out of the tracker would silently lose a finished
+        // re-evaluation (the user's "date column didn't change" after a web
+        // re-eval was exactly this — reports written, merge never ran).
+        const mergeTrackerRows = async () => {
+          send({ type: "status", label: "Merging tracker rows..." });
+          try {
+            const { stdout } = await runNode("merge-tracker.mjs", []);
+            if (stdout.trim()) send({ type: "text", text: `${stdout.trim()}\n` });
+          } catch (err) {
+            send({ type: "text", text: `\u26A0\uFE0F merge-tracker: ${(err as Error).message}\n` });
+          }
+        };
         if (cancelled) {
-          // Client dropped the connection mid-batch: release the reserved
-          // range so the numbers are not held hostage until the stale GC.
+          // Client dropped the connection mid-batch: still fold whatever the
+          // workers finished, then release the reserved range so the numbers
+          // are not held hostage until the stale GC.
+          await mergeTrackerRows();
           await releaseReserved();
           send({ type: "error", msg: "Batch cancelled." });
         } else {
-          // Fold all tracker-additions rows into data/applications.md ONCE.
-          // merge-tracker takes the core tracker lock itself, so this is the only
-          // writer of applications.md for this batch — workers never touched it.
-          if (ok > 0) {
-            send({ type: "status", label: "Merging tracker rows..." });
-            try {
-              const { stdout } = await runNode("merge-tracker.mjs", []);
-              if (stdout.trim()) send({ type: "text", text: `${stdout.trim()}\n` });
-            } catch (err) {
-              send({ type: "text", text: `\u26A0\uFE0F merge-tracker: ${(err as Error).message}\n` });
-            }
-          }
+          await mergeTrackerRows();
           // Clean up reservation sentinels — completed slots already hold real
           // reports, so releasing the range only removes leftover placeholders.
           await releaseReserved();

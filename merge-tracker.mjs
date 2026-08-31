@@ -1204,8 +1204,16 @@ for (const file of tsvFiles) {
     const pdf = reportNum && pdfIndex.has(String(reportNum))
       ? '✅'
       : (reportChanged ? '❌' : duplicate.pdf);
+    // The date column is the row's INITIAL evaluation date, not the re-eval date
+    // (#2808, 方向 A): a re-evaluation refreshes score/report/notes but must not
+    // move the date forward, or an old application silently looks new (and the
+    // follow-up clock seeded off that date resets). The one exception keeps the
+    // existing backfill contract: a row that was never scored (N/A/—/-) has no
+    // real initial date, so the re-eval's date is still written through.
     const updatedLine = buildRow({
-      num: duplicate.num, date: addition.date, company: addition.company,
+      num: duplicate.num,
+      date: isUnscoreable(duplicate.score) ? addition.date : duplicate.date,
+      company: addition.company,
       // A URL match is a CONFIRMED same-posting identity, so the incoming title
       // is authoritative the same way a report-number match is — employers do
       // edit a live posting's title. The fuzzy tiers stay conservative and keep
