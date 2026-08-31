@@ -127,6 +127,15 @@ data/model-blacklist.json
 .idea/
 .vscode/
 
+# Agent skill storage (local installations; share via skills-lock.json)
+.agents/skills/*
+!.agents/skills/career-ops/
+.agents/skills/*/README.md
+.agents/skills/*/SKILL.md
+.agents/skills/*/references/
+.serena/
+skills-lock.json
+
 # CLI-specific local config
 .claude/settings.local.json
 .claude/memory/
