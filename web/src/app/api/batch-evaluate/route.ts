@@ -278,6 +278,11 @@ export async function POST(req: Request) {
           send({ type: "done", ok, failed });
         }
       } catch (err) {
+        // Anything after a successful reserveRange() that throws (e.g. send()
+        // failing on a dropped stream) skips both the cancel and normal-completion
+        // branches above, so release the reserved range here too — otherwise the
+        // sentinels sit until the 4h stale GC. Best-effort, same as everywhere else.
+        await releaseReserved();
         send({ type: "error", msg: (err as Error).message });
       } finally {
         releaseTrackerWrite(writeToken);
