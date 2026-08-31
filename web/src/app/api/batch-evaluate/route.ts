@@ -1,18 +1,34 @@
-// Batch evaluate — the pipeline page's "re-evaluate N selected" path. Uses the
-// EXACT same engine as single evaluation (/api/run): the CLI + model picked on
-// the config page, the same buildPrompt evaluate prompt, the same honesty gate
-// (a green result requires a clean exit AND a report actually written). URLs
-// run SEQUENTIALLY while holding the tracker write token — evaluate agents
-// write the tracker file themselves, and /api/run serializes on the same lock,
-// so parallel runs would race the tracker. Streams NDJSON events the client job
-// runner parses: {type:"status"|"text"|"item"|"done"|"error"}.
+// Batch evaluate — the pipeline page's "re-evaluate N selected" path.
+//
+// Runs the SAME engine as single evaluation (/api/run): the CLI + model picked
+// on the config page, the same evaluate prompt per URL, the same honesty gate
+// (green requires a clean exit AND a report actually written). Where it differs
+// is ORCHESTRATION, and that is exactly what lets it run in PARALLEL where a
+// row of single-evaluate cards cannot:
+//
+//   The single evaluate prompt (buildPrompt) tells each worker to reserve its
+//   OWN report number and merge the tracker ITSELF. N concurrent workers doing
+//   that on the same files races both — which is why /api/run serializes. This
+//   route instead reserves a CONTIGUOUS RANGE up front
+//   (reserve-report-num.mjs --count N), hands each worker its own number via
+//   buildBatchPrompt, and tells it NOT to merge. Each worker then writes only
+//   ITS OWN reports/{num}-*.md and batch/tracker-additions/{num}-*.tsv — no
+//   shared mutable state, so concurrency is safe by construction. When every
+//   worker is done, the orchestrator runs merge-tracker.mjs ONCE to fold all
+//   rows into data/applications.md, then releases the whole reserved range.
+//
+// Streams NDJSON events the client job runner parses:
+// {type:"status"|"text"|"item"|"done"|"error"|"keepalive"} — "item" per URL.
 import fs from "node:fs";
 import path from "node:path";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { resolveCli } from "@/lib/clis";
-import { withModelFlag, hasNewCompletedReport } from "@/lib/run-cli-support.mjs";
+import { withModelFlag } from "@/lib/run-cli-support.mjs";
+import { isReservedReportFile } from "@/lib/report-files.mjs";
 import { spawnHeadlessCli } from "@/lib/spawn-cli.mjs";
 import { careerOpsRoot, readMemory, readInbox, readScanDates } from "@/lib/career-ops";
-import { buildPrompt } from "@/lib/run-prompts.mjs";
+import { buildBatchPrompt } from "@/lib/run-prompts.mjs";
 import { acquireTrackerWrite, releaseTrackerWrite } from "@/lib/core/run-registry";
 
 export const runtime = "nodejs";
@@ -20,6 +36,9 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 800;
 
 const MAX_URLS = 20;
+const MAX_PARALLEL = 3; // bounded worker pool; batch-runner.sh uses 1, this stays modest
+
+const execFileAsync = promisify(execFile);
 
 export async function POST(req: Request) {
   let body: { urls?: unknown; cliId?: unknown; model?: unknown };
@@ -71,9 +90,50 @@ export async function POST(req: Request) {
       return [];
     }
   };
+  const runNode = (script: string, args: string[]) =>
+    execFileAsync(process.execPath, [path.join(root, script), ...args], { cwd: root });
+
+  // --- Reserve a contiguous report-number range up front -----------------------
+  // Parallel workers must NEVER compute max+1 themselves (#749); the range is
+  // the single point of allocation. Each URL gets its own number in order.
+  let reserved: number[] = [];
+  const reserveRange = async () => {
+    const { stdout } = await runNode("reserve-report-num.mjs", ["--count", String(urls.length)]);
+    const m = stdout.trim().match(/^(\d{3})(?:-(\d{3}))?$/);
+    if (!m) throw new Error(`unexpected reservation output: ${stdout.trim()}`);
+    const a = parseInt(m[1], 10);
+    const b = m[2] ? parseInt(m[2], 10) : a;
+    reserved = Array.from({ length: b - a + 1 }, (_, k) => a + k);
+    if (reserved.length !== urls.length) throw new Error(`reserved ${reserved.length} but needed ${urls.length}`);
+  };
+
+  // Did THIS worker's own number get a real (non-sentinel) report? Parallel-safe:
+  // each worker owns {num}, so a match keyed on the number proves that worker
+  // persisted — no cross-worker interference, unlike a global before/after diff.
+  const wroteReportForNum = (num: number) => {
+    const prefix = String(num).padStart(3, "0") + "-";
+    return reportEntries().some((n) => n.startsWith(prefix) && n.endsWith(".md") && !isReservedReportFile(n));
+  };
+
+  // Remove this batch's reservation sentinels (reports/{NNN}-RESERVED.md).
+  // Called from BOTH the normal completion path and the client-cancel path —
+  // the CLI --release path runs with force:true, so it needs no ownership token.
+  // Best-effort: a failure only leaves sentinels to the stale GC, never breaks
+  // the batch's own outcome events.
+  const releaseReserved = async () => {
+    if (reserved.length === 0) return;
+    try {
+      await runNode("reserve-report-num.mjs", [
+        "--release",
+        `${reserved[0].toString().padStart(3, "0")}-${reserved[reserved.length - 1].toString().padStart(3, "0")}`,
+      ]);
+    } catch {
+      /* release is best-effort; stale GC is the fallback */
+    }
+  };
 
   let cancelled = false;
-  let currentChild: ReturnType<typeof spawnHeadlessCli> | null = null;
+  const children = new Set<ReturnType<typeof spawnHeadlessCli>>();
   const stream = new ReadableStream({
     async start(controller) {
       const enc = new TextEncoder();
@@ -82,8 +142,6 @@ export async function POST(req: Request) {
         if (closed) return;
         controller.enqueue(enc.encode(JSON.stringify(ev) + "\n"));
       };
-      // A single evaluation can stay silent for minutes; nothing downstream can
-      // tell that from a hung request, and the browser/proxy drops the stream.
       const heartbeat = setInterval(() => send({ type: "keepalive" }), 10_000);
       const close = () => {
         if (closed) return;
@@ -96,30 +154,34 @@ export async function POST(req: Request) {
         }
       };
 
-      // One token for the whole batch: evaluate agents write the tracker file,
-      // and /api/run serializes every evaluate on the same lock — holding it
-      // here keeps the batch mutually exclusive with single evaluates too.
+      // Tracker-mutating (the final merge folds rows into applications.md), so a
+      // concurrent tracker.mjs delete must not race it. One token for the batch.
       const writeToken = acquireTrackerWrite();
       let ok = 0;
       let failed = 0;
 
       try {
-        for (const [i, url] of urls.entries()) {
-          if (cancelled) break;
-          send({ type: "status", label: `[${i + 1}/${urls.length}] ${url}` });
-          const postedAt = inboxPostedAt.get(url) ?? scanDates.get(url);
-          const prompt = buildPrompt({ kind: "evaluate", input: url, memory: readMemory(), today, postedAt });
-          // Plain-text argv (spec.args), not streamArgs: the batch route reads
-          // the agent's output as text and only extracts the VERDICT line —
-          // per-event parsing is /api/run's single-run concern.
-          const args = withModelFlag(spec.args(prompt), spec.model, model);
-          const reportsBefore = reportEntries();
+        await reserveRange();
 
-          const outcome = await new Promise<{ cleanExit: boolean; sawError: boolean; verdict: string | null }>((resolve) => {
+        // Evaluate one URL with a pre-reserved, exclusively-owned report number.
+        const evaluateOne = (i: number, num: number) =>
+          new Promise<{ cleanExit: boolean; sawError: boolean; verdict: string | null }>((resolve) => {
             let sawError = false;
             let verdict: string | null = null;
+            const url = urls[i];
+            const postedAt = inboxPostedAt.get(url) ?? scanDates.get(url);
+            const prompt = buildBatchPrompt(String(num).padStart(3, "0"), {
+              input: url,
+              memory: readMemory(),
+              today,
+              postedAt,
+            });
+            // Plain-text argv (spec.args), not streamArgs: the batch route reads
+            // the agent's output as text and extracts the VERDICT line — per-event
+            // parsing is /api/run's single-run concern.
+            const args = withModelFlag(spec.args(prompt), spec.model, model);
             const child = spawnHeadlessCli(binPath, args, { cwd: root, env: process.env });
-            currentChild = child;
+            children.add(child);
             child.stdout?.setEncoding("utf-8");
             child.stderr?.setEncoding("utf-8");
             child.stdout?.on("data", (chunk: string) => {
@@ -131,45 +193,92 @@ export async function POST(req: Request) {
             });
             child.on("error", (err) => {
               sawError = true;
-              send({ type: "text", text: `❌ ${url}: ${err.message}\n` });
+              send({ type: "text", text: `\u274C ${url}: ${err.message}\n` });
               resolve({ cleanExit: false, sawError: true, verdict: null });
             });
             child.on("close", (code) => {
               resolve({ cleanExit: code === 0, sawError, verdict });
+              children.delete(child);
             });
           });
-          currentChild = null;
-          if (cancelled) break;
-
-          const wroteReport = hasNewCompletedReport(reportsBefore, reportEntries());
-          const itemOk = outcome.cleanExit && !outcome.sawError && wroteReport;
-          if (itemOk) ok++;
-          else failed++;
-          send({
-            type: "item",
-            url,
-            ok: itemOk,
-            score: itemOk && outcome.verdict ? parseFloat((outcome.verdict.match(/([0-5](?:\.\d)?)/) ?? [])[1] ?? "") || null : null,
-            // Honesty gate, same as /api/run: a run that errored or never wrote
-            // its report is surfaced, never banked as a confident score.
-            reason: itemOk
-              ? undefined
-              : !outcome.cleanExit || outcome.sawError
-                ? "the run hit an error before finishing — re-run it to verify"
-                : "the worker ran but never saved a report/tracker row",
-          });
-          send({
-            type: "text",
-            text: itemOk
-              ? `✅ [${i + 1}/${urls.length}] done: ${url}${outcome.verdict ? ` — ${outcome.verdict}` : ""}\n`
-              : `⚠️ [${i + 1}/${urls.length}] NOT recorded: ${url}\n`,
-          });
-        }
+        // Bounded parallel pool. Each worker owns its number and its own report +
+        // TSV files, so there is no shared state to serialize on — the pool just
+        // caps how many heavyweight agent CLIs run at once.
+        const poolLimit = Math.min(MAX_PARALLEL, urls.length);
+        let cursor = 0;
+        let active = 0;
+        await new Promise<void>((poolDone) => {
+          const pump = () => {
+            if (cancelled) {
+              if (active === 0) poolDone();
+              return;
+            }
+            while (cursor < urls.length && active < poolLimit) {
+              const i = cursor++;
+              const num = reserved[i];
+              active++;
+              send({ type: "status", label: `[${i + 1}/${urls.length}] ${urls[i]} (report #${num})` });
+              evaluateOne(i, num)
+                .then((outcome) => {
+                  const itemOk = outcome.cleanExit && !outcome.sawError && wroteReportForNum(num);
+                  if (itemOk) ok++;
+                  else failed++;
+                  send({
+                    type: "item",
+                    url: urls[i],
+                    ok: itemOk,
+                    score:
+                      itemOk && outcome.verdict
+                        ? parseFloat((outcome.verdict.match(/([0-5](?:\.\d)?)/) ?? [])[1] ?? "") || null
+                        : null,
+                    reason: itemOk
+                      ? undefined
+                      : !outcome.cleanExit || outcome.sawError
+                        ? "the run hit an error before finishing — re-run it to verify"
+                        : "the worker ran but never saved a report/tracker row",
+                  });
+                  send({
+                    type: "text",
+                    text: itemOk
+                      ? `\u2705 [${i + 1}/${urls.length}] done: ${urls[i]}${outcome.verdict ? ` — ${outcome.verdict}` : ""}\n`
+                      : `\u26A0\uFE0F [${i + 1}/${urls.length}] NOT recorded: ${urls[i]}\n`,
+                  });
+                })
+                .catch(() => failed++)
+                .finally(() => {
+                  active--;
+                  pump();
+                });
+            }
+            if (cursor >= urls.length && active === 0) poolDone();
+          };
+          pump();
+        });
         if (cancelled) {
+          // Client dropped the connection mid-batch: release the reserved
+          // range so the numbers are not held hostage until the stale GC.
+          await releaseReserved();
           send({ type: "error", msg: "Batch cancelled." });
         } else {
+          // Fold all tracker-additions rows into data/applications.md ONCE.
+          // merge-tracker takes the core tracker lock itself, so this is the only
+          // writer of applications.md for this batch — workers never touched it.
+          if (ok > 0) {
+            send({ type: "status", label: "Merging tracker rows..." });
+            try {
+              const { stdout } = await runNode("merge-tracker.mjs", []);
+              if (stdout.trim()) send({ type: "text", text: `${stdout.trim()}\n` });
+            } catch (err) {
+              send({ type: "text", text: `\u26A0\uFE0F merge-tracker: ${(err as Error).message}\n` });
+            }
+          }
+          // Clean up reservation sentinels — completed slots already hold real
+          // reports, so releasing the range only removes leftover placeholders.
+          await releaseReserved();
           send({ type: "done", ok, failed });
         }
+      } catch (err) {
+        send({ type: "error", msg: (err as Error).message });
       } finally {
         releaseTrackerWrite(writeToken);
         close();
@@ -177,13 +286,16 @@ export async function POST(req: Request) {
     },
     cancel() {
       cancelled = true;
-      // SIGTERM the in-flight evaluation; the loop checks `cancelled` between
-      // URLs and stops before spawning the next one.
-      try {
-        currentChild?.kill("SIGTERM");
-      } catch {
-        /* ignore */
+      // SIGTERM every in-flight worker; the pool pump checks `cancelled` and
+      // stops before dispatching more.
+      for (const child of children) {
+        try {
+          child.kill("SIGTERM");
+        } catch {
+          /* ignore */
+        }
       }
+      children.clear();
     },
   });
 

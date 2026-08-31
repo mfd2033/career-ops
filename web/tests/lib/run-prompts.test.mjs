@@ -9,7 +9,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildPrompt, isShellSafeCompanyName } from "../../src/lib/run-prompts.mjs";
+import { buildPrompt, buildBatchPrompt, isShellSafeCompanyName } from "../../src/lib/run-prompts.mjs";
 import { OPEN_MARK, CLOSE_MARK } from "../../src/lib/cv-envelope.mjs";
 import { grantsWriteCapability, toolScopeFor } from "../../src/lib/claude-invocation.mjs";
 
@@ -230,4 +230,39 @@ test("buildPrompt: the row without a date is byte-identical to before the featur
   const withDate = buildPrompt({ kind: "evaluate", input: "u", memory: "", today: "2026-08-14", postedAt: "2026-08-07" });
   const without = buildPrompt({ kind: "evaluate", input: "u", memory: "", today: "2026-08-14" });
   assert.equal(withDate.replace("; posted: 2026-08-07", ""), without);
+});
+
+// ── buildBatchPrompt (#batch) ────────────────────────────────────────────────
+//
+// The evaluate prompt tells a worker to reserve its OWN number and merge the
+// tracker ITSELF — correct for a single interactive run, fatal for a parallel
+// batch (N workers racing the same files). buildBatchPrompt rewrites those two
+// instructions and pins every `{num}` to one orchestrator-owned number, letting
+// the batch route run workers truly in parallel with no shared mutable state.
+
+test("buildBatchPrompt: pins every report number to the assigned one", () => {
+  const p = buildBatchPrompt("042", { input: "https://acme.com/jobs/7", memory: "", today: "2026-08-14" });
+  assert.match(p, /reports\/042-{company-slug}-2026-08-14\.md/);
+  assert.match(p, /tracker-additions\/042-{company-slug}\.tsv/);
+  assert.match(p, /\[042\]\(reports\/042-/);
+  assert.ok(!/reports\/\{num\}-/.test(p), "no unresolved {num} in the report path");
+  assert.ok(!/tracker-additions\/\{num\}-/.test(p), "no unresolved {num} in the TSV path");
+});
+test("buildBatchPrompt: stops the worker reserving its own (racing) number", () => {
+  const p = buildBatchPrompt("042", { input: "https://acme.com/jobs/7", memory: "", today: "2026-08-14" });
+  assert.match(p, /already-reserved report number 042/i);
+  // it must not ask the worker to run the allocator (that would race the batch)
+  assert.ok(!/Reserve a report number: run/i.test(p), "must not tell the worker to reserve");
+});
+
+test("buildBatchPrompt: stops the worker merging the tracker itself", () => {
+  const p = buildBatchPrompt("042", { input: "https://acme.com/jobs/7", memory: "", today: "2026-08-14" });
+  assert.match(p, /batch orchestrator merges every row AFTER the whole batch/i);
+  assert.ok(!/run \`node merge-tracker\.mjs\` to merge/i.test(p), "must not have the worker merge alone");
+});
+
+test("buildBatchPrompt: still demands the full 10-field TSV row and the honesty VERDICT", () => {
+  const p = buildBatchPrompt("042", { input: "https://acme.com/jobs/7", memory: "", today: "2026-08-14" });
+  assert.match(p, /10 TAB-separated columns/i);
+  assert.match(p, /VERDICT:/i);
 });

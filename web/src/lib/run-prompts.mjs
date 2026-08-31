@@ -139,3 +139,45 @@ VERDICT: {score}/5 — {reason in 12 words or fewer}
 Posting URL: ${input}`;
 }
 
+/**
+ * Batch variant of the evaluate prompt — the pipeline page's "re-evaluate N
+ * selected" path (#batch).
+ *
+ * The single evaluate prompt (buildPrompt) tells the agent to reserve its OWN
+ * report number and merge the tracker ITSELF. That is correct for a single
+ * interactive run, but it is why /api/batch-evaluate has to serialize: N
+ * concurrent agents all calling reserve-report-num + merge-tracker on the same
+ * files races the tracker. The batch orchestrator instead reserves a RANGE of
+ * report numbers up front and merges ONCE after every worker finishes — so each
+ * worker can run fully in parallel.
+ *
+ * This keeps buildPrompt byte-for-byte unchanged (single evaluations and the
+ * run-prompts.test assertions never know this exists); the batch route wraps
+ * the evaluate prompt and rewrites the two persistence instructions:
+ *   1. "reserve your own number"   → "use the orchestrator's fixed number"
+ *   2. "merge the tracker yourself" → "leave the TSV row; the orchestrator
+ *                                      merges after the whole batch"
+ * and pins every `{num}` in the report/tracker templates to the assigned number.
+ *
+ * @param {string} reportNum  zero-padded 3-digit number the orchestrator reserved
+ * @param {{input:string, memory:string, today:string, postedAt?:string}} args
+ * @returns {string}
+ */
+export function buildBatchPrompt(reportNum, { input, memory, today, postedAt }) {
+  let p = buildPrompt({ kind: "evaluate", input, memory, today, postedAt });
+  // Step 2a — stop asking the worker to reserve its own (racing) number.
+  p = p.replace(
+    /[^\n]*a\. Reserve a report number:.*\n/,
+    `   a. Use the already-reserved report number ${reportNum} — do NOT run \`node reserve-report-num.mjs\`; it is reserved for you.\n`,
+  );
+  // Step 2d — stop asking the worker to merge the tracker itself; the
+  // orchestrator merges once after the whole batch completes.
+  p = p.replace(
+    /[^\n]*d\. Merge into the tracker:.*\n/,
+    `   d. Do NOT run \`node merge-tracker.mjs\` — the batch orchestrator merges every row AFTER the whole batch finishes. Just leave the TSV row in batch/tracker-additions/.\n`,
+  );
+  // Pin every `{num}` (report filename, TSV first field, report link) to the
+  // number the orchestrator actually reserved, so all N workers write
+  // DISTINCT reports/rows — no two can collide on the same number.
+  return p.replaceAll("{num}", reportNum);
+}
