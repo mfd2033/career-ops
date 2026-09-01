@@ -93,12 +93,25 @@ export async function POST(req: Request) {
   const runNode = (script: string, args: string[]) =>
     execFileAsync(process.execPath, [path.join(root, script), ...args], { cwd: root });
 
+  // promisify(execFile) resolves { stdout, stderr } on Node builds that set
+  // customPromisifyArgs on execFile, but on others (some v22.x) it resolves
+  // the stdout string itself — destructuring `{ stdout }` from that yields
+  // undefined, and a `.trim()` on it crashes with "Cannot read properties of
+  // undefined (reading 'trim')". Normalize both shapes to the text.
+  const runNodeText = (out: unknown): string => {
+    if (typeof out === "string") return out;
+    if (out && typeof out === "object" && typeof (out as { stdout?: unknown }).stdout === "string") {
+      return (out as { stdout: string }).stdout;
+    }
+    return "";
+  };
+
   // --- Reserve a contiguous report-number range up front -----------------------
   // Parallel workers must NEVER compute max+1 themselves (#749); the range is
   // the single point of allocation. Each URL gets its own number in order.
   let reserved: number[] = [];
   const reserveRange = async () => {
-    const { stdout } = await runNode("reserve-report-num.mjs", ["--count", String(urls.length)]);
+    const stdout = runNodeText(await runNode("reserve-report-num.mjs", ["--count", String(urls.length)]));
     const m = stdout.trim().match(/^(\d{3})(?:-(\d{3}))?$/);
     if (!m) throw new Error(`unexpected reservation output: ${stdout.trim()}`);
     const a = parseInt(m[1], 10);
@@ -265,7 +278,7 @@ export async function POST(req: Request) {
         const mergeTrackerRows = async () => {
           send({ type: "status", label: "Merging tracker rows..." });
           try {
-            const { stdout } = await runNode("merge-tracker.mjs", []);
+            const stdout = runNodeText(await runNode("merge-tracker.mjs", []));
             if (stdout.trim()) send({ type: "text", text: `${stdout.trim()}\n` });
           } catch (err) {
             send({ type: "text", text: `\u26A0\uFE0F merge-tracker: ${(err as Error).message}\n` });
