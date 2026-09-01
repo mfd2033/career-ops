@@ -6,6 +6,7 @@ import * as yaml from "js-yaml";
 import { careerOpsRoot } from "@/lib/career-ops";
 import { DEFAULT_FILTERS, cleanChips, type ExploreFilters } from "@/lib/explore";
 import { profileTargetKeywords } from "@/lib/profile-keywords.mjs";
+import { extractBrowserQuery } from "../browser-search.mjs";
 
 /**
  * ACL for portals.yml — the core's scan-filter config (a CONTRACT entry-point,
@@ -78,6 +79,21 @@ export function seedExploreFilters(): { filters: ExploreFilters; seededFrom: str
     filters.alwaysAllow = listFrom(lf.always_allow);
     filters.blockHard = listFrom(lf.block_hard);
     if (filters.positive.length || filters.allow.length || filters.block.length || filters.blockHard.length) seededFrom.push("portals.yml");
+    // Browser mode's keyword box: seed from the CLI scan's first enabled
+    // search_queries entry (the Chinese-board search intent — same platforms
+    // the browser mode walks). Falls back to "" when portals has none.
+    const queries = Array.isArray(portals.search_queries) ? portals.search_queries : [];
+    for (const q of queries) {
+      if (!q || typeof q !== "object") continue;
+      const qr = q as Record<string, unknown>;
+      if (qr.enabled === false || typeof qr.query !== "string") continue;
+      const extracted = extractBrowserQuery(qr.query);
+      if (extracted) {
+        filters.zhQuery = extracted;
+        seededFrom.push("search_queries");
+        break;
+      }
+    }
   }
 
   if (filters.positive.length === 0) {
