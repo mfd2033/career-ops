@@ -41,8 +41,11 @@ const CAPTCHA_HELP_TIMEOUT_MS = 3 * 60_000; // user needs a moment to solve the 
 // SPA listing pages (zhipin search, liepin search) render their rows
 // asynchronously: domcontentloaded fires on an empty body, and a single
 // immediate read returns zero anchors. Poll until the page has content.
+// 15s ceiling — zhipin's search results frequently land 5-8s in, and an 8s
+// budget intermittently cut the poll short right before the rows arrived
+// (handing back the intermediate recommend page as a 1-row listing).
 const DOM_READY_POLL_MS = 500;
-const DOM_READY_TIMEOUT_MS = 8_000;
+const DOM_READY_TIMEOUT_MS = 15_000;
 
 const READ_DOM_JS = `(() => {
   const title = (document.querySelector('h1')?.innerText || document.title || '').trim();
@@ -80,11 +83,29 @@ const READ_DOM_JS = `(() => {
 /** Run a bsk subcommand. Rejects on non-zero exit with a joined message. */
 async function runBsk(args, timeoutMs = DEFAULT_TIMEOUT_MS) {
   try {
-    const { stdout, stderr } = await execFileAsync('bsk', args, {
+    const res = await execFileAsync('bsk', args, {
       timeout: timeoutMs,
       windowsHide: true,
       maxBuffer: 16 * 1024 * 1024,
     });
+    // util.promisify(execFile)'s resolve shape DRIFTED across Node versions:
+    // modern Node (v22+) resolves to the stdout STRING directly; older Node
+    // resolves {stdout, stderr} (or a [stdout, stderr] array). The former got
+    // silently lost — `const { stdout, stderr } = await …` destructured a
+    // string into two undefineds, and every command looked "empty" (a bsk
+    // session start reported "could not parse a session id from: (empty
+    // output)"). Normalize all three shapes ONCE here.
+    let stdout = '';
+    let stderr = '';
+    if (typeof res === 'string') {
+      stdout = res;
+    } else if (Array.isArray(res)) {
+      stdout = res[0] ?? '';
+      stderr = res[1] ?? '';
+    } else if (res && typeof res === 'object') {
+      stdout = res.stdout ?? '';
+      stderr = res.stderr ?? '';
+    }
     return { stdout: String(stdout || '').trim(), stderr: String(stderr || '').trim() };
   } catch (err) {
     const detail = [err.stderr, err.stdout, err.cmd ? `${err.cmd} ${err.args?.join(' ') ?? ''}` : '']
@@ -202,11 +223,20 @@ async function readDomViaBsk(sessionId) {
  * SPA boards (zhipin search, liepin search) render their rows asynchronously:
  * domcontentloaded can fire on a near-empty body, and the rows appear a moment
  * later. A single immediate read yields the static nav chrome only — enough to
- * count as "content" but not enough for a listing. Poll until the anchor count
- * stabilizes across two consecutive reads (SPA rendering is monotonic, so a
- * stable count means the rows have landed). A genuine dead/blank page times out
- * and hands back the last read so the captcha-wall / empty-result handling
- * still sees something.
+ * count as "content" but not enough for a listing. Poll until the JOB anchor
+ * count stabilizes across two consecutive reads.
+ *
+ * TWO corrections over the naive "any anchors" rule:
+ *   • The stability signal is the count of anchors that PASS the zh job-detail
+ *     filter, never the raw anchor count — a board's nav chrome (猎聘: 首页 /
+ *     职位 / 校园 / 海归 / 简历优化; BOSS: APP / 消息) is present from the very
+ *     first read, so "stable raw anchors" fires before the dynamic rows land
+ *     and returns an empty listing. (It also fires on an intermediate
+ *     recommend/home page that holds 0-1 job-looking links — BUSINESS直聘's
+ *     search results replace that page a moment later.)
+ *   • A genuinely empty result page stays at 0 job anchors the whole window;
+ *     it costs the full budget and returns the last read (0 jobs), which is
+ *     the right trade against shipping a prematurely-empty hunt.
  * @param {string} sessionId
  * @param {'jd'|'listing'} mode
  * @returns {Promise<object>}
@@ -214,15 +244,16 @@ async function readDomViaBsk(sessionId) {
 async function readDomReadyViaBsk(sessionId, mode) {
   const deadline = Date.now() + DOM_READY_TIMEOUT_MS;
   let raw = null;
-  let prevAnchors = -1;
+  let prev = -1;
   while (Date.now() <= deadline) {
     const next = await readDomViaBsk(sessionId);
     raw = next;
     if (mode === 'listing') {
-      const n = next?.anchors?.length ?? 0;
-      // Stable across consecutive reads ⇒ the dynamic row set has landed.
-      if (n > 0 && n === prevAnchors) break;
-      prevAnchors = n;
+      const url = typeof next?.url === 'string' ? next.url : '';
+      const jobAnchors = zhListingAnchors(next?.anchors ?? [], url).length;
+      // Stable AND non-zero ⇒ the dynamic row set has landed.
+      if (jobAnchors > 0 && jobAnchors === prev) break;
+      prev = jobAnchors;
     } else if (String(next?.text ?? '').trim().length > 0) {
       break; // a jd has text; done on first non-empty read
     }
