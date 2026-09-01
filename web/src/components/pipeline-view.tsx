@@ -405,7 +405,14 @@ export function PipelineView({
                       {statusLabel(r.status)}
                     </span>
                   </td>
-                  <td className="whitespace-nowrap px-4 py-3 text-faint tabular-nums">{r.date}</td>
+                  <td className="whitespace-nowrap px-4 py-3 text-faint tabular-nums">
+                    {r.date}
+                    {r.revalDate && r.revalDate !== r.date && (
+                      <span className="block text-[11px] leading-4 text-faint/70">
+                        {t("pipeline.revalOn", { date: r.revalDate })}
+                      </span>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>

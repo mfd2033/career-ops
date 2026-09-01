@@ -364,6 +364,24 @@ if (!HAS_WEB) {
   } else {
     fail(`web reader: alias table drifted from HEADER_ALIASES — web ${JSON.stringify(webAliases)} vs core ${JSON.stringify(HEADER_ALIASES)}`);
   }
+  // revalDate: the freshest `Re-eval YYYY-MM-DD` marker in Notes, "" when never
+  // re-evaluated. The Date column keeps the INITIAL evaluation date (#2808,
+  // 方向 A), so the page can show both without the merge path moving the date.
+  const REVAL = `# Applications Tracker
+
+| # | Date | Company | Role | Score | Status | PDF | Report | Notes |
+|---|------|---------|------|-------|--------|-----|--------|-------|
+| 1 | 2026-08-23 | Acme | Engineer | 4.0/5 | Applied | ✅ | — | first eval |
+| 2 | 2026-08-24 | Beta | PM | 3.0/5 | Applied | ✅ | — | Re-eval 2026-08-30 (4→3.5): note one. Re-eval 2026-09-01 (3.5→3): fresh |
+| 3 | 2026-08-25 | Gamma | Lead | 2.0/5 | SKIP | ❌ | — | plain row, no re-eval |
+`;
+  const revalRows = parseApplications(REVAL, ROOT);
+  const [rNever, rMulti, rNone] = revalRows;
+  if (revalRows.length === 3 && rNever.revalDate === '' && rNone.revalDate === '' && rMulti.revalDate === '2026-09-01') {
+    pass('web reader: revalDate lifts the freshest Re-eval marker from Notes, "" otherwise');
+  } else {
+    fail(`web reader: revalDate extraction — got ${JSON.stringify(revalRows)}`);
+  }
 }
 
 // ═══ Stage 2 (#1596): Via column ════════════════════════════════════════════
