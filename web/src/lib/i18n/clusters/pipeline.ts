@@ -127,6 +127,12 @@ export const en: Dict = {
 
   // ── Report view (report-view.tsx) ──
   "pipeline.report.backToPipeline": "Pipeline",
+  "pipeline.report.navigation": "Report navigation",
+  "pipeline.report.previous": "Previous · {company}",
+  "pipeline.report.next": "Next · {company}",
+  "pipeline.report.previousNone": "First",
+  "pipeline.report.nextNone": "Last",
+  "pipeline.report.position": "{pos} / {total}",
   "pipeline.report.recommended": "Recommended",
   "pipeline.report.belowApplyLine": "Below the apply line",
   "pipeline.report.posting": "posting",
@@ -312,6 +318,12 @@ export const zh: Dict = {
 
   // ── Report view (report-view.tsx) ──
   "pipeline.report.backToPipeline": "返回管道",
+  "pipeline.report.navigation": "报告导航",
+  "pipeline.report.previous": "上一个 · {company}",
+  "pipeline.report.next": "下一个 · {company}",
+  "pipeline.report.previousNone": "已是第一条",
+  "pipeline.report.nextNone": "已是最后一条",
+  "pipeline.report.position": "{pos} / {total}",
   "pipeline.report.recommended": "推荐申请",
   "pipeline.report.belowApplyLine": "低于申请线",
   "pipeline.report.posting": "职位链接",

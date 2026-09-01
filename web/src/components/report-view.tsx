@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowLeft, FileText, ExternalLink, ChevronDown } from "lucide-react";
+import { ArrowLeft, FileText, ExternalLink, ChevronDown, ChevronLeft, ChevronRight } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Application } from "@/lib/career-ops";
@@ -57,6 +57,11 @@ export function ReportView({
   app,
   report,
   canDelete = false,
+  prev = null,
+  next = null,
+  position = null,
+  total = null,
+  contextQuery = "",
 }: {
   id: string;
   app: Application | null;
@@ -65,6 +70,17 @@ export function ReportView({
    *  the raw .md filename is a dev artifact, not header content. */
   file?: string | null;
   canDelete?: boolean;
+  /** Previous/next report in the list page's ordered context (null at the
+   *  boundaries, where the control is disabled). */
+  prev?: Application | null;
+  next?: Application | null;
+  /** 1-based position of this report within the ordered list, or null when the
+   *  report isn't in any ordered list (rare). Renders the "3 / 12" indicator. */
+  position?: number | null;
+  total?: number | null;
+  /** Query string carrying the list context (tab/min/sort/dir/q) — appended to
+   *  the back + prev/next links so a round-trip returns to the SAME view. */
+  contextQuery?: string;
 }) {
   const { t } = useI18n();
   const translateSectionHeading = (heading: string): string => {
@@ -127,12 +143,62 @@ export function ReportView({
 
   return (
     <div className="w-full px-6 py-8">
-      <Link
-        href="/pipeline"
-        className="inline-flex items-center gap-1.5 text-sm text-muted transition-colors hover:text-brand"
-      >
-        <ArrowLeft className="size-4" /> {t("pipeline.report.backToPipeline")}
-      </Link>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <Link
+          href={`/pipeline${contextQuery}`}
+          className="inline-flex items-center gap-1.5 text-sm text-muted transition-colors hover:text-brand"
+        >
+          <ArrowLeft className="size-4" /> {t("pipeline.report.backToPipeline")}
+        </Link>
+
+        {position != null && (
+          <nav aria-label={t("pipeline.report.navigation")} className="flex items-center gap-1.5">
+            {prev ? (
+              <Link
+                href={`/pipeline/${prev.n}${contextQuery}`}
+                className="inline-flex min-w-0 max-w-56 items-center gap-1 rounded-lg border border-border bg-surface/60 px-2.5 py-1.5 text-sm text-muted transition-colors hover:border-brand/40 hover:text-brand"
+                title={t("pipeline.report.previous", { company: prev.company })}
+              >
+                <ChevronLeft className="size-4 shrink-0" />
+                <span className="truncate">{t("pipeline.report.previous", { company: prev.company })}</span>
+              </Link>
+            ) : (
+              <span
+                aria-disabled="true"
+                className="inline-flex items-center gap-1 rounded-lg border border-border/60 bg-surface/30 px-2.5 py-1.5 text-sm text-faint/60 opacity-60"
+                title={t("pipeline.report.previousNone")}
+              >
+                <ChevronLeft className="size-4 shrink-0" />
+                <span className="truncate">{t("pipeline.report.previousNone")}</span>
+              </span>
+            )}
+
+            <span className="px-1 text-xs text-faint tabular-nums" aria-live="polite">
+              {t("pipeline.report.position", { pos: position, total: total ?? position })}
+            </span>
+
+            {next ? (
+              <Link
+                href={`/pipeline/${next.n}${contextQuery}`}
+                className="inline-flex min-w-0 max-w-56 items-center gap-1 rounded-lg border border-border bg-surface/60 px-2.5 py-1.5 text-sm text-muted transition-colors hover:border-brand/40 hover:text-brand"
+                title={t("pipeline.report.next", { company: next.company })}
+              >
+                <span className="truncate">{t("pipeline.report.next", { company: next.company })}</span>
+                <ChevronRight className="size-4 shrink-0" />
+              </Link>
+            ) : (
+              <span
+                aria-disabled="true"
+                className="inline-flex items-center gap-1 rounded-lg border border-border/60 bg-surface/30 px-2.5 py-1.5 text-sm text-faint/60 opacity-60"
+                title={t("pipeline.report.nextNone")}
+              >
+                <span className="truncate">{t("pipeline.report.nextNone")}</span>
+                <ChevronRight className="size-4 shrink-0" />
+              </span>
+            )}
+          </nav>
+        )}
+      </div>
 
       <header className="mt-5">
         <p className="font-mono text-xs uppercase tracking-[0.18em] text-faint">#{id}</p>
