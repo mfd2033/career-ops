@@ -1,9 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { X, Ban, Clock, MapPin, ChevronDown, SlidersHorizontal } from "lucide-react";
+import { X, Ban, Clock, MapPin, ChevronDown, SlidersHorizontal, Search } from "lucide-react";
 import { cn } from "@/lib/cn";
-import { ATS_LABEL, ATS_SOURCES, cleanChips, type AtsSource, type ExploreFilters } from "@/lib/explore";
+import { ATS_LABEL, ATS_SOURCES, BROWSER_LABEL, BROWSER_SOURCES, cleanChips, type AtsSource, type BrowserSource, type ExploreFilters, type ExploreMode } from "@/lib/explore";
 import { useI18n } from "@/lib/i18n/context";
 
 const RECENCY = [
@@ -104,10 +104,12 @@ export function FilterBuilder({
   filters,
   onChange,
   seededFrom = [],
+  mode = "scan",
 }: {
   filters: ExploreFilters;
   onChange: (f: ExploreFilters) => void;
   seededFrom?: string[];
+  mode?: ExploreMode;
 }) {
   const { t } = useI18n();
   const [advanced, setAdvanced] = useState(false);
@@ -117,6 +119,62 @@ export function FilterBuilder({
     const next = has ? filters.ats.filter((x) => x !== a) : [...filters.ats, a];
     set({ ats: next.length ? next : filters.ats });
   };
+  const toggleBrowserSource = (s: BrowserSource) => {
+    const cur = filters.browserSources?.length ? filters.browserSources : [...BROWSER_SOURCES];
+    const has = cur.includes(s);
+    const next = has ? cur.filter((x) => x !== s) : [...cur, s];
+    set({ browserSources: next.length ? next : cur });
+  };
+
+  // Browser mode's filter surface is DRASTICALLY simpler than the ATS scan's: a
+  // browser hunt just picks a Chinese keyword and which of the three boards to
+  // walk. The scan's location/depth/recency controls would be inert here (the
+  // listing extractor doesn't filter by them), so they're not shown — an
+  // honest surface over live controls.
+  if (mode === "browser") {
+    return (
+      <div className="space-y-4">
+        <style>{STYLE}</style>
+        <div>
+          <Label>{t("explore.filter.zhQuery")}</Label>
+          <div className="co-fb__field border border-border bg-surface/40 focus-within:border-brand/40 transition-colors">
+            <Search className="size-3.5 shrink-0 text-muted" />
+            <input
+              value={filters.zhQuery ?? ""}
+              onChange={(e) => set({ zhQuery: e.target.value })}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") e.currentTarget.blur();
+              }}
+              placeholder={t("explore.filter.zhQueryPlaceholder")}
+              className="min-w-0 flex-1 bg-transparent outline-none"
+            />
+          </div>
+        </div>
+        <div>
+          <Label hint={t("explore.filter.browserSourcesHint")}>{t("explore.filter.browserSources")}</Label>
+          <div className="flex flex-wrap gap-1.5">
+            {BROWSER_SOURCES.map((s) => {
+              const on = filters.browserSources?.length ? filters.browserSources.includes(s) : true;
+              return (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => toggleBrowserSource(s)}
+                  aria-pressed={on}
+                  className={cn(
+                    "rounded-full border px-2.5 py-1 text-xs font-medium transition-colors max-sm:min-h-[44px]",
+                    on ? "border-brand/40 bg-brand-soft text-brand" : "border-border text-muted hover:text-foreground",
+                  )}
+                >
+                  {BROWSER_LABEL[s]}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">

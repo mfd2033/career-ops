@@ -3,10 +3,11 @@ import fs from "node:fs";
 import { runDiscovery } from "@/lib/core/scan";
 import { rootScript } from "@/lib/career-ops";
 import { parseExplorePatch, DEFAULT_FILTERS, type DiscoveredOffer, type ScanEvent } from "@/lib/explore";
-import { scannerMissingBody, SCANNER_MISSING_STATUS } from "@/lib/explore-error.mjs";
+import { scannerMissingBody, bskMissingBody, SCANNER_MISSING_STATUS } from "@/lib/explore-error.mjs";
 
 // Discovery is HTTP-bound across many ATS boards; give it room. It is FREE —
 // zero LLM tokens (the scanner only does HTTP + JSON, and --dry-run writes nothing).
+// The browser mode can take longer still (a real browser walk per platform).
 export const runtime = "nodejs";
 export const maxDuration = 300;
 export const dynamic = "force-dynamic";
@@ -19,12 +20,22 @@ export async function POST(req: NextRequest) {
     /* empty body → defaults */
   }
 
+  const mode = String(body.mode ?? "scan").toLowerCase() === "browser" ? "browser" : "scan";
   const filters = parseExplorePatch(body, DEFAULT_FILTERS);
 
-  // Guard: a data-only checkout (or pre-onboarding) has no scanner. Fail soft.
-  // The body carries an explicit code because 400 is a shared channel: the
-  // client cannot tell this apart from a malformed request by status alone.
-  if (!fs.existsSync(rootScript("scan-ats-full"))) {
+  // Capability gates — each mode needs its OWN machinery, and each fails with its
+  // OWN structured code on the shared 400 channel (never the bare status, never
+  // the other mode's message — see explore-error.mjs):
+  //   • scan  → scan-ats-full.mjs (data-only / pre-onboarding checkout)
+  //   • browser → bsk CLI + a connected browser (the user's own logged-in session)
+  // The browser gate is deliberately independent of the scanner gate: a checkout
+  // that has no scan-ats-full can still run a browser hunt.
+  if (mode === "browser") {
+    const { bskInstalled } = await import("@/lib/core/browser-scan");
+    if (!bskInstalled()) {
+      return Response.json(bskMissingBody(), { status: SCANNER_MISSING_STATUS });
+    }
+  } else if (!fs.existsSync(rootScript("scan-ats-full"))) {
     return Response.json(scannerMissingBody(), { status: SCANNER_MISSING_STATUS });
   }
 
@@ -38,10 +49,16 @@ export async function POST(req: NextRequest) {
           /* stream closed */
         }
       };
-      send({ kind: "start", ats: filters.ats, sinceDays: filters.sinceDays, limit: filters.limitPerAts, free: true } satisfies ScanEvent);
+      const atsList = mode === "browser" ? (filters.browserSources as string[]) : filters.ats;
+      send({ kind: "start", ats: atsList, sinceDays: filters.sinceDays, limit: filters.limitPerAts, free: true } satisfies ScanEvent);
       let offers: DiscoveredOffer[] = [];
       try {
-        offers = await runDiscovery(filters, (e: ScanEvent) => send(e));
+        if (mode === "browser") {
+          const { runBrowserDiscovery } = await import("@/lib/core/browser-scan");
+          offers = await runBrowserDiscovery(filters, (e: ScanEvent) => send(e));
+        } else {
+          offers = await runDiscovery(filters, (e: ScanEvent) => send(e));
+        }
       } catch (err) {
         send({ kind: "error", message: err instanceof Error ? err.message : "discovery failed" } satisfies ScanEvent);
       }

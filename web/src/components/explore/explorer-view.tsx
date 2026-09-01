@@ -1,13 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Compass, ChevronDown, RotateCcw, AlertTriangle, Sparkles, Settings } from "lucide-react";
+import { Compass, ChevronDown, RotateCcw, AlertTriangle, Sparkles, Settings, Globe } from "lucide-react";
 import Link from "next/link";
 import { cn } from "@/lib/cn";
 import { instrumentSerif } from "@/lib/fonts";
 import type { Application, InboxJob } from "@/lib/career-ops";
 import { normalizeTextKey } from "@/lib/core/normalize-text-key.mjs";
-import { paramsToFilters, paramsToAi, type ExploreFilters } from "@/lib/explore";
+import { paramsToFilters, paramsToAi, paramsToBrowser, type ExploreFilters } from "@/lib/explore";
 import { FilterBuilder } from "./filter-builder";
 import { DiscoveringState } from "./discovering-state";
 import { AiHuntView } from "./ai-hunt-view";
@@ -40,7 +40,7 @@ export function ExplorerView({
   appsSnapshot: Application[];
   rootExists: boolean;
 }) {
-  const { filters, setFilters, initFilters, phase, running, offers, discover, loadFresh, status, error, scannerMissing, mode, setMode, aiIntent, setAiIntent, discoverAI, companiesScanned, companiesAvailable, capHit, droppedNoDate, partial } = useExplore();
+  const { filters, setFilters, initFilters, phase, running, offers, discover, discoverBrowser, loadFresh, status, error, scannerMissing, mode, setMode, aiIntent, setAiIntent, discoverAI, companiesScanned, companiesAvailable, capHit, droppedNoDate, partial } = useExplore();
   const { t } = useI18n();
   const avail = companiesAvailable > companiesScanned ? t("explore.degraded.ofAvailable", { n: companiesAvailable.toLocaleString() }) : "";
   const partialTxt = partial ? t("explore.scanNotePartial") : "";
@@ -76,22 +76,30 @@ export function ExplorerView({
     if (ai !== null) {
       setMode("ai");
       setAiIntent(ai);
-    } else if (sp.get("view") === "fresh") {
-      // Today's "See all N" (#84) hands off here instead of a bare config form —
-      // load the SAME /api/whats-new offers it already showed, through the normal
-      // results-phase UI. The config form (Refine search / Re-cast) stays reachable.
-      // Force scan mode: a session restored in "ai" mode (sessionStorage rehydrate)
-      // must not show the AI-search UI for this scan-only hand-off.
-      setMode("scan");
-      initFilters(seed.filters);
-      void loadFresh();
     } else {
-      initFilters(sp.toString() ? paramsToFilters(sp) : seed.filters);
-      // Onboarding hand-off: ?run=1 auto-fires the free scan + flags the first-run
-      // banner (the "matches found from your CV, free" reveal).
-      if (sp.get("run") === "1") {
-        setFirstRun(true);
-        void discover();
+      const browser = paramsToBrowser(sp);
+      if (browser !== null) {
+        // A restored browser hunt (?mode=browser&zh=…&sources=…) lands straight
+        // back in the browser surface with its filters and URL intact.
+        setMode("browser");
+        initFilters(browser);
+      } else if (sp.get("view") === "fresh") {
+        // Today's "See all N" (#84) hands off here instead of a bare config form —
+        // load the SAME /api/whats-new offers it already showed, through the normal
+        // results-phase UI. The config form (Refine search / Re-cast) stays reachable.
+        // Force scan mode: a session restored in "ai" mode (sessionStorage rehydrate)
+        // must not show the AI-search UI for this scan-only hand-off.
+        setMode("scan");
+        initFilters(seed.filters);
+        void loadFresh();
+      } else {
+        initFilters(sp.toString() ? paramsToFilters(sp) : seed.filters);
+        // Onboarding hand-off: ?run=1 auto-fires the free scan + flags the first-run
+        // banner (the "matches found from your CV, free" reveal).
+        if (sp.get("run") === "1") {
+          setFirstRun(true);
+          void discover();
+        }
       }
     }
   }, [seed.filters, initFilters, setMode, setAiIntent, discover, loadFresh]);
@@ -114,9 +122,10 @@ export function ExplorerView({
   );
 
   const isAi = mode === "ai";
+  const isBrowser = mode === "browser";
   if (running) return isAi ? <AiHuntView cliName={cli.name} /> : <DiscoveringState />;
 
-  const canDiscover = filters.ats.length > 0;
+  const canDiscover = isBrowser ? true : filters.ats.length > 0;
   const isResults = phase === "results";
 
   return (
@@ -134,9 +143,7 @@ export function ExplorerView({
         </div>
         {!isResults && (
           <p className="mt-3 max-w-2xl text-[15px] leading-relaxed text-muted">
-            {isAi
-              ? t("explore.aiDesc")
-              : t("explore.scanDesc")}
+            {isAi ? t("explore.aiDesc") : isBrowser ? t("explore.browserDesc") : t("explore.scanDesc")}
           </p>
         )}
       </header>
@@ -171,6 +178,56 @@ export function ExplorerView({
               />
             )}
             {phase === "failed" && <FailedCard msg={error || status} scannerMissing={scannerMissing} onRetry={() => void discoverAI()} />}
+          </div>
+        )
+      ) : isBrowser ? (
+        phase === "blocked" ? (
+          <BrowserBlockedCard />
+        ) : (
+          <div className="space-y-6">
+            {isResults ? (
+              <div className="mb-6 rounded-xl border border-border bg-surface/30">
+                <button type="button" onClick={() => setRefineOpen((v) => !v)} className="flex w-full items-center gap-2 px-4 py-3 text-sm font-medium text-foreground">
+                  <Globe className="size-4 text-brand" /> {t("explore.refineSearch")}
+                  <ChevronDown className={cn("ml-auto size-4 text-muted transition-transform", refineOpen && "rotate-180")} />
+                </button>
+                {refineOpen && (
+                  <div className="space-y-4 border-t border-border p-4">
+                    <FilterBuilder filters={filters} onChange={setFilters} seededFrom={seed.seededFrom} mode="browser" />
+                    <DiscoverBar canDiscover={canDiscover} onDiscover={discoverBrowser} label={t("explore.recastBrowser")} />
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="mb-6 rounded-2xl border border-border bg-surface/30 p-5">
+                <FilterBuilder filters={filters} onChange={setFilters} seededFrom={seed.seededFrom} mode="browser" />
+                <div className="mt-5">
+                  <DiscoverBar canDiscover={canDiscover} onDiscover={discoverBrowser} label={t("explore.discoverBrowser")} />
+                </div>
+              </div>
+            )}
+
+            {isResults && <ResultsList offers={enriched} />}
+            {phase === "empty-loose" && (
+              <EmptyState
+                tone="loose"
+                title={t("explore.empty.browserLooseTitle")}
+                body={t("explore.empty.browserLooseBody")}
+                onRerun={() => void discoverBrowser()}
+                rerunLabel={t("explore.empty.browserLooseRerun")}
+              />
+            )}
+            {phase === "degraded" && (
+              <DegradedCard
+                onRetry={() => void discoverBrowser()}
+                companiesScanned={companiesScanned}
+                companiesAvailable={companiesAvailable}
+                capHit={capHit}
+                droppedNoDate={droppedNoDate}
+                partial={partial}
+              />
+            )}
+            {phase === "failed" && <FailedCard msg={error || status} scannerMissing={scannerMissing} onRetry={() => void discoverBrowser()} />}
           </div>
         )
       ) : (
@@ -409,6 +466,27 @@ function BlockedCard() {
       <Link href="/config" className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-brand px-3.5 py-2 text-sm font-semibold text-brand-foreground transition hover:brightness-110">
         <Settings className="size-4" /> {t("explore.failed.openConfig")}
       </Link>
+    </div>
+  );
+}
+
+function BrowserBlockedCard() {
+  const { t } = useI18n();
+  // The browser mode can't run without browser-skill — this is an INSTALL guide,
+  // not a retry: the missing bsk returned a structured BSK_MISSING 400, so a
+  // "Try again" would re-fail forever until the CLI is present.
+  return (
+    <div className="rounded-2xl border border-border bg-surface/30 px-6 py-12 text-center">
+      <div className="mx-auto grid size-12 place-items-center rounded-full bg-brand-soft text-brand">
+        <Globe className="size-6" />
+      </div>
+      <h2 className={`${instrumentSerif.className} mt-4 text-2xl text-foreground`}>{t("explore.blockedBrowser.title")}</h2>
+      <p className="mx-auto mt-1.5 max-w-md text-sm text-muted">
+        {t("explore.blockedBrowser.body")}
+      </p>
+      <pre className="mx-auto mt-4 inline-block rounded-lg border border-border bg-surface px-4 py-2 text-left text-[12.5px] text-foreground">
+        npm i -g browser-skill{`\n`}bsk status
+      </pre>
     </div>
   );
 }

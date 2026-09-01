@@ -13,9 +13,28 @@ export const ATS_LABEL: Record<AtsSource, string> = {
   workday: "Workday",
 };
 
+/** The Chinese boards the browser mode can search. Sources split into a plain
+ *  .mjs (browser-search.mjs) so node:test can import them; re-exported here
+ *  (with the literal TS type restored) so client components and server routes
+ *  share ONE closed set. */
+export type BrowserSource = "zhipin" | "liepin" | "zhaopin";
+export const BROWSER_SOURCES: BrowserSource[] = rawBrowserSources as BrowserSource[];
+export const cleanBrowserSources = ((v: unknown) => rawCleanBrowserSources(v)) as (v: unknown) => BrowserSource[];
+export const parseBrowserSources = ((s: string | null | undefined) =>
+  rawParseBrowserSources(s ?? undefined)) as (s: string | null | undefined) => BrowserSource[];
+/** Browser-mode URL codec (serializer). Restore side: paramsToBrowser below. */
+export const browserToParams = ((q: string, sources: BrowserSource[] | string[]) =>
+  rawBrowserToParams(q, sources)) as (q: string, sources: BrowserSource[] | string[]) => string;
+export const BROWSER_LABEL: Record<BrowserSource, string> = {
+  zhipin: "BOSS直聘",
+  liepin: "猎聘",
+  zhaopin: "智联招聘",
+};
+
 /** The full UI filter state. The keyword/location lists mirror scan.mjs's
  *  buildTitleFilter / buildLocationFilter semantics; sinceDays/ats/limitPerAts map
- *  to scan-ats-full.mjs's --since / --ats / --limit. */
+ *  to scan-ats-full.mjs's --since / --ats / --limit. The browser-mode fields are
+ *  OPTIONAL: the deterministic scan and AI search ignore them entirely. */
 export type ExploreFilters = {
   positive: string[];
   negative: string[];
@@ -26,6 +45,13 @@ export type ExploreFilters = {
   sinceDays: number;
   ats: AtsSource[];
   limitPerAts: number;
+  // ── browser mode (Chinese boards via bsk) — scan/ai ignore these ──
+  /** which surface produced this filter set; absent = scan */
+  mode?: ExploreMode;
+  /** platform selection for the browser hunt (default: all) */
+  browserSources?: BrowserSource[];
+  /** Chinese keyword for the browser hunt ("AI 工程师") */
+  zhQuery?: string;
 };
 
 export const DEFAULT_FILTERS: ExploreFilters = {
@@ -38,6 +64,8 @@ export const DEFAULT_FILTERS: ExploreFilters = {
   sinceDays: 7,
   ats: [...ATS_SOURCES],
   limitPerAts: 150,
+  browserSources: [...BROWSER_SOURCES],
+  zhQuery: "",
 };
 
 export type DiscoveredOffer = {
@@ -67,8 +95,9 @@ export type DiscoveredOffer = {
   confidence?: "low" | "medium" | "high";
 };
 
-/** The two discovery surfaces: free deterministic Scan vs token-spending AI search. */
-export type ExploreMode = "scan" | "ai";
+/** The three discovery surfaces: free deterministic Scan, token-spending AI
+ *  search, and the browser-mode hunt over Chinese boards (free; needs bsk). */
+export type ExploreMode = "scan" | "ai" | "browser";
 
 /** Stream event grammar (NDJSON). `kind` discriminates. Discovery is FREE — the
  *  terminal `done` always carries cost {tokens:0, usd:0}. */
@@ -99,6 +128,12 @@ export type ScanEvent =
 // and re-export for external consumers (filter-builder.tsx, etc.).
 import { cleanChips } from "./clean-chips.mjs";
 export { cleanChips };
+import {
+  BROWSER_SOURCES as rawBrowserSources,
+  cleanBrowserSources as rawCleanBrowserSources,
+  parseBrowserSources as rawParseBrowserSources,
+  browserToParams as rawBrowserToParams,
+} from "./browser-search.mjs";
 
 function clampNum(v: unknown, lo: number, hi: number, fallback: number): number {
   const n = Number(v);
@@ -142,6 +177,15 @@ export function parseExplorePatch(
   if (raw.limit !== undefined) next.limitPerAts = clampNum(raw.limit, 50, 500, base.limitPerAts);
   if (raw.limitPerAts !== undefined) next.limitPerAts = clampNum(raw.limitPerAts, 50, 500, base.limitPerAts);
   if (raw.ats !== undefined) next.ats = cleanAts(raw.ats);
+  // ── browser mode additions (optional; the deterministic scan ignores them) ──
+  if (raw.mode !== undefined) {
+    const m = String(raw.mode).toLowerCase();
+    next.mode = m === "scan" || m === "ai" || m === "browser" ? m : base.mode;
+  }
+  if (raw.browserSources !== undefined) {
+    next.browserSources = cleanBrowserSources(raw.browserSources) as BrowserSource[];
+  }
+  if (raw.zhQuery !== undefined) next.zhQuery = String(raw.zhQuery).slice(0, 200);
   return next;
 }
 
@@ -189,6 +233,20 @@ export function aiToParams(intent: string): string {
 export function paramsToAi(sp: URLSearchParams): string | null {
   if (sp.get("mode") !== "ai") return null;
   return sp.get("intent") ?? "";
+}
+
+/** Browser-mode URL codec restore. Mirrors paramsToAi: null unless the URL is a
+ *  browser hunt, in which case the filter patch is rebuilt (unknown/absent
+ *  sources fall back to the default set). Serializer: browserToParams (browser-search.mjs). */
+export function paramsToBrowser(sp: URLSearchParams, base: ExploreFilters = DEFAULT_FILTERS): ExploreFilters | null {
+  if (sp.get("mode") !== "browser") return null;
+  const parsed = parseBrowserSources(sp.get("sources") ?? undefined);
+  return {
+    ...base,
+    browserSources: parsed.length ? (parsed as BrowserSource[]) : [...BROWSER_SOURCES],
+    zhQuery: sp.get("zh") ?? "",
+    mode: "browser",
+  };
 }
 
 /** Is the search broad enough that "nothing found" means "you're current"

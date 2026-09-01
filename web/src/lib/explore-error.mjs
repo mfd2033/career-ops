@@ -74,3 +74,36 @@ export function isScannerMissing(body) {
     /** @type {{code?: unknown}} */ (body).code === SCANNER_MISSING_CODE
   );
 }
+
+/**
+ * Machine-readable marker for "the browser mode can't run — no bsk CLI/bin or
+ * no connected browser". Same 400-shared-channel discipline as the scanner: a
+ * FIRST-CLASS code, never free text, never the bare status. The Scan tab's
+ * scanner-missing panel must not claim this failure, and neither may the retry
+ * path — the right next step is installing browser-skill (`npm i -g
+ * browser-skill` + `bsk status`), not retrying.
+ */
+export const BSK_MISSING_CODE = "BSK_MISSING";
+
+/** Default copy for the blocked card. Lives here so the route + test share it. */
+export const BSK_MISSING_MESSAGE =
+  "browser-skill (bsk) not found. Install browser-skill and connect a browser — run `bsk status` to verify.";
+
+/** The exact JSON body the route returns for the bsk-missing case. */
+export function bskMissingBody(message = BSK_MISSING_MESSAGE) {
+  return { code: BSK_MISSING_CODE, error: message };
+}
+
+/**
+ * True only for the "browser mode lacks bsk" failure. Takes the PARSED RESPONSE
+ * BODY (never the HTTP status — 400 is a shared channel). Anything unrecognised
+ * falls through to the retry path, never to the install guide.
+ * @param {unknown} body Parsed JSON response body.
+ */
+export function isBskMissing(body) {
+  return (
+    typeof body === "object" &&
+    body !== null &&
+    /** @type {{code?: unknown}} */ (body).code === BSK_MISSING_CODE
+  );
+}

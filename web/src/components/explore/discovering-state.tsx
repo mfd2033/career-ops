@@ -4,8 +4,9 @@ import { useEffect, useRef, useState } from "react";
 import { Check, Loader2 } from "lucide-react";
 import { ApplyBackdrop } from "@/components/apply/apply-backdrop";
 import { instrumentSerif } from "@/lib/fonts";
-import { ATS_LABEL, ATS_SOURCES, type AtsSource } from "@/lib/explore";
+import { ATS_LABEL, ATS_SOURCES, BROWSER_LABEL, BROWSER_SOURCES, type AtsSource, type BrowserSource } from "@/lib/explore";
 import { useExplore, type SourceState } from "./explore-provider";
+import { useI18n } from "@/lib/i18n/context";
 
 const STYLE = `
 .co-disc{position:relative;z-index:1;display:flex;min-height:78vh;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:1.6rem;padding:2rem}
@@ -45,7 +46,7 @@ export function useCountUp(target: number): number {
   return Math.round(val);
 }
 
-function SourceChip({ ats, s }: { ats: AtsSource; s?: SourceState }) {
+function SourceChip({ ats, label, s }: { ats: string; label: string; s?: SourceState }) {
   const state = s?.state ?? "queued";
   const pct = s?.total ? Math.min(100, Math.round(((s.done ?? 0) / s.total) * 100)) : state === "swept" || state === "noisy" ? 100 : 0;
   return (
@@ -57,7 +58,7 @@ function SourceChip({ ats, s }: { ats: AtsSource; s?: SourceState }) {
       ) : (
         <span className="size-2.5 rounded-full border border-current opacity-40" />
       )}
-      <span className="text-[13px] font-medium text-foreground">{ATS_LABEL[ats]}</span>
+      <span className="text-[13px] font-medium text-foreground">{label}</span>
       <div className="ml-auto flex flex-col items-end gap-1">
         {state === "noisy" && <span className="text-[10px] text-faint">~{s?.unreachable} skipped</span>}
         <div className="co-src__track">
@@ -69,9 +70,16 @@ function SourceChip({ ats, s }: { ats: AtsSource; s?: SourceState }) {
 }
 
 export function DiscoveringState() {
-  const { sources, matchCount, companiesScanned, status, phase } = useExplore();
+  const { sources, matchCount, companiesScanned, status, phase, mode, filters } = useExplore();
+  const { t } = useI18n();
   const shown = useCountUp(matchCount);
   const companies = useCountUp(companiesScanned);
+  // Browser mode walks PLATFORMS (BOSS/猎聘/智联), not ATS networks — the chips
+  // and ledger swap to the browser source set when mode says so.
+  const isBrowser = mode === "browser";
+  const chipIds = isBrowser ? (BROWSER_SOURCES as string[]) : (ATS_SOURCES as unknown as string[]);
+  const chipLabel = (id: string) => (isBrowser ? BROWSER_LABEL[id as BrowserSource] : ATS_LABEL[id as AtsSource]) ?? id;
+  const platforms = isBrowser ? filters.browserSources?.length ?? BROWSER_SOURCES.length : 0;
 
   return (
     <>
@@ -81,25 +89,33 @@ export function DiscoveringState() {
 
         <div className="co-ledger">
           <span className="size-1.5 rounded-full bg-emerald-500" />
-          0 tokens · $0.00 {companies > 0 && <span className="opacity-70">· {companies.toLocaleString()} companies</span>}
+          0 tokens · $0.00 {companies > 0 && <span className="opacity-70">{isBrowser ? t("explore.disc.platforms", { n: companies.toLocaleString() }) : `· ${companies.toLocaleString()} companies`}</span>}
         </div>
 
         <div>
           <div className={`${instrumentSerif.className} co-disc__counter text-foreground`}>{shown}</div>
           <p className="mt-1 text-sm text-muted">
-            {phase === "revealing" ? "fresh roles found — free" : matchCount > 0 ? "fresh roles and counting…" : "scanning the network…"}
+            {phase === "revealing"
+              ? isBrowser
+                ? t("explore.disc.browserReveal")
+                : "fresh roles found — free"
+              : matchCount > 0
+                ? "fresh roles and counting…"
+                : isBrowser
+                  ? t("explore.disc.browserScanning")
+                  : "scanning the network…"}
           </p>
         </div>
 
         <div className="co-src">
-          {ATS_SOURCES.map((a) => (
-            <SourceChip key={a} ats={a} s={sources[a]} />
+          {chipIds.map((a) => (
+            <SourceChip key={a} ats={a} label={chipLabel(a)} s={sources[a]} />
           ))}
         </div>
 
         <p className="flex items-center gap-2 text-[13px] text-faint">
           <Loader2 className="size-3.5 animate-spin" />
-          {status || "Casting the net across the ATS network…"}
+          {status || t("explore.disc.castingNet")}
         </p>
 
         {phase !== "revealing" && (
