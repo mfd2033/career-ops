@@ -7,7 +7,8 @@ import { Search, ChevronsUpDown, X, Compass, ArrowRight, RotateCcw, Loader2 } fr
 import type { Application, InboxJob } from "@/lib/career-ops";
 import { Badge } from "@/components/ui/badge";
 import { CompanyLogo } from "@/components/company-logo";
-import { canonStatus, scoreNum, scoreTone, statusDot } from "@/lib/format";
+import { canonStatus, scoreTone, statusDot } from "@/lib/format";
+import { orderApplications, buildContextQuery } from "@/lib/pipeline-order.mjs";
 import { InboxTriage } from "@/components/inbox/inbox-triage";
 import { useJobs } from "@/components/jobs/job-store";
 import { cn } from "@/lib/cn";
@@ -121,31 +122,24 @@ export function PipelineView({
     return out;
   }, [inbox]);
 
-  const filtered = useMemo(() => {
-    if (tab === "INBOX") return [];
-    let rows = applications;
-    if (tab !== "ALL") rows = rows.filter((r) => canonStatus(r.status).includes(tab));
-    if (minFilter != null) {
-      rows = rows.filter((r) => {
-        const n = scoreNum(r.score);
-        return !Number.isNaN(n) && n >= minFilter;
-      });
-    }
-    if (q.trim()) {
-      const needle = q.toLowerCase();
-      rows = rows.filter((r) => `${r.company} ${r.role}`.toLowerCase().includes(needle));
-    }
-    return [...rows].sort((a, b) => {
-      if (sort.key === "score") {
-        const an = scoreNum(a.score);
-        const bn = scoreNum(b.score);
-        const av = Number.isNaN(an) ? -Infinity : an;
-        const bv = Number.isNaN(bn) ? -Infinity : bn;
-        return (av - bv) * sort.dir;
-      }
-      return (a[sort.key] || "").localeCompare(b[sort.key] || "") * sort.dir;
-    });
-  }, [applications, tab, q, sort, minFilter]);
+  // Filtering/sorting live in pipeline-order.mjs — the single source of truth
+  // shared with the report detail page so its prev/next navigation reproduces
+  // this exact context (the list view and the detail nav must never drift).
+  const filtered = useMemo(
+    () => orderApplications(applications, { tab, min: minFilter, q, sortKey: sort.key, dir: sort.dir }),
+    [applications, tab, minFilter, q, sort],
+  );
+
+  // The context a row link carries into the report page (and back out again):
+  // tab/min/sort/dir are URL params, q is the local search state. Passing it
+  // means "previous/next" and the back link return to THIS view, not the
+  // default one. Built by the shared buildContextQuery so the report page's
+  // prev/next/back links serialize the context IDENTICALLY. tab==="INBOX"
+  // never reaches here (no tracker rows to link).
+  const contextQuery = useMemo(
+    () => buildContextQuery({ tab, min: minFilter, sortKey: sort.key, dir: sort.dir, q }),
+    [tab, minFilter, sort.key, sort.dir, q],
+  );
 
   // ── Batch re-evaluate ──
   // Selection is keyed by application number (r.n). Posting URLs are resolved
@@ -388,13 +382,13 @@ export function PipelineView({
                     />
                   </td>
                   <td className="px-4 py-3 font-medium">
-                    <Link href={`/pipeline/${r.n}`} className="flex items-center gap-2.5 transition-colors group-hover:text-brand">
+                    <Link href={`/pipeline/${r.n}${contextQuery}`} className="flex items-center gap-2.5 transition-colors group-hover:text-brand">
                       <CompanyLogo name={r.company} size={20} />
                       {r.company}
                     </Link>
                   </td>
                   <td className="px-4 py-3 text-muted">
-                    <Link href={`/pipeline/${r.n}`}>{r.role}</Link>
+                    <Link href={`/pipeline/${r.n}${contextQuery}`}>{r.role}</Link>
                   </td>
                   <td className="px-4 py-3">
                     <Badge tone={scoreTone(r.score)}>{r.score || "—"}</Badge>
