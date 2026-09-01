@@ -6,7 +6,7 @@ import * as yaml from "js-yaml";
 import { careerOpsRoot } from "@/lib/career-ops";
 import { DEFAULT_FILTERS, cleanChips, type ExploreFilters } from "@/lib/explore";
 import { profileTargetKeywords } from "@/lib/profile-keywords.mjs";
-import { extractBrowserQuery } from "../browser-search.mjs";
+import { extractBrowserQuery, browserCityValue } from "../browser-search.mjs";
 
 /**
  * ACL for portals.yml — the core's scan-filter config (a CONTRACT entry-point,
@@ -93,6 +93,25 @@ export function seedExploreFilters(): { filters: ExploreFilters; seededFrom: str
         seededFrom.push("search_queries");
         break;
       }
+    }
+    // Browser mode's city box: seed from the user's own config — profile.yml
+    // location.city first (the ground truth of where they want to work), then
+    // portals.yml location_filter.allow (the CLI scan's location filter). Only a
+    // KNOWN Chinese city (in BROWSER_CITY_MAP) is used — an unrecognised value
+    // keeps the national default rather than silently mis-filtering.
+    const profile = loadYaml("config/profile.yml");
+    const profileCity =
+      (profile?.candidate && typeof profile.candidate === "object" && (profile.candidate as Record<string, unknown>).location) ||
+      (profile?.location && typeof profile.location === "object" && (profile.location as Record<string, unknown>).city);
+    const candidateCity = typeof profileCity === "string" ? profileCity.trim() : "";
+    const allowList = Array.isArray(lf.allow) ? (lf.allow as unknown[]) : [];
+    const allowCity = String(allowList[0] ?? "").trim();
+    if (browserCityValue("zhipin", candidateCity)) {
+      filters.zhCity = candidateCity;
+      seededFrom.push("profile.yml");
+    } else if (browserCityValue("zhipin", allowCity)) {
+      filters.zhCity = allowCity;
+      seededFrom.push("portals.yml");
     }
   }
 

@@ -44,7 +44,8 @@ export function runBrowserDiscovery(
   return new Promise((resolve) => {
     const sources = cleanBrowserSources(filters.browserSources as unknown as BrowserSource[] | undefined) as BrowserSource[];
     const query = filters.zhQuery?.trim() ?? "";
-    const urls = buildSearchUrls(sources, query);
+    const city = filters.zhCity?.trim() ?? "";
+    const urls = buildSearchUrls(sources, query, city);
 
     const offers: DiscoveredOffer[] = [];
     const seen = new Set<string>();
@@ -131,7 +132,7 @@ export function runBrowserDiscovery(
               postedAt: "",
               ats: "browser",
               source: `browser-${platform}`,
-              note: `browser · ${platform}`,
+              note: city ? `browser · ${platform} · ${city}` : `browser · ${platform}`,
             };
             offers.push(offer);
             onEvent({ kind: "offer", offer });

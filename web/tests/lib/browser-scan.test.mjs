@@ -13,6 +13,9 @@ import {
   cleanBrowserSources,
   parseBrowserSources,
   browserToParams,
+  applyBrowserCity,
+  browserCityValue,
+  BROWSER_CITY_MAP,
 } from "../../src/lib/browser-search.mjs";
 
 // The three supported Chinese platforms must stay fixed — the UI chrome,
@@ -67,4 +70,53 @@ test("browserToParams encodes query + sources under mode=browser", () => {
   // empty sources → all sources listed explicitly (so a restore round-trips)
   const all = browserToParams("", []);
   assert.ok(all.startsWith("mode=browser"));
+});
+
+// ── City filtering (the browser hunt honors a logical Chinese city per board) ──
+
+test("buildSearchUrls appends the platform-native city slot for a known city", () => {
+  // BOSS → &city=<code>; 猎聘 → /city-<slug>/ path; 智联 → &jl=<name>
+  const urls = buildSearchUrls(["zhipin", "liepin", "zhaopin"], "项目经理", "郑州");
+  assert.equal(urls[0], "https://www.zhipin.com/web/geek/job?query=%E9%A1%B9%E7%9B%AE%E7%BB%8F%E7%90%86&city=101180100");
+  assert.equal(urls[1], "https://www.liepin.com/city-zhengzhou/zhaopin/?key=%E9%A1%B9%E7%9B%AE%E7%BB%8F%E7%90%86");
+  assert.equal(urls[2], "https://sou.zhaopin.com/jobs/searchresult.ashx?t=%E9%A1%B9%E7%9B%AE%E7%BB%8F%E7%90%86&jl=%E9%83%91%E5%B7%9E");
+});
+
+test("buildSearchUrls keeps the national search for an unknown or empty city", () => {
+  assert.equal(
+    buildSearchUrls(["zhipin"], "AI 工程师", "非存在的城市")[0],
+    "https://www.zhipin.com/web/geek/job?query=AI%20%E5%B7%A5%E7%A8%8B%E5%B8%88",
+  );
+  assert.equal(buildSearchUrls(["zhipin"], "AI 工程师", "")[0], "https://www.zhipin.com/web/geek/job?query=AI%20%E5%B7%A5%E7%A8%8B%E5%B8%88");
+  assert.equal(buildSearchUrls(["zhipin"], "AI 工程师", undefined)[0], "https://www.zhipin.com/web/geek/job?query=AI%20%E5%B7%A5%E7%A8%8B%E5%B8%88");
+});
+
+test("BROWSER_CITY_MAP covers every platform for each listed city", () => {
+  for (const [name, entry] of Object.entries(BROWSER_CITY_MAP)) {
+    assert.equal(typeof name, "string");
+    for (const s of BROWSER_SOURCES) {
+      assert.equal(typeof entry[s], "string", `city ${name} missing ${s} value`);
+      assert.ok(entry[s].length > 0, `city ${name} has empty ${s} value`);
+    }
+  }
+});
+
+test("browserCityValue resolves known cities, empty for unknown/empty", () => {
+  assert.equal(browserCityValue("zhipin", "郑州"), "101180100");
+  assert.equal(browserCityValue("liepin", "郑州"), "zhengzhou");
+  assert.equal(browserCityValue("zhaopin", "郑州"), "郑州");
+  assert.equal(browserCityValue("zhipin", "不存在的城市"), "");
+  assert.equal(browserCityValue("zhipin", ""), "");
+  assert.equal(browserCityValue("zhipin", undefined), "");
+});
+
+test("applyBrowserCity is a no-op for unknown sources and empty values", () => {
+  assert.equal(applyBrowserCity("not-a-source", "https://x.com/", "郑州"), "https://x.com/");
+  assert.equal(applyBrowserCity("zhipin", "https://www.zhipin.com/web/geek/job?query=x", ""), "https://www.zhipin.com/web/geek/job?query=x");
+});
+
+test("browserToParams carries an optional city slot for restorability", () => {
+  assert.equal(browserToParams("项目经理", ["zhipin"], "郑州"), "mode=browser&zh=%E9%A1%B9%E7%9B%AE%E7%BB%8F%E7%90%86&sources=zhipin&city=%E9%83%91%E5%B7%9E");
+  assert.equal(browserToParams("项目经理", ["zhipin"], ""), "mode=browser&zh=%E9%A1%B9%E7%9B%AE%E7%BB%8F%E7%90%86&sources=zhipin");
+  assert.equal(browserToParams("项目经理", ["zhipin"], undefined), "mode=browser&zh=%E9%A1%B9%E7%9B%AE%E7%BB%8F%E7%90%86&sources=zhipin");
 });

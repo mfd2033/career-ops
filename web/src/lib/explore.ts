@@ -23,8 +23,12 @@ export const cleanBrowserSources = ((v: unknown) => rawCleanBrowserSources(v)) a
 export const parseBrowserSources = ((s: string | null | undefined) =>
   rawParseBrowserSources(s ?? undefined)) as (s: string | null | undefined) => BrowserSource[];
 /** Browser-mode URL codec (serializer). Restore side: paramsToBrowser below. */
-export const browserToParams = ((q: string, sources: BrowserSource[] | string[]) =>
-  rawBrowserToParams(q, sources)) as (q: string, sources: BrowserSource[] | string[]) => string;
+export const browserToParams = ((q: string, sources: BrowserSource[] | string[], city?: string) =>
+  rawBrowserToParams(q, sources, city)) as (
+  q: string,
+  sources: BrowserSource[] | string[],
+  city?: string,
+) => string;
 export const BROWSER_LABEL: Record<BrowserSource, string> = {
   zhipin: "BOSS直聘",
   liepin: "猎聘",
@@ -52,6 +56,9 @@ export type ExploreFilters = {
   browserSources?: BrowserSource[];
   /** Chinese keyword for the browser hunt ("AI 工程师") */
   zhQuery?: string;
+  /** Optional logical Chinese city to filter the browser hunt by (e.g. "郑州").
+   *  Empty = national search. Only the three browser boards honor it. */
+  zhCity?: string;
 };
 
 export const DEFAULT_FILTERS: ExploreFilters = {
@@ -66,6 +73,7 @@ export const DEFAULT_FILTERS: ExploreFilters = {
   limitPerAts: 150,
   browserSources: [...BROWSER_SOURCES],
   zhQuery: "",
+  zhCity: "",
 };
 
 export type DiscoveredOffer = {
@@ -186,6 +194,7 @@ export function parseExplorePatch(
     next.browserSources = cleanBrowserSources(raw.browserSources) as BrowserSource[];
   }
   if (raw.zhQuery !== undefined) next.zhQuery = String(raw.zhQuery).slice(0, 200);
+  if (raw.zhCity !== undefined) next.zhCity = String(raw.zhCity).trim().slice(0, 50);
   return next;
 }
 
@@ -245,6 +254,7 @@ export function paramsToBrowser(sp: URLSearchParams, base: ExploreFilters = DEFA
     ...base,
     browserSources: parsed.length ? (parsed as BrowserSource[]) : [...BROWSER_SOURCES],
     zhQuery: sp.get("zh") ?? "",
+    zhCity: (sp.get("city") ?? "").trim(),
     mode: "browser",
   };
 }

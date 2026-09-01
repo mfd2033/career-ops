@@ -334,7 +334,7 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     setSources(init);
     setStatus(t("explore.disc.castingBrowser"));
     if (typeof window !== "undefined") {
-      window.history.replaceState(null, "", `/explore?${browserToParams(query, platforms as unknown as string[])}`);
+      window.history.replaceState(null, "", `/explore?${browserToParams(query, platforms as unknown as string[], f.zhCity)}`);
     }
 
     const acc: DiscoveredOffer[] = [];

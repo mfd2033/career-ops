@@ -151,6 +151,21 @@ export function FilterBuilder({
           </div>
         </div>
         <div>
+          <Label hint={t("explore.filter.zhCityHint")}>{t("explore.filter.zhCity")}</Label>
+          <div className="co-fb__field border border-border bg-surface/40 focus-within:border-brand/40 transition-colors">
+            <MapPin className="size-3.5 shrink-0 text-muted" />
+            <input
+              value={filters.zhCity ?? ""}
+              onChange={(e) => set({ zhCity: e.target.value })}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") e.currentTarget.blur();
+              }}
+              placeholder={t("explore.filter.zhCityPlaceholder")}
+              className="min-w-0 flex-1 bg-transparent outline-none"
+            />
+          </div>
+        </div>
+        <div>
           <Label hint={t("explore.filter.browserSourcesHint")}>{t("explore.filter.browserSources")}</Label>
           <div className="flex flex-wrap gap-1.5">
             {BROWSER_SOURCES.map((s) => {
