@@ -20,6 +20,37 @@ export const SEARCH_TEMPLATES = {
 };
 
 /**
+ * Extract the first searchable Chinese phrase from a portals.yml
+ * `search_queries[].query` string (the CLI scan's WebSearch syntax), so the
+ * Explorer's browser mode can seed its keyword box with the same intent.
+ * The CLI form looks like:
+ *   'site:zhipin.com 项目经理 郑州 OR 技术经理 郑州 OR IT项目经理 郑州'
+ * We drop every `site:` token and the bare `OR` separators, then keep the
+ * tokens up to the first `OR` — the most specific first candidate — and join
+ * them back with spaces. A query with no `OR` keeps all its non-site tokens.
+ * Returns "" for anything that yields no phrase.
+ * @param {string} searchQuery
+ * @returns {string}
+ */
+export function extractBrowserQuery(searchQuery) {
+  const tokens = String(searchQuery ?? "")
+    .trim()
+    .split(/\s+/)
+    .filter((t) => t && !/^site:/i.test(t));
+  const group = [];
+  for (const t of tokens) {
+    if (/^OR$/i.test(t)) {
+      // A separator between groups: stop only once a group was collected;
+      // a leading/consecutive OR is just noise to skip, not a boundary.
+      if (group.length > 0) break;
+      continue;
+    }
+    group.push(t);
+  }
+  return group.join(" ").trim();
+}
+
+/**
  * Build one search URL per requested source. Unknown sources are skipped, never
  * crashing — the user's browser does the heavy lifting and a stale template for
  * an unknown id must not sink the whole hunt.
