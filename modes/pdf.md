@@ -211,6 +211,24 @@ Write a JSON file with this structure, then run `node build-cv-html.mjs <input.j
 
 `build-cv-html.mjs` errors out (non-zero exit) if any template placeholder is left unresolved, so a malformed payload fails loudly instead of shipping a broken CV. Run `node build-cv-html.mjs --test` for a self-test render.
 
+### Section title localization (MANDATORY)
+
+**When `language.output` is not `en`, you MUST explicitly override the `sections` object with localized titles.** Do not rely on the English defaults. The `lang` field sets CSS language, but `sections` controls the visible section headers — they are independent.
+
+| `language.output` | `sections.summary` | `sections.competencies` | `sections.experience` | `sections.projects` | `sections.education` | `sections.certifications` | `sections.awards` | `sections.skills` |
+|-------------------|-------------------|------------------------|----------------------|--------------------|--------------------|--------------------------|-------------------|-------------------|
+| `en` (default) | Professional Summary | Core Competencies | Work Experience | Projects | Education | Certifications | Awards & Honors | Skills |
+| `zh-CN` | 个人优势 | 核心技能 | 工作经历 | 项目经验 | 教育经历 | 资格证书 | 荣誉奖项 | 技能 |
+| `zh-TW` | 個人優勢 | 核心技能 | 工作經歷 | 項目經驗 | 教育經歷 | 資格證書 | 榮譽獎項 | 技能 |
+| `ja` | 自己PR | コアコンピテンシー | 職務経歴 | プロジェクト | 学歴 | 資格 | 受賞歴 | スキル |
+| `ko` | 자기소개 | 핵심역량 | 경력 | 프로젝트 | 학력 | 자격증 | 수상내역 | 기술 |
+| `de` | Berufliches Profil | Kernkompetenzen | Berufserfahrung | Projekte | Bildung | Zertifikate | Auszeichnungen | Kenntnisse |
+| `fr` | Résumé professionnel | Compétences clés | Expérience professionnelle | Projets | Formation | Certifications | Distinctions | Compétences |
+| `es` | Resumen profesional | Competencias clave | Experiencia laboral | Proyectos | Educación | Certificaciones | Premios | Habilidades |
+| `ar` | الملخص المهني | الكفاءات الرئيسية | الخبرة المهنية | المشاريع | التعليم | الشهادات | الجوائز | المهارات |
+
+**Rule:** Before building the JSON payload, check `language.output` from `config/profile.yml`. If it is not `en`, select the corresponding row from this table and set every `sections.*` field explicitly. If a language is missing from this table, translate the English defaults using the same conventions (formal, concise, market-standard terms). Never leave `sections` as English-only when the CV output language is different.
+
 ### Profile photo (opt-in, market-specific)
 
 The `{{PHOTO}}` slot is **off by default** and intentionally market-specific:
