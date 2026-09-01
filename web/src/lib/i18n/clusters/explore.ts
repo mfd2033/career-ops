@@ -26,6 +26,7 @@ export const en: Dict = {
   "explore.recastBrowser": "Re-cast (browser)",
   "explore.discoverBrowser": "Discover (browser)",
   "explore.discoverNote": "Evaluating a role later costs tokens. Discovering never does.",
+  "explore.discoverBrowserKeywordRequired": "Enter a Chinese keyword first.",
 
   // ── First-run reveal banner ──
   "explore.firstRun.lead": "These are live roles that match your CV. ",
@@ -244,6 +245,7 @@ export const zh: Dict = {
   "explore.recastBrowser": "重新投放（浏览器）",
   "explore.discoverBrowser": "发现（浏览器）",
   "explore.discoverNote": "稍后评估岗位会消耗 token。发现永远不会。",
+  "explore.discoverBrowserKeywordRequired": "请先输入中文关键词。",
 
   // ── 首次揭示横幅 ──
   "explore.firstRun.lead": "这些是与你的 CV 匹配的真实岗位。",
