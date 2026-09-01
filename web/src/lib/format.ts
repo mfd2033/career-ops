@@ -7,8 +7,12 @@
 // test can load it and assert it still covers templates/states.yml (#2917);
 // a hand-maintained copy is what drifted in #2249 and again after #2705.
 import { canonStatus } from "@/lib/status-alias.mjs";
+// Score parsing lives in score-num.mjs (plain .mjs) so pipeline-order.mjs and
+// the node --test suites can share it; format.ts re-exports for the TS callers
+// that have always imported { scoreNum } from here — no import churn.
+import { scoreNum } from "@/lib/score-num.mjs";
 
-export { canonStatus };
+export { canonStatus, scoreNum };
 
 export const CANONICAL_STATES = [
   "Evaluated",
@@ -32,12 +36,6 @@ export function statusDot(status: string): string {
   if (c.includes("REJECTED") || c.includes("SKIP")) return "bg-red-400";
   if (c.includes("DISCARDED")) return "bg-zinc-600";
   return "bg-zinc-500"; // Evaluated / unknown
-}
-
-/** First number in a score string ("4.1/5", "B+", "3.0") → numeric, or NaN. */
-export function scoreNum(s: string): number {
-  const m = s.match(/(\d+(?:\.\d+)?)/);
-  return m ? parseFloat(m[1]) : NaN;
 }
 
 /** Score → tone, mirroring the Go TUI thresholds (>=4.2 green, >=3.8 yellow,
