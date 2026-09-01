@@ -129,6 +129,10 @@ export function readScanDates(): Map<string, string> {
 export type Application = {
   n: string;
   date: string;
+  /** Most recent re-evaluation date ("" when never re-evaluated). The Date
+   *  column keeps the INITIAL evaluation date (#2808, 方向 A); this field
+   *  carries the freshest `Re-eval YYYY-MM-DD` marker lifted from the notes. */
+  revalDate: string;
   company: string;
   /** Intermediary channel (#1596): agency/recruiter firm, "—" for direct, "" when the tracker has no Via column. */
   via: string;

@@ -113,7 +113,14 @@ export function ReportView({
   const meta = report ? parseReport(report) : null;
   const field = (label: string) => meta?.fields.find((f) => f.label === label)?.value;
   const score = app?.score || field("Score");
+  // The tracker Date column keeps the INITIAL evaluation date (#2808, 方向 A);
+  // the report's own `Date:` header is the date THIS report was written — for a
+  // re-evaluated row that is the fresh re-eval date. Show both when they differ
+  // so the page reflects "evaluated 08-23 · re-evaluated 09-01" without moving
+  // the tracker's initial date.
   const date = app?.date || field("Date");
+  const revalDate = field("Date");
+  const showReval = Boolean(revalDate && app?.date && revalDate !== app.date);
   const archetype = field("Archetype");
   const url = field("URL");
   const pdfReady = (app?.pdf ?? "").includes("✅");
@@ -164,7 +171,11 @@ export function ReportView({
         {(archetype || date || (url && url.startsWith("http"))) && (
           <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted">
             {archetype && <span className="max-w-full truncate">{archetype}</span>}
-            {date && <span className="tabular-nums text-faint">{date}</span>}
+            {date && (
+              <span className="tabular-nums text-faint">
+                {showReval ? t("pipeline.report.evalDates", { date, reval: revalDate ?? "" }) : date}
+              </span>
+            )}
             {url && url.startsWith("http") && (
               <a
                 href={url}
