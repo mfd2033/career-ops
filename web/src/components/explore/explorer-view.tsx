@@ -125,7 +125,8 @@ export function ExplorerView({
   const isBrowser = mode === "browser";
   if (running) return isAi ? <AiHuntView cliName={cli.name} /> : <DiscoveringState />;
 
-  const canDiscover = isBrowser ? true : filters.ats.length > 0;
+  const browserKeywordMissing = isBrowser && !(filters.zhQuery ?? "").trim();
+  const canDiscover = isBrowser ? !browserKeywordMissing : filters.ats.length > 0;
   const isResults = phase === "results";
 
   return (
@@ -194,7 +195,7 @@ export function ExplorerView({
                 {refineOpen && (
                   <div className="space-y-4 border-t border-border p-4">
                     <FilterBuilder filters={filters} onChange={setFilters} seededFrom={seed.seededFrom} mode="browser" />
-                    <DiscoverBar canDiscover={canDiscover} onDiscover={discoverBrowser} label={t("explore.recastBrowser")} />
+                    <DiscoverBar canDiscover={canDiscover} onDiscover={discoverBrowser} label={t("explore.recastBrowser")} hint={browserKeywordMissing ? t("explore.discoverBrowserKeywordRequired") : undefined} />
                   </div>
                 )}
               </div>
@@ -202,7 +203,7 @@ export function ExplorerView({
               <div className="mb-6 rounded-2xl border border-border bg-surface/30 p-5">
                 <FilterBuilder filters={filters} onChange={setFilters} seededFrom={seed.seededFrom} mode="browser" />
                 <div className="mt-5">
-                  <DiscoverBar canDiscover={canDiscover} onDiscover={discoverBrowser} label={t("explore.discoverBrowser")} />
+                  <DiscoverBar canDiscover={canDiscover} onDiscover={discoverBrowser} label={t("explore.discoverBrowser")} hint={browserKeywordMissing ? t("explore.discoverBrowserKeywordRequired") : undefined} />
                 </div>
               </div>
             )}
@@ -313,7 +314,7 @@ export function ExplorerView({
   );
 }
 
-function DiscoverBar({ canDiscover, onDiscover, label }: { canDiscover: boolean; onDiscover: () => void; label: string }) {
+function DiscoverBar({ canDiscover, onDiscover, label, hint }: { canDiscover: boolean; onDiscover: () => void; label: string; hint?: string }) {
   const { t } = useI18n();
   return (
     <div className="flex flex-wrap items-center gap-3">
@@ -325,10 +326,16 @@ function DiscoverBar({ canDiscover, onDiscover, label }: { canDiscover: boolean;
       >
         <Compass className="size-4" /> {label}
       </button>
-      <span className="inline-flex items-center gap-1.5 text-[12px] text-muted">
-        <span className="size-1.5 rounded-full bg-emerald-500" />
-        {t("explore.discoverNote")}
-      </span>
+      {hint ? (
+        <span className="inline-flex items-center gap-1.5 text-[12px] text-amber-600 dark:text-amber-400">
+          <AlertTriangle className="size-3.5" /> {hint}
+        </span>
+      ) : (
+        <span className="inline-flex items-center gap-1.5 text-[12px] text-muted">
+          <span className="size-1.5 rounded-full bg-emerald-500" />
+          {t("explore.discoverNote")}
+        </span>
+      )}
     </div>
   );
 }
