@@ -113,7 +113,7 @@ export function parseReport(md: string): ReportMeta {
       title = h[1].replace(/^Evaluat?i[oó]n:?\s*/i, "").trim();
       continue;
     }
-    const m = l.match(/^\s*\*\*(.+?):\*\*\s*(.*)$/);
+    const m = l.match(/^\s*\*\*(.+?)[：:]\*\*\s*(.*)$/);
     if (!m) continue;
     const label = FIELD_KEYS[m[1].trim().toLowerCase()];
     const value = m[2].trim();
