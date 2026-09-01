@@ -8,11 +8,13 @@ export const en: Dict = {
   "explore.title": "Explore",
   "explore.badgeNew": "New",
   "explore.mode.scan": "Scan",
+  "explore.mode.browser": "Browser",
   "explore.mode.aiSearch": "AI search",
   "explore.mode.needsCli": "needs a CLI",
 
   // ── Mode descriptions ──
   "explore.scanDesc": "Scan the public ATS network — Greenhouse, Lever, Ashby, Workday. Fresh postings matched to you, zero tokens. You only spend when you choose to evaluate one.",
+  "explore.browserDesc": "Scan the Chinese boards — BOSS直聘, 猎聘, 智联招聘 — through your own logged-in browser. Free, needs browser-skill (bsk).",
   "explore.aiDesc": "Describe the role in plain language — an AI hunts the open web for it, on your own AI. Candidates are unverified until you evaluate.",
 
   "explore.rootNotSetup": "Your career-ops home isn’t set up yet — discovery needs a checkout with a profile to seed from.",
@@ -21,6 +23,8 @@ export const en: Dict = {
   "explore.refineSearch": "Refine search",
   "explore.recastFree": "Re-cast (free)",
   "explore.discoverFree": "Discover (free)",
+  "explore.recastBrowser": "Re-cast (browser)",
+  "explore.discoverBrowser": "Discover (browser)",
   "explore.discoverNote": "Evaluating a role later costs tokens. Discovering never does.",
 
   // ── First-run reveal banner ──
@@ -32,6 +36,9 @@ export const en: Dict = {
   "explore.empty.aiLooseTitle": "No public matches — yet.",
   "explore.empty.aiLooseBody": "AI search reads what's public. Try broader intent, or run the free Scan over the ATS network.",
   "explore.empty.aiLooseRerun": "Run the free Scan",
+  "explore.empty.browserLooseTitle": "Nothing on those boards — yet.",
+  "explore.empty.browserLooseBody": "Try a different keyword, or widen the platform selection. Discovery is free.",
+  "explore.empty.browserLooseRerun": "Search again",
   "explore.empty.caughtUpTitle": "You're all caught up.",
   "explore.empty.caughtUpBody": "Nothing new since your last scan. Your pipeline is current — that's the goal.",
   "explore.empty.lookBack30": "Look back 30 days",
@@ -67,6 +74,8 @@ export const en: Dict = {
   // ── Blocked card ──
   "explore.blocked.title": "AI search needs a CLI",
   "explore.blocked.body": "Connect Claude Code, Gemini, or any agent CLI — your key, your tokens, your machine. The free Scan stays available without one.",
+  "explore.blockedBrowser.title": "Browser mode needs browser-skill",
+  "explore.blockedBrowser.body": "Install browser-skill and connect your browser — BOSS直聘/猎聘/智联招聘 block headless and logged-out browsers, so the hunt runs in your own logged-in session.",
 
   // ── Scan note (empty-state footer) ──
   "explore.scanNoteOne": "Scanned {n}{avail} company{partial}.",
@@ -104,17 +113,24 @@ export const en: Dict = {
   "explore.disc.skipped": "~{n} skipped",
   "explore.disc.ledger": "0 tokens · $0.00",
   "explore.disc.companies": "· {n} companies",
+  "explore.disc.platforms": "· {n} platforms",
   "explore.disc.freshFound": "fresh roles found — free",
   "explore.disc.counting": "fresh roles and counting…",
   "explore.disc.scanning": "scanning the network…",
+  "explore.disc.browserScanning": "scanning your boards…",
+  "explore.disc.browserReveal": "roles found on your boards — free",
   "explore.disc.castingNet": "Casting the net across the ATS network…",
+  "explore.disc.castingBrowser": "Casting through your browser across BOSS直聘 / 猎聘 / 智联招聘…",
   "explore.disc.walking": "Walking {ats} — {n} companies",
+  "explore.disc.browsing": "Walking {platform} in your browser…",
   "explore.disc.foundFreeOne": "{n} fresh role found — free.",
   "explore.disc.foundFreeMany": "{n} fresh roles found — free.",
   "explore.disc.loadingFresh": "Loading fresh matches…",
   "explore.disc.castingWeb": "Casting across the open web…",
   "explore.disc.candidatesFoundOne": "{n} candidate found.",
   "explore.disc.candidatesFoundMany": "{n} candidates found.",
+  "explore.disc.browserFoundOne": "{n} role found on the Chinese boards — free.",
+  "explore.disc.browserFoundMany": "{n} roles found on the Chinese boards — free.",
 
   // ── Discovery card ──
   "explore.card.evaluating": "Evaluating…",
@@ -147,6 +163,10 @@ export const en: Dict = {
   "explore.filter.postedWithin": "Posted within",
   "explore.filter.sourcesHint": "pick at least one",
   "explore.filter.sources": "Sources",
+  "explore.filter.zhQuery": "Keywords (Chinese)",
+  "explore.filter.zhQueryPlaceholder": "AI 工程师，算法…",
+  "explore.filter.browserSources": "Platforms",
+  "explore.filter.browserSourcesHint": "pick at least one",
   "explore.filter.locationScope": "Location & scope",
   "explore.filter.location": "Location",
   "explore.filter.alwaysIncludeHint": "rescues multi-loc posts",
@@ -197,6 +217,7 @@ export const en: Dict = {
   "explore.err.loadFresh": "Couldn't load fresh matches.",
   "explore.err.aiUnavailable": "AI search isn't available.",
   "explore.err.aiFailed": "AI search failed ({status}).",
+  "explore.err.bskMissing": "browser-skill (bsk) not found — install it and connect a browser, then retry.",
 };
 
 // Simplified Chinese strings. Every key in en must have a matching key here.
@@ -205,11 +226,13 @@ export const zh: Dict = {
   "explore.title": "探索",
   "explore.badgeNew": "新",
   "explore.mode.scan": "扫描",
+  "explore.mode.browser": "浏览器",
   "explore.mode.aiSearch": "AI 搜索",
   "explore.mode.needsCli": "需要 CLI",
 
   // ── 模式说明 ──
   "explore.scanDesc": "扫描公开 ATS 网络 — Greenhouse、Lever、Ashby、Workday。为你匹配的新职位，零 token。只有在你选择评估时才消耗。",
+  "explore.browserDesc": "通过你已登录的浏览器扫描国内平台 — BOSS直聘、猎聘、智联招聘。免费，需安装 browser-skill（bsk）。",
   "explore.aiDesc": "用自然语言描述岗位 — AI 会在全网替你搜寻，运行在你自己的 AI 上。候选在评估前均为未验证。",
 
   "explore.rootNotSetup": "你的 career-ops 主目录尚未配置 — 发现功能需要一个带有 profile 的 checkout 作为种子。",
@@ -218,6 +241,8 @@ export const zh: Dict = {
   "explore.refineSearch": "优化搜索",
   "explore.recastFree": "重新投放（免费）",
   "explore.discoverFree": "发现（免费）",
+  "explore.recastBrowser": "重新投放（浏览器）",
+  "explore.discoverBrowser": "发现（浏览器）",
   "explore.discoverNote": "稍后评估岗位会消耗 token。发现永远不会。",
 
   // ── 首次揭示横幅 ──
@@ -229,6 +254,9 @@ export const zh: Dict = {
   "explore.empty.aiLooseTitle": "暂无公开匹配 — 尚未。",
   "explore.empty.aiLooseBody": "AI 搜索读取公开内容。尝试更宽泛的意图，或在 ATS 网络运行免费扫描。",
   "explore.empty.aiLooseRerun": "运行免费扫描",
+  "explore.empty.browserLooseTitle": "这些平台暂未找到 — 尚未。",
+  "explore.empty.browserLooseBody": "换一个关键词，或扩大平台选择。发现始终免费。",
+  "explore.empty.browserLooseRerun": "再次搜索",
   "explore.empty.caughtUpTitle": "你已经全部跟上了。",
   "explore.empty.caughtUpBody": "自上次扫描以来没有新内容。你的管道是最新的 — 这正是目标。",
   "explore.empty.lookBack30": "回溯 30 天",
@@ -264,6 +292,8 @@ export const zh: Dict = {
   // ── 受阻卡片 ──
   "explore.blocked.title": "AI 搜索需要 CLI",
   "explore.blocked.body": "连接 Claude Code、Gemini 或任意 agent CLI — 你的密钥、你的 token、你的机器。免费扫描无需 CLI 也可用。",
+  "explore.blockedBrowser.title": "浏览器模式需要 browser-skill",
+  "explore.blockedBrowser.body": "安装 browser-skill 并连接你的浏览器 — BOSS直聘/猎聘/智联招聘屏蔽无头与未登录浏览器，因此搜索运行在你自己的登录会话中。",
 
   // ── 扫描备注（空状态页脚） ──
   "explore.scanNoteOne": "已扫描 {n}{avail} 家公司{partial}。",
@@ -301,17 +331,24 @@ export const zh: Dict = {
   "explore.disc.skipped": "约 {n} 个已跳过",
   "explore.disc.ledger": "0 token · $0.00",
   "explore.disc.companies": "· {n} 家公司",
+  "explore.disc.platforms": "· {n} 个平台",
   "explore.disc.freshFound": "已找到新岗位 — 免费",
   "explore.disc.counting": "新岗位持续增加中…",
   "explore.disc.scanning": "正在扫描网络…",
+  "explore.disc.browserScanning": "正在扫描你选择的平台…",
+  "explore.disc.browserReveal": "在你选择的平台找到职位 — 免费",
   "explore.disc.castingNet": "正在 ATS 网络撒网…",
+  "explore.disc.castingBrowser": "正在通过你的浏览器访问 BOSS直聘 / 猎聘 / 智联招聘…",
   "explore.disc.walking": "正在遍历 {ats} — {n} 家公司",
+  "explore.disc.browsing": "正在浏览器中访问 {platform}…",
   "explore.disc.foundFreeOne": "{n} 个新岗位已找到 — 免费。",
   "explore.disc.foundFreeMany": "{n} 个新岗位已找到 — 免费。",
   "explore.disc.loadingFresh": "正在加载新匹配…",
   "explore.disc.castingWeb": "正在全网撒网…",
   "explore.disc.candidatesFoundOne": "{n} 个候选已找到。",
   "explore.disc.candidatesFoundMany": "{n} 个候选已找到。",
+  "explore.disc.browserFoundOne": "在中文平台找到 {n} 个职位 — 免费。",
+  "explore.disc.browserFoundMany": "在中文平台找到 {n} 个职位 — 免费。",
 
   // ── 发现卡片 ──
   "explore.card.evaluating": "评估中…",
@@ -344,6 +381,10 @@ export const zh: Dict = {
   "explore.filter.postedWithin": "发布于",
   "explore.filter.sourcesHint": "至少选择一个",
   "explore.filter.sources": "来源",
+  "explore.filter.zhQuery": "关键词（中文）",
+  "explore.filter.zhQueryPlaceholder": "AI 工程师，算法…",
+  "explore.filter.browserSources": "平台",
+  "explore.filter.browserSourcesHint": "至少选择一个",
   "explore.filter.locationScope": "地点与范围",
   "explore.filter.location": "地点",
   "explore.filter.alwaysIncludeHint": "挽救多地点职位",
@@ -394,4 +435,5 @@ export const zh: Dict = {
   "explore.err.loadFresh": "无法加载新匹配。",
   "explore.err.aiUnavailable": "AI 搜索不可用。",
   "explore.err.aiFailed": "AI 搜索失败（{status}）。",
+  "explore.err.bskMissing": "未找到 browser-skill（bsk）— 请安装并连接浏览器后重试。",
 };

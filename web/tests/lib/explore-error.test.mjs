@@ -11,6 +11,9 @@ import {
   scannerMissingBody,
   SCANNER_MISSING_CODE,
   SCANNER_MISSING_STATUS,
+  isBskMissing,
+  bskMissingBody,
+  BSK_MISSING_CODE,
 } from "../../src/lib/explore-error.mjs";
 
 // The data-only / pre-onboarding checkout has no scanner. /api/explore signals it
@@ -80,4 +83,37 @@ test("the response body the route sends is classified by the client", () => {
   assert.equal(typeof body.error, "string");
   assert.ok(body.error.length > 0, "the panel renders body.error, so it must carry copy");
   assert.equal(isScannerMissing(body), true);
+});
+
+// ── Browser mode: the bsk body is a distinct code on the same 400 channel ──
+
+// The browser mode needs the bsk CLI + a connected browser; absence is a
+// MISSING-CAPABILITY failure with its own code and copy (like MODE_MISSING), never
+// a misreport of the scanner being absent and never a plain runtime error.
+test("the bsk-missing code is bsk-missing", () => {
+  assert.equal(isBskMissing({ code: BSK_MISSING_CODE }), true);
+  assert.equal(isBskMissing(bskMissingBody()), true);
+});
+
+test("other 400 codes and free text are NOT bsk-missing", () => {
+  assert.equal(isBskMissing({ code: SCANNER_MISSING_CODE }), false);
+  assert.equal(isBskMissing({ code: "MODE_MISSING" }), false);
+  assert.equal(isBskMissing({ error: "bsk CLI not found on PATH" }), false);
+  assert.equal(isBskMissing({ code: "bsk_missing", error: "..." }), false); // CLI-level code ≠ HTTP contract code
+});
+
+test("a missing or non-object body is NOT bsk-missing", () => {
+  assert.equal(isBskMissing({}), false);
+  assert.equal(isBskMissing(undefined), false);
+  assert.equal(isBskMissing(null), false);
+  assert.equal(isBskMissing("BSK_MISSING"), false);
+  assert.equal(isBskMissing(400), false);
+});
+
+test("the response body the route sends is classified by the client", () => {
+  const body = bskMissingBody();
+  assert.equal(body.code, BSK_MISSING_CODE);
+  assert.equal(typeof body.error, "string");
+  assert.ok(body.error.length > 0, "the blocked panel renders body.error, so it must carry copy");
+  assert.equal(isBskMissing(body), true);
 });

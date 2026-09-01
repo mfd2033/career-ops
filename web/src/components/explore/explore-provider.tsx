@@ -5,11 +5,15 @@ import { useRouter } from "next/navigation";
 import {
   DEFAULT_FILTERS,
   ATS_LABEL,
+  BROWSER_LABEL,
+  BROWSER_SOURCES,
   filtersToParams,
   aiToParams,
   isBroadSearch,
   parseExplorePatch,
+  browserToParams,
   type AtsSource,
+  type BrowserSource,
   type DiscoveredOffer,
   type ExploreFilters,
   type ExploreMode,
@@ -17,7 +21,7 @@ import {
 } from "@/lib/explore";
 import { makeAiStreamParser, type AiTraceChunk } from "@/lib/explore-ai";
 import { MAX_OFFER_LIMIT } from "@/lib/whats-new.mjs";
-import { isScannerMissing } from "@/lib/explore-error.mjs";
+import { isScannerMissing, isBskMissing } from "@/lib/explore-error.mjs";
 import { useI18n } from "@/lib/i18n/context";
 
 export type Phase =
@@ -41,6 +45,9 @@ export type SourceState = {
   matches?: number;
   unreachable?: number;
 };
+/** Per-source progress. Keys are AtsSource ids in scan mode and BrowserSource
+ *  ids in browser mode — a string key keeps both surfaces on one shape. */
+export type SourceMap = Partial<Record<string, SourceState>>;
 
 type ExploreCtx = {
   filters: ExploreFilters;
@@ -51,7 +58,7 @@ type ExploreCtx = {
   phase: Phase;
   running: boolean;
   offers: DiscoveredOffer[];
-  sources: Partial<Record<AtsSource, SourceState>>;
+  sources: SourceMap;
   matchCount: number;
   companiesScanned: number;
   companiesAvailable: number;
@@ -66,6 +73,9 @@ type ExploreCtx = {
   added: Set<string>;
   adding: Set<string>;
   discover: () => Promise<void>;
+  /** Browser mode over the Chinese boards (BOSS直聘/猎聘/智联) via the user's
+   *  own logged-in browser — free, needs the bsk CLI + a connected browser. */
+  discoverBrowser: () => Promise<void>;
   /** Load the SUPPLY-loop offers Today's "Fresh matches this week" already
    *  fetched from /api/whats-new, straight into the results phase — no scan. */
   loadFresh: () => Promise<void>;
@@ -103,7 +113,7 @@ type ResultSnapshot = {
   companiesAvailable: number;
   capHit: boolean;
   droppedNoDate: number;
-  sources: Partial<Record<AtsSource, SourceState>>;
+  sources: SourceMap;
   partial: boolean;
   status: string;
   error: string;
@@ -121,7 +131,7 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
   const touched = useRef(false);
   const [phase, setPhase] = useState<Phase>("idle");
   const [offers, setOffers] = useState<DiscoveredOffer[]>([]);
-  const [sources, setSources] = useState<Partial<Record<AtsSource, SourceState>>>({});
+  const [sources, setSources] = useState<SourceMap>({});
   const [matchCount, setMatchCount] = useState(0);
   const [companiesScanned, setCompaniesScanned] = useState(0);
   // Authoritative scan-health signals (scanner --json mode, #1199): tell a capped /
@@ -295,6 +305,129 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
       setPhase("degraded");
     } else {
       setPhase(isBroadSearch(f) ? "empty-current" : "empty-loose");
+    }
+  }, [t]);
+
+  // Browser mode — walk the Chinese boards (BOSS直聘/猎聘/智联) through the
+  // user's OWN logged-in browser via bsk-extract.mjs. Shares the ScanEvent stream
+  // grammar with discover(), so the surface state machine is nearly identical;
+  // the differences are the URL codec, the source chips (platforms, not ATS),
+  // and the bsk gate (a structured BSK_MISSING 400 → "blocked", not "failed").
+  const discoverBrowser = useCallback(async () => {
+    if (runningRef.current) return;
+    const f = filtersRef.current;
+    const platforms = f.browserSources?.length ? f.browserSources : BROWSER_SOURCES;
+    const query = f.zhQuery?.trim() ?? "";
+    runningRef.current = true;
+    setPhase("casting");
+    setOffers([]);
+    setMatchCount(0);
+    setCompaniesScanned(0);
+    setCompaniesAvailable(0);
+    setCapHit(false);
+    setDroppedNoDate(0);
+    setPartial(false);
+    setError("");
+    setScannerMissing(false);
+    const init: SourceMap = {};
+    for (const p of platforms) init[p] = { state: "queued" };
+    setSources(init);
+    setStatus(t("explore.disc.castingBrowser"));
+    if (typeof window !== "undefined") {
+      window.history.replaceState(null, "", `/explore?${browserToParams(query, platforms as unknown as string[])}`);
+    }
+
+    const acc: DiscoveredOffer[] = [];
+    let sawError = "";
+    let sawBskMissing = false; // bsk absent/not connected — structured 400, → blocked
+    let reachedAcc = 0; // platforms that completed a real sweep
+    let unreachableAcc = 0;
+    try {
+      const r = await fetch("/api/explore", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...f, mode: "browser" }),
+      });
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        sawBskMissing = isBskMissing(d);
+        sawError = d.error || (sawBskMissing ? t("explore.err.bskMissing") : t("explore.err.discoveryFailed", { status: r.status }));
+      } else if (!r.body) {
+        sawError = t("explore.err.noStream");
+      } else {
+        const reader = r.body.getReader();
+        const dec = new TextDecoder();
+        let buf = "";
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buf += dec.decode(value, { stream: true });
+          let nl: number;
+          while ((nl = buf.indexOf("\n")) >= 0) {
+            const line = buf.slice(0, nl).trim();
+            buf = buf.slice(nl + 1);
+            if (!line) continue;
+            let ev: ScanEvent;
+            try {
+              ev = JSON.parse(line) as ScanEvent;
+            } catch {
+              continue;
+            }
+            switch (ev.kind) {
+              case "atsStart":
+                setPhase("scanning");
+                setStatus(t("explore.disc.browsing", { platform: BROWSER_LABEL[ev.ats as BrowserSource] ?? ev.ats }));
+                setSources((s) => ({ ...s, [ev.ats]: { ...s[ev.ats], state: "active" } }));
+                break;
+              case "atsDone":
+                unreachableAcc += ev.unreachable;
+                setSources((s) => ({ ...s, [ev.ats]: { ...s[ev.ats], state: ev.unreachable > 0 ? "noisy" : "swept", unreachable: ev.unreachable } }));
+                break;
+              case "offer":
+                acc.push(ev.offer);
+                setOffers((o) => [...o, ev.offer]);
+                break;
+              case "summary":
+                reachedAcc = ev.companiesScanned;
+                setCompaniesScanned(ev.companiesScanned);
+                if (ev.unreachable > 0) setPartial(true);
+                break;
+              case "error":
+                if (!sawError) sawError = ev.message;
+                break;
+              default:
+                break;
+            }
+          }
+        }
+      }
+    } catch (e) {
+      sawError = e instanceof Error ? e.message : t("explore.err.streamError");
+    }
+
+    // Mark any still-active sources as swept (stream ended).
+    setSources((s) => {
+      const next = { ...s };
+      for (const k of Object.keys(next)) if (next[k]?.state === "active" || next[k]?.state === "queued") next[k] = { ...next[k]!, state: "swept" };
+      return next;
+    });
+
+    runningRef.current = false;
+    if (acc.length > 0) {
+      setMatchCount(acc.length);
+      setPhase("revealing");
+      setStatus(t(acc.length === 1 ? "explore.disc.browserFoundOne" : "explore.disc.browserFoundMany", { n: acc.length }));
+      window.setTimeout(() => setPhase("results"), 850);
+    } else if (sawBskMissing) {
+      setError(sawError);
+      setPhase("blocked");
+    } else if (sawError) {
+      setError(sawError);
+      setPhase("failed");
+    } else if (reachedAcc === 0 && unreachableAcc > 0) {
+      setPhase("degraded");
+    } else {
+      setPhase("empty-loose");
     }
   }, [t]);
 
@@ -539,7 +672,7 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
       snap = null;
     }
     if (!snap || snap.v !== 1 || !Array.isArray(snap.offers)) return;
-    setModeState(snap.mode === "ai" ? "ai" : "scan");
+    setModeState(snap.mode === "ai" ? "ai" : snap.mode === "browser" ? "browser" : "scan");
     setOffers(snap.offers);
     setMatchCount(typeof snap.matchCount === "number" ? snap.matchCount : snap.offers.length);
     setCompaniesScanned(snap.companiesScanned ?? 0);
@@ -580,10 +713,10 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
       filters, setFilters, initFilters, phase,
       running: phase === "casting" || phase === "scanning" || phase === "revealing" || phase === "hunting",
       offers, sources, matchCount, companiesScanned, companiesAvailable, capHit, droppedNoDate, status, partial, error, scannerMissing, added, adding,
-      discover, loadFresh, addToPipeline, applyPatch, reset,
+      discover, discoverBrowser, loadFresh, addToPipeline, applyPatch, reset,
       mode, setMode, aiIntent, setAiIntent, discoverAI, aiTrace, aiCost,
     }),
-    [filters, setFilters, initFilters, phase, offers, sources, matchCount, companiesScanned, companiesAvailable, capHit, droppedNoDate, status, partial, error, scannerMissing, added, adding, discover, loadFresh, addToPipeline, applyPatch, reset, mode, setMode, aiIntent, discoverAI, aiTrace, aiCost],
+    [filters, setFilters, initFilters, phase, offers, sources, matchCount, companiesScanned, companiesAvailable, capHit, droppedNoDate, status, partial, error, scannerMissing, added, adding, discover, discoverBrowser, loadFresh, addToPipeline, applyPatch, reset, mode, setMode, aiIntent, discoverAI, aiTrace, aiCost],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
