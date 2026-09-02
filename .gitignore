@@ -150,6 +150,7 @@ opencode.json
 career-dashboard
 career-dashboard.exe
 career-dashboard-ui.exe
+career-dashboard-launcher.exe
 package-lock.json
 !web/package-lock.json
 
