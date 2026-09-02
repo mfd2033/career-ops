@@ -11,6 +11,10 @@
 //   6. go-winres make                   → rsrc_windows_amd64.syso (icon + manifest)
 //   7. go build -H windowsgui           → career-dashboard-ui.exe (repo root)
 //
+// Lightweight launcher variant (no embedded runtime):
+//   BUILDFULL=0 node dashboard-ui/build-dashboard-ui.mjs
+//   → career-dashboard-launcher.exe (~9 MB, reads from .dashboard-runtime/)
+//
 // Requires: Node (builds the web app), Go 1.24+, and go-winres (auto-installed
 // on first run into dashboard-ui/.gobin). Run from anywhere:
 //   node dashboard-ui/build-dashboard-ui.mjs
@@ -24,6 +28,7 @@ const webDir = path.join(root, "web");
 const uiDir = path.join(root, "dashboard-ui");
 const gobinDir = path.join(uiDir, ".gobin");
 const goWinres = path.join(gobinDir, "go-winres.exe");
+const buildFull = process.env.BUILDFULL !== "0";
 
 function run(cmd, cwd, env = {}) {
   console.log(`\n$ ${cmd}`);
@@ -110,11 +115,18 @@ fs.writeFileSync(path.join(uiDir, "app", "build-info.json"), JSON.stringify({ sh
 // 6. regenerate the Windows resources (icon + manifest + version) as .syso.
 run(`${goWinres} make --arch amd64`, uiDir);
 
-// 7. compile the GUI launcher (no console window) into the repo root.
-// cacheVersion is injected, not a constant: the runtime dir becomes
-// .dashboard-runtime\v<sha>, so a new build can never reuse a stale extraction.
-run(`go build -ldflags "-H windowsgui -X main.cacheVersion=${cacheVersion}" -o ..\\career-dashboard-ui.exe .`, uiDir);
+if (buildFull) {
+  // 7a. Full embedded launcher (~120 MB): node.exe + Next.js bundled inside.
+  run(`go build -ldflags "-H windowsgui -X main.cacheVersion=${cacheVersion}" -o ..\\career-dashboard-ui.exe .`, uiDir);
+  const out = path.join(root, "career-dashboard-ui.exe");
+  const mb = (fs.statSync(out).size / (1024 * 1024)).toFixed(1);
+  console.log(`\n✓ ${out} (${mb} MB)`);
+}
 
-const out = path.join(root, "career-dashboard-ui.exe");
-const mb = (fs.statSync(out).size / (1024 * 1024)).toFixed(1);
-console.log(`\n✓ ${out} (${mb} MB)`);
+// 7b. Lightweight launcher (~9 MB): no embedded runtime, reads from cache dir.
+{
+  const out = path.join(root, "career-dashboard-launcher.exe");
+  run(`go build -o ..\\career-dashboard-launcher.exe .`, uiDir);
+  const mb = (fs.statSync(out).size / (1024 * 1024)).toFixed(1);
+  console.log(`\n✓ ${out} (${mb} MB)`);
+}
