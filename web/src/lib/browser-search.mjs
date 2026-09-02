@@ -32,45 +32,55 @@ export const SEARCH_TEMPLATES = {
  *
  *   • zhipin → `&city={code}`  (e.g. 郑州 = 101180100)
  *   • liepin → `&dq={code}`   (dq 数字城市码，e.g. 郑州 = 150020; 替代已失效的 /city-{slug}/ 路径)
- *   • zhaopin → `&jl={name}`  (智联 takes the Chinese name verbatim)
+ *   • zhaopin → `&jl={code}`  (智联数字城市码，e.g. 郑州 = 719; 中文名 jl 已失效, 返回全国职位)
  */
 export const BROWSER_CITY_MAP = {
-  北京: { zhipin: "101010100", liepin: "010", zhaopin: "北京" },
-  上海: { zhipin: "101020100", liepin: "020", zhaopin: "上海" },
-  广州: { zhipin: "101280100", liepin: "050020", zhaopin: "广州" },
-  深圳: { zhipin: "101280600", liepin: "050090", zhaopin: "深圳" },
-  杭州: { zhipin: "101210100", liepin: "070020", zhaopin: "杭州" },
-  成都: { zhipin: "101270100", liepin: "280020", zhaopin: "成都" },
-  武汉: { zhipin: "101200100", liepin: "170020", zhaopin: "武汉" },
-  南京: { zhipin: "101190100", liepin: "060020", zhaopin: "南京" },
-  苏州: { zhipin: "101190400", liepin: "060080", zhaopin: "苏州" },
-  西安: { zhipin: "101110100", liepin: "270020", zhaopin: "西安" },
-  天津: { zhipin: "101030100", liepin: "030", zhaopin: "天津" },
-  重庆: { zhipin: "101040100", liepin: "040", zhaopin: "重庆" },
-  郑州: { zhipin: "101180100", liepin: "150020", zhaopin: "郑州" },
-  长沙: { zhipin: "101250100", liepin: "180020", zhaopin: "长沙" },
-  济南: { zhipin: "101120100", liepin: "250020", zhaopin: "济南" },
-  青岛: { zhipin: "101120200", liepin: "250070", zhaopin: "青岛" },
-  合肥: { zhipin: "101220100", liepin: "080020", zhaopin: "合肥" },
-  福州: { zhipin: "101230100", liepin: "090020", zhaopin: "福州" },
-  厦门: { zhipin: "101230200", liepin: "090040", zhaopin: "厦门" },
-  昆明: { zhipin: "101290100", liepin: "310020", zhaopin: "昆明" },
-  贵阳: { zhipin: "101260100", liepin: "120020", zhaopin: "贵阳" },
-  南宁: { zhipin: "101300100", liepin: "110020", zhaopin: "南宁" },
-  海口: { zhipin: "101310100", liepin: "130020", zhaopin: "海口" },
-  南昌: { zhipin: "101240100", liepin: "200020", zhaopin: "南昌" },
-  太原: { zhipin: "101100100", liepin: "260020", zhaopin: "太原" },
-  石家庄: { zhipin: "101090100", liepin: "140020", zhaopin: "石家庄" },
-  呼和浩特: { zhipin: "101080100", liepin: "220020", zhaopin: "呼和浩特" },
-  沈阳: { zhipin: "101070100", liepin: "210020", zhaopin: "沈阳" },
-  大连: { zhipin: "101070200", liepin: "210040", zhaopin: "大连" },
-  长春: { zhipin: "101060100", liepin: "190020", zhaopin: "长春" },
-  哈尔滨: { zhipin: "101050100", liepin: "160020", zhaopin: "哈尔滨" },
-  兰州: { zhipin: "101160100", liepin: "100020", zhaopin: "兰州" },
-  乌鲁木齐: { zhipin: "101130100", liepin: "300020", zhaopin: "乌鲁木齐" },
-  西宁: { zhipin: "101150100", liepin: "240020", zhaopin: "西宁" },
-  银川: { zhipin: "101170100", liepin: "230020", zhaopin: "银川" },
+  北京: { zhipin: "101010100", liepin: "010", zhaopin: "530" },
+  上海: { zhipin: "101020100", liepin: "020", zhaopin: "538" },
+  广州: { zhipin: "101280100", liepin: "050020", zhaopin: "763" },
+  深圳: { zhipin: "101280600", liepin: "050090", zhaopin: "765" },
+  杭州: { zhipin: "101210100", liepin: "070020", zhaopin: "653" },
+  成都: { zhipin: "101270100", liepin: "280020", zhaopin: "801" },
+  武汉: { zhipin: "101200100", liepin: "170020", zhaopin: "736" },
+  南京: { zhipin: "101190100", liepin: "060020", zhaopin: "635" },
+  苏州: { zhipin: "101190400", liepin: "060080", zhaopin: "639" },
+  西安: { zhipin: "101110100", liepin: "270020", zhaopin: "854" },
+  天津: { zhipin: "101030100", liepin: "030", zhaopin: "531" },
+  重庆: { zhipin: "101040100", liepin: "040", zhaopin: "551" },
+  郑州: { zhipin: "101180100", liepin: "150020", zhaopin: "719" },
+  长沙: { zhipin: "101250100", liepin: "180020", zhaopin: "749" },
+  济南: { zhipin: "101120100", liepin: "250020", zhaopin: "702" },
+  青岛: { zhipin: "101120200", liepin: "250070", zhaopin: "703" },
+  合肥: { zhipin: "101220100", liepin: "080020", zhaopin: "664" },
+  福州: { zhipin: "101230100", liepin: "090020", zhaopin: "681" },
+  厦门: { zhipin: "101230200", liepin: "090040", zhaopin: "682" },
+  昆明: { zhipin: "101290100", liepin: "310020", zhaopin: "831" },
+  贵阳: { zhipin: "101260100", liepin: "120020", zhaopin: "822" },
+  南宁: { zhipin: "101300100", liepin: "110020", zhaopin: "785" },
+  海口: { zhipin: "101310100", liepin: "130020", zhaopin: "799" },
+  南昌: { zhipin: "101240100", liepin: "200020", zhaopin: "691" },
+  太原: { zhipin: "101100100", liepin: "260020", zhaopin: "576" },
+  石家庄: { zhipin: "101090100", liepin: "140020", zhaopin: "565" },
+  呼和浩特: { zhipin: "101080100", liepin: "220020", zhaopin: "587" },
+  沈阳: { zhipin: "101070100", liepin: "210020", zhaopin: "599" },
+  大连: { zhipin: "101070200", liepin: "210040", zhaopin: "600" },
+  长春: { zhipin: "101060100", liepin: "190020", zhaopin: "613" },
+  哈尔滨: { zhipin: "101050100", liepin: "160020", zhaopin: "622" },
+  兰州: { zhipin: "101160100", liepin: "100020", zhaopin: "864" },
+  乌鲁木齐: { zhipin: "101130100", liepin: "300020", zhaopin: "890" },
+  西宁: { zhipin: "101150100", liepin: "240020", zhaopin: "878" },
+  银川: { zhipin: "101170100", liepin: "230020", zhaopin: "886" },
 };
+
+/**
+ * The logical Chinese city names (BROWSER_CITY_MAP keys) as a flat array.
+ * Consumed by bsk-extract.mjs to build the in-browser card-text matcher for
+ * the city-extraction pass (方案1): zhipin/liepin anchors carry no structured
+ * city, so the extraction scans the card text for the first known city name.
+ * Exported here so the injected page script and the Node-side tests share ONE
+ * list — the map keys are the source of truth.
+ */
+export const CITY_NAMES = Object.keys(BROWSER_CITY_MAP);
 
 /**
  * Inject a platform-native city slot into a search URL. Pure — exported for

@@ -76,11 +76,11 @@ test("browserToParams encodes query + sources under mode=browser", () => {
 // ── City filtering (the browser hunt honors a logical Chinese city per board) ──
 
 test("buildSearchUrls appends the platform-native city slot for a known city", () => {
-  // BOSS → &city=<code>; 猎聘 → &dq=<code>; 智联 → &jl=<name>
+  // BOSS → &city=<code>; 猎聘 → &dq=<code>; 智联 → &jl=<numeric code> (中文名已失效, 返回全国职位)
   const urls = buildSearchUrls(["zhipin", "liepin", "zhaopin"], "项目经理", "郑州");
   assert.equal(urls[0], "https://www.zhipin.com/web/geek/job?query=%E9%A1%B9%E7%9B%AE%E7%BB%8F%E7%90%86&city=101180100");
   assert.equal(urls[1], "https://www.liepin.com/zhaopin/?key=%E9%A1%B9%E7%9B%AE%E7%BB%8F%E7%90%86&dq=150020");
-  assert.equal(urls[2], "https://www.zhaopin.com/jobs?kw=%E9%A1%B9%E7%9B%AE%E7%BB%8F%E7%90%86&jl=%E9%83%91%E5%B7%9E");
+  assert.equal(urls[2], "https://www.zhaopin.com/jobs?kw=%E9%A1%B9%E7%9B%AE%E7%BB%8F%E7%90%86&jl=719");
 });
 
 test("buildSearchUrls keeps the national search for an unknown or empty city", () => {
@@ -105,7 +105,7 @@ test("BROWSER_CITY_MAP covers every platform for each listed city", () => {
 test("browserCityValue resolves known cities, empty for unknown/empty", () => {
   assert.equal(browserCityValue("zhipin", "郑州"), "101180100");
   assert.equal(browserCityValue("liepin", "郑州"), "150020");
-  assert.equal(browserCityValue("zhaopin", "郑州"), "郑州");
+  assert.equal(browserCityValue("zhaopin", "郑州"), "719");
   assert.equal(browserCityValue("zhipin", "不存在的城市"), "");
   assert.equal(browserCityValue("zhipin", ""), "");
   assert.equal(browserCityValue("zhipin", undefined), "");
