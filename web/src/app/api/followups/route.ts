@@ -32,9 +32,11 @@ export async function GET(req: Request) {
     // Overdue first; cap for the home (full list lives in /followups).
     // Check BOTH fields — not urgency-with-status-fallback — so output where
     // either one signals overdue/urgent lands in the priority bucket.
+    // Important: return empty when no overdue/urgent — do NOT fall back to
+    // all active entries, otherwise waiting/cold items leak into the home
+    // "follow-ups due" section after the user has already followed up.
     const overdue = entries.filter((e: { urgency?: string; status?: string }) => /overdue|urgent/i.test(`${e.urgency ?? ""} ${e.status ?? ""}`)).slice(0, 8);
-    const top = (overdue.length ? overdue : entries).slice(0, 6);
-    return Response.json({ available: true, metadata: j.metadata ?? null, entries: top });
+    return Response.json({ available: true, metadata: j.metadata ?? null, entries: overdue });
   } catch {
     return Response.json({ available: false, metadata: null, entries: [] });
   }

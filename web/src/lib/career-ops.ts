@@ -15,11 +15,42 @@ import { parseReport } from "@/lib/format";
  * career-ops checkout, so the home is its parent (..). Dev overrides via
  * CAREER_OPS_ROOT to read the user's real (gitignored) data from a separate
  * checkout — see web/.env.local.
+ *
+ * The cwd-based default must not assume where the server was started from:
+ * `next dev` runs with cwd = web/ (so ".." is home), but the standalone
+ * production server (web/.next/standalone/server.js) calls process.chdir() on
+ * itself, making the cwd's parent web/.next — not home. So when the fast path
+ * does not look like a career-ops root, probe upward until a directory that
+ * actually holds the user's files (cv.md or data/applications.md) is found.
  */
 export function careerOpsRoot(): string {
   const env = process.env.CAREER_OPS_ROOT?.trim();
   if (env) return env;
-  return path.resolve(process.cwd(), "..");
+  // Fast path: dev layout (cwd = web/), where the parent already is home.
+  const devHome = path.resolve(process.cwd(), "..");
+  if (looksLikeHome(devHome)) return devHome;
+  // Standalone layout: probe upward from the cwd, capped so a stray marker
+  // far up the tree cannot hijack the root.
+  let dir = path.resolve(process.cwd());
+  for (let depth = 0; depth < 8; depth++) {
+    if (looksLikeHome(dir)) return dir;
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return devHome;
+}
+
+/** True when `dir` holds the user's files — the career-ops home marker. */
+function looksLikeHome(dir: string): boolean {
+  try {
+    return (
+      fs.existsSync(path.join(dir, "cv.md")) ||
+      fs.existsSync(path.join(dir, "data", "applications.md"))
+    );
+  } catch {
+    return false;
+  }
 }
 
 /**
