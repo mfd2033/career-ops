@@ -31,12 +31,35 @@ import { promisify } from 'util';
 import { rejectPrivateOrInvalid } from './liveness-browser.mjs';
 import { normalizeJd, normalizeListing } from './browser-extract.mjs';
 import { isZhJobDetailUrl, isZhJobHost, looksLikeCaptchaWall } from './lib/zh-jobs.mjs';
+import { CITY_NAMES } from './web/src/lib/browser-search.mjs';
 
 const execFileAsync = promisify(execFile);
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const NAVIGATE_TIMEOUT_MS = 45_000;
 const CAPTCHA_HELP_TIMEOUT_MS = 3 * 60_000; // user needs a moment to solve the slider
+
+/**
+ * Find the first known Chinese city name inside a job-card text blob (方案1:
+ * BOSS/猎聘 cards carry no structured city field, so we scan the card text for
+ * the first BROWSER_CITY_MAP city name — BOSS renders "郑州·金水区·经五路",
+ * 猎聘 "【 郑州-金水区 】"). Matches the FIRST occurrence: card text reads
+ * title→company→city, so the first hit is the job's city, not a company-name
+ * coincidence. Pure — exported for tests AND inlined into READ_DOM_JS via
+ * extractCityFromText.toString() so the injected page script and the Node-side
+ * tests share ONE implementation.
+ * @param {string} [text]
+ * @param {string[]} [cityNames]
+ * @returns {string} matched city name, or "" when none found
+ */
+export function extractCityFromText(text, cityNames = CITY_NAMES) {
+  const t = String(text ?? '');
+  if (!t) return '';
+  for (const name of cityNames) {
+    if (t.includes(name)) return name;
+  }
+  return '';
+}
 
 // SPA listing pages (zhipin search, liepin search) render their rows
 // asynchronously: domcontentloaded fires on an empty body, and a single
@@ -48,6 +71,8 @@ const DOM_READY_POLL_MS = 500;
 const DOM_READY_TIMEOUT_MS = 15_000;
 
 const READ_DOM_JS = `(() => {
+  const CITY_NAMES = ${JSON.stringify(CITY_NAMES)};
+  ${extractCityFromText.toString()}
   const title = (document.querySelector('h1')?.innerText || document.title || '').trim();
   // Prefer a semantic container, then a Chinese board's job-body class, then body.
   const root =
@@ -74,7 +99,27 @@ const READ_DOM_JS = `(() => {
       if (s.display === 'none' || s.visibility === 'hidden') return false;
       return el.getClientRects().length > 0;
     })
-    .map((el) => ({ href: el.getAttribute('href') || '', label: (el.innerText || '').trim() }));
+    .map((el) => ({ href: el.getAttribute('href') || '', label: (el.innerText || '').trim(), el }));
+  // 方案1: BOSS/猎聘 的职位 anchor 没有结构化 city 字段（BOSS 卡片无 city 属性,
+  // 猎聘 anchor 只有 label）, 导致 matchesBrowserCity 只能回退 title.includes(城市),
+  // 而 BOSS 标题("项目经理")不含城市名 → 城市门控把所有真实职位全误杀。
+  // 这里向上遍历卡片父链(≤4层)用 extractCityFromText 匹配已知城市名
+  // (BOSS "郑州·金水区·经五路" / 猎聘 "【 郑州-金水区 】") 写入 anchor.city,
+  // matchesBrowserCity 优先信任 job.city 字段 → 门控不再误杀。
+  for (const a of anchors) {
+    if (!a.label) continue;
+    let el = a.el;
+    let city = '';
+    let depth = 0;
+    while (el && el !== document.body && depth < 4) {
+      city = extractCityFromText(el.innerText || '', CITY_NAMES);
+      if (city) break;
+      el = el.parentElement;
+      depth += 1;
+    }
+    a.city = city;
+    delete a.el;
+  }
   // 智联招聘 (zhaopin.com/jobs) 的职位卡片是 DIV.job-card 而非 <a href>，上面的
   // a[href] 抓不到任何职位（"结果很少"的根因）。真实数据在
   // window.__INITIAL_STATE__.positionList，每项含 positionUrl/name/workCity。
@@ -229,10 +274,15 @@ export async function extractWithBsk({ url, mode = 'jd', max = 200, maxChars = 1
 /** readDomViaBsk: run the DOM reader in the page via bsk evaluate. */
 async function readDomViaBsk(sessionId) {
   const { stdout } = await runBsk(['evaluate', READ_DOM_JS, '--session', sessionId], 20_000);
+  const s = String(stdout ?? '');
+  // bsk evaluate occasionally returns an EMPTY stdout for a multi-line script
+  // (a daemon/page hiccup, observed on liepin) even though the page is fine —
+  // that is transient, so signal the poller to retry rather than fail the read.
+  if (!s.trim()) return null;
   try {
-    return JSON.parse(stdout);
+    return JSON.parse(s);
   } catch {
-    const e = new Error(`bsk evaluate returned non-JSON: ${String(stdout).slice(0, 200)}`);
+    const e = new Error(`bsk evaluate returned non-JSON: ${s.slice(0, 200)}`);
     e.code = 'extract_failed';
     throw e;
   }
@@ -256,6 +306,17 @@ async function readDomViaBsk(sessionId) {
  *   • A genuinely empty result page stays at 0 job anchors the whole window;
  *     it costs the full budget and returns the last read (0 jobs), which is
  *     the right trade against shipping a prematurely-empty hunt.
+ *
+ * KNOWN LIMITATION (anti-bot, 2026-09): after many rapid bsk-driven requests,
+ * zhipin and liepin pages enter an anti-bot loop — zhipin's SPA keeps cycling
+ * readyState between 'loading' and 'complete' (the DOM clears and the job rows
+ * reappear, so jobAnchors oscillates 21→0→21 and the stability rule below
+ * never fires), and liepin navigates to an interstitial page or about:blank.
+ * Both yield the last read (often 0 jobs). This is a platform anti-bot
+ * behavior, NOT the city gate: the 方案1 city extraction works (SURFACE: 15/16
+ * zhipin, 17/17 liepin when the page renders). Out of scope here; a real fix
+ * needs reload/blank detection plus a more human navigation strategy.
+ *
  * @param {string} sessionId
  * @param {'jd'|'listing'} mode
  * @returns {Promise<object>}
@@ -265,7 +326,23 @@ async function readDomReadyViaBsk(sessionId, mode) {
   let raw = null;
   let prev = -1;
   while (Date.now() <= deadline) {
-    const next = await readDomViaBsk(sessionId);
+    let next;
+    try {
+      next = await readDomViaBsk(sessionId);
+    } catch (e) {
+      // Non-JSON evaluate output can also be transient (same daemon hiccup):
+      // retry within the window instead of failing the whole extraction.
+      if (e.code === 'extract_failed') {
+        await new Promise((r) => setTimeout(r, DOM_READY_POLL_MS));
+        continue;
+      }
+      throw e;
+    }
+    // Empty evaluate output (readDomViaBsk returned null) → retry within window.
+    if (!next) {
+      await new Promise((r) => setTimeout(r, DOM_READY_POLL_MS));
+      continue;
+    }
     raw = next;
     if (mode === 'listing') {
       const url = typeof next?.url === 'string' ? next.url : '';
@@ -277,6 +354,14 @@ async function readDomReadyViaBsk(sessionId, mode) {
       break; // a jd has text; done on first non-empty read
     }
     await new Promise((r) => setTimeout(r, DOM_READY_POLL_MS));
+  }
+  // The whole window produced no readable DOM (every attempt empty/non-JSON):
+  // surface the failure explicitly rather than hand a null up to callers
+  // that would crash on `raw.url`.
+  if (!raw) {
+    const e = new Error('bsk evaluate never returned a readable DOM (every attempt was empty or non-JSON)');
+    e.code = 'extract_failed';
+    throw e;
   }
   return raw;
 }

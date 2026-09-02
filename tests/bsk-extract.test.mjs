@@ -24,7 +24,7 @@ import { tmpdir } from 'node:os';
 
 import { pass, fail, ROOT } from './helpers.mjs';
 import { pickExtractor } from '../browser-extract.mjs';
-import { extractWithBsk, parseSessionId, zhListingAnchors, listingWithCities } from '../bsk-extract.mjs';
+import { extractWithBsk, parseSessionId, zhListingAnchors, listingWithCities, extractCityFromText } from '../bsk-extract.mjs';
 import { isZhJobDetailUrl } from '../lib/zh-jobs.mjs';
 
 const NODE = process.execPath;
@@ -251,5 +251,39 @@ for (const [href, expected] of detailUrlCases) {
     pass('listingWithCities passes city-less anchors through without a city field');
   } else {
     fail(`listingWithCities(city-less) => ${JSON.stringify(listing)}`);
+  }
+}
+
+// ── S7: extractCityFromText (方案1 city extraction from card text) ────────
+// BOSS/猎聘 anchors carry no structured city; the extraction scans the card
+// text for the first BROWSER_CITY_MAP city name. BOSS renders "郑州·金水区·经五路",
+// 猎聘 "【 郑州-金水区 】". Matches the first hit (title→company→city order).
+{
+  const cases = [
+    // [text, expected]
+    ['土建项目经理 10-18K 5-10年 大专 南阳力源 郑州·金水区·经五路', '郑州'],
+    ['项目经理（GA方向）【 郑州-金水区 】 18-25k·13薪 3年以上 统招本科', '郑州'],
+    ['IT项目经理 深圳·南山区', '深圳'],
+    ['高级产品经理 杭州·余杭区·未来科技城', '杭州'],
+    ['土建项目经理 10-18K 5-10年 大专（无城市字段）', ''],
+    ['', ''],
+    [undefined, ''],
+    [null, ''],
+  ];
+  for (const [text, expected] of cases) {
+    const got = extractCityFromText(text);
+    if (got === expected) {
+      pass(`extractCityFromText(${JSON.stringify(String(text ?? '').slice(0, 24))}...) -> ${JSON.stringify(expected)}`);
+    } else {
+      fail(`extractCityFromText(${JSON.stringify(String(text ?? ''))}) -> ${JSON.stringify(got)}, expected ${JSON.stringify(expected)}`);
+    }
+  }
+
+  // Custom city list respected (defaults to BROWSER_CITY_MAP keys).
+  const custom = extractCityFromText('项目经理 南昌·红谷滩', ['北京', '南昌']);
+  if (custom === '南昌') {
+    pass('extractCityFromText honors a custom city list');
+  } else {
+    fail(`extractCityFromText custom list -> ${JSON.stringify(custom)}, expected 南昌`);
   }
 }
