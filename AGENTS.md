@@ -372,6 +372,18 @@ The `--extractor auto` default routes Chinese boards to the candidate's own logg
 
 ---
 
+## Agent skills
+
+### Issue tracker
+
+Local markdown — issues live as files under `.scratch/`. See `docs/agents/issue-tracker.md`.
+
+### Domain docs
+
+Single-context — one `CONTEXT.md` + `docs/adr/` at repo root. See `docs/agents/domain.md`.
+
+---
+
 ## CI/CD, Community and Governance
 
 - **GitHub Actions** on every PR: the full `test-all.mjs` suite, risk-based auto-labeler (🔴 core-architecture, ⚠️ agent-behavior, 📄 docs), first-timer welcome bot. **Branch protection** on `main`: status checks required, no direct pushes (except admin bypass). **Dependabot** on npm/Go/Actions.
