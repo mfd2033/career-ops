@@ -16,6 +16,7 @@ import {
   applyBrowserCity,
   browserCityValue,
   BROWSER_CITY_MAP,
+  matchesBrowserCity,
 } from "../../src/lib/browser-search.mjs";
 
 // The three supported Chinese platforms must stay fixed — the UI chrome,
@@ -75,11 +76,11 @@ test("browserToParams encodes query + sources under mode=browser", () => {
 // ── City filtering (the browser hunt honors a logical Chinese city per board) ──
 
 test("buildSearchUrls appends the platform-native city slot for a known city", () => {
-  // BOSS → &city=<code>; 猎聘 → /city-<slug>/ path; 智联 → &jl=<name>
+  // BOSS → &city=<code>; 猎聘 → &dq=<code>; 智联 → &jl=<name>
   const urls = buildSearchUrls(["zhipin", "liepin", "zhaopin"], "项目经理", "郑州");
   assert.equal(urls[0], "https://www.zhipin.com/web/geek/job?query=%E9%A1%B9%E7%9B%AE%E7%BB%8F%E7%90%86&city=101180100");
-  assert.equal(urls[1], "https://www.liepin.com/city-zhengzhou/zhaopin/?key=%E9%A1%B9%E7%9B%AE%E7%BB%8F%E7%90%86");
-  assert.equal(urls[2], "https://sou.zhaopin.com/jobs/searchresult.ashx?t=%E9%A1%B9%E7%9B%AE%E7%BB%8F%E7%90%86&jl=%E9%83%91%E5%B7%9E");
+  assert.equal(urls[1], "https://www.liepin.com/zhaopin/?key=%E9%A1%B9%E7%9B%AE%E7%BB%8F%E7%90%86&dq=150020");
+  assert.equal(urls[2], "https://www.zhaopin.com/jobs?kw=%E9%A1%B9%E7%9B%AE%E7%BB%8F%E7%90%86&jl=%E9%83%91%E5%B7%9E");
 });
 
 test("buildSearchUrls keeps the national search for an unknown or empty city", () => {
@@ -103,11 +104,32 @@ test("BROWSER_CITY_MAP covers every platform for each listed city", () => {
 
 test("browserCityValue resolves known cities, empty for unknown/empty", () => {
   assert.equal(browserCityValue("zhipin", "郑州"), "101180100");
-  assert.equal(browserCityValue("liepin", "郑州"), "zhengzhou");
+  assert.equal(browserCityValue("liepin", "郑州"), "150020");
   assert.equal(browserCityValue("zhaopin", "郑州"), "郑州");
   assert.equal(browserCityValue("zhipin", "不存在的城市"), "");
   assert.equal(browserCityValue("zhipin", ""), "");
   assert.equal(browserCityValue("zhipin", undefined), "");
+});
+
+// ── Post-discovery city gate (Q2 zero-tolerance backstop) ─────────────────
+
+test("matchesBrowserCity trusts an explicit job city field first", () => {
+  assert.equal(matchesBrowserCity({ city: "郑州", title: "项目经理" }, "郑州"), true);
+  assert.equal(matchesBrowserCity({ city: "北京", title: "项目经理" }, "郑州"), false);
+  assert.equal(matchesBrowserCity({ city: "郑州 金水区", title: "项目经理" }, "郑州"), true);
+});
+
+test("matchesBrowserCity falls back to the title when no city field exists", () => {
+  assert.equal(matchesBrowserCity({ title: "郑州 项目经理" }, "郑州"), true);
+  assert.equal(matchesBrowserCity({ title: "项目经理" }, "郑州"), false);
+  assert.equal(matchesBrowserCity({}, "郑州"), false);
+  assert.equal(matchesBrowserCity(undefined, "郑州"), false);
+});
+
+test("matchesBrowserCity passes everything through when no city is requested", () => {
+  assert.equal(matchesBrowserCity({ title: "项目经理" }, ""), true);
+  assert.equal(matchesBrowserCity({ title: "项目经理" }, undefined), true);
+  assert.equal(matchesBrowserCity(undefined, ""), true);
 });
 
 test("applyBrowserCity is a no-op for unknown sources and empty values", () => {

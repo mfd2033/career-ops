@@ -20,7 +20,7 @@ export const BROWSER_SOURCES = ["zhipin", "liepin", "zhaopin"];
 export const SEARCH_TEMPLATES = {
   zhipin: "https://www.zhipin.com/web/geek/job?query={q}",
   liepin: "https://www.liepin.com/zhaopin/?key={q}",
-  zhaopin: "https://sou.zhaopin.com/jobs/searchresult.ashx?t={q}",
+  zhaopin: "https://www.zhaopin.com/jobs?kw={q}",
 };
 
 /**
@@ -31,45 +31,45 @@ export const SEARCH_TEMPLATES = {
  * the browser hunt never crashes over an unknown city.
  *
  *   • zhipin → `&city={code}`  (e.g. 郑州 = 101180100)
- *   • liepin → `/city-{slug}/` path segment (slug WITHOUT the city- prefix)
+ *   • liepin → `&dq={code}`   (dq 数字城市码，e.g. 郑州 = 150020; 替代已失效的 /city-{slug}/ 路径)
  *   • zhaopin → `&jl={name}`  (智联 takes the Chinese name verbatim)
  */
 export const BROWSER_CITY_MAP = {
-  北京: { zhipin: "101010100", liepin: "bj", zhaopin: "北京" },
-  上海: { zhipin: "101020100", liepin: "sh", zhaopin: "上海" },
-  广州: { zhipin: "101280100", liepin: "gz", zhaopin: "广州" },
-  深圳: { zhipin: "101280600", liepin: "sz", zhaopin: "深圳" },
-  杭州: { zhipin: "101210100", liepin: "hz", zhaopin: "杭州" },
-  成都: { zhipin: "101270100", liepin: "cd", zhaopin: "成都" },
-  武汉: { zhipin: "101200100", liepin: "wuhan", zhaopin: "武汉" },
-  南京: { zhipin: "101190100", liepin: "nj", zhaopin: "南京" },
-  苏州: { zhipin: "101190400", liepin: "suzhou", zhaopin: "苏州" },
-  西安: { zhipin: "101110100", liepin: "xian", zhaopin: "西安" },
-  天津: { zhipin: "101030100", liepin: "tj", zhaopin: "天津" },
-  重庆: { zhipin: "101040100", liepin: "cq", zhaopin: "重庆" },
-  郑州: { zhipin: "101180100", liepin: "zhengzhou", zhaopin: "郑州" },
-  长沙: { zhipin: "101250100", liepin: "changsha", zhaopin: "长沙" },
-  济南: { zhipin: "101120100", liepin: "jinan", zhaopin: "济南" },
-  青岛: { zhipin: "101120200", liepin: "qingdao", zhaopin: "青岛" },
-  合肥: { zhipin: "101220100", liepin: "hefei", zhaopin: "合肥" },
-  福州: { zhipin: "101230100", liepin: "fuzhou", zhaopin: "福州" },
-  厦门: { zhipin: "101230200", liepin: "xiamen", zhaopin: "厦门" },
-  昆明: { zhipin: "101290100", liepin: "kunming", zhaopin: "昆明" },
-  贵阳: { zhipin: "101260100", liepin: "guiyang", zhaopin: "贵阳" },
-  南宁: { zhipin: "101300100", liepin: "nanning", zhaopin: "南宁" },
-  海口: { zhipin: "101310100", liepin: "haikou", zhaopin: "海口" },
-  南昌: { zhipin: "101240100", liepin: "nanchang", zhaopin: "南昌" },
-  太原: { zhipin: "101100100", liepin: "taiyuan", zhaopin: "太原" },
-  石家庄: { zhipin: "101090100", liepin: "shijiazhuang", zhaopin: "石家庄" },
-  呼和浩特: { zhipin: "101080100", liepin: "huhehaote", zhaopin: "呼和浩特" },
-  沈阳: { zhipin: "101070100", liepin: "shenyang", zhaopin: "沈阳" },
-  大连: { zhipin: "101070200", liepin: "dalian", zhaopin: "大连" },
-  长春: { zhipin: "101060100", liepin: "changchun", zhaopin: "长春" },
-  哈尔滨: { zhipin: "101050100", liepin: "haerbin", zhaopin: "哈尔滨" },
-  兰州: { zhipin: "101160100", liepin: "lanzhou", zhaopin: "兰州" },
-  乌鲁木齐: { zhipin: "101130100", liepin: "wulumuqi", zhaopin: "乌鲁木齐" },
-  西宁: { zhipin: "101150100", liepin: "xining", zhaopin: "西宁" },
-  银川: { zhipin: "101170100", liepin: "yinchuan", zhaopin: "银川" },
+  北京: { zhipin: "101010100", liepin: "010", zhaopin: "北京" },
+  上海: { zhipin: "101020100", liepin: "020", zhaopin: "上海" },
+  广州: { zhipin: "101280100", liepin: "050020", zhaopin: "广州" },
+  深圳: { zhipin: "101280600", liepin: "050090", zhaopin: "深圳" },
+  杭州: { zhipin: "101210100", liepin: "070020", zhaopin: "杭州" },
+  成都: { zhipin: "101270100", liepin: "280020", zhaopin: "成都" },
+  武汉: { zhipin: "101200100", liepin: "170020", zhaopin: "武汉" },
+  南京: { zhipin: "101190100", liepin: "060020", zhaopin: "南京" },
+  苏州: { zhipin: "101190400", liepin: "060080", zhaopin: "苏州" },
+  西安: { zhipin: "101110100", liepin: "270020", zhaopin: "西安" },
+  天津: { zhipin: "101030100", liepin: "030", zhaopin: "天津" },
+  重庆: { zhipin: "101040100", liepin: "040", zhaopin: "重庆" },
+  郑州: { zhipin: "101180100", liepin: "150020", zhaopin: "郑州" },
+  长沙: { zhipin: "101250100", liepin: "180020", zhaopin: "长沙" },
+  济南: { zhipin: "101120100", liepin: "250020", zhaopin: "济南" },
+  青岛: { zhipin: "101120200", liepin: "250070", zhaopin: "青岛" },
+  合肥: { zhipin: "101220100", liepin: "080020", zhaopin: "合肥" },
+  福州: { zhipin: "101230100", liepin: "090020", zhaopin: "福州" },
+  厦门: { zhipin: "101230200", liepin: "090040", zhaopin: "厦门" },
+  昆明: { zhipin: "101290100", liepin: "310020", zhaopin: "昆明" },
+  贵阳: { zhipin: "101260100", liepin: "120020", zhaopin: "贵阳" },
+  南宁: { zhipin: "101300100", liepin: "110020", zhaopin: "南宁" },
+  海口: { zhipin: "101310100", liepin: "130020", zhaopin: "海口" },
+  南昌: { zhipin: "101240100", liepin: "200020", zhaopin: "南昌" },
+  太原: { zhipin: "101100100", liepin: "260020", zhaopin: "太原" },
+  石家庄: { zhipin: "101090100", liepin: "140020", zhaopin: "石家庄" },
+  呼和浩特: { zhipin: "101080100", liepin: "220020", zhaopin: "呼和浩特" },
+  沈阳: { zhipin: "101070100", liepin: "210020", zhaopin: "沈阳" },
+  大连: { zhipin: "101070200", liepin: "210040", zhaopin: "大连" },
+  长春: { zhipin: "101060100", liepin: "190020", zhaopin: "长春" },
+  哈尔滨: { zhipin: "101050100", liepin: "160020", zhaopin: "哈尔滨" },
+  兰州: { zhipin: "101160100", liepin: "100020", zhaopin: "兰州" },
+  乌鲁木齐: { zhipin: "101130100", liepin: "300020", zhaopin: "乌鲁木齐" },
+  西宁: { zhipin: "101150100", liepin: "240020", zhaopin: "西宁" },
+  银川: { zhipin: "101170100", liepin: "230020", zhaopin: "银川" },
 };
 
 /**
@@ -87,10 +87,10 @@ export function applyBrowserCity(source, baseUrl, nativeValue) {
   switch (source) {
     case "zhipin":
     case "zhaopin":
-      return `${baseUrl}${baseUrl.includes("?") ? "&" : "?"}${source === "zhipin" ? "city" : "jl"}=${encodeURIComponent(native)}`;
     case "liepin":
-      // https://www.liepin.com/zhaopin/?key=… → https://www.liepin.com/city-zhengzhou/zhaopin/?key=…
-      return baseUrl.replace(/^(\w+:\/\/[^/]+\/)/, `$1city-${encodeURIComponent(native)}/`);
+      // BOSS → &city=<code>; 智联 → &jl=<name>; 猎聘 → &dq=<code> (城市码，替代已失效的
+      // /city-{slug}/ 路径——slug 不产生城市过滤，dq 参数实测有效)
+      return `${baseUrl}${baseUrl.includes("?") ? "&" : "?"}${source === "zhipin" ? "city" : source === "zhaopin" ? "jl" : "dq"}=${encodeURIComponent(native)}`;
     default:
       return baseUrl;
   }
@@ -108,6 +108,31 @@ export function browserCityValue(source, cityName) {
   if (!name) return "";
   const entry = BROWSER_CITY_MAP[name];
   return entry ? String(entry[source] ?? "") : "";
+}
+
+/**
+ * Q2 zero-tolerance post-discovery gate: is this discovered job in the target
+ * city? A job that carries an explicit city field (e.g. 智联's positionList
+ * `workCity`) is judged on that field FIRST — it is the reliable signal; the
+ * title is only a fallback for platforms whose list cards don't expose a city
+ * (猎聘/BOSS anchors). When a city is requested it MUST match — a job with no
+ * matching city/title signal is dropped, never kept on trust that the search
+ * URL's city parameter filtered it. No city requested → everything passes.
+ * Pure — exported for tests.
+ * @param {{ city?: string, title?: string } | undefined} job
+ * @param {string} [cityName] logical Chinese city, e.g. "郑州"; "" = no gate
+ * @returns {boolean}
+ */
+export function matchesBrowserCity(job, cityName) {
+  const city = String(cityName ?? "").trim();
+  if (!city) return true;
+  const jobCity = String(job?.city ?? "").trim();
+  if (jobCity) {
+    // workCity values are usually exact ("郑州") but can be compound
+    // ("郑州 金水区") — accept either containment direction.
+    return jobCity === city || jobCity.includes(city) || city.includes(jobCity);
+  }
+  return String(job?.title ?? "").includes(city);
 }
 
 /**
