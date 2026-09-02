@@ -24,7 +24,7 @@ import { tmpdir } from 'node:os';
 
 import { pass, fail, ROOT } from './helpers.mjs';
 import { pickExtractor } from '../browser-extract.mjs';
-import { extractWithBsk, parseSessionId, zhListingAnchors } from '../bsk-extract.mjs';
+import { extractWithBsk, parseSessionId, zhListingAnchors, listingWithCities } from '../bsk-extract.mjs';
 import { isZhJobDetailUrl } from '../lib/zh-jobs.mjs';
 
 const NODE = process.execPath;
@@ -199,4 +199,57 @@ for (const [href, expected] of detailUrlCases) {
   const safe = zhListingAnchors(undefined, base);
   if (Array.isArray(safe) && safe.length === 0) pass('zhListingAnchors(undefined) -> []');
   else fail(`zhListingAnchors(undefined) -> ${JSON.stringify(safe)}`);
+}
+
+// ── S6: listingWithCities (zhaopin positionList → city-carrying listing) ───
+// The zhaopin search page renders job cards as DIVs (no <a>), so READ_DOM_JS
+// synthesizes anchors from window.__INITIAL_STATE__.positionList with a `city`
+// field (workCity). listingWithCities must keep those postings AND attach the
+// city onto each { title, url } entry; non-zh anchors and city-less postings
+// behave exactly as before.
+{
+  const base = 'https://www.zhaopin.com/jobs?kw=%E9%A1%B9%E7%9B%AE%E7%BB%8F%E7%90%86&jl=%E9%83%91%E5%B7%9E';
+  const raw = {
+    url: base,
+    anchors: [
+      { href: 'http://www.zhaopin.com/jobdetail/CC634185820J40852229109.htm', label: '项目经理（郑州）', city: '郑州' },
+      { href: 'http://www.zhaopin.com/jobdetail/CC634185820J40852229110.htm', label: '高级项目经理', city: '北京' },
+      { href: 'https://www.zhaopin.com/', label: '首页', city: '' },
+    ],
+  };
+  const listing = listingWithCities(raw, base, 200);
+  const jobs = listing.jobs;
+  const byCity = Object.fromEntries(jobs.map((j) => [j.city, j.title]));
+  if (
+    jobs.length === 2 &&
+    byCity['郑州'] === '项目经理（郑州）' &&
+    byCity['北京'] === '高级项目经理' &&
+    jobs.every((j) => j.url.startsWith('http://www.zhaopin.com/jobdetail/'))
+  ) {
+    pass('listingWithCities keeps synthesized zhaopin postings with their city');
+  } else {
+    fail(`listingWithCities => ${JSON.stringify(listing)}`);
+  }
+}
+
+{
+  // City-less anchors (猎聘/BOSS anchor cards) keep a plain { title, url }.
+  const raw = {
+    url: 'https://www.liepin.com/zhaopin/?key=x&dq=150020',
+    anchors: [
+      { href: 'https://www.liepin.com/job/1982729989.shtml', label: '郑州 项目经理' },
+      { href: 'https://www.liepin.com/job/1982729990.shtml', label: '技术经理' },
+    ],
+  };
+  const listing = listingWithCities(raw, raw.url, 200);
+  const jobs = listing.jobs;
+  if (
+    jobs.length === 2 &&
+    jobs.every((j) => !Object.prototype.hasOwnProperty.call(j, 'city')) &&
+    jobs.some((j) => j.title === '郑州 项目经理')
+  ) {
+    pass('listingWithCities passes city-less anchors through without a city field');
+  } else {
+    fail(`listingWithCities(city-less) => ${JSON.stringify(listing)}`);
+  }
 }

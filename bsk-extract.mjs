@@ -75,7 +75,26 @@ const READ_DOM_JS = `(() => {
       return el.getClientRects().length > 0;
     })
     .map((el) => ({ href: el.getAttribute('href') || '', label: (el.innerText || '').trim() }));
-  return JSON.stringify({ title, text, anchors, url: location.href });
+  // 智联招聘 (zhaopin.com/jobs) 的职位卡片是 DIV.job-card 而非 <a href>，上面的
+  // a[href] 抓不到任何职位（"结果很少"的根因）。真实数据在
+  // window.__INITIAL_STATE__.positionList，每项含 positionUrl/name/workCity。
+  // 合成 anchor（附 city）追加，让 zhListingAnchors 按 isZhJobDetailUrl 统一过滤。
+  // 绝不读 positionCount（实测 =0，不可信）；positionList 才是真数据。
+  let synth = [];
+  try {
+    const st = window.__INITIAL_STATE__;
+    if (st && Array.isArray(st.positionList)) {
+      synth = st.positionList
+        .filter((p) => p && p.positionUrl)
+        .map((p) => ({
+          href: String(p.positionUrl),
+          label: String(p.name || '').trim(),
+          city: String(p.workCity || '').trim(),
+        }))
+        .filter((a) => a.label && a.href);
+    }
+  } catch (e) { /* a state read must never sink the DOM read */ }
+  return JSON.stringify({ title, text, anchors: anchors.concat(synth), url: location.href });
 })()`;
 
 // ── bsk plumbing ─────────────────────────────────────────────────────────
@@ -189,12 +208,12 @@ export async function extractWithBsk({ url, mode = 'jd', max = 200, maxChars = 1
       );
       const rawAfter = await readDomReadyViaBsk(sessionId, mode);
       return mode === 'listing'
-        ? normalizeListing(zhListingAnchors(rawAfter.anchors, rawAfter.url || url), rawAfter.url || url, max)
+        ? listingWithCities(rawAfter, rawAfter.url || url, max)
         : normalizeJd(rawAfter, rawAfter.url || url, maxChars);
     }
 
     return mode === 'listing'
-      ? normalizeListing(zhListingAnchors(raw.anchors, raw.url || url), raw.url || url, max)
+      ? listingWithCities(raw, raw.url || url, max)
       : normalizeJd(raw, raw.url || url, maxChars);
   } finally {
     if (sessionId) {
@@ -288,6 +307,41 @@ export function zhListingAnchors(anchors, baseUrl) {
       return false;
     }
   });
+}
+
+/**
+ * Shape a listing result and carry each job's explicit city (智联 positionList
+ * `workCity`) onto its `{ title, url }` entry. normalizeListing is shared with
+ * the Playwright path and intentionally drops unknown anchor fields, so the
+ * city is re-attached here by resolved URL — bsk-extract is the only caller
+ * whose anchors may carry a `city`. Jobs without a city keep none (their
+ * platform relies on the search URL's own city parameter; the browser-scan
+ * post-gate falls back to the title). Pure — exported for tests.
+ * @param {{ anchors?: Array<{ href?: string, label?: string, city?: string }>, url?: string }} raw
+ * @param {string} baseUrl
+ * @param {number} [max]
+ * @returns {{ url: string, jobs: Array<{ title: string, url: string, city?: string }> }}
+ */
+export function listingWithCities(raw, baseUrl, max = 200) {
+  const base = String(raw?.url || baseUrl || '');
+  const listing = normalizeListing(zhListingAnchors(raw?.anchors, base), base, max);
+  const cityByHref = new Map();
+  for (const a of Array.isArray(raw?.anchors) ? raw.anchors : []) {
+    const c = String(a?.city ?? '').trim();
+    if (!c) continue;
+    try {
+      cityByHref.set(new URL(String(a.href ?? ''), base).href, c);
+    } catch {
+      /* unparseable href — nothing to attach */
+    }
+  }
+  if (cityByHref.size > 0) {
+    for (const j of listing.jobs) {
+      const c = cityByHref.get(j.url);
+      if (c) j.city = c;
+    }
+  }
+  return listing;
 }
 
 // ── CLI ──────────────────────────────────────────────────────────────────

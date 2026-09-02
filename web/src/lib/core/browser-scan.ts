@@ -1,6 +1,6 @@
 import { spawn, spawnSync } from "node:child_process";
 import { careerOpsRoot, rootScript } from "@/lib/career-ops";
-import { buildSearchUrls, cleanBrowserSources } from "../browser-search.mjs";
+import { buildSearchUrls, cleanBrowserSources, matchesBrowserCity } from "../browser-search.mjs";
 import { type BrowserSource, type DiscoveredOffer, type ExploreFilters, type ScanEvent } from "@/lib/explore";
 
 export type { DiscoveredOffer, ScanEvent } from "@/lib/explore";
@@ -35,7 +35,7 @@ export function bskInstalled(): boolean {
   }
 }
 
-type BskListing = { url?: string; jobs?: Array<{ title?: string; url?: string }> };
+type BskListing = { url?: string; jobs?: Array<{ title?: string; url?: string; city?: string }> };
 
 export function runBrowserDiscovery(
   filters: ExploreFilters,
@@ -122,6 +122,11 @@ export function runBrowserDiscovery(
             const link = String(j.url ?? "").trim();
             const title = String(j.title ?? "").trim();
             if (!/^https?:\/\//i.test(link) || !title || title.length < 3) continue;
+            // Q2 zero-tolerance post-gate: a requested city MUST match — never
+            // keep a job on trust that the search URL's city parameter filtered
+            // it (智联's list is not strictly filtered; its positionList city is
+            // authoritative, 猎聘/BOSS fall back to the title).
+            if (!matchesBrowserCity(j, city)) continue;
             if (seen.has(link)) continue;
             seen.add(link);
             const offer: DiscoveredOffer = {
