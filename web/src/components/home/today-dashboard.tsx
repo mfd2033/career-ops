@@ -123,7 +123,7 @@ export function TodayDashboard({
         <Section icon={Bell} title={t("home.followUpsDueTitle")} hint={t("home.followUpsDueHint")}>
           <div className="grid gap-2.5">
             {followups.map((f) => (
-              <FollowUpCard key={`${f.num}-${f.company}`} followup={f} onLogged={() => setOverdue((n) => Math.max(0, n - 1))} />
+              <FollowUpCard key={`${f.num}-${f.company}`} followup={f} onLogged={() => { setOverdue((n) => Math.max(0, n - 1)); refetch(); }} />
             ))}
           </div>
         </Section>
