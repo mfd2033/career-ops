@@ -7,6 +7,10 @@ import type { InboxJob } from "@/lib/career-ops";
 import type { AtsSource } from "@/lib/explore";
 import { ATS_SOURCES } from "@/lib/explore";
 import { daysSince, seniorityFromTitle, sourceFromUrl, SENIORITY_ORDER, type Seniority } from "@/lib/inbox";
+import { normalizeUrl } from "@/lib/core/url-key.mjs";
+import { resolveRowScore } from "@/lib/inbox-score.mjs";
+import { scoreTone } from "@/lib/format";
+import { scoreNum } from "@/lib/score-num.mjs";
 import { FacetChips } from "./facet-chips";
 import { TriageRow, type RowScore } from "./triage-row";
 import { ShortlistTray, type ShortItem } from "./shortlist-tray";
@@ -22,7 +26,12 @@ const BATCH = 20;
 // Default is a small fresh batch (never the full wall); free facets + Save/Skip narrow
 // it; only "Score shortlist" spends tokens. 🔴 The shell is agnostic to what makes a
 // role relevant — order is freshness with a single documented plug point.
-export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
+//
+// scoredUrls: durable URL → tracker score map (server-built from reports'
+// `**URL:**` headers). The live job-store only covers evaluations fired THIS
+// browser — postings already evaluated via CLI / batch / an earlier session
+// must still show their real score, not a false "not scored".
+export function InboxTriage({ inbox, scoredUrls }: { inbox: InboxJob[]; scoredUrls?: Record<string, { score: string }> }) {
   const { jobs, startJob } = useJobs();
   const { t } = useI18n();
 
@@ -75,29 +84,50 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
   // triages once (and Save/Skip/score, all keyed by URL, act on it coherently).
   const enriched = useMemo(() => {
     const seen = new Set<string>();
-    const out: { job: InboxJob; source: AtsSource | null; seniority: Seniority | null; age: number | null }[] = [];
+    const out: { job: InboxJob; source: AtsSource | null; seniority: Seniority | null; age: number | null; urlKey: string }[] = [];
     for (const job of inbox) {
       if (seen.has(job.url)) continue;
       seen.add(job.url);
-      out.push({ job, source: sourceFromUrl(job.url), seniority: seniorityFromTitle(job.role), age: daysSince(job.postedAt, now) });
+      out.push({
+        job,
+        source: sourceFromUrl(job.url),
+        seniority: seniorityFromTitle(job.role),
+        age: daysSince(job.postedAt, now),
+        urlKey: normalizeUrl(job.url),
+      });
     }
     return out;
   }, [inbox, now]);
 
-  // EVALUADA lookup: the latest evaluate worker per posting URL (running → badge).
-  const scoreByUrl = useMemo(() => {
+  // EVALUADA lookup part 1 — LIVE: the latest evaluate worker per posting URL
+  // keyed by the SAME normalizeUrl(...) the persisted map uses, so both sides
+  // compare canonically (running → badge). Covers only this browser's sessions.
+  const liveScores = useMemo(() => {
     const best = new Map<string, (typeof jobs)[number]>();
     for (const j of jobs) {
       if (!j.input || j.kind !== "evaluate") continue;
-      const ex = best.get(j.input);
-      if (!ex || j.startedAt > ex.startedAt) best.set(j.input, j);
+      const key = normalizeUrl(j.input);
+      const ex = best.get(key);
+      if (!ex || j.startedAt > ex.startedAt) best.set(key, j);
     }
     const m = new Map<string, RowScore>();
-    for (const [url, j] of best) {
-      m.set(url, { score: j.result?.score ?? null, tone: j.result?.tone ?? "muted", jobId: j.id, running: j.status === "running" });
+    for (const [key, j] of best) {
+      m.set(key, { score: j.result?.score ?? null, tone: j.result?.tone ?? "muted", jobId: j.id, running: j.status === "running" });
     }
     return m;
   }, [jobs]);
+
+  // EVALUADA lookup part 2 — PERSISTED: durable tracker scores for postings
+  // evaluated outside this browser (CLI pipeline, batch, prior sessions). No
+  // job to link to → jobId "" (TriageRow renders a bare badge).
+  const persistedScores = useMemo(() => {
+    const m = new Map<string, RowScore>();
+    for (const [key, s] of Object.entries(scoredUrls ?? {})) {
+      const n = scoreNum(s.score);
+      m.set(key, { score: Number.isNaN(n) ? null : n, tone: scoreTone(s.score), jobId: "", running: false });
+    }
+    return m;
+  }, [scoredUrls]);
 
   // facet options — only surface what's actually present in the (non-hidden) data
   const availSources = useMemo(() => {
@@ -241,7 +271,7 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
               job={e.job}
               source={e.source}
               age={e.age}
-              scored={scoreByUrl.get(e.job.url)}
+              scored={resolveRowScore(liveScores.get(e.urlKey), persistedScores.get(e.urlKey))}
               selected={selected.has(e.job.url)}
               shortlisted={isShortlisted(e.job.url)}
               onToggleSelect={() => toggleSelect(e.job.url)}
