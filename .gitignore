@@ -151,6 +151,10 @@ career-dashboard
 career-dashboard.exe
 career-dashboard-ui.exe
 career-dashboard-launcher.exe
+# career-dashboard-*-launcher runtime artifacts (written next to the exe on launch)
+/LOCK
+/icon.ico
+/tray-debug.log
 package-lock.json
 !web/package-lock.json
 
