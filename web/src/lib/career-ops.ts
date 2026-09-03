@@ -8,6 +8,9 @@ import { isReservedReportFile } from "@/lib/report-files.mjs";
 // Reuse the canonical tolerant report parser (format.ts is explicitly shared
 // by server + client, no fs). One definition of `**URL:**` extraction.
 import { parseReport } from "@/lib/format";
+// Durable inbox score map (URL → tracker score) — pure + client-importable, so
+// the triage view can show already-evaluated postings after a refresh.
+import { buildScoreByUrl } from "@/lib/inbox-score.mjs";
 
 /**
  * Resolve the career-ops "home" — the directory holding the user's sibling
@@ -240,18 +243,27 @@ export type PipelineSummary = {
   rootExists: boolean;
   inbox: InboxJob[];
   applications: Application[];
+  /** Durable evaluation map: normalized posting URL → tracker score string,
+   *  built from reports' `**URL:**` headers. Lets the inbox triage show real
+   *  scores for postings evaluated outside this browser (CLI, batch, prior
+   *  sessions) instead of a false "not scored". */
+  scoredUrls: Record<string, { score: string }>;
 };
 
 export function pipelineSummary(): PipelineSummary {
   const root = careerOpsRoot();
   const scanDates = readScanDates();
+  const applications = readApplications();
   return {
     root,
     rootExists: fs.existsSync(root),
     // join the freshness date (first_seen) onto each raw posting — the inbox's
     // triage view orders/faceted-filters on it entirely client-side.
     inbox: readInbox().map((j) => ({ ...j, postedAt: j.postedAt ?? scanDates.get(j.url) })),
-    applications: readApplications(),
+    applications,
+    // one full read of the report URL headers per page load — bounded by the
+    // tracker size, same cost the batch re-evaluate flow already pays on demand.
+    scoredUrls: buildScoreByUrl(applications, readApplicationUrl),
   };
 }
 

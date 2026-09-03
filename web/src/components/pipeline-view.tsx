@@ -36,9 +36,11 @@ type SortKey = (typeof SORT_KEYS)[number];
 export function PipelineView({
   applications,
   inbox,
+  scoredUrls,
 }: {
   applications: Application[];
   inbox: InboxJob[];
+  scoredUrls?: Record<string, { score: string }>;
 }) {
   const params = useSearchParams();
   const router = useRouter();
@@ -322,7 +324,7 @@ export function PipelineView({
       {tab === "INBOX" ? (
         /* ── Inbox: the triage surface (Abundance → Triage → Shortlist → Score) ── */
         pendingInbox.length > 0 ? (
-          <InboxTriage inbox={pendingInbox} />
+          <InboxTriage inbox={pendingInbox} scoredUrls={scoredUrls} />
         ) : (
           <InboxEmpty count={0} filtered={false} />
         )

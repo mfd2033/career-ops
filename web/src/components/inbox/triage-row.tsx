@@ -85,18 +85,23 @@ export function TriageRow({
         </p>
       </div>
 
-      {/* EVALUADA state (right-aligned, visually distinct from raw rows) */}
+      {/* EVALUADA state (right-aligned, visually distinct from raw rows). A jobId
+          links to the worker that produced the verdict; a PERSISTED score (jobId "")
+          — evaluated outside this browser — renders a bare badge with no page to
+          link to. */}
       {evaluated ? (
-        <Link href={`/jobs/${scored!.jobId}`} className="flex shrink-0 items-center gap-1.5 text-xs">
-          {scored!.running ? (
-            <>
-              <Loader2 className="size-3.5 animate-spin text-brand" />
-              <span className="text-brand max-sm:hidden">{t("inbox.scoring")}</span>
-            </>
-          ) : (
+        scored!.running ? (
+          <Link href={`/jobs/${scored!.jobId}`} className="flex shrink-0 items-center gap-1.5 text-xs">
+            <Loader2 className="size-3.5 animate-spin text-brand" />
+            <span className="text-brand max-sm:hidden">{t("inbox.scoring")}</span>
+          </Link>
+        ) : scored!.jobId ? (
+          <Link href={`/jobs/${scored!.jobId}`} className="flex shrink-0 items-center gap-1.5 text-xs">
             <Badge tone={scored!.tone}>{scored!.score}/5</Badge>
-          )}
-        </Link>
+          </Link>
+        ) : (
+          <Badge tone={scored!.tone}>{scored!.score}/5</Badge>
+        )
       ) : (
         <div className="flex shrink-0 items-center gap-1">
           <button
