@@ -112,6 +112,21 @@ const builtAt = new Date().toISOString().replace("T", " ").slice(0, 16) + " UTC"
 const cacheVersion = buildSha ? `${buildSha}${dirty ? "-dirty" : ""}` : `dev-${Date.now()}`;
 fs.writeFileSync(path.join(uiDir, "app", "build-info.json"), JSON.stringify({ sha: buildSha, builtAt, cacheVersion }, null, 2));
 
+// 5c. Prepare the extracted-runtime layout the launcher reads: launcher.go
+// resolves node.exe + app/server.js from a `.dashboard-runtime\v{cacheVersion}\`
+// dir next to the exe (locateLegacyCache), preferring the dir whose name
+// matches ITS OWN injected cacheVersion over the newest-by-mtime. The README
+// has always promised a full build produces this layout; the launcher reuses
+// the newest dir as a fallback, but only a versioned one guarantees a rebuild
+// serves the NEW web build (a long-running server keeps touching its own
+// runtime dir, so "newest mtime" converges on the stale extraction).
+const runtimeCacheDir = path.join(root, ".dashboard-runtime", `v${cacheVersion}`);
+fs.rmSync(runtimeCacheDir, { recursive: true, force: true });
+fs.mkdirSync(path.join(runtimeCacheDir, "app"), { recursive: true });
+fs.cpSync(path.join(uiDir, "app"), path.join(runtimeCacheDir, "app"), { recursive: true, dereference: true });
+fs.copyFileSync(process.execPath, path.join(runtimeCacheDir, "node.exe"));
+console.log(`✓ prepared runtime cache ${runtimeCacheDir} (v${cacheVersion})`);
+
 // 6. regenerate the Windows resources (icon + manifest + version) as .syso.
 run(`${goWinres} make --arch amd64`, uiDir);
 
@@ -122,11 +137,13 @@ if (buildFull) {
   const mb = (fs.statSync(out).size / (1024 * 1024)).toFixed(1);
   console.log(`\n✓ ${out} (${mb} MB)`);
 }
-
 // 7b. Lightweight launcher (~9 MB): no embedded runtime, reads from cache dir.
+// Same cacheVersion injection as 7a — without it the console variant falls
+// back to newest-by-mtime and a rebuilt launcher keeps serving the stale
+// .dashboard-runtime extraction (same trap the GUI variant's stamp fixes).
 {
   const out = path.join(root, "career-dashboard-launcher.exe");
-  run(`go build -o ..\\career-dashboard-launcher.exe .`, uiDir);
+  run(`go build -ldflags "-X main.cacheVersion=${cacheVersion}" -o ..\\career-dashboard-launcher.exe .`, uiDir);
   const mb = (fs.statSync(out).size / (1024 * 1024)).toFixed(1);
   console.log(`\n✓ ${out} (${mb} MB)`);
 }
