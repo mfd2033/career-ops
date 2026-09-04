@@ -21,17 +21,28 @@ const GENERIC_FAILURE = "status update failed";
  * @returns {Record<string, unknown> | null}
  */
 export function parseCliJson(stdout) {
-  const lines = String(stdout ?? "").split("\n");
+  const text = String(stdout ?? "");
+  const lines = text.split("\n");
+  // The CLI prints the result LAST, so scan from the end for the line where
+  // the document starts. `--json` documents may be pretty-printed
+  // (set-status.mjs prints JSON.stringify(result, null, 2)) — multi-line, with
+  // the opening brace alone on its own line — so the document is every line
+  // from the found start to the END of stdout, not just that one line.
+  // Parsing the whole tail at once handles both the single-line document and
+  // the pretty-printed one; a diagnostic object printed before the result is
+  // still skipped because the scan runs from the end.
   for (let i = lines.length - 1; i >= 0; i--) {
     const line = lines[i].trim();
     if (!line.startsWith("{")) continue;
+    const candidate = lines.slice(i).join("\n");
     try {
-      const parsed = JSON.parse(line);
+      const parsed = JSON.parse(candidate);
       if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
         return /** @type {Record<string, unknown>} */ (parsed);
       }
     } catch {
-      // Not the document line. Keep scanning earlier lines.
+      // Not the document start (e.g. a `{...}` inside a diagnostic on its own
+      // line). Keep scanning earlier lines.
     }
   }
   return null;

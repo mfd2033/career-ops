@@ -32,6 +32,30 @@ test("the last JSON object wins, so a diagnostic object cannot shadow the result
   assert.deepEqual(parseCliJson(stdout), { ok: true, changed: false });
 });
 
+test("pretty-printed multi-line JSON from set-status.mjs --json parses as the document", () => {
+  // set-status.mjs prints JSON.stringify(result, null, 2) — a multi-line
+  // document. A line-at-a-time reader finds only the bare opening `{` on the
+  // first line, JSON.parse throws, and the route answers 500 "no result" for
+  // a write that actually committed — the tracker changes but the UI reverts
+  // (StatusSelect's catch path) and the page keeps showing the old status.
+  const stdout = [
+    "{",
+    '  "changed": true,',
+    '  "num": 121,',
+    '  "oldStatus": "Evaluated",',
+    '  "newStatus": "Applied",',
+    '  "statusLogged": true',
+    "}",
+  ].join("\n");
+  assert.deepEqual(parseCliJson(stdout), {
+    changed: true,
+    num: 121,
+    oldStatus: "Evaluated",
+    newStatus: "Applied",
+    statusLogged: true,
+  });
+});
+
 test("a plain object is required: no output, no JSON, and a bare array all read as absent", () => {
   assert.equal(parseCliJson(""), null);
   assert.equal(parseCliJson("no json at all\n"), null);
