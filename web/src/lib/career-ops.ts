@@ -176,6 +176,8 @@ export type Application = {
   pdf: string;
   report: string;
   notes: string;
+  /** Posting URL from the tracker's URL column, "" when the tracker has none. */
+  url: string;
 };
 
 /**
