@@ -4,6 +4,7 @@ import { careerOpsRoot, readApplications } from "@/lib/career-ops";
 import { getNormalizeTextKey } from "@/lib/core/text-key";
 import type { DiscoveredOffer } from "@/lib/explore";
 import { collectWhatsNew, resolveOfferLimit } from "@/lib/whats-new.mjs";
+import { normalizeUrl, rowToOfferOrNull } from "@/lib/whats-new-filter.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -33,26 +34,27 @@ export async function GET(req: Request) {
     return Response.json({ offers: [], count: 0 });
   }
 
-  // Companies already evaluated → don't resurface as "new".
+  // Already-evaluated postings → don't resurface as "new". Keyed TWO ways so
+  // neither gap leaks: by company (a scan row with a company name matches a
+  // tracker row whose URL column is absent) and by URL (a scan row with an
+  // empty company column — browser-mode boards like 智联/BOSS record no
+  // company — still matches the tracker row for the exact posting). Both sides
+  // go through the same canonical key (normalizeTextKey / normalizeUrl), so
+  // name case/punct and scheme/host/trailing-slash drift cannot hide an
+  // evaluated posting. NOTE: normalizeUrl strips only campaign params (utm_*,
+  // gh_src, …); a posting URL that grew a non-campaign param (e.g. zhipin's
+  // securityId=…) after evaluation keys differently and is only caught by the
+  // company dimension — acceptable, since browser-board rows carry no company
+  // and their scan URL is the clean base link recorded at discovery time.
   const normalizeTextKey = await getNormalizeTextKey();
   const norm = (s: string) => normalizeTextKey(s, " ");
-  const evaluated = new Set(readApplications().map((a) => norm(a.company)).filter(Boolean));
-
-  const toOffer = (c: string[]): DiscoveredOffer | null => {
-    const [url, firstSeen, portal, title, company, status, location] = c;
-    if (!url || !/^https?:\/\//i.test(url)) return null;
-    if (status && /skipped|expired/i.test(status)) return null;
-    if (company && evaluated.has(norm(company))) return null;
-    return {
-      url,
-      company: (company || "").trim(),
-      title: (title || "").trim(),
-      location: (location || "").trim(),
-      postedAt: /^\d{4}-\d{2}-\d{2}$/.test(firstSeen || "") ? firstSeen : "",
-      ats: (portal || "").replace(/-full$/, "").trim() || "other",
-      source: "whats-new",
-    };
-  };
+  const apps = readApplications();
+  const evaluated = new Set(apps.map((a) => norm(a.company)).filter(Boolean));
+  const evaluatedUrls = new Set(apps.map((a) => normalizeUrl(a.url)).filter(Boolean));
+  // rowToOfferOrNull is a plain .mjs export (no type annotations) whose return
+  // shape is exactly DiscoveredOffer — the tracked fields line up 1:1.
+  const toOffer = (c: string[]): DiscoveredOffer | null =>
+    rowToOfferOrNull({ norm, evaluated, evaluatedUrls }, c) as DiscoveredOffer | null;
 
   const { offers, count } = collectWhatsNew(rows, { cutoff, toOffer, offerLimit });
   return Response.json({ offers, count });
