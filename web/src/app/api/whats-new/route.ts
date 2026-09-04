@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { careerOpsRoot, readApplications } from "@/lib/career-ops";
+import { careerOpsRoot, readApplications, readInbox } from "@/lib/career-ops";
 import { getNormalizeTextKey } from "@/lib/core/text-key";
 import type { DiscoveredOffer } from "@/lib/explore";
 import { collectWhatsNew, resolveOfferLimit } from "@/lib/whats-new.mjs";
@@ -46,15 +46,24 @@ export async function GET(req: Request) {
   // securityId=…) after evaluation keys differently and is only caught by the
   // company dimension — acceptable, since browser-board rows carry no company
   // and their scan URL is the clean base link recorded at discovery time.
+  //
+  // Already-pending postings → ALSO don't resurface. A browser-mode scan
+  // writes the same discovery to both scan-history.tsv (a "first seen this
+  // week" row) and pipeline.md (a pending `- [ ]` inbox row), so without this
+  // third dimension the supply loop re-offers postings the user already
+  // queued — "已在管道中" cards under "本周新匹配" (#pipeline-leak). Done
+  // inbox rows are excluded here: a processed posting is handled by the
+  // evaluated dimensions above, not by this one.
   const normalizeTextKey = await getNormalizeTextKey();
   const norm = (s: string) => normalizeTextKey(s, " ");
   const apps = readApplications();
   const evaluated = new Set(apps.map((a) => norm(a.company)).filter(Boolean));
   const evaluatedUrls = new Set(apps.map((a) => normalizeUrl(a.url)).filter(Boolean));
+  const pipelineUrls = new Set(readInbox().filter((j) => !j.done).map((j) => normalizeUrl(j.url)).filter(Boolean));
   // rowToOfferOrNull is a plain .mjs export (no type annotations) whose return
   // shape is exactly DiscoveredOffer — the tracked fields line up 1:1.
   const toOffer = (c: string[]): DiscoveredOffer | null =>
-    rowToOfferOrNull({ norm, evaluated, evaluatedUrls }, c) as DiscoveredOffer | null;
+    rowToOfferOrNull({ norm, evaluated, evaluatedUrls, pipelineUrls }, c) as DiscoveredOffer | null;
 
   const { offers, count } = collectWhatsNew(rows, { cutoff, toOffer, offerLimit });
   return Response.json({ offers, count });
