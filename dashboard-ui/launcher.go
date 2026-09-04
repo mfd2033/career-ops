@@ -17,6 +17,16 @@ import (
 	"time"
 )
 
+// cacheVersion keys the preferred runtime directory (.dashboard-runtime\v{...}).
+// The packer (build-dashboard-ui.mjs) injects the git short SHA (+ dirty marker)
+// of the web build via -ldflags "-X main.cacheVersion=<sha>", so a rebuilt exe
+// prefers the extraction stamped with ITS OWN build, never the newest-by-mtime
+// directory (which a long-running server keeps touching — the stale-cache trap
+// that made a rebuild keep serving the previous web build). MUST stay
+// uninitialized: go -X only overrides string vars without an explicit
+// initializer. Empty → plain `go build` without the packer → "dev".
+var cacheVersion string
+
 func main() {
 	exe, err := os.Executable()
 	if err != nil {
@@ -105,6 +115,30 @@ func locateLegacyCache(exeDir string) (nodePath, serverDir string) {
 	if err != nil {
 		return "", ""
 	}
+	// The extracted runtime keyed to THIS exe's build wins outright — the
+	// directory name is `v{sha}[-dirty]`, stamped by the packer into
+	// cacheVersion. Picking it by name (not by mtime) is what stops a rebuilt
+	// exe from serving a stale extraction: a long-running server keeps
+	// touching its own .dashboard-runtime dir, so "newest mtime" converges on
+	// the OLD build and a rebuild silently serves the previous web version.
+	preferred := "v" + cacheVersion
+	if cacheVersion == "" {
+		preferred = "vdev"
+	}
+	for _, e := range entries {
+		if !e.IsDir() || e.Name() != preferred {
+			continue
+		}
+		dir := filepath.Join(cacheBase, e.Name())
+		node := filepath.Join(dir, "node.exe")
+		app := filepath.Join(dir, "app", "server.js")
+		if fileExists(node) && fileExists(app) {
+			return node, filepath.Join(dir, "app")
+		}
+	}
+	// No versioned match (legacy cache written before the cacheVersion stamp,
+	// or a plain `go build` with no injected version) — fall back to the
+	// newest valid runtime as a best effort.
 	var best string
 	var bestMod time.Time
 	for _, e := range entries {
