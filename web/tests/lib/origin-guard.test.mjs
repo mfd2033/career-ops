@@ -181,3 +181,77 @@ test("a cross-site request is blocked even on an allowed LAN host", () => {
   });
   assert.equal(d.ok, false);
 });
+
+// --- extension pass: loopback + trusted chrome-extension origin -------------
+
+const TRUSTED = new Set(["chrome-extension://fplgidebccliinljlhipjiinoeeffeep"]);
+
+test("allows the trusted extension origin on loopback (cross-site), echoes ACAO", () => {
+  const d = checkRequest({
+    secFetchSite: "cross-site",
+    origin: "chrome-extension://fplgidebccliinljlhipjiinoeeffeep",
+    host: "localhost:3000",
+    allowedHosts: parseAllowedHosts(""),
+    extensionOrigins: TRUSTED,
+  });
+  assert.equal(d.ok, true);
+  assert.equal(d.extensionAllowOrigin, "chrome-extension://fplgidebccliinljlhipjiinoeeffeep");
+});
+
+test("allows the trusted extension origin with no Sec-Fetch-Site (fallback)", () => {
+  const d = checkRequest({
+    secFetchSite: null,
+    origin: "chrome-extension://fplgidebccliinljlhipjiinoeeffeep",
+    host: "127.0.0.1:3040",
+    allowedHosts: parseAllowedHosts(""),
+    extensionOrigins: TRUSTED,
+  });
+  assert.equal(d.ok, true);
+});
+
+test("blocks the trusted extension origin on a non-loopback host", () => {
+  const d = checkRequest({
+    secFetchSite: "cross-site",
+    origin: "chrome-extension://fplgidebccliinljlhipjiinoeeffeep",
+    host: "192.168.1.50:3000",
+    allowedHosts: parseAllowedHosts(""),
+    extensionOrigins: TRUSTED,
+  });
+  assert.equal(d.ok, false);
+  assert.equal(d.status, 403);
+});
+
+test("blocks an unknown chrome-extension origin even when a trusted one is set", () => {
+  const d = checkRequest({
+    secFetchSite: "cross-site",
+    origin: "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    host: "localhost:3000",
+    allowedHosts: parseAllowedHosts(""),
+    extensionOrigins: TRUSTED,
+  });
+  assert.equal(d.ok, false);
+  assert.equal(d.status, 403);
+});
+
+test("with no extension whitelist, any chrome-extension origin is blocked via cross-site", () => {
+  const d = checkRequest({
+    secFetchSite: "cross-site",
+    origin: "chrome-extension://fplgidebccliinljlhipjiinoeeffeep",
+    host: "localhost:3000",
+    allowedHosts: parseAllowedHosts(""),
+  });
+  assert.equal(d.ok, false);
+  assert.equal(d.status, 403);
+});
+
+test("an extension origin on a LAN host is blocked, still", () => {
+  const d = checkRequest({
+    secFetchSite: "cross-site",
+    origin: "chrome-extension://fplgidebccliinljlhipjiinoeeffeep",
+    host: "192.168.1.50:3000",
+    allowedHosts: parseAllowedHosts("192.168.1.50"),
+    extensionOrigins: TRUSTED,
+  });
+  assert.equal(d.ok, false);
+  assert.equal(d.status, 403);
+});

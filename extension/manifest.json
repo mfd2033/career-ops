@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "BOSS直聘 就地评估",
+  "version": "0.1.0",
+  "description": "在 BOSS直聘 页面对职位就地评估：已评估打标、列表勾选批量评估、详情页单职位评估、点击徽章跳本地报告页。",
+  "minimum_chrome_version": "110",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA0qh28gR+z8u71b2BrYzc+uFzMD4CPTFjguoU7/HbXjHL+c+S1KL/mJZf7qYEgY8RzOKL5XoRtlkNcKewLLJzonEgr22phOrxiSLPQ9oigUkRsDFyFQqDJLdz5ajrsMEpHCeN+L+lHWc8vRLc+A58sgPl9nNWvZpU26l5ROAo/jD6WeItEn/78ZvCFUj98lV4VQvkT4oBciUp4RD2Km2fjoDdNVlXK0QH0nhno0I376yKcTIr5UtOcCwPLiIHjuRAzA+yiUJNyr/o9ILHN6qfT6M2VLithhKPZxd4SIqfrZ6m63rdrcMaXybfvVlrrCQcLxLPfc7X3oMu4A3q2hGcPwIDAQAB",
+  "permissions": ["storage", "tabs"],
+  "host_permissions": ["http://localhost/*", "http://127.0.0.1/*"],
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [
+    {
+      "matches": ["https://*.zhipin.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_title": "BOSS 就地评估",
+    "default_popup": "popup.html"
+  }
+}
