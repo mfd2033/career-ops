@@ -8,6 +8,7 @@ import { instrumentSerif } from "@/lib/fonts";
 import type { Application, InboxJob } from "@/lib/career-ops";
 import { normalizeTextKey } from "@/lib/core/normalize-text-key.mjs";
 import { paramsToFilters, paramsToAi, paramsToBrowser, type ExploreFilters } from "@/lib/explore";
+import { SCAN_SOURCES, type ScanSource } from "@/lib/scan-mode";
 import { FilterBuilder } from "./filter-builder";
 import { DiscoveringState } from "./discovering-state";
 import { AiHuntView } from "./ai-hunt-view";
@@ -40,7 +41,7 @@ export function ExplorerView({
   appsSnapshot: Application[];
   rootExists: boolean;
 }) {
-  const { filters, setFilters, initFilters, phase, running, offers, discover, discoverBrowser, loadFresh, status, error, scannerMissing, mode, setMode, aiIntent, setAiIntent, discoverAI, companiesScanned, companiesAvailable, capHit, droppedNoDate, partial } = useExplore();
+  const { filters, setFilters, initFilters, phase, running, offers, discover, discoverBrowser, loadFresh, status, error, scannerMissing, mode, setMode, scanSource, setScanSource, enabledSources, aiIntent, setAiIntent, discoverAI, companiesScanned, companiesAvailable, capHit, droppedNoDate, partial } = useExplore();
   const { t } = useI18n();
   const avail = companiesAvailable > companiesScanned ? t("explore.degraded.ofAvailable", { n: companiesAvailable.toLocaleString() }) : "";
   const partialTxt = partial ? t("explore.scanNotePartial") : "";
@@ -122,11 +123,13 @@ export function ExplorerView({
   );
 
   const isAi = mode === "ai";
-  const isBrowser = mode === "browser";
+  // 老「浏览器」tab 并入扫描 tab 后，这里统一为"扫描 tab 内选中 BSK 引擎"即走浏览器抓取路径。
+  // mode==="browser" 兼容旧会话恢复（URL ?mode=browser / 旧 sessionStorage）与旧深层链接。
+  const isBsk = mode === "browser" || (!isAi && scanSource === "bsk");
   if (running) return isAi ? <AiHuntView cliName={cli.name} /> : <DiscoveringState />;
 
-  const browserKeywordMissing = isBrowser && !(filters.zhQuery ?? "").trim();
-  const canDiscover = isBrowser ? !browserKeywordMissing : filters.ats.length > 0;
+  const browserKeywordMissing = isBsk && !(filters.zhQuery ?? "").trim();
+  const canDiscover = isBsk ? !browserKeywordMissing : filters.ats.length > 0;
   const isResults = phase === "results";
 
   return (
@@ -144,7 +147,7 @@ export function ExplorerView({
         </div>
         {!isResults && (
           <p className="mt-3 max-w-2xl text-[15px] leading-relaxed text-muted">
-            {isAi ? t("explore.aiDesc") : isBrowser ? t("explore.browserDesc") : t("explore.scanDesc")}
+            {isAi ? t("explore.aiDesc") : isBsk ? t("explore.browserDesc") : t("explore.scanDesc")}
           </p>
         )}
       </header>
@@ -152,6 +155,22 @@ export function ExplorerView({
       {!rootExists && (
         <div className="mb-5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-300">
           {t("explore.rootNotSetup")}
+        </div>
+      )}
+
+      {/* 扫描 tab 内子 tab：仅当配置勾选了多个扫描方式时出现，
+          驱动开发者在 ATS（老「扫描」）与 BSK（老「浏览器」）间切换。 */}
+      {!isAi && enabledSources.length >= 2 && (
+        <div className="mb-5">
+          <ScanSourceToggle
+            enabled={enabledSources}
+            active={isBsk ? "bsk" : "ats"}
+            onChange={(s) => {
+              setScanSource(s);
+              // 子 tab 只在扫描 tab 内出现 —— 切引擎时确保顶层停在「扫描」。
+              setMode("scan");
+            }}
+          />
         </div>
       )}
 
@@ -181,7 +200,7 @@ export function ExplorerView({
             {phase === "failed" && <FailedCard msg={error || status} scannerMissing={scannerMissing} onRetry={() => void discoverAI()} />}
           </div>
         )
-      ) : isBrowser ? (
+      ) : isBsk ? (
         phase === "blocked" ? (
           <BrowserBlockedCard />
         ) : (
@@ -310,6 +329,37 @@ export function ExplorerView({
           {phase === "failed" && <FailedCard msg={error || status} scannerMissing={scannerMissing} onRetry={() => void discover()} />}
         </>
       )}
+    </div>
+  );
+}
+
+function ScanSourceToggle({
+  enabled,
+  active,
+  onChange,
+}: {
+  enabled: ScanSource[];
+  active: ScanSource;
+  onChange: (s: ScanSource) => void;
+}) {
+  const { t } = useI18n();
+  return (
+    <div className="flex w-full rounded-xl border border-border bg-surface/40 p-1 sm:inline-flex">
+      {SCAN_SOURCES.filter((s) => enabled.includes(s)).map((s) => (
+        <button
+          key={s}
+          type="button"
+          onClick={() => onChange(s)}
+          aria-pressed={active === s}
+          className={cn(
+            "flex flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors sm:flex-none max-sm:min-h-[40px]",
+            active === s ? "bg-brand-soft text-brand" : "text-muted hover:text-foreground",
+          )}
+        >
+          {s === "bsk" ? <Globe className="size-3.5" /> : <Compass className="size-3.5" />}
+          {s === "bsk" ? t("explore.scanSourceBsk") : t("explore.scanSourceAts")}
+        </button>
+      ))}
     </div>
   );
 }

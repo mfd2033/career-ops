@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import {
   DEFAULT_FILTERS,
   ATS_LABEL,
@@ -23,6 +23,11 @@ import { makeAiStreamParser, type AiTraceChunk } from "@/lib/explore-ai";
 import { MAX_OFFER_LIMIT } from "@/lib/whats-new.mjs";
 import { isScannerMissing, isBskMissing } from "@/lib/explore-error.mjs";
 import { useI18n } from "@/lib/i18n/context";
+import {
+  readScanSources,
+  SCAN_SOURCE_DEFAULT,
+  type ScanSource,
+} from "@/lib/scan-mode";
 
 export type Phase =
   | "idle"
@@ -85,6 +90,11 @@ type ExploreCtx = {
   // ── AI search (modes/discover.md) ──
   mode: ExploreMode;
   setMode: (m: ExploreMode) => void;
+  /** 扫描 tab 内当前选中的扫描引擎（ATS 或 BSK）。 */
+  scanSource: ScanSource;
+  setScanSource: (s: ScanSource) => void;
+  /** 配置勾选的「扫描方式」集合 —— 决定扫描 tab 内可见的子 tab。 */
+  enabledSources: ScanSource[];
   aiIntent: string;
   setAiIntent: (s: string) => void;
   discoverAI: () => Promise<void>;
@@ -106,6 +116,7 @@ const RESULTS_KEY = "career-ops:explore-results";
 type ResultSnapshot = {
   v: number;
   mode: ExploreMode;
+  scanSource?: ScanSource;
   phase: Phase;
   offers: DiscoveredOffer[];
   matchCount: number;
@@ -146,6 +157,8 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
   const [added, setAdded] = useState<Set<string>>(new Set());
   const [adding, setAdding] = useState<Set<string>>(new Set());
   const [mode, setModeState] = useState<ExploreMode>("scan");
+  const [scanSource, setScanSource] = useState<ScanSource>(SCAN_SOURCE_DEFAULT[0]);
+  const [enabledSources, setEnabledSources] = useState<ScanSource[]>([...SCAN_SOURCE_DEFAULT]);
   const [aiIntent, setAiIntent] = useState("");
   const [aiTrace, setAiTrace] = useState<AiTraceChunk[]>([]);
   const [aiCost, setAiCost] = useState<AiCost>({ searches: 0, candidates: 0, fetches: 0 });
@@ -660,6 +673,17 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     setModeState(m);
   }, []);
 
+  // 扫描 tab 内的子 tab 集合由配置「扫描方式」决定（勾选了才显示，默认 BSK）。
+  // ExploreProvider 是 shell 级单例、跨软导航不重挂载——所以不能在挂载时读一次就完事，
+  // 否则在 /config 改了扫描方式再回到 /explore，集合仍是旧的（# 配置不同步 bug）。
+  // 改为随路由路径变化重读配置并校正当前引擎，覆盖首次挂载 + 每次跨页软导航。
+  const pathname = usePathname();
+  useEffect(() => {
+    const list = readScanSources();
+    setEnabledSources(list);
+    setScanSource((s) => (list.includes(s) ? s : list[0]));
+  }, [pathname]); // 修复：跨页/挂载都重读配置
+
   // Rehydrate the last settled result set on mount (per-tab sessionStorage), unless a
   // search is already running. Done in an effect (not a useState initializer) to avoid
   // an SSR hydration mismatch.
@@ -673,6 +697,7 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     }
     if (!snap || snap.v !== 1 || !Array.isArray(snap.offers)) return;
     setModeState(snap.mode === "ai" ? "ai" : snap.mode === "browser" ? "browser" : "scan");
+    setScanSource(snap.scanSource ?? (snap.mode === "browser" ? "bsk" : SCAN_SOURCE_DEFAULT[0]));
     setOffers(snap.offers);
     setMatchCount(typeof snap.matchCount === "number" ? snap.matchCount : snap.offers.length);
     setCompaniesScanned(snap.companiesScanned ?? 0);
@@ -699,14 +724,14 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     if (!SETTLED.has(phase)) return;
     try {
       const snap: ResultSnapshot = {
-        v: 1, mode, phase, offers, matchCount, companiesScanned, companiesAvailable, capHit, droppedNoDate, sources,
+        v: 1, mode, scanSource, phase, offers, matchCount, companiesScanned, companiesAvailable, capHit, droppedNoDate, sources,
         partial, status, error, scannerMissing, added: [...added], aiTrace, aiCost, aiIntent,
       };
       sessionStorage.setItem(RESULTS_KEY, JSON.stringify(snap));
     } catch {
       /* sessionStorage full/unavailable — non-fatal */
     }
-  }, [phase, mode, offers, matchCount, companiesScanned, companiesAvailable, capHit, droppedNoDate, sources, partial, status, error, scannerMissing, added, aiTrace, aiCost, aiIntent]);
+  }, [phase, mode, scanSource, offers, matchCount, companiesScanned, companiesAvailable, capHit, droppedNoDate, sources, partial, status, error, scannerMissing, added, aiTrace, aiCost, aiIntent]);
 
   const value = useMemo(
     () => ({
@@ -714,9 +739,9 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
       running: phase === "casting" || phase === "scanning" || phase === "revealing" || phase === "hunting",
       offers, sources, matchCount, companiesScanned, companiesAvailable, capHit, droppedNoDate, status, partial, error, scannerMissing, added, adding,
       discover, discoverBrowser, loadFresh, addToPipeline, applyPatch, reset,
-      mode, setMode, aiIntent, setAiIntent, discoverAI, aiTrace, aiCost,
+      mode, setMode, scanSource, setScanSource, enabledSources, aiIntent, setAiIntent, discoverAI, aiTrace, aiCost,
     }),
-    [filters, setFilters, initFilters, phase, offers, sources, matchCount, companiesScanned, companiesAvailable, capHit, droppedNoDate, status, partial, error, scannerMissing, added, adding, discover, discoverBrowser, loadFresh, addToPipeline, applyPatch, reset, mode, setMode, aiIntent, discoverAI, aiTrace, aiCost],
+    [filters, setFilters, initFilters, phase, offers, sources, matchCount, companiesScanned, companiesAvailable, capHit, droppedNoDate, status, partial, error, scannerMissing, added, adding, discover, discoverBrowser, loadFresh, addToPipeline, applyPatch, reset, mode, setMode, scanSource, setScanSource, enabledSources, aiIntent, discoverAI, aiTrace, aiCost],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

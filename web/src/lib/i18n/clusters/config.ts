@@ -45,6 +45,13 @@ export const en: Dict = {
   "config.applyBehaviorFormDesc": "Open the pre-filled form proxy to review and submit yourself.",
   "config.localFirstRoadmap": "Local-first · on our roadmap",
 
+  "config.scanSourceTitle": "Scan sources",
+  "config.scanSourceDesc": "Which engines the Scan tab shows and runs. Enabled engines appear as sub-tabs inside Scan. At least one must stay on.",
+  "config.scanSourceAts": "ATS network",
+  "config.scanSourceAtsDesc": "Scan the public ATS network — Greenhouse, Lever, Ashby, Workday. Pure HTTP, zero tokens.",
+  "config.scanSourceBsk": "Browser (bsk)",
+  "config.scanSourceBskDesc": "Scan the Chinese boards — BOSS直聘, 猎聘, 智联招聘 — through your own logged-in browser. Needs browser-skill.",
+
   "config.defaultLangTitle": "Default display language",
   "config.defaultLangDesc": "Choose the language shown on first load. You can still switch anytime.",
   "config.langEnglish": "English",
@@ -108,6 +115,13 @@ export const zh: Dict = {
   "config.applyBehaviorForm": "读取申请表单",
   "config.applyBehaviorFormDesc": "打开预填的申请表单，由你核对并亲自提交。",
   "config.localFirstRoadmap": "本地优先 · 已在路线图中",
+
+  "config.scanSourceTitle": "扫描方式",
+  "config.scanSourceDesc": "探索页「扫描」tab 显示并运行的引擎。启用的引擎会作为扫描 tab 内的子 tab 出现。至少保留一个启用。",
+  "config.scanSourceAts": "ATS 网络",
+  "config.scanSourceAtsDesc": "扫描公开 ATS 网络 — Greenhouse、Lever、Ashby、Workday。纯 HTTP，零 token。",
+  "config.scanSourceBsk": "浏览器抓取（bsk）",
+  "config.scanSourceBskDesc": "通过你已登录的浏览器扫描国内平台 — BOSS直聘、猎聘、智联招聘。需安装 browser-skill。",
 
   "config.defaultLangTitle": "默认显示语言",
   "config.defaultLangDesc": "选择首次加载时显示的语言。你随时可以切换。",

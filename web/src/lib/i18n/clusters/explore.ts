@@ -1,4 +1,4 @@
-﻿import type { Dict } from "../types";
+import type { Dict } from "../types";
 
 // Cluster: explore
 // English (source) strings. Each key is dotted and namespaced by cluster, e.g.
@@ -11,6 +11,8 @@ export const en: Dict = {
   "explore.mode.browser": "Browser",
   "explore.mode.aiSearch": "AI search",
   "explore.mode.needsCli": "needs a CLI",
+  "explore.scanSourceAts": "ATS",
+  "explore.scanSourceBsk": "BSK",
 
   // ── Mode descriptions ──
   "explore.scanDesc": "Scan the public ATS network — Greenhouse, Lever, Ashby, Workday. Fresh postings matched to you, zero tokens. You only spend when you choose to evaluate one.",
@@ -233,6 +235,8 @@ export const zh: Dict = {
   "explore.mode.browser": "浏览器",
   "explore.mode.aiSearch": "AI 搜索",
   "explore.mode.needsCli": "需要 CLI",
+  "explore.scanSourceAts": "ATS",
+  "explore.scanSourceBsk": "BSK",
 
   // ── 模式说明 ──
   "explore.scanDesc": "扫描公开 ATS 网络 — Greenhouse、Lever、Ashby、Workday。为你匹配的新职位，零 token。只有在你选择评估时才消耗。",

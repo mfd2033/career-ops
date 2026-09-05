@@ -1,6 +1,6 @@
 "use client";
 
-import { Compass, Globe, Sparkles } from "lucide-react";
+import { Compass, Sparkles } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { CostBadge } from "@/components/cost/cost-badge";
 import type { ExploreMode } from "@/lib/explore";
@@ -9,8 +9,9 @@ import { useI18n } from "@/lib/i18n/context";
 // Cost honesty rendered at the POINT OF CHOICE: free deterministic Scan (default)
 // vs token-spending AI search. The AI segment stays selectable even with no CLI —
 // selecting it reveals the blocked state (more discoverable than a dead tab).
-// The browser segment is also free and needs the bsk CLI + a connected browser;
-// without one it reveals its own blocked card on selection.
+// The Scan surface now hosts BOTH engines internally (ATS network via scan-ats-full,
+// and the Chinese boards via the user's own logged-in browser / bsk) — the engine
+// is chosen by a sub-tab driven by the "scan source" config, not by a top-level tab.
 export function ExploreModeToggle({
   mode,
   onChange,
@@ -26,29 +27,14 @@ export function ExploreModeToggle({
       <button
         type="button"
         onClick={() => onChange("scan")}
-        aria-pressed={mode === "scan"}
+        aria-pressed={mode !== "ai"}
         className={cn(
           "flex flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg px-2.5 py-2 text-sm transition-colors sm:flex-none sm:gap-2 sm:px-3 max-sm:min-h-[44px]",
-          mode === "scan" ? "bg-brand-soft text-brand" : "text-muted hover:text-foreground",
+          mode !== "ai" ? "bg-brand-soft text-brand" : "text-muted hover:text-foreground",
         )}
       >
         <Compass className="size-4" />
         <span className="font-medium">{t("explore.mode.scan")}</span>
-        <span className="hidden sm:inline-flex">
-          <CostBadge kind="free-network" size="xs" />
-        </span>
-      </button>
-      <button
-        type="button"
-        onClick={() => onChange("browser")}
-        aria-pressed={mode === "browser"}
-        className={cn(
-          "flex flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg px-2.5 py-2 text-sm transition-colors sm:flex-none sm:gap-2 sm:px-3 max-sm:min-h-[44px]",
-          mode === "browser" ? "bg-brand-soft text-brand" : "text-muted hover:text-foreground",
-        )}
-      >
-        <Globe className="size-4" />
-        <span className="font-medium">{t("explore.mode.browser")}</span>
         <span className="hidden sm:inline-flex">
           <CostBadge kind="free-network" size="xs" />
         </span>
