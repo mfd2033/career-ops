@@ -15,6 +15,7 @@ import {
 import { cn } from "@/lib/cn";
 import { CadenceSettings } from "@/components/followups/cadence-settings";
 import { JdRulesSettings } from "@/components/jd-rules-settings";
+import { JobTargetSettings } from "@/components/job-target-settings";
 import { persistCliId, persistModel, readSavedCliId, readSavedModel } from "@/lib/saved-cli";
 import { resolveModelPicker } from "@/lib/model-picker.mjs";
 import {
@@ -542,6 +543,8 @@ export function ConfigForm() {
           );
         })}
       </div>
+
+      <JobTargetSettings />
 
       <CadenceSettings />
 
