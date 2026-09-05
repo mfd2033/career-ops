@@ -14,6 +14,9 @@ import {
   isBskMissing,
   bskMissingBody,
   BSK_MISSING_CODE,
+  isBrowserCollectorMissing,
+  browserCollectorMissingBody,
+  BROWSER_COLLECTOR_MISSING_CODE,
 } from "../../src/lib/explore-error.mjs";
 
 // The data-only / pre-onboarding checkout has no scanner. /api/explore signals it
@@ -116,4 +119,38 @@ test("the response body the route sends is classified by the client", () => {
   assert.equal(typeof body.error, "string");
   assert.ok(body.error.length > 0, "the blocked panel renders body.error, so it must carry copy");
   assert.equal(isBskMissing(body), true);
+});
+
+// ── Browser mode: the Playwright collector gate (ADR-0001) ──
+
+// The browser mode now runs through zh-collect.mjs + local Playwright + system
+// Edge, so the missing-capability failure keys on BROWSER_COLLECTOR_MISSING —
+// its own code on the shared 400 channel. It must not collide with the legacy
+// BSK_MISSING code nor with the scanner's.
+test("the collector-missing code is collector-missing", () => {
+  assert.equal(isBrowserCollectorMissing({ code: BROWSER_COLLECTOR_MISSING_CODE }), true);
+  assert.equal(isBrowserCollectorMissing(browserCollectorMissingBody()), true);
+});
+
+test("other 400 codes and free text are NOT collector-missing", () => {
+  assert.equal(isBrowserCollectorMissing({ code: SCANNER_MISSING_CODE }), false);
+  assert.equal(isBrowserCollectorMissing({ code: BSK_MISSING_CODE }), false); // legacy bsk gate ≠ new collector gate
+  assert.equal(isBrowserCollectorMissing({ code: "MODE_MISSING" }), false);
+  assert.equal(isBrowserCollectorMissing({ error: "Browser collector not found" }), false); // text ≠ code
+});
+
+test("a missing or non-object body is NOT collector-missing", () => {
+  assert.equal(isBrowserCollectorMissing({}), false);
+  assert.equal(isBrowserCollectorMissing(undefined), false);
+  assert.equal(isBrowserCollectorMissing(null), false);
+  assert.equal(isBrowserCollectorMissing("BROWSER_COLLECTOR_MISSING"), false);
+  assert.equal(isBrowserCollectorMissing(400), false);
+});
+
+test("the response body the route sends is classified by the client", () => {
+  const body = browserCollectorMissingBody();
+  assert.equal(body.code, BROWSER_COLLECTOR_MISSING_CODE);
+  assert.equal(typeof body.error, "string");
+  assert.ok(body.error.length > 0, "the blocked panel renders body.error, so it must carry copy");
+  assert.equal(isBrowserCollectorMissing(body), true);
 });

@@ -21,7 +21,7 @@ import {
 } from "@/lib/explore";
 import { makeAiStreamParser, type AiTraceChunk } from "@/lib/explore-ai";
 import { MAX_OFFER_LIMIT } from "@/lib/whats-new.mjs";
-import { isScannerMissing, isBskMissing } from "@/lib/explore-error.mjs";
+import { isScannerMissing, isBrowserCollectorMissing } from "@/lib/explore-error.mjs";
 import { useI18n } from "@/lib/i18n/context";
 import {
   readScanSources,
@@ -321,11 +321,12 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     }
   }, [t]);
 
-  // Browser mode — walk the Chinese boards (BOSS直聘/猎聘/智联) through the
-  // user's OWN logged-in browser via bsk-extract.mjs. Shares the ScanEvent stream
-  // grammar with discover(), so the surface state machine is nearly identical;
-  // the differences are the URL codec, the source chips (platforms, not ATS),
-  // and the bsk gate (a structured BSK_MISSING 400 → "blocked", not "failed").
+  // Browser mode — walk the Chinese boards (BOSS直聘/猎聘/智联) through an
+  // independent job-seeking Edge profile via zh-collect.mjs (Playwright). Shares
+  // the ScanEvent stream grammar with discover(), so the surface state machine is
+  // nearly identical; the differences are the URL codec, the source chips
+  // (platforms, not ATS), and the collector gate (a structured
+  // BROWSER_COLLECTOR_MISSING 400 → "blocked", not "failed").
   const discoverBrowser = useCallback(async () => {
     if (runningRef.current) return;
     const f = filtersRef.current;
@@ -352,7 +353,7 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
 
     const acc: DiscoveredOffer[] = [];
     let sawError = "";
-    let sawBskMissing = false; // bsk absent/not connected — structured 400, → blocked
+    let sawCollectorMissing = false; // Playwright collector absent — structured 400 → blocked
     let reachedAcc = 0; // platforms that completed a real sweep
     let unreachableAcc = 0;
     try {
@@ -363,8 +364,8 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
       });
       if (!r.ok) {
         const d = await r.json().catch(() => ({}));
-        sawBskMissing = isBskMissing(d);
-        sawError = d.error || (sawBskMissing ? t("explore.err.bskMissing") : t("explore.err.discoveryFailed", { status: r.status }));
+        sawCollectorMissing = isBrowserCollectorMissing(d);
+        sawError = d.error || (sawCollectorMissing ? t("explore.err.collectorMissing") : t("explore.err.discoveryFailed", { status: r.status }));
       } else if (!r.body) {
         sawError = t("explore.err.noStream");
       } else {
@@ -431,7 +432,7 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
       setPhase("revealing");
       setStatus(t(acc.length === 1 ? "explore.disc.browserFoundOne" : "explore.disc.browserFoundMany", { n: acc.length }));
       window.setTimeout(() => setPhase("results"), 850);
-    } else if (sawBskMissing) {
+    } else if (sawCollectorMissing) {
       setError(sawError);
       setPhase("blocked");
     } else if (sawError) {

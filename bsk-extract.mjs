@@ -236,7 +236,7 @@ export async function extractWithBsk({ url, mode = 'jd', max = 200, maxChars = 1
 
     await runBsk(['navigate', url, '--session', sessionId, '--wait-until', 'domcontentloaded'], NAVIGATE_TIMEOUT_MS);
 
-    const raw = await readDomReadyViaBsk(sessionId, mode);
+    const raw = await readDomReadyViaBsk(sessionId, mode, url);
 
     // A captcha/login wall surfaced instead of the job body: hand the page to
     // the user for a manual solve, then re-read. At most one help round.
@@ -251,7 +251,7 @@ export async function extractWithBsk({ url, mode = 'jd', max = 200, maxChars = 1
         ],
         CAPTCHA_HELP_TIMEOUT_MS + 20_000,
       );
-      const rawAfter = await readDomReadyViaBsk(sessionId, mode);
+      const rawAfter = await readDomReadyViaBsk(sessionId, mode, url);
       return mode === 'listing'
         ? listingWithCities(rawAfter, rawAfter.url || url, max)
         : normalizeJd(rawAfter, rawAfter.url || url, maxChars);
@@ -312,16 +312,66 @@ async function readDomViaBsk(sessionId) {
  * readyState between 'loading' and 'complete' (the DOM clears and the job rows
  * reappear, so jobAnchors oscillates 21→0→21 and the stability rule below
  * never fires), and liepin navigates to an interstitial page or about:blank.
- * Both yield the last read (often 0 jobs). This is a platform anti-bot
- * behavior, NOT the city gate: the 方案1 city extraction works (SURFACE: 15/16
- * zhipin, 17/17 liepin when the page renders). Out of scope here; a real fix
- * needs reload/blank detection plus a more human navigation strategy.
+ * Both yield the last read (often 0 jobs). The reload-on-zero retry in
+ * readDomReadyViaBsk absorbs the COMMON case (rows land late on a cold
+ * first-nav) by re-navigating once; the most stubborn anti-bot case (rows stay
+ * empty across a reload) still returns 0 — a fully human navigation strategy
+ * (request-help/SURFACE_UNCLEAR) is the remaining escape hatch.
  *
+ * @param {string} sessionId
+ * @param {'jd'|'listing'} mode
+ * @param {string} [targetUrl] the URL already navigated to; used to RE-load
+ *   once when a listing poll ends at zero job anchors (below).
+ * @returns {Promise<object>}
+ */
+
+/** Pure decision rule: should a listing poll trigger one re-navigation retry?
+ *  A listing that ends a warm-up window at zero job anchors is most often a
+ *  stale/anti-bot SPA (see KNOWN LIMITATION below), not a real empty result —
+ *  but only while retries remain and only for listing mode. Exported so the
+ *  reload-on-zero behavior can be locked by a unit test at a real seam. */
+export function shouldReloadListing({ mode, jobAnchors, attempt, maxAttempts }) {
+  return mode === 'listing' && jobAnchors === 0 && attempt < (maxAttempts ?? 2) - 1;
+}
+
+async function readDomReadyViaBsk(sessionId, mode, targetUrl) {
+  // Single-source hunts surface this SPA staleness as "no results"; multi-source
+  // hunts hide it because another board reliably fills the list. Reloading the
+  // same URL once forces the SPA to re-request its list — cheap and observably
+  // recovers the rows. At most one re-navigation so a genuinely empty query
+  // never loops forever.
+  const attempts = 2;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    const raw = await pollReadableDom(sessionId, mode);
+    const lUrl = typeof raw?.url === 'string' ? raw.url : '';
+    const jobAnchors = mode === 'listing' ? zhListingAnchors(raw?.anchors ?? [], lUrl).length : -1;
+    const staleFirstLoad = Boolean(targetUrl) && shouldReloadListing({ mode, jobAnchors, attempt, maxAttempts: attempts });
+    if (staleFirstLoad) {
+      // Let the anti-bot page breathe, then hand the SPA a fresh load.
+      await new Promise((r) => setTimeout(r, 1_200));
+      await runBsk(['navigate', targetUrl, '--session', sessionId, '--wait-until', 'domcontentloaded'], NAVIGATE_TIMEOUT_MS);
+      continue;
+    }
+    return raw;
+  }
+  // Unreachable (a return always fires on the last attempt); keep TS/JS honest.
+  throw new Error('unreachable: listing re-navigation loop exhausted');
+}
+
+/**
+ * Run the DOM reader against the page, polling until the content criterion for
+ * the given mode is met or the budget is spent.
+ *   • jd       → break on the first read with non-empty text (a job body);
+ *   • listing  → break when the dynamic job-anchor set is stable AND non-zero
+ *                (the rows landed); otherwise spend the whole window and return
+ *                the LAST read (some rows / the empty skeleton — the caller
+ *                decides via jobAnchors whether a reload retry is worth it).
+ * A window in which every read is empty/non-JSON throws `extract_failed`.
  * @param {string} sessionId
  * @param {'jd'|'listing'} mode
  * @returns {Promise<object>}
  */
-async function readDomReadyViaBsk(sessionId, mode) {
+async function pollReadableDom(sessionId, mode) {
   const deadline = Date.now() + DOM_READY_TIMEOUT_MS;
   let raw = null;
   let prev = -1;
