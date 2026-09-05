@@ -165,6 +165,8 @@ playwright-report/
 
 # Planning (local scratchpad)
 plan/
+# Ticket/work-order scratch (development working notes — never commit)
+.scratch/
 
 # Web — runtime cache/history the dashboard writes locally; nothing here is tracked.
 .career-ops-web/
