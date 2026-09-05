@@ -52,6 +52,7 @@ export async function GET() {
   const file = path.join(root, "config", "profile.yml");
   let dealBreakers: string[] = [];
   let locationFlexibility = "";
+  let roles: string[] = [];
   if (fs.existsSync(file)) {
     let parsed: unknown;
     try {
@@ -66,6 +67,10 @@ export async function GET() {
     }
     const comp = isObj(profile.compensation) ? (profile.compensation as Record<string, unknown>) : {};
     if (typeof comp.location_flexibility === "string") locationFlexibility = comp.location_flexibility;
+    const targets = isObj(profile.target_roles) ? (profile.target_roles as Record<string, unknown>) : {};
+    if (Array.isArray(targets.primary)) {
+      roles = (targets.primary as unknown[]).filter((r): r is string => typeof r === "string");
+    }
   }
   // `modes/_profile.md` is ALSO read by the evaluation pipeline (SKILL.md loads
   // it for every mode; context-budget injects both files). A rule hand-written
@@ -82,7 +87,7 @@ export async function GET() {
       dealBreakers = merged;
     }
   }
-  return Response.json({ dealBreakers, locationFlexibility });
+  return Response.json({ dealBreakers, locationFlexibility, roles });
 }
 
 export async function POST(req: Request) {

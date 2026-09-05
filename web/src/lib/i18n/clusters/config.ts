@@ -59,6 +59,15 @@ export const en: Dict = {
   "config.currentLang": "Current display language: {lang}",
   "config.switchNow": "Switch now",
 
+  "config.jobTargetTitle": "Job intention",
+  "config.jobTargetDesc": "The roles you're seeking. Saved to config/profile.yml — they drive evaluation targeting and apply to CLI evaluation as well.",
+  "config.jobTargetRoles": "Target roles",
+  "config.jobTargetHint": "One per line. The first few become your primary target roles.",
+  "config.jobTargetPlaceholder": "软件项目经理\n技术经理",
+  "config.jobTargetEmpty": "Add at least one target role.",
+  "config.saveJobTarget": "Save intention",
+  "config.jobTargetSaved": "Saved",
+
   "config.jdRulesTitle": "JD evaluation rules",
   "config.jdRulesDesc": "Exclusion and flexibility rules applied to every evaluation. Saved to config/profile.yml — they also apply to CLI evaluations and re-evaluations.",
   "config.dealBreakers": "Deal-breakers",
@@ -129,6 +138,15 @@ export const zh: Dict = {
   "config.langChinese": "简体中文",
   "config.currentLang": "当前显示语言：{lang}",
   "config.switchNow": "立即切换",
+
+  "config.jobTargetTitle": "求职意向",
+  "config.jobTargetDesc": "你正在求职的目标职位。保存到 config/profile.yml——它们驱动评估的目标定位，同样适用于 CLI 评估。",
+  "config.jobTargetRoles": "目标职位",
+  "config.jobTargetHint": "每行一个。前几个会成为你的主要目标职位。",
+  "config.jobTargetPlaceholder": "软件项目经理\n技术经理",
+  "config.jobTargetEmpty": "至少填写一个目标职位。",
+  "config.saveJobTarget": "保存意向",
+  "config.jobTargetSaved": "已保存",
 
   "config.jdRulesTitle": "JD 评估规则",
   "config.jdRulesDesc": "每次评估都会应用的排除与灵活性规则。保存到 config/profile.yml——同样适用于 CLI 评估与重新评估。",
