@@ -304,6 +304,60 @@ function processCard(card) {
   }
 }
 
+// List page "评估本职位" button — pinned to the right-hand detail pane (BOSS
+// /web/geek/jobs renders the selected job's description beside the list in a
+// .job-detail-body panel). Clicking it evaluates the currently-selected card
+// (the .active one), reusing the same engine as the detail-page button.
+const LIST_EVAL_BTN_ID = "career-ext-list-eval-btn";
+
+function currentActiveUrl() {
+  const ac = document.querySelector(`${CARD_SELECTOR}.active`) || document.querySelector(".job-card-wrap.active");
+  const a = ac && ac.querySelector(LINK_SELECTOR);
+  return a && a.href ? a.href : null;
+}
+
+function ensureRightPaneButton() {
+  if (location.pathname.includes("/job_detail/")) {
+    // Detail page — the dedicated full-page button owns this; don't add the pane one.
+    const stale = document.getElementById(LIST_EVAL_BTN_ID);
+    if (stale) stale.remove();
+    return;
+  }
+  const opBar = document.querySelector(".job-detail-op");
+  if (!opBar) return; // pane not rendered yet — observer will retry
+  if (document.getElementById(LIST_EVAL_BTN_ID)) return;
+  const btn = document.createElement("button");
+  btn.id = LIST_EVAL_BTN_ID;
+  btn.textContent = "评估本职位";
+  btn.style.cssText =
+    "padding:6px 12px;border:none;border-radius:6px;cursor:pointer;vertical-align:middle;" +
+    "background:#00c68d;color:#fff;font-size:13px;font-weight:600;margin-left:8px;" +
+    "font-family:system-ui,sans-serif;box-shadow:0 2px 6px rgba(0,0,0,.2);";
+  btn.addEventListener("click", () => {
+    const btn = document.getElementById(LIST_EVAL_BTN_ID);
+    const url = currentActiveUrl();
+    if (!url) {
+      showToast("未选中职位，请先在左侧点击一个职位", true);
+      return;
+    }
+    btn.disabled = true;
+    btn.textContent = "评估中...";
+    chrome.runtime.sendMessage({ type: "single-evaluate", url }, (res) => {
+      if (chrome.runtime.lastError || !res || !res.ok) {
+        btn.disabled = false;
+        btn.textContent = "评估本职位";
+        showToast((res && res.error) || "评估发起失败：本地 web 服务未运行?", true);
+      }
+    });
+  });
+  // Sit immediately left of the "微信扫码分享" share button inside the op bar;
+  // fall back to the bar's first child if the share anchor isn't found.
+  const share = Array.from(opBar.querySelectorAll("a,button,span")).find((el) =>
+    /微信|分享/.test(el.textContent || ""),
+  );
+  opBar.insertBefore(btn, share || opBar.firstChild);
+}
+
 function applyAllInjections() {
   document.querySelectorAll(CARD_SELECTOR).forEach((card) => {
     if (!card.__careerExt) processCard(card);
@@ -321,6 +375,7 @@ function applyAllInjections() {
   });
   if (location.pathname.includes("/job_detail/")) injectDetailButton();
   refreshDetailBadge();
+  ensureRightPaneButton();
 }
 
 // ---- message listeners ----------------------------------------------------
@@ -339,6 +394,11 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     if (btn) {
       btn.disabled = false;
       btn.textContent = "评估本职位";
+    }
+    const listBtn = document.getElementById(LIST_EVAL_BTN_ID);
+    if (listBtn) {
+      listBtn.disabled = false;
+      listBtn.textContent = "评估本职位";
     }
     showToast((msg.error || "评估失败"), true);
     sendResponse({ ok: true });
@@ -423,6 +483,61 @@ function init() {
     __diag.detailKey = location.pathname.includes("/job_detail/") ? normalizeUrl(location.href) : null;
     __diag.detailHit = __diag.detailKey ? Object.prototype.hasOwnProperty.call(evaluated, __diag.detailKey) : null;
     __diag.detailBadgeEl = !!document.getElementById(DETAIL_BADGE_ID);
+    // List-page right pane (BOSS /web/geek/jobs shows the selected job's detail
+    // beside the list). Diagnose where the current selection's URL lives and what
+    // container holds the description area so we can anchor the inline eval button.
+    __diag.activeCardUrl = (() => {
+      const ac = document.querySelector(`${CARD_SELECTOR}.active`) || document.querySelector(".job-card-wrap.active");
+      const a = ac && ac.querySelector(LINK_SELECTOR);
+      return a && a.href ? a.href : null;
+    })();
+    // job_detail anchors that are NOT inside a list card — likely the right pane's
+    // own title link. Record each with a short ancestor tag.class chain.
+    __diag.rightPanes = (() => {
+      const out = [];
+      document.querySelectorAll(LINK_SELECTOR).forEach((a) => {
+        if (a.closest(CARD_SELECTOR)) return;
+        let el = a;
+        const chain = [];
+        for (let i = 0; i < 5 && el && el.parentElement; i++) {
+          el = el.parentElement;
+          const cls = el.className ? String(el.className).split(/\s+/).join(".") : "";
+          chain.push(`${el.tagName}${cls ? "." + cls.slice(0, 100) : ""}`);
+        }
+        out.push({ href: a.href, chain });
+      });
+      return out.slice(0, 5);
+    })();
+    // The user wants the eval button to sit left of the "微信扫码分享" share
+    // element in the right pane. Snapshot any element whose own/descendant text
+    // mentions 微信/分享/收藏, with ancestors + viewport rect, to anchor it.
+    __diag.shareEls = (() => {
+      const out = [];
+      const seen = new Set();
+      document.querySelectorAll("a,button,span,div").forEach((el) => {
+        if (seen.has(el)) return;
+        const t = (el.textContent || "").replace(/\s+/g, "").slice(0, 40);
+        if (!/(微信|扫码|分享|收藏)/.test(t)) return;
+        let a = el;
+        const chain = [];
+        for (let i = 0; i < 4 && a && a.parentElement; i++) {
+          a = a.parentElement;
+          const cls = a.className ? String(a.className).split(/\s+/).join(".") : "";
+          chain.push(`${a.tagName}${cls ? "." + cls.slice(0, 80) : ""}`);
+        }
+        const r = el.getBoundingClientRect();
+        out.push({
+          tag: el.tagName,
+          cls: el.className ? String(el.className).split(/\s+/).join(".") : "",
+          text: t,
+          x: Math.round(r.x),
+          y: Math.round(r.y),
+          w: Math.round(r.width),
+          chain: chain.reverse(),
+        });
+      });
+      return out.slice(0, 6);
+    })();
     chrome.runtime.sendMessage({ type: "diag-report", data: __diag });
   };
   __diag.snap = snap;
@@ -439,6 +554,9 @@ function init() {
       }
     }
     if (touched) syncSelection();
+    // The right pane (.job-detail-body) re-renders when the selection changes;
+    // re-check it on every mutation batch so the eval button survives the swap.
+    ensureRightPaneButton();
   });
   observer.observe(document.body, { childList: true, subtree: true });
 
