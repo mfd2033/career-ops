@@ -23,6 +23,10 @@ const PROBE_TIMEOUT_MS = 900;
 let cachedPort = null;
 let probing = null;
 
+// Latest DOM diagnostics reported by the content script (for the popup's
+// debug box, since BOSS blocks DevTools by resizing/kicking the page).
+let lastContentDiag = null;
+
 async function versionOk(base) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), PROBE_TIMEOUT_MS);
@@ -71,9 +75,15 @@ async function needPort() {
  * badge from opening a dead localhost link when the dashboard restarted.
  */
 async function ensureLivePort() {
-  if (cachedPort && (await versionOk(`http://localhost:${cachedPort}`))) return cachedPort;
+  console.log("[bg] ensureLivePort cachedPort=", cachedPort);
+  if (cachedPort && (await versionOk(`http://localhost:${cachedPort}`))) {
+    console.log("[bg] cached port live:", cachedPort);
+    return cachedPort;
+  }
   invalidatePort();
-  return needPort();
+  const p = await needPort();
+  console.log("[bg] re-probed port:", p);
+  return p;
 }
 
 // ---- cliId / model resolution ---------------------------------------------
@@ -108,9 +118,14 @@ let evaluated = {};
 
 async function loadEvaluated(base) {
   try {
-    const j = await (await fetch(`${base}/api/report-status`)).json();
+    const res = await fetch(`${base}/api/report-status`);
+    console.log("[bg] loadEvaluated", base, "status=", res.status);
+    const j = await res.json();
     evaluated = j && typeof j === "object" ? j : {};
-  } catch {
+    console.log("[bg] report-status keys=", Object.keys(evaluated).length);
+    return evaluated;
+  } catch (err) {
+    console.log("[bg] loadEvaluated error:", err.message);
     evaluated = {};
   }
   return evaluated;
@@ -125,18 +140,35 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     switch (msg && msg.type) {
       case "get-state": {
         if (msg && msg.force) invalidatePort();
-        const port = await probePort();
+        const port = await ensureLivePort().catch(() => null);
         sendResponse({ ok: true, connected: port != null, port });
         break;
       }
       case "get-evaluated": {
-        const port = await probePort();
+        const port = await ensureLivePort().catch(() => null);
         if (port == null) {
           sendResponse({ ok: false, connected: false, map: {} });
           break;
         }
         const map = await loadEvaluated(`http://localhost:${port}`);
-        sendResponse({ ok: true, connected: true, map });
+        sendResponse({ ok: true, connected: true, port, map, keys: Object.keys(map).length });
+        break;
+      }
+      case "get-diagnostics": {
+        const port = await ensureLivePort().catch(() => null);
+        sendResponse({
+          ok: true,
+          connected: port != null,
+          port,
+          cachedPort,
+          evalKeys: Object.keys(evaluated).length,
+          contentDiag: lastContentDiag,
+        });
+        break;
+      }
+      case "diag-report": {
+        lastContentDiag = msg && msg.data ? msg.data : null;
+        sendResponse({ ok: true });
         break;
       }
       case "selection-update": {
@@ -171,7 +203,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       }
       case "refresh-evaluated": {
         try {
-          const port = await needPort();
+          const port = await ensureLivePort();
           await loadEvaluated(`http://localhost:${port}`);
           await notifyContentScripts();
           sendResponse({ ok: true });

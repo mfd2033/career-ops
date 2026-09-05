@@ -63,5 +63,9 @@ p-state.failed .p-dot { background: var(--danger); }
 .p-score { flex: 0 0 auto; font-weight: 700; }
 
 footer { font-size: 11px; color: var(--muted); text-align: center; }
+.diag { margin-top: 6px; padding: 6px; background: #1d1f23; color: #9fe8d0; border-radius: 6px; font-size: 10px; text-align: left; white-space: pre-wrap; word-break: break-all; }
+.diag-copy-row { margin-top: 6px; }
+.copy-btn { background: #2a2e35; color: #cfd6e4; border: 1px solid #3a3f4a; border-radius: 6px; padding: 4px 10px; font-size: 11px; cursor: pointer; }
+.copy-btn:hover { background: #343a44; }
 
 @keyframes pulse { 50% { opacity: 0.3; } }

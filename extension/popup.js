@@ -12,6 +12,8 @@ const progressEl = $("#progress");
 const progressListEl = $("#progressList");
 const progressSummaryEl = $("#progressSummary");
 const footTipEl = $("#footTip");
+const diagEl = $("#diag");
+const copyDiagBtn = $("#copyDiag");
 
 let activeTabId = null;
 let worker = null; // chrome.runtime.connect({name:"eval"})
@@ -37,13 +39,31 @@ async function init() {
     reprobeBtn.hidden = true;
     await paintSelection();
     footTipEl.textContent = `本地 web：localhost:${s.port}`;
+    await paintDiag();
   } else {
     stateEl.textContent = "未检测到本地 web 服务";
     stateEl.className = "state disconnected";
     reprobeBtn.hidden = false;
     selectionEl.hidden = true;
     footTipEl.textContent = "请先启动 career-dashboard";
+    await paintDiag();
   }
+}
+
+/** Show background-side state (eval map key count, resolved port) for debugging. */
+let lastDiagJson = "";
+async function paintDiag() {
+  const d = await msg("get-diagnostics");
+  diagEl.hidden = false;
+  const base = {
+    connected: d.connected,
+    port: d.port,
+    cachedPort: d.cachedPort,
+    evalKeys: d.evalKeys,
+  };
+  if (d.contentDiag) base.contentDiag = d.contentDiag;
+  lastDiagJson = JSON.stringify(base, null, 2);
+  diagEl.textContent = lastDiagJson;
 }
 
 async function paintSelection() {
@@ -181,3 +201,21 @@ reprobeBtn.addEventListener("click", () => {
 });
 
 document.addEventListener("DOMContentLoaded", () => init());
+
+// One-click copy of the last diagnostic snapshot (popup re-opens each click,
+// so diagEl.textContent may be empty until init/paintDiag runs; refresh it
+// on demand and copy the freshest values).
+copyDiagBtn.addEventListener("click", async () => {
+  diagEl.hidden = false;
+  await paintDiag(); // re-pull so contentDiag is current
+  try {
+    await navigator.clipboard.writeText(lastDiagJson);
+    footTipEl.textContent = "诊断已复制 ✓";
+  } catch {
+    // Clipboard API can be unavailable in some popup contexts; fall back to
+    // a select-and-copy of the pre element.
+    diagEl.select();
+    document.execCommand("copy");
+    footTipEl.textContent = "诊断已复制 ✓";
+  }
+});
