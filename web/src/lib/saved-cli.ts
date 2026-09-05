@@ -1,5 +1,16 @@
 export const CONFIG_KEY = "career-ops:config";
 
+// Mirror the selected CLI/model onto the server (/api/config) so the BOSS直聘
+// extension can reuse it without re-asking. Best-effort — the local store is
+// still authoritative for the web UI; a failed post must never block the save.
+function pushServerConfig(patch: Record<string, string>) {
+  void fetch("/api/config", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  }).catch(() => {});
+}
+
 export function readSavedCliId(): string | null {
   try {
     const raw = localStorage.getItem(CONFIG_KEY);
@@ -18,6 +29,7 @@ export function persistCliId(cliId: string) {
       CONFIG_KEY,
       JSON.stringify({ ...prev, mode: prev.mode || "cli", cliId }),
     );
+    pushServerConfig({ cliId });
   } catch {
     /* quota / private mode */
   }
@@ -38,6 +50,7 @@ export function persistModel(model: string) {
     const raw = localStorage.getItem(CONFIG_KEY);
     const prev = raw ? JSON.parse(raw) : {};
     localStorage.setItem(CONFIG_KEY, JSON.stringify({ ...prev, mode: prev.mode || "cli", model }));
+    pushServerConfig({ model });
   } catch {
     /* quota / private mode */
   }

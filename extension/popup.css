@@ -1,0 +1,67 @@
+:root {
+  --bg: #f7f8fa;
+  --card: #ffffff;
+  --ink: #1d1f23;
+  --muted: #8a8f98;
+  --line: #eef0f3;
+  --brand: #00c68d;
+  --brand-strong: #00a97b;
+  --danger: #d93026;
+  --warn: #f5a623;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  width: 320px;
+  font-family: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+  background: var(--bg);
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.wrap { display: flex; flex-direction: column; gap: 10px; padding: 12px; }
+
+header { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+h1 { font-size: 14px; font-weight: 700; margin-right: auto; }
+.state { font-size: 12px; font-weight: 600; padding: 3px 8px; border-radius: 999px; }
+.state.connected { background: #e6f9f1; color: var(--brand-strong); }
+.state.disconnected { background: #fdecea; color: var(--danger); }
+.state.probing { background: #f3f4f6; color: var(--muted); }
+button.link { background: none; border: none; color: var(--brand-strong); cursor: pointer; font-size: 12px; text-decoration: underline; }
+
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px; }
+.card.muted { color: var(--muted); text-align: center; }
+.card.muted p + p { margin-top: 6px; }
+
+.count { font-weight: 600; margin-bottom: 8px; }
+
+button.primary {
+  width: 100%;
+  padding: 9px 0;
+  border: none;
+  border-radius: 8px;
+  background: var(--brand);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+button.primary:hover { background: var(--brand-strong); }
+button.primary:disabled { background: #c9d3cf; cursor: not-allowed; }
+
+.progress-head { display: flex; justify-content: space-between; font-weight: 600; margin-bottom: 8px; }
+.progress-list { list-style: none; max-height: 240px; overflow-y: auto; }
+.progress-list li { display: flex; gap: 8px; align-items: baseline; padding: 4px 0; border-bottom: 1px solid var(--line); font-size: 12px; }
+.progress-list li:last-child { border-bottom: none; }
+.p-dot { flex: 0 0 auto; width: 8px; height: 8px; border-radius: 50%; margin-top: 3px; }
+p-state.pending .p-dot { background: var(--muted); }
+p-state.running .p-dot { background: var(--warn); animation: pulse 1s infinite; }
+p-state.done .p-dot { background: var(--brand); }
+p-state.failed .p-dot { background: var(--danger); }
+.p-url { flex: 1; word-break: break-all; }
+.p-score { flex: 0 0 auto; font-weight: 700; }
+
+footer { font-size: 11px; color: var(--muted); text-align: center; }
+
+@keyframes pulse { 50% { opacity: 0.3; } }

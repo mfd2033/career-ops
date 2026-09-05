@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <div class="wrap">
+      <header>
+        <h1>BOSS 就地评估</h1>
+        <div id="state" class="state">检测中…</div>
+        <button id="reprobe" class="link" hidden>重新探测</button>
+      </header>
+
+      <section id="selection" class="card" hidden>
+        <div id="selCount" class="count">未选择职位</div>
+        <button id="evaluateBtn" class="primary" disabled>评估选中职位</button>
+      </section>
+
+      <section id="progress" class="card" hidden>
+        <div class="progress-head">
+          <span>评估进度</span>
+          <span id="progressSummary"></span>
+        </div>
+        <ul id="progressList" class="progress-list"></ul>
+      </section>
+
+      <section id="empty" class="card muted">
+        <p>在 BOSS 直聘搜索列表勾选职位，或打开职位详情页使用「评估本职位」。</p>
+        <p>已评估的职位会在卡片右上角显示徽章，点击可跳本地报告页。</p>
+      </section>
+
+      <footer>
+        <span id="footTip"></span>
+      </footer>
+    </div>
+    <script src="popup.js"></script>
+  </body>
+</html>

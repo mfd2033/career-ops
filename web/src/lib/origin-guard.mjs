@@ -57,13 +57,19 @@ function block(reason) {
 /**
  * Decide whether an /api request may proceed.
  * @param {object} req
- * @param {string|null} req.secFetchSite  Sec-Fetch-Site header, if any
- * @param {string|null} req.origin        Origin header, if any
- * @param {string|null} req.host          Host header
- * @param {Set<string>} req.allowedHosts  extra non-loopback hosts opted in
- * @returns {{ok: true} | {ok: false, status: number, reason: string}}
+ * @param {string|null} req.secFetchSite      Sec-Fetch-Site header, if any
+ * @param {string|null} req.origin            Origin header, if any
+ * @param {string|null} req.host              Host header
+ * @param {Set<string>} req.allowedHosts      extra non-loopback hosts opted in
+ * @param {Set<string>} [req.extensionOrigins] trusted `chrome-extension://{id}`
+ *   origins allowed to reach the localhost /api — the browser-extension pass.
+ * @returns {{ok: true} |
+ *          {ok: true, extensionAllowOrigin: string} |
+ *          {ok: false, status: number, reason: string}}
+ *   `extensionAllowOrigin` is the exact Origin value to echo back as
+ *   `Access-Control-Allow-Origin` (set only for the trusted extension open).
  */
-export function checkRequest({ secFetchSite, origin, host, allowedHosts }) {
+export function checkRequest({ secFetchSite, origin, host, allowedHosts, extensionOrigins }) {
   // Host layer (F2): must be loopback, or an explicitly opted-in host.
   const normalizedHost = normalizeHost(host);
   if (!normalizedHost) return block("missing Host header");
@@ -72,6 +78,22 @@ export function checkRequest({ secFetchSite, origin, host, allowedHosts }) {
     return block(
       "this host is not allowed; the dashboard serves loopback only unless CAREER_OPS_WEB_ALLOWED_HOSTS opts it in",
     );
+  }
+
+  // Extension pass (F1 exemption, loopback + fixed origin only): the browser
+  // extension calls the /api surface cross-site from chrome-extension://{id}.
+  // A Sec-Fetch-Site: cross-site leg would be refused below, so check this
+  // BEFORE the origin layer. Narrow by construction — the origin must be one of
+  // the trusted extension IDs AND the host must already be loopback, so this
+  // window is exactly one extension to the user's own machine.
+  if (isLoopbackHost(normalizedHost) && extensionOrigins && extensionOrigins.size > 0 && origin != null) {
+    // chrome-extension:// URLs have no port/path; `new URL(x).origin` returns
+    // "null" for that scheme in edge/node, so normalize with a plain string trim
+    // instead: lowercase + drop a trailing slash. Keys are full `{scheme}://{id}`.
+    const extOrigin = String(origin).trim().toLowerCase().replace(/\/+$/, "");
+    if (extOrigin && extensionOrigins.has(extOrigin)) {
+      return { ok: true, extensionAllowOrigin: origin };
+    }
   }
 
   // Origin layer (F1), primary: the Fetch Metadata signal, when present.
