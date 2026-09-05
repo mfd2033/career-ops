@@ -146,34 +146,27 @@ export function matchesBrowserCity(job, cityName) {
 }
 
 /**
- * Extract the first searchable Chinese phrase from a portals.yml
- * `search_queries[].query` string (the CLI scan's WebSearch syntax), so the
- * Explorer's browser mode can seed its keyword box with the same intent.
- * The CLI form looks like:
+ * Extract the position-keyword-only seed from a portals.yml `search_queries[].query`
+ * string (the CLI scan's WebSearch syntax), so the Explorer's browser mode can fill
+ * its keyword box with the same intent. The CLI form looks like:
  *   'site:zhipin.com 项目经理 郑州 OR 技术经理 郑州 OR IT项目经理 郑州'
- * We drop every `site:` token and the bare `OR` separators, then keep the
- * tokens up to the first `OR` — the most specific first candidate — and join
- * them back with spaces. A query with no `OR` keeps all its non-site tokens.
+ * Every `site:` token, every bare `OR` separator, AND every token that names a known
+ * city (a BROWSER_CITY_MAP key) is dropped — the browser hunt applies its city filter
+ * separately via the zhCity box / the search-URL city slot, so the city must not leak
+ * into the keyword field. What remains is the position selection across ALL `OR`
+ * groups (not just the first), joined with a single space (one keyword per token; the
+ * search stage re-expands spaces back to `OR`, see runBrowserDiscovery).
  * Returns "" for anything that yields no phrase.
  * @param {string} searchQuery
  * @returns {string}
  */
 export function extractBrowserQuery(searchQuery) {
+  const citySet = new Set(CITY_NAMES);
   const tokens = String(searchQuery ?? "")
     .trim()
     .split(/\s+/)
-    .filter((t) => t && !/^site:/i.test(t));
-  const group = [];
-  for (const t of tokens) {
-    if (/^OR$/i.test(t)) {
-      // A separator between groups: stop only once a group was collected;
-      // a leading/consecutive OR is just noise to skip, not a boundary.
-      if (group.length > 0) break;
-      continue;
-    }
-    group.push(t);
-  }
-  return group.join(" ").trim();
+    .filter((t) => t && !/^site:/i.test(t) && !/^OR$/i.test(t) && !citySet.has(t));
+  return tokens.join(" ").trim();
 }
 
 /**
