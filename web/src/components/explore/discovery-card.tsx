@@ -92,7 +92,10 @@ export function DiscoveryCard({ offer, inPipeline, evaluatedN }: { offer: Discov
       </div>
 
       <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
-        <span className="rounded border border-border px-1.5 py-0.5 font-medium text-muted">{ATS_LABEL[offer.ats as AtsSource] ?? offer.ats}</span>
+        {/* 浏览器(BSK)来源无展示价值，隐藏；保留 ATS 来源标识 */}
+        {offer.ats !== "browser" && (
+          <span className="rounded border border-border px-1.5 py-0.5 font-medium text-muted">{ATS_LABEL[offer.ats as AtsSource] ?? offer.ats}</span>
+        )}
         {fresh && <span className="text-faint">{fresh}</span>}
         {unverified && (
           <span
