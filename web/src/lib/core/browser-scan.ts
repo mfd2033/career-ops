@@ -43,7 +43,9 @@ export function runBrowserDiscovery(
 ): Promise<DiscoveredOffer[]> {
   return new Promise((resolve) => {
     const sources = cleanBrowserSources(filters.browserSources as unknown as BrowserSource[] | undefined) as BrowserSource[];
-    const query = filters.zhQuery?.trim() ?? "";
+    // 用户在关键词框用空格分隔多个职位候选（便于手动编辑）。实际搜索时按 CLI query
+    // 语义把连续空白替换成 OR，使各平台按"多候选职位"处理，而不是把整串当作单个 AND 短语。
+    const query = (filters.zhQuery ?? "").trim().replace(/\s+/g, " OR ");
     const city = filters.zhCity?.trim() ?? "";
     const urls = buildSearchUrls(sources, query, city);
 
