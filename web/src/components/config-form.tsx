@@ -17,6 +17,12 @@ import { CadenceSettings } from "@/components/followups/cadence-settings";
 import { JdRulesSettings } from "@/components/jd-rules-settings";
 import { persistCliId, persistModel, readSavedCliId, readSavedModel } from "@/lib/saved-cli";
 import { resolveModelPicker } from "@/lib/model-picker.mjs";
+import {
+  readApplyBehavior,
+  persistApplyBehavior,
+  APPLY_BEHAVIOR_DEFAULT,
+  type ApplyBehavior,
+} from "@/lib/apply-behavior";
 import { useI18n } from "@/lib/i18n/context";
 
 type ModelOption = { id: string; label: string };
@@ -62,6 +68,7 @@ export function ConfigForm() {
   const [provider, setProvider] = useState("anthropic");
   const [apiKey, setApiKey] = useState("");
   const [logos, setLogos] = useState(true);
+  const [applyBehavior, setApplyBehavior] = useState<ApplyBehavior>(APPLY_BEHAVIOR_DEFAULT);
   const [saved, setSaved] = useState(false);
 
   // Load saved prefs
@@ -88,6 +95,7 @@ export function ConfigForm() {
     } catch {
       /* ignore */
     }
+    setApplyBehavior(readApplyBehavior());
   }, []);
 
   // Detect installed CLIs
@@ -119,7 +127,15 @@ export function ConfigForm() {
     const nextModel = picker?.model ?? model;
     localStorage.setItem(
       STORAGE_KEY,
-      JSON.stringify({ mode, cliId, model: nextModel, modelCliId: nextModel ? modelCliId : "", provider, logos }),
+      JSON.stringify({
+        mode,
+        cliId,
+        model: nextModel,
+        modelCliId: nextModel ? modelCliId : "",
+        provider,
+        logos,
+        applyBehavior,
+      }),
     );
     // The persisted value is now the "current model" — only after Save.
     setSavedModel(nextModel);
@@ -446,6 +462,40 @@ export function ConfigForm() {
             )}
           </span>
         </div>
+      </div>
+
+      {/* 申请按钮行为：管道页 Apply 按钮点击后做什么 */}
+      <label className="mt-8 mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-muted">
+        {t("config.applyBehaviorTitle")}
+      </label>
+      <p className="mb-3 text-xs text-faint">{t("config.applyBehaviorDesc")}</p>
+      <div className="grid gap-2 sm:grid-cols-2">
+        <button
+          type="button"
+          onClick={() => setApplyBehavior("link")}
+          className={cn(
+            "rounded-xl border px-4 py-3 text-left transition-colors",
+            applyBehavior === "link"
+              ? "border-brand/50 bg-brand-soft"
+              : "border-border bg-surface/50 hover:bg-surface-hover",
+          )}
+        >
+          <span className="block text-sm font-medium text-foreground">{t("config.applyBehaviorLink")}</span>
+          <span className="mt-1 block text-xs text-faint">{t("config.applyBehaviorLinkDesc")}</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setApplyBehavior("form")}
+          className={cn(
+            "rounded-xl border px-4 py-3 text-left transition-colors",
+            applyBehavior === "form"
+              ? "border-brand/50 bg-brand-soft"
+              : "border-border bg-surface/50 hover:bg-surface-hover",
+          )}
+        >
+          <span className="block text-sm font-medium text-foreground">{t("config.applyBehaviorForm")}</span>
+          <span className="mt-1 block text-xs text-faint">{t("config.applyBehaviorFormDesc")}</span>
+        </button>
       </div>
 
       <CadenceSettings />

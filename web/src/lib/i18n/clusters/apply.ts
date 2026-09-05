@@ -1,4 +1,4 @@
-﻿import type { Dict } from "../types";
+import type { Dict } from "../types";
 
 // Cluster: apply
 // English (source) strings. Each key is dotted and namespaced by cluster, e.g.
@@ -10,6 +10,8 @@ export const en: Dict = {
 
   // ── apply button (web/src/components/apply-button.tsx) ──
   "apply.apply": "Apply",
+  "apply.openJob": "Open job",
+  "apply.openJobTitle": "Open the job posting in a new tab",
   "apply.applyTitle": "Apply — opens the form pre-filled, you review and submit yourself",
   "apply.noAppUrl": "No application URL on this report",
   "apply.genCvFirst": "Generate the tailored CV (PDF) first to apply",
@@ -143,6 +145,8 @@ export const zh: Dict = {
 
   // ── apply button (web/src/components/apply-button.tsx) ──
   "apply.apply": "申请",
+  "apply.openJob": "打开职位",
+  "apply.openJobTitle": "在新标签页打开该职位链接",
   "apply.applyTitle": "申请——打开已预填的表单，由你核对并亲自提交",
   "apply.noAppUrl": "该报告没有申请链接",
   "apply.genCvFirst": "请先生成定制简历（PDF）再申请",

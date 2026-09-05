@@ -1,4 +1,4 @@
-﻿import type { Dict } from "../types";
+import type { Dict } from "../types";
 
 // Cluster: config
 // English (source) strings. Each key is dotted and namespaced by cluster, e.g.
@@ -37,6 +37,12 @@ export const en: Dict = {
   "config.logosDesc": "Show each company's real logo. Fetched once through your local server and cached on disk — only the employer domain is sent to a third party. Off = colored monograms only.",
   "config.saved": "Saved",
   "config.saveConfig": "Save config",
+  "config.applyBehaviorTitle": "Apply button behavior",
+  "config.applyBehaviorDesc": "What the Apply button on the pipeline page does.",
+  "config.applyBehaviorLink": "Open job link",
+  "config.applyBehaviorLinkDesc": "Open the job posting in a new tab instantly (default).",
+  "config.applyBehaviorForm": "Read application form",
+  "config.applyBehaviorFormDesc": "Open the pre-filled form proxy to review and submit yourself.",
   "config.localFirstRoadmap": "Local-first · on our roadmap",
 
   "config.defaultLangTitle": "Default display language",
@@ -95,6 +101,12 @@ export const zh: Dict = {
   "config.logosDesc": "显示每家公司的真实 Logo。通过你的本地服务器获取一次并缓存在磁盘上 —— 只会将雇主域名发送给第三方。关闭 = 仅显示彩色字母组合。",
   "config.saved": "已保存",
   "config.saveConfig": "保存设置",
+  "config.applyBehaviorTitle": "申请按钮行为",
+  "config.applyBehaviorDesc": "管道页面「申请」按钮点击后的功能。",
+  "config.applyBehaviorLink": "打开职位链接",
+  "config.applyBehaviorLinkDesc": "在新标签页直接打开职位链接（默认）。",
+  "config.applyBehaviorForm": "读取申请表单",
+  "config.applyBehaviorFormDesc": "打开预填的申请表单，由你核对并亲自提交。",
   "config.localFirstRoadmap": "本地优先 · 已在路线图中",
 
   "config.defaultLangTitle": "默认显示语言",
