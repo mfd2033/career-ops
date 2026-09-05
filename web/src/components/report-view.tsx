@@ -4,6 +4,8 @@ import Link from "next/link";
 import { ArrowLeft, FileText, ExternalLink, ChevronDown, ChevronLeft, ChevronRight } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { useEffect, useState } from "react";
+import { readApplyBehavior, APPLY_BEHAVIOR_DEFAULT, type ApplyBehavior } from "@/lib/apply-behavior";
 import type { Application } from "@/lib/career-ops";
 import { Badge } from "@/components/ui/badge";
 import { scoreTone, scoreNum, legitimacyTone, parseReport } from "@/lib/format";
@@ -83,6 +85,11 @@ export function ReportView({
   contextQuery?: string;
 }) {
   const { t } = useI18n();
+  // 打开职位链接模式下 Apply 按钮即是跳转入口，隐藏下方独立的「职位链接」，避免重复。
+  const [behavior, setBehavior] = useState<ApplyBehavior>(APPLY_BEHAVIOR_DEFAULT);
+  useEffect(() => {
+    setBehavior(readApplyBehavior());
+  }, []);
   const translateSectionHeading = (heading: string): string => {
     const map: Record<string, string> = {
       "Role Summary": t("pipeline.section.roleSummary"),
@@ -493,7 +500,7 @@ export function ReportView({
                 {showReval ? t("pipeline.report.evalDates", { date, reval: revalDate ?? "" }) : date}
               </span>
             )}
-            {url && url.startsWith("http") && (
+            {behavior === "form" && url && url.startsWith("http") && (
               <a
                 href={url}
                 target="_blank"
