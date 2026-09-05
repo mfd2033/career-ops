@@ -119,9 +119,15 @@ export function readInbox(): InboxJob[] {
     }
     if (parts.length < 3 || !parts[0]) continue; // need at least url | company | role
     const posted = labels.get("posted");
+    // the URL cell is commonly written with Markdown auto-link angle brackets
+    // (`<https://…>`); strip them so downstream URL keys match their clean
+    // `**URL:**` counterparts in reports / scan rows (normalizeUrl & the exact
+    // inbox-url lookup both see the raw cell). Harmless no-op on plain URLs.
+    const rawUrl = parts[0].trim();
+    const url = rawUrl.startsWith("<") && rawUrl.endsWith(">") ? rawUrl.slice(1, -1) : rawUrl;
     jobs.push({
       done: m[1].toLowerCase() === "x",
-      url: parts[0],
+      url,
       company: parts[1],
       role: parts[2],
       location: parts[3] || undefined, // optional 4th column (#1015)

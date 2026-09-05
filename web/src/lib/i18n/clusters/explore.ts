@@ -212,6 +212,11 @@ export const en: Dict = {
   "explore.results.sortCompany": "company",
   "explore.results.addAll": "Add all {n}",
   "explore.results.noMatch": "No results match “{q}”.",
+  "explore.results.tabAll": "All",
+  "explore.results.tabNew": "New",
+  "explore.results.tabPipeline": "In pipeline",
+  "explore.results.tabEvaluated": "Evaluated",
+  "explore.results.tabEmpty": "Nothing in this group yet.",
 
   // ── Provider status / error strings ──
   "explore.err.scannerUnavailable": "The scanner isn't available.",
@@ -436,6 +441,11 @@ export const zh: Dict = {
   "explore.results.sortCompany": "公司",
   "explore.results.addAll": "全部添加 {n}",
   "explore.results.noMatch": "没有结果匹配“{q}”。",
+  "explore.results.tabAll": "全部",
+  "explore.results.tabNew": "新增",
+  "explore.results.tabPipeline": "管道中",
+  "explore.results.tabEvaluated": "已评估",
+  "explore.results.tabEmpty": "该分组暂无内容。",
 
   // ── Provider 状态 / 错误字符串 ──
   "explore.err.scannerUnavailable": "扫描器不可用。",
