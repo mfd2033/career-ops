@@ -67,6 +67,10 @@ function loadYaml(rel: string): Record<string, unknown> | null {
 export function seedExploreFilters(): { filters: ExploreFilters; seededFrom: string[] } {
   const filters: ExploreFilters = { ...DEFAULT_FILTERS, ats: [...DEFAULT_FILTERS.ats] };
   const seededFrom: string[] = [];
+  // 求职意向（目标职位）一次读好，bsk 关键词框与 ATS 正向关键词都以它为来源；
+  // 与核心的 providers/_profile-keywords.mjs 同口径（primary + archetypes.name）。
+  const profile = loadYaml("config/profile.yml");
+  const fromRoles = listFrom(profileTargetKeywords(profile));
 
   const portals = loadYaml("portals.yml");
   if (portals) {
@@ -79,27 +83,11 @@ export function seedExploreFilters(): { filters: ExploreFilters; seededFrom: str
     filters.alwaysAllow = listFrom(lf.always_allow);
     filters.blockHard = listFrom(lf.block_hard);
     if (filters.positive.length || filters.allow.length || filters.block.length || filters.blockHard.length) seededFrom.push("portals.yml");
-    // Browser mode's keyword box: seed from the CLI scan's first enabled
-    // search_queries entry (the Chinese-board search intent — same platforms
-    // the browser mode walks). Falls back to "" when portals has none.
-    const queries = Array.isArray(portals.search_queries) ? portals.search_queries : [];
-    for (const q of queries) {
-      if (!q || typeof q !== "object") continue;
-      const qr = q as Record<string, unknown>;
-      if (qr.enabled === false || typeof qr.query !== "string") continue;
-      const extracted = extractBrowserQuery(qr.query);
-      if (extracted) {
-        filters.zhQuery = extracted;
-        seededFrom.push("search_queries");
-        break;
-      }
-    }
     // Browser mode's city box: seed from the user's own config — profile.yml
     // location.city first (the ground truth of where they want to work), then
     // portals.yml location_filter.allow (the CLI scan's location filter). Only a
     // KNOWN Chinese city (in BROWSER_CITY_MAP) is used — an unrecognised value
     // keeps the national default rather than silently mis-filtering.
-    const profile = loadYaml("config/profile.yml");
     const profileCity =
       (profile?.candidate && typeof profile.candidate === "object" && (profile.candidate as Record<string, unknown>).location) ||
       (profile?.location && typeof profile.location === "object" && (profile.location as Record<string, unknown>).city);
@@ -115,13 +103,33 @@ export function seedExploreFilters(): { filters: ExploreFilters; seededFrom: str
     }
   }
 
+  // Browser mode's keyword box follows 求职意向（target_roles）：
+  // 空集分隔多个候选职位（扫描阶段会把空白展开回 OR，见 runBrowserDiscovery）。
+  // 只有 profile 里没有目标职位时才退回 CLI 的 search_queries 意图，保证裸配置不失效。
+  if (fromRoles.length) {
+    filters.zhQuery = fromRoles.join(" ");
+    seededFrom.push("profile.yml");
+  } else if (portals) {
+    const queries = Array.isArray(portals.search_queries) ? portals.search_queries : [];
+    for (const q of queries) {
+      if (!q || typeof q !== "object") continue;
+      const qr = q as Record<string, unknown>;
+      if (qr.enabled === false || typeof qr.query !== "string") continue;
+      const extracted = extractBrowserQuery(qr.query);
+      if (extracted) {
+        filters.zhQuery = extracted;
+        seededFrom.push("search_queries");
+        break;
+      }
+    }
+  }
+
   if (filters.positive.length === 0) {
     // Shape-reading lives in profile-keywords.mjs, mirroring the core's
     // providers/_profile-keywords.mjs. Inlined here it had drifted from the
     // core on BOTH fields — `primary` read as a string when it is a list,
     // `archetypes` spread raw when its entries are objects — so this fallback
     // returned nothing for every profile.yml the app itself writes.
-    const fromRoles = listFrom(profileTargetKeywords(loadYaml("config/profile.yml")));
     if (fromRoles.length) {
       filters.positive = fromRoles;
       seededFrom.push("profile.yml");
