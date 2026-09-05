@@ -1,4 +1,4 @@
-﻿import type { Dict } from "../types";
+import type { Dict } from "../types";
 
 // Cluster: jobs
 // English (source) strings. Each key is dotted and namespaced by cluster, e.g.
@@ -55,6 +55,7 @@ export const en: Dict = {
   "jobs.fixPortalTitle": "Fix · {company}",
   "jobs.fixPortalSubtitle": "repair portal slug",
   "jobs.scoreTitle": "Score · {company}",
+  "jobs.scanTitle": "Evaluating · batch",
 };
 
 // Simplified Chinese strings. Every key in en must have a matching key here.
@@ -109,4 +110,5 @@ export const zh: Dict = {
   "jobs.fixPortalTitle": "修复 · {company}",
   "jobs.fixPortalSubtitle": "修复门户 slug",
   "jobs.scoreTitle": "评分 · {company}",
+  "jobs.scanTitle": "评估中 · 批量",
 };

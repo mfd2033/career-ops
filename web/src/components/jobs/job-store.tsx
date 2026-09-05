@@ -8,6 +8,9 @@ import { useI18n } from "@/lib/i18n/context";
 export type JobStep = { kind: "tool" | "status"; label: string; ts: number };
 export type JobResult = { score: number | null; summary: string; tone: "good" | "warn" | "bad" | "muted" };
 
+// Server snapshot shape — see /api/active-runs and lib/core/active-runs.ts.
+type ActiveRunApi = { url: string; startedAt: number; reportNum?: number; id: string };
+
 export type Job = {
   id: string;
   title: string;
@@ -59,9 +62,55 @@ function parseVerdict(text: string): JobResult {
 
 export function JobsProvider({ children }: { children: React.ReactNode }) {
   const [jobs, setJobs] = useState<Job[]>([]);
+  const [activeRuns, setActiveRuns] = useState<ActiveRunApi[]>([]);
   const seq = useRef(0);
   const loaded = useRef(false);
   const { t } = useI18n();
+
+  // Poll the server-wide in-flight batch-evaluations snapshot. Evaluations
+  // started from the BOSS直聘 EXTENSION never touch this process's job-store,
+  // so this is the only channel that surfaces them in the worker list. Cleaned
+  // up on unmount; entries vanish from activeRuns as soon as the server
+  // unregisters them (the batch worker closed), so a poll that stops seeing one
+  // drops its ephemeral worker card.
+  useEffect(() => {
+    let live = true;
+    const poll = async () => {
+      try {
+        const res = await fetch("/api/active-runs");
+        if (!res.ok) return;
+        const data = (await res.json()) as { runs?: ActiveRunApi[] };
+        if (live) setActiveRuns(Array.isArray(data.runs) ? data.runs : []);
+      } catch {
+        /* transient — leave the last good snapshot */
+      }
+    };
+    poll();
+    const timer = setInterval(poll, 3000);
+    return () => {
+      live = false;
+      clearInterval(timer);
+    };
+  }, []);
+
+  // Merge ephemeral extension runs into the visible job list. Keyed by a stable
+  // "active-{n}" id (NOT the URL, which could collide with an in-app job's
+  // input), status locked to "running", never persisted to localStorage.
+  const visibleJobs: Job[] = [
+    ...activeRuns.map((r): Job => ({
+      id: `active-${r.id}`,
+      title: t("jobs.scanTitle"),
+      subtitle: r.reportNum != null ? `#${r.reportNum}` : undefined,
+      page: "/jobs",
+      input: r.url,
+      kind: "batch-evaluate",
+      status: "running",
+      steps: [{ kind: "status", label: t("jobs.working"), ts: r.startedAt }],
+      text: "",
+      startedAt: r.startedAt,
+    })),
+    ...jobs,
+  ];
 
   // restore history
   useEffect(() => {
@@ -221,5 +270,5 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
   const removeJob = useCallback((id: string) => setJobs((js) => js.filter((j) => j.id !== id)), []);
   const clearFinished = useCallback(() => setJobs((js) => js.filter((j) => j.status === "running")), []);
 
-  return <JobsContext.Provider value={{ jobs, startJob, removeJob, clearFinished }}>{children}</JobsContext.Provider>;
+  return <JobsContext.Provider value={{ jobs: visibleJobs, startJob, removeJob, clearFinished }}>{children}</JobsContext.Provider>;
 }

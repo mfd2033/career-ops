@@ -30,6 +30,7 @@ import { spawnHeadlessCli } from "@/lib/spawn-cli.mjs";
 import { careerOpsRoot, readMemory, readInbox, readScanDates } from "@/lib/career-ops";
 import { buildBatchPrompt } from "@/lib/run-prompts.mjs";
 import { acquireTrackerWrite, releaseTrackerWrite } from "@/lib/core/run-registry";
+import { registerActiveRun, unregisterActiveRun } from "@/lib/core/active-runs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -182,6 +183,10 @@ export async function POST(req: Request) {
             let sawError = false;
             let verdict: string | null = null;
             const url = urls[i];
+            // Surface this URL in the server-wide active-runs snapshot the worker
+            // list polls — so a batch started from the BOSS extension is visible
+            // to the web UI even though it never touched this process's job-store.
+            registerActiveRun(url, num);
             const postedAt = inboxPostedAt.get(url) ?? scanDates.get(url);
             const prompt = buildBatchPrompt(String(num).padStart(3, "0"), {
               input: url,
@@ -205,11 +210,13 @@ export async function POST(req: Request) {
               if (/error|fatal/i.test(chunk)) sawError = true;
             });
             child.on("error", (err) => {
+              unregisterActiveRun(url);
               sawError = true;
               send({ type: "text", text: `\u274C ${url}: ${err.message}\n` });
               resolve({ cleanExit: false, sawError: true, verdict: null });
             });
             child.on("close", (code) => {
+              unregisterActiveRun(url);
               resolve({ cleanExit: code === 0, sawError, verdict });
               children.delete(child);
             });
