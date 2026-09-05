@@ -154,7 +154,7 @@ function injectDetailButton() {
   const btn = document.createElement("button");
   btn.textContent = "评估本职位";
   btn.style.cssText =
-    "position:fixed;right:20px;bottom:64px;z-index:2147483647;" +
+    "position:fixed;right:20px;top:80px;z-index:2147483647;" +
     "padding:10px 16px;border:none;border-radius:8px;cursor:pointer;" +
     "background:#00c68d;color:#fff;font-size:14px;font-weight:600;" +
     "font-family:system-ui,sans-serif;box-shadow:0 4px 12px rgba(0,0,0,.3);";
@@ -174,6 +174,22 @@ function injectDetailButton() {
     });
   });
   document.body.appendChild(btn);
+  updateButtonPosition();
+}
+
+// Keep the eval button vertically stacked under the detail badge; when no badge
+// is present it sits in the badge's own spot (top:80px). Re-measured whenever the
+// badge appears/disappears so an evaluation that just completes repositions it.
+function updateButtonPosition() {
+  const btn = document.getElementById("career-ext-eval-btn");
+  if (!btn) return;
+  const badge = document.getElementById(DETAIL_BADGE_ID);
+  if (badge) {
+    const r = badge.getBoundingClientRect();
+    btn.style.top = `${Math.round(r.bottom + 8)}px`;
+  } else {
+    btn.style.top = "80px";
+  }
 }
 
 // Detail-page badge: shows the evaluation score for an already-evaluated
@@ -188,10 +204,14 @@ function refreshDetailBadge() {
   const existing = document.getElementById(DETAIL_BADGE_ID);
   if (!entry) {
     if (existing) existing.remove();
+    updateButtonPosition();
     return;
   }
   if (existing) {
-    existing.textContent = `已评估 ${entry.score || ""}`.trim();
+    if (existing.textContent !== `已评估 ${entry.score || ""}`.trim()) {
+      existing.textContent = `已评估 ${entry.score || ""}`.trim();
+      updateButtonPosition();
+    }
     return;
   }
   const badge = document.createElement("div");
@@ -209,6 +229,7 @@ function refreshDetailBadge() {
     openReport(entry.reportNum);
   });
   document.body.appendChild(badge);
+  updateButtonPosition();
 }
 
 // Reset the detail button once the evaluated map comes back fresh.
@@ -275,7 +296,9 @@ function processCard(card) {
     const url = cardUrl(card);
     const key = url ? normalizeUrl(url) : "";
     if (!key) return;
-    injectCheckbox(card, key);
+    // Batch-evaluation checkboxes are disabled for now (feature dormant);
+    // keep only the evaluated badge on list cards. Skeleton (injectCheckbox /
+    // selectedKeys / syncSelection) stays for reinstating batch eval later.
     const entry = evaluated[key];
     if (entry) injectBadge(card, entry);
   }
@@ -306,6 +329,18 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg && msg.type === "evaluated-updated") {
     refreshEvaluated();
     if (detailEvaluating) finalizeDetail();
+    sendResponse({ ok: true });
+    return;
+  }
+  if (msg && msg.type === "single-eval-error") {
+    // Evaluation failed (background routed it back because the popup auto-closes).
+    detailEvaluating = false;
+    const btn = document.getElementById("career-ext-eval-btn");
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = "评估本职位";
+    }
+    showToast((msg.error || "评估失败"), true);
     sendResponse({ ok: true });
     return;
   }
