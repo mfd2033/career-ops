@@ -103,7 +103,14 @@ async function resolveEvalConfig(base) {
     try {
       const d = await (await fetch(`${base}/api/clis`)).json();
       const installed = (d && d.clis ? d.clis : []).filter((c) => c.installed);
+      // No single installed CLI to fall back to → pick a sensible default (the
+      // career-ops flagship CLI first, else the first installed) instead of
+      // leaving cliId empty and failing downstream with "CLI '' not found".
       if (installed.length === 1) cliId = installed[0].id;
+      else {
+        const preferred = installed.find((c) => c.id === "opencode") || installed[0];
+        if (preferred) cliId = preferred.id;
+      }
     } catch {
       /* no CLIs readable */
     }
@@ -223,9 +230,20 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           break;
         }
         sendResponse({ ok: true });
-        runBatch([url], msg.cliId, msg.model).catch((err) =>
-          announce({ stage: "error", error: err.message }),
-        );
+        const tabId = sender.tab ? sender.tab.id : null;
+        runBatch([url], msg.cliId, msg.model).catch(async (err) => {
+          announce({ stage: "error", error: err.message });
+          // The action popup auto-closes when the user clicks the page button, so
+          // `announce`'s eval port is usually gone. Route the failure back to the
+          // detail tab instead so the page can toast it and reset the button.
+          if (tabId != null) {
+            try {
+              await chrome.tabs.sendMessage(tabId, { type: "single-eval-error", error: err.message });
+            } catch {
+              /* tab closed or content not injected — ignore */
+            }
+          }
+        });
         break;
       }
       default:
