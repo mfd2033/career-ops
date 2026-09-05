@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect } from "react";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/cn";
 import { CoMark } from "@/components/co-mark";
@@ -19,10 +20,17 @@ import { instrumentSerif } from "@/lib/fonts";
 import { NAV_ITEMS, isActivePath } from "@/lib/nav-items";
 import { useI18n } from "@/lib/i18n/context";
 import { LanguageToggle } from "@/components/language-toggle";
+import { pushNavHistory } from "@/lib/nav-history";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { t } = useI18n();
+
+  // 记录应用内导航：路由变化时把当前完整路由压入会话栈，供详情页“返回”按钮判断
+  // 回到进入详情页之前的页面。软导航下 AppShell 不重挂载，因此依赖 pathname 变化触发。
+  useEffect(() => {
+    pushNavHistory(window.location.pathname + window.location.search);
+  }, [pathname]);
   return (
     <JobsProvider>
       <PipelineProvider>

@@ -1,10 +1,12 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { ArrowLeft, FileText, ExternalLink, ChevronDown, ChevronLeft, ChevronRight } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useEffect, useState } from "react";
+import { prevNavHistory } from "@/lib/nav-history";
 import { readApplyBehavior, APPLY_BEHAVIOR_DEFAULT, type ApplyBehavior } from "@/lib/apply-behavior";
 import type { Application } from "@/lib/career-ops";
 import { Badge } from "@/components/ui/badge";
@@ -85,6 +87,7 @@ export function ReportView({
   contextQuery?: string;
 }) {
   const { t } = useI18n();
+  const router = useRouter();
   // 打开职位链接模式下 Apply 按钮即是跳转入口，隐藏下方独立的「职位链接」，避免重复。
   const [behavior, setBehavior] = useState<ApplyBehavior>(APPLY_BEHAVIOR_DEFAULT);
   useEffect(() => {
@@ -402,12 +405,20 @@ export function ReportView({
   return (
     <div className="w-full px-6 py-8">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <Link
-          href={`/pipeline${contextQuery}`}
+        <button
+          type="button"
+          onClick={() => {
+            // 回到进入本详情页之前的那个页面（首页/探索/职位列表…），而不是固定回管道列表。
+            // 依据会话历史栈判断：有应用内前一页则用浏览器 back（保留其精确状态），
+            // 直接打开/新标签进入（无前一页）时退化为回管道列表并保留列表上下文。
+            const prev = prevNavHistory();
+            if (prev) router.back();
+            else router.replace(`/pipeline${contextQuery}`, { scroll: false });
+          }}
           className="inline-flex items-center gap-1.5 text-sm text-muted transition-colors hover:text-brand"
         >
           <ArrowLeft className="size-4" /> {t("pipeline.report.backToPipeline")}
-        </Link>
+        </button>
 
         {position != null && (
           <nav aria-label={t("pipeline.report.navigation")} className="flex items-center gap-1.5">
