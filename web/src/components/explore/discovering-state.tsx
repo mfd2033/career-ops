@@ -70,13 +70,14 @@ function SourceChip({ ats, label, s }: { ats: string; label: string; s?: SourceS
 }
 
 export function DiscoveringState() {
-  const { sources, matchCount, companiesScanned, status, phase, mode, filters } = useExplore();
+  const { sources, matchCount, companiesScanned, status, phase, mode, scanSource, filters } = useExplore();
   const { t } = useI18n();
   const shown = useCountUp(matchCount);
   const companies = useCountUp(companiesScanned);
-  // Browser mode walks PLATFORMS (BOSS/猎聘/智联), not ATS networks — the chips
-  // and ledger swap to the browser source set when mode says so.
-  const isBrowser = mode === "browser";
+  // BSK/浏览器抓取走的是 PLATFORMS（BOSS/猎聘/智联），不是 ATS 网络 —— chips 与
+  // 进度条据此切换到浏览器源集合。老「浏览器」tab 并入「扫描」后，引擎由
+  // scanSource（或兼容旧会话的 mode==="browser"）决定，不再只看顶层 tab。
+  const isBrowser = mode === "browser" || scanSource === "bsk";
   const chipIds = isBrowser ? (BROWSER_SOURCES as string[]) : (ATS_SOURCES as unknown as string[]);
   const chipLabel = (id: string) => (isBrowser ? BROWSER_LABEL[id as BrowserSource] : ATS_LABEL[id as AtsSource]) ?? id;
   const platforms = isBrowser ? filters.browserSources?.length ?? BROWSER_SOURCES.length : 0;

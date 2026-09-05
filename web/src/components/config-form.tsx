@@ -23,6 +23,14 @@ import {
   APPLY_BEHAVIOR_DEFAULT,
   type ApplyBehavior,
 } from "@/lib/apply-behavior";
+import {
+  readScanSources,
+  persistScanSources,
+  cleanScanSources,
+  SCAN_SOURCES,
+  SCAN_SOURCE_DEFAULT,
+  type ScanSource,
+} from "@/lib/scan-mode";
 import { useI18n } from "@/lib/i18n/context";
 
 type ModelOption = { id: string; label: string };
@@ -69,6 +77,7 @@ export function ConfigForm() {
   const [apiKey, setApiKey] = useState("");
   const [logos, setLogos] = useState(true);
   const [applyBehavior, setApplyBehavior] = useState<ApplyBehavior>(APPLY_BEHAVIOR_DEFAULT);
+  const [scanSource, setScanSource] = useState<ScanSource[]>([...SCAN_SOURCE_DEFAULT]);
   const [saved, setSaved] = useState(false);
 
   // Load saved prefs
@@ -96,6 +105,7 @@ export function ConfigForm() {
       /* ignore */
     }
     setApplyBehavior(readApplyBehavior());
+    setScanSource(readScanSources());
   }, []);
 
   // Detect installed CLIs
@@ -135,6 +145,7 @@ export function ConfigForm() {
         provider,
         logos,
         applyBehavior,
+        scanSource: cleanScanSources(scanSource),
       }),
     );
     // The persisted value is now the "current model" — only after Save.
@@ -496,6 +507,40 @@ export function ConfigForm() {
           <span className="block text-sm font-medium text-foreground">{t("config.applyBehaviorForm")}</span>
           <span className="mt-1 block text-xs text-faint">{t("config.applyBehaviorFormDesc")}</span>
         </button>
+      </div>
+
+      {/* 扫描方式：探索页「扫描」tab 内启用哪些引擎（多选，勾选才显示对应子 tab） */}
+      <label className="mt-8 mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-muted">
+        {t("config.scanSourceTitle")}
+      </label>
+      <p className="mb-3 text-xs text-faint">{t("config.scanSourceDesc")}</p>
+      <div className="grid gap-2 sm:grid-cols-2">
+        {SCAN_SOURCES.map((s) => {
+          const on = scanSource.includes(s);
+          return (
+            <button
+              key={s}
+              type="button"
+              onClick={() => {
+                // 至少保留一个启用引擎，避免扫描 tab 无子 tab 可用。
+                const next = on ? scanSource.filter((x) => x !== s) : [...scanSource, s];
+                setScanSource(cleanScanSources(next));
+              }}
+              aria-pressed={on}
+              className={cn(
+                "rounded-xl border px-4 py-3 text-left transition-colors",
+                on ? "border-brand/50 bg-brand-soft" : "border-border bg-surface/50 hover:bg-surface-hover",
+              )}
+            >
+              <span className="block text-sm font-medium text-foreground">
+                {s === "ats" ? t("config.scanSourceAts") : t("config.scanSourceBsk")}
+              </span>
+              <span className="mt-1 block text-xs text-faint">
+                {s === "ats" ? t("config.scanSourceAtsDesc") : t("config.scanSourceBskDesc")}
+              </span>
+            </button>
+          );
+        })}
       </div>
 
       <CadenceSettings />
