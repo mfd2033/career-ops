@@ -42,6 +42,11 @@
 const TRACKING_PARAMS = [
   /^utm_/i, /^gh_src$/i, /^fbclid$/i, /^gclid$/i,
   /^mc_cid$/i, /^mc_eid$/i, /^igshid$/i, /^_hsenc$/i, /^_hsmi$/i, /^trk$/i, /^trackingid$/i,
+  // BOSS直聘 board-specific: securityId is the anti-bot session token and ka is
+  // a click-source param — both vary per-request, never identify the posting.
+  // A listing's detail URL carries ?securityId=...&ka=... while the list card
+  // link doesn't, so stripping keeps both views on the same dedup key.
+  /^securityId$/i, /^ka$/i,
 ];
 
 /**

@@ -18,6 +18,11 @@ let inited = false;
 const TRACKING_PARAMS = [
   /^utm_/i, /^gh_src$/i, /^fbclid$/i, /^gclid$/i,
   /^mc_cid$/i, /^mc_eid$/i, /^igshid$/i, /^_hsenc$/i, /^_hsmi$/i, /^trk$/i, /^trackingid$/i,
+  // BOSS直聘 board-specific: securityId is the anti-bot session token and ka is
+  // a click-source param — both vary per-request, never identify the posting.
+  // A listing's detail URL carries ?securityId=...&ka=... while the list card
+  // link doesn't, so stripping keeps both views on the same dedup key.
+  /^securityId$/i, /^ka$/i,
 ];
 function normalizeUrl(raw) {
   if (typeof raw !== "string") return "";
@@ -46,7 +51,10 @@ function normalizeUrl(raw) {
 
 // ---- DOM helpers ----------------------------------------------------------
 
-const CARD_SELECTOR = ".job-card-wrapper";
+// BOSS /web/geek/jobs list card container. The job-name anchor sits in
+// DIV.job-title > DIV.job-info > LI.job-card-box (older .job-card-wrapper is
+// gone after BOSS' list revamp). One LI per posting.
+const CARD_SELECTOR = "li.job-card-box";
 const LINK_SELECTOR = 'a[href*="/job_detail/"]';
 
 function cardIsList(card) {
@@ -83,13 +91,20 @@ function openReport(num) {
 
 // ---- badge / checkbox injection (list cards) ------------------------------
 
+// Make the card a positioned context so absolutely-annexed badges/checkboxes
+// pin to IT, not to some far ancestor or a fragile zero-size holder.
+function ensurePositioned(card) {
+  const pos = getComputedStyle(card).position;
+  if (pos === "static" || pos === "sticky" || pos === "") card.style.position = "relative";
+}
+
 function injectBadge(card, entry) {
   const badge = document.createElement("span");
   badge.dataset.careerBadge = "1";
   badge.textContent = `已评估 ${entry.score || ""}`.trim();
   badge.title = `点击打开报告 #${entry.reportNum}`;
   badge.style.cssText =
-    "position:absolute;top:8px;right:8px;z-index:50;" +
+    "position:absolute;top:56px;right:8px;z-index:50;" +
     "cursor:pointer;font-size:12px;line-height:1;padding:4px 8px;border-radius:999px;" +
     `background:${scoreColor(entry.score)};color:#fff;font-weight:600;` +
     "box-shadow:0 2px 6px rgba(0,0,0,.25);font-family:system-ui,sans-serif;";
@@ -98,6 +113,7 @@ function injectBadge(card, entry) {
     e.stopPropagation();
     openReport(entry.reportNum);
   });
+  ensurePositioned(card);
   card.appendChild(badge);
 }
 
@@ -124,10 +140,8 @@ function injectCheckbox(card, key) {
     else selectedKeys.delete(key);
     syncSelection();
   });
-  const holder = document.createElement("div");
-  holder.style.cssText = "position:relative;width:0;height:0;";
-  holder.appendChild(cb);
-  card.appendChild(holder);
+  ensurePositioned(card);
+  card.appendChild(cb);
 }
 
 // ---- detail page button ---------------------------------------------------
@@ -161,6 +175,42 @@ function injectDetailButton() {
   });
   document.body.appendChild(btn);
 }
+
+// Detail-page badge: shows the evaluation score for an already-evaluated
+// posting high up the page (fixed, so it survives BOSS' layout shifts), and
+// opens the report on click. Kept in sync with the evaluated map via
+// refreshDetailBadge() on every applyAllInjections pass.
+const DETAIL_BADGE_ID = "career-ext-detail-badge";
+
+function refreshDetailBadge() {
+  if (!location.pathname.includes("/job_detail/")) return;
+  const entry = evaluated[normalizeUrl(location.href)];
+  const existing = document.getElementById(DETAIL_BADGE_ID);
+  if (!entry) {
+    if (existing) existing.remove();
+    return;
+  }
+  if (existing) {
+    existing.textContent = `已评估 ${entry.score || ""}`.trim();
+    return;
+  }
+  const badge = document.createElement("div");
+  badge.id = DETAIL_BADGE_ID;
+  badge.textContent = `已评估 ${entry.score || ""}`.trim();
+  badge.title = `点击打开报告 #${entry.reportNum}`;
+  badge.style.cssText =
+    "position:fixed;top:80px;right:20px;z-index:2147483647;" +
+    "cursor:pointer;font-size:13px;line-height:1;padding:8px 12px;border-radius:999px;" +
+    `background:${scoreColor(entry.score)};color:#fff;font-weight:600;` +
+    "box-shadow:0 4px 12px rgba(0,0,0,.3);font-family:system-ui,sans-serif;";
+  badge.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    openReport(entry.reportNum);
+  });
+  document.body.appendChild(badge);
+}
+
 // Reset the detail button once the evaluated map comes back fresh.
 function finalizeDetail() {
   detailEvaluating = false;
@@ -247,6 +297,7 @@ function applyAllInjections() {
     }
   });
   if (location.pathname.includes("/job_detail/")) injectDetailButton();
+  refreshDetailBadge();
 }
 
 // ---- message listeners ----------------------------------------------------
@@ -269,26 +320,87 @@ function matchCardParent(node) {
   return node.closest ? node.closest(CARD_SELECTOR) : null;
 }
 
+function handleAddedNode(node) {
+  if (!node || node.nodeType !== 1) return 0;
+  let touched = 0;
+  const batch = [];
+  if (typeof node.matches === "function") {
+    if (node.matches(CARD_SELECTOR)) {
+      // The added node IS a card.
+      batch.push(node);
+    } else {
+      // Container node (e.g. UL.rec-job-list): process every card inside, but
+      // DON'T treat the container itself as a card — that would mark it
+      // __careerExt and skip all its real card children.
+      if (node.appendChild) batch.push(...node.querySelectorAll(CARD_SELECTOR));
+      const parentCard = matchCardParent(node);
+      if (parentCard && !batch.includes(parentCard)) batch.push(parentCard);
+    }
+  }
+  for (const c of batch) {
+    if (c && !c.__careerExt) {
+      processCard(c);
+      touched++;
+    }
+  }
+  return touched;
+}
+
 function init() {
   if (inited) return;
   inited = true;
+
+  // Diag: snapshot + report DOM state to the background (BOSS blocks DevTools
+  // by resizing/kicking the page, so the popup reads this instead). Re-sent on
+  // a timer so lazily-scrolled cards refresh the numbers for the popup.
+  const __diag = window.__careerExtDiag = {};
+  const snap = () => {
+    __diag.evaluatedKeys = Object.keys(evaluated).length;
+    __diag.cards = document.querySelectorAll(CARD_SELECTOR).length;
+    const first = document.querySelector(CARD_SELECTOR);
+    __diag.cardHasLink = !!(first && first.querySelector(LINK_SELECTOR));
+    __diag.cardHref = first ? (first.querySelector(LINK_SELECTOR) || {}).href || null : null;
+    __diag.pathname = location.pathname;
+    __diag.badges = document.querySelectorAll("span[data-career-badge]").length;
+    __diag.boxes = document.querySelectorAll("input[type=checkbox][title^=选择]").length;
+    // BOSS changed its list markup (pathname=/web/geek/jobs); .job-card-wrapper
+    // no longer matches. Snapshot the REAL card container's class chain from the
+    // first job_detail anchor so we can fix CARD_SELECTOR.
+    __diag.linkAnchors = document.querySelectorAll(LINK_SELECTOR).length;
+    const anchor = document.querySelector(LINK_SELECTOR);
+    __diag.anchorClass = anchor ? anchor.className : null;
+    __diag.anchorId = anchor ? anchor.id : null;
+    // Walk up ~6 ancestors from the first job-name anchor and record the
+    // tag.class of each, so we can spot the real card container (old BOSS used
+    // .job-card-wrapper; the new /web/geek/jobs list markup differs).
+    const chain = [];
+    let el = anchor;
+    for (let i = 0; i < 6 && el && el.parentElement; i++) {
+      el = el.parentElement;
+      const cls = el.className ? String(el.className) : "";
+      chain.push(`${el.tagName}${cls ? "." + cls.split(/\s+/).join(".").slice(0, 120) : ""}`);
+    }
+    __diag.ancestorChain = chain;
+    // Detail-page diagnosis: does THIS posting exist in the evaluated map, and
+    // does the detail badge element actually get injected? (badges/boxes above
+    // only count list-card spans/checkboxes, not the detail badge div.)
+    __diag.detailUrl = location.pathname.includes("/job_detail/") ? location.href : null;
+    __diag.detailKey = location.pathname.includes("/job_detail/") ? normalizeUrl(location.href) : null;
+    __diag.detailHit = __diag.detailKey ? Object.prototype.hasOwnProperty.call(evaluated, __diag.detailKey) : null;
+    __diag.detailBadgeEl = !!document.getElementById(DETAIL_BADGE_ID);
+    chrome.runtime.sendMessage({ type: "diag-report", data: __diag });
+  };
+  __diag.snap = snap;
+  setInterval(snap, 3000); // keep the popup's debug box live as cards lazy-load
 
   // Fresh page → drop any selection the previous load left on this tab.
   chrome.runtime.sendMessage({ type: "selection-update", urls: [] });
 
   const observer = new MutationObserver((records) => {
-    let touched = false;
+    let touched = 0;
     for (const rec of records) {
-      const added = rec.addedNodes || [];
-      for (const node of added) {
-        const card = matchCardParent(node) || (node.nodeType === 1 && node.matches ? node : null);
-        const list = card ? [card] : node.nodeType === 1 ? node.querySelectorAll(CARD_SELECTOR) : [];
-        for (const c of list) {
-          if (c && !c.__careerExt) {
-            processCard(c);
-            touched = true;
-          }
-        }
+      for (const node of rec.addedNodes) {
+        touched += handleAddedNode(node);
       }
     }
     if (touched) syncSelection();
@@ -296,7 +408,7 @@ function init() {
   observer.observe(document.body, { childList: true, subtree: true });
 
   // Evening existing + listen for a first sync of the evaluated map.
-  refreshEvaluated();
+  refreshEvaluated().then(() => snap());
 }
 
 if (document.body) init();
