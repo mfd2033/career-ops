@@ -529,9 +529,10 @@ function BlockedCard() {
 
 function BrowserBlockedCard() {
   const { t } = useI18n();
-  // The browser mode can't run without browser-skill — this is an INSTALL guide,
-  // not a retry: the missing bsk returned a structured BSK_MISSING 400, so a
-  // "Try again" would re-fail forever until the CLI is present.
+  // The browser mode can't run without the Playwright collector — this is an
+  // INSTALL guide, not a retry: the missing collector returned a structured
+  // BROWSER_COLLECTOR_MISSING 400, so a "Try again" would re-fail forever until
+  // the toolkit is present.
   return (
     <div className="rounded-2xl border border-border bg-surface/30 px-6 py-12 text-center">
       <div className="mx-auto grid size-12 place-items-center rounded-full bg-brand-soft text-brand">
@@ -541,9 +542,6 @@ function BrowserBlockedCard() {
       <p className="mx-auto mt-1.5 max-w-md text-sm text-muted">
         {t("explore.blockedBrowser.body")}
       </p>
-      <pre className="mx-auto mt-4 inline-block rounded-lg border border-border bg-surface px-4 py-2 text-left text-[12.5px] text-foreground">
-        npm i -g browser-skill{`\n`}bsk status
-      </pre>
     </div>
   );
 }

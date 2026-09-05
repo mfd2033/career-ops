@@ -3,7 +3,7 @@ import fs from "node:fs";
 import { runDiscovery } from "@/lib/core/scan";
 import { rootScript } from "@/lib/career-ops";
 import { parseExplorePatch, DEFAULT_FILTERS, type DiscoveredOffer, type ScanEvent } from "@/lib/explore";
-import { scannerMissingBody, bskMissingBody, SCANNER_MISSING_STATUS } from "@/lib/explore-error.mjs";
+import { scannerMissingBody, browserCollectorMissingBody, SCANNER_MISSING_STATUS } from "@/lib/explore-error.mjs";
 
 // Discovery is HTTP-bound across many ATS boards; give it room. It is FREE —
 // zero LLM tokens (the scanner only does HTTP + JSON, and --dry-run writes nothing).
@@ -26,14 +26,15 @@ export async function POST(req: NextRequest) {
   // Capability gates — each mode needs its OWN machinery, and each fails with its
   // OWN structured code on the shared 400 channel (never the bare status, never
   // the other mode's message — see explore-error.mjs):
-  //   • scan  → scan-ats-full.mjs (data-only / pre-onboarding checkout)
-  //   • browser → bsk CLI + a connected browser (the user's own logged-in session)
+  //   • scan    → scan-ats-full.mjs (data-only / pre-onboarding checkout)
+  //   • browser → zh-collect.mjs + local Playwright + system Edge (the independent
+  //               job-seeking profile the collector drives)
   // The browser gate is deliberately independent of the scanner gate: a checkout
   // that has no scan-ats-full can still run a browser hunt.
   if (mode === "browser") {
-    const { bskInstalled } = await import("@/lib/core/browser-scan");
-    if (!bskInstalled()) {
-      return Response.json(bskMissingBody(), { status: SCANNER_MISSING_STATUS });
+    const { browserCollectorReady } = await import("@/lib/core/browser-scan");
+    if (!browserCollectorReady()) {
+      return Response.json(browserCollectorMissingBody(), { status: SCANNER_MISSING_STATUS });
     }
   } else if (!fs.existsSync(rootScript("scan-ats-full"))) {
     return Response.json(scannerMissingBody(), { status: SCANNER_MISSING_STATUS });

@@ -24,7 +24,7 @@ import { tmpdir } from 'node:os';
 
 import { pass, fail, ROOT } from './helpers.mjs';
 import { pickExtractor } from '../browser-extract.mjs';
-import { extractWithBsk, parseSessionId, zhListingAnchors, listingWithCities, extractCityFromText } from '../bsk-extract.mjs';
+import { extractWithBsk, parseSessionId, zhListingAnchors, listingWithCities, extractCityFromText, shouldReloadListing } from '../bsk-extract.mjs';
 import { isZhJobDetailUrl } from '../lib/zh-jobs.mjs';
 
 const NODE = process.execPath;
@@ -285,5 +285,28 @@ for (const [href, expected] of detailUrlCases) {
     pass('extractCityFromText honors a custom city list');
   } else {
     fail(`extractCityFromText custom list -> ${JSON.stringify(custom)}, expected 南昌`);
+  }
+}
+
+// ── S8: shouldReloadListing (reload-on-zero SPA/anti-bot retry decision) ───
+// The exact rule that fixes "single-source hunt returns 0 for BOSS/猎聘 when the
+// SPA sits stale": a listing poll that ends at zero job anchors gets (at most)
+// one re-navigation retry, then gives up so a genuinely empty query cannot loop.
+const reloadCases = [
+  // [desc, input, expected]
+  ['listing + 0 jobs + attempt 0 -> reload', { mode: 'listing', jobAnchors: 0, attempt: 0 }, true],
+  ['listing + 0 jobs + last attempt -> give up (no infinite loop)', { mode: 'listing', jobAnchors: 0, attempt: 1 }, false],
+  ['listing + rows present -> no reload', { mode: 'listing', jobAnchors: 8, attempt: 0 }, false],
+  ['jd mode + 0 anchors -> no reload (jd polls on text, not anchors)', { mode: 'jd', jobAnchors: 0, attempt: 0 }, false],
+  ['custom maxAttempts honored', { mode: 'listing', jobAnchors: 0, attempt: 0, maxAttempts: 3 }, true],
+  ['custom maxAttempts: middle attempt still retries', { mode: 'listing', jobAnchors: 0, attempt: 1, maxAttempts: 3 }, true],
+  ['custom maxAttempts: last attempt gives up', { mode: 'listing', jobAnchors: 0, attempt: 2, maxAttempts: 3 }, false],
+];
+for (const [desc, args, expected] of reloadCases) {
+  const got = shouldReloadListing(args);
+  if (got === expected) {
+    pass(`shouldReloadListing(${desc}) -> ${expected}`);
+  } else {
+    fail(`shouldReloadListing(${desc}) -> ${got}, expected ${expected}`);
   }
 }

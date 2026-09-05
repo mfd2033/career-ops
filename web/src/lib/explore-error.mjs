@@ -76,12 +76,49 @@ export function isScannerMissing(body) {
 }
 
 /**
- * Machine-readable marker for "the browser mode can't run — no bsk CLI/bin or
- * no connected browser". Same 400-shared-channel discipline as the scanner: a
- * FIRST-CLASS code, never free text, never the bare status. The Scan tab's
- * scanner-missing panel must not claim this failure, and neither may the retry
- * path — the right next step is installing browser-skill (`npm i -g
- * browser-skill` + `bsk status`), not retrying.
+ * Machine-readable marker for "the browser mode can't run — the Playwright
+ * collector is absent from this checkout" (no `zh-collect.mjs`, no local
+ * `playwright` package, or no system Edge). Same 400-shared-channel discipline
+ * as the scanner: a FIRST-CLASS code, never free text, never the bare status.
+ * The Scan tab's scanner-missing panel must not claim this failure, and neither
+ * may the retry path — the right next step is a full career-ops install with
+ * Playwright, not retrying.
+ *
+ * The browser mode previously keyed on the bsk CLI (`BSK_MISSING`); the
+ * collector now drives an independent Edge profile directly via Playwright
+ * (ADR-0001), so this code replaces that one on the wire. The BSK_* exports
+ * below are kept for the legacy test contract only.
+ */
+export const BROWSER_COLLECTOR_MISSING_CODE = "BROWSER_COLLECTOR_MISSING";
+
+/** Default copy for the blocked card. Lives here so the route + test share it. */
+export const BROWSER_COLLECTOR_MISSING_MESSAGE =
+  "Browser collector not found. This checkout needs career-ops with Playwright and Microsoft Edge — reinstall/update to enable browser scans.";
+
+/** The exact JSON body the route returns for the collector-missing case. */
+export function browserCollectorMissingBody(message = BROWSER_COLLECTOR_MISSING_MESSAGE) {
+  return { code: BROWSER_COLLECTOR_MISSING_CODE, error: message };
+}
+
+/**
+ * True only for the "browser mode lacks the Playwright collector" failure.
+ * Takes the PARSED RESPONSE BODY (never the HTTP status — 400 is a shared
+ * channel). Anything unrecognised falls through to the retry path, never to
+ * the install guide.
+ * @param {unknown} body Parsed JSON response body.
+ */
+export function isBrowserCollectorMissing(body) {
+  return (
+    typeof body === "object" &&
+    body !== null &&
+    /** @type {{code?: unknown}} */ (body).code === BROWSER_COLLECTOR_MISSING_CODE
+  );
+}
+
+/**
+ * Legacy — the pre-Playwright bsk gate. No production route returns this code
+ * anymore; the exports stay so the existing test contract keeps compiling.
+ * New code should use BROWSER_COLLECTOR_MISSING_*.
  */
 export const BSK_MISSING_CODE = "BSK_MISSING";
 

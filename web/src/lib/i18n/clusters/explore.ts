@@ -77,8 +77,8 @@ export const en: Dict = {
   // ── Blocked card ──
   "explore.blocked.title": "AI search needs a CLI",
   "explore.blocked.body": "Connect Claude Code, Gemini, or any agent CLI — your key, your tokens, your machine. The free Scan stays available without one.",
-  "explore.blockedBrowser.title": "Browser mode needs browser-skill",
-  "explore.blockedBrowser.body": "Install browser-skill and connect your browser — BOSS直聘/猎聘/智联招聘 block headless and logged-out browsers, so the hunt runs in your own logged-in session.",
+  "explore.blockedBrowser.title": "Browser mode needs the collector",
+  "explore.blockedBrowser.body": "BOSS直聘/猎聘/智联招聘 block headless and logged-out browsers, so the hunt runs in an independent Edge profile via Playwright. This checkout is missing that toolkit — update career-ops to enable browser scans.",
 
   // ── Scan note (empty-state footer) ──
   "explore.scanNoteOne": "Scanned {n}{avail} company{partial}.",
@@ -228,7 +228,7 @@ export const en: Dict = {
   "explore.err.loadFresh": "Couldn't load fresh matches.",
   "explore.err.aiUnavailable": "AI search isn't available.",
   "explore.err.aiFailed": "AI search failed ({status}).",
-  "explore.err.bskMissing": "browser-skill (bsk) not found — install it and connect a browser, then retry.",
+  "explore.err.collectorMissing": "Browser collector not found — update career-ops (Playwright + Edge required) and retry.",
 };
 
 // Simplified Chinese strings. Every key in en must have a matching key here.
@@ -306,8 +306,8 @@ export const zh: Dict = {
   // ── 受阻卡片 ──
   "explore.blocked.title": "AI 搜索需要 CLI",
   "explore.blocked.body": "连接 Claude Code、Gemini 或任意 agent CLI — 你的密钥、你的 token、你的机器。免费扫描无需 CLI 也可用。",
-  "explore.blockedBrowser.title": "浏览器模式需要 browser-skill",
-  "explore.blockedBrowser.body": "安装 browser-skill 并连接你的浏览器 — BOSS直聘/猎聘/智联招聘屏蔽无头与未登录浏览器，因此搜索运行在你自己的登录会话中。",
+  "explore.blockedBrowser.title": "浏览器模式需要采集器",
+  "explore.blockedBrowser.body": "BOSS直聘/猎聘/智联招聘屏蔽无头与未登录浏览器，因此搜索通过 Playwright 驱动独立 Edge 配置运行。当前安装缺少该工具 — 更新 career-ops 以启用浏览器扫描。",
 
   // ── 扫描备注（空状态页脚） ──
   "explore.scanNoteOne": "已扫描 {n}{avail} 家公司{partial}。",
@@ -457,5 +457,5 @@ export const zh: Dict = {
   "explore.err.loadFresh": "无法加载新匹配。",
   "explore.err.aiUnavailable": "AI 搜索不可用。",
   "explore.err.aiFailed": "AI 搜索失败（{status}）。",
-  "explore.err.bskMissing": "未找到 browser-skill（bsk）— 请安装并连接浏览器后重试。",
+  "explore.err.collectorMissing": "未找到浏览器采集器 — 请更新 career-ops（需 Playwright + Edge）后重试。",
 };
