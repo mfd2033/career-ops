@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { CompanyLogo } from "@/components/company-logo";
 import { canonStatus, scoreTone, statusDot } from "@/lib/format";
 import { orderApplications, buildContextQuery } from "@/lib/pipeline-order.mjs";
+import { sourceLabel } from "@/lib/source-label.mjs";
 import { InboxTriage } from "@/components/inbox/inbox-triage";
 import { useJobs } from "@/components/jobs/job-store";
 import { cn } from "@/lib/cn";
@@ -364,6 +365,8 @@ export function PipelineView({
                     </span>
                   </th>
                 ))}
+                {/* 来源列：纯展示，不参与排序，置于日期列后 */}
+                <th className="whitespace-nowrap px-4 py-2.5 font-medium">{t("pipeline.col.source")}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
@@ -409,6 +412,7 @@ export function PipelineView({
                       </span>
                     )}
                   </td>
+                  <td className="whitespace-nowrap px-4 py-3 text-faint">{sourceLabel(r.url) ?? "—"}</td>
                 </tr>
               ))}
             </tbody>
