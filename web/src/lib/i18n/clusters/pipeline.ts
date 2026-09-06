@@ -40,6 +40,7 @@ export const en: Dict = {
   "pipeline.col.score": "score",
   "pipeline.col.status": "status",
   "pipeline.col.date": "date",
+  "pipeline.col.source": "source",
 
   // Canonical status names (display labels; option value stays canonical English)
   "pipeline.status.evaluated": "Evaluated",
@@ -245,6 +246,7 @@ export const zh: Dict = {
   "pipeline.col.score": "分数",
   "pipeline.col.status": "状态",
   "pipeline.col.date": "日期",
+  "pipeline.col.source": "来源",
 
   // Canonical status names
   "pipeline.status.evaluated": "已评估",
