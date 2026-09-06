@@ -123,6 +123,45 @@ async function resolveEvalConfig(base) {
 // normalizedUrl → { score, reportNum }; refreshed from /api/report-status.
 let evaluated = {};
 
+// ---- quick-eval scores ----------------------------------------------------
+
+// normalizedUrl → { score, grade, reason }; persisted in chrome.storage.local so
+// the quick score survives page navigation/reload (the detail page must still
+// show it after a list-page quick eval). Independent of `evaluated` (full report).
+let quickScores = {};
+
+function quickKey(url) {
+  if (typeof url !== "string") return "";
+  try {
+    const u = new URL(url.trim());
+    u.protocol = "https:";
+    u.hostname = u.hostname.toLowerCase();
+    u.hash = "";
+    return u.toString();
+  } catch {
+    return "";
+  }
+}
+
+chrome.storage.local.get(["quickScores"], (r) => {
+  quickScores = r && r.quickScores && typeof r.quickScores === "object" ? r.quickScores : {};
+});
+
+/** Tell every zhipin tab to refresh its quick-score map and re-render. */
+async function notifyQuickUpdated() {
+  const tabs = await chrome.tabs.query({});
+  for (const tab of tabs) {
+    if (!tab.id) continue;
+    if (tab.url && /^https?:\/\/([^/]*\.)?zhipin\.com\//.test(tab.url)) {
+      try {
+        await chrome.tabs.sendMessage(tab.id, { type: "quick-updated" });
+      } catch {
+        /* tab closed or content not injected — ignore */
+      }
+    }
+  }
+}
+
 async function loadEvaluated(base) {
   try {
     const res = await fetch(`${base}/api/report-status`);
@@ -159,6 +198,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         }
         const map = await loadEvaluated(`http://localhost:${port}`);
         sendResponse({ ok: true, connected: true, port, map, keys: Object.keys(map).length });
+        break;
+      }
+      case "get-quick": {
+        sendResponse({ ok: true, map: quickScores, keys: Object.keys(quickScores).length });
         break;
       }
       case "get-diagnostics": {
@@ -244,6 +287,54 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             }
           }
         });
+        break;
+      }
+      case "quick-evaluate": {
+        // 快评：直连本地 /api/quick-eval（DOM 已提取 JD 文本，无需服务端抓取）。
+        // 独立于 single-evaluate；失败只回传给详情页 toast，不越权改跑完整评估。
+        const tabId = sender.tab ? sender.tab.id : null;
+        const sendTab = (ev) => {
+          if (tabId == null) {
+            announce(ev);
+            return;
+          }
+          chrome.tabs.sendMessage(tabId, ev).catch(() => {});
+        };
+        try {
+          const port = await ensureLivePort();
+          const base = `http://localhost:${port}`;
+          const res = await fetch(`${base}/api/quick-eval`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              url: typeof msg.url === "string" ? msg.url : "",
+              title: typeof msg.title === "string" ? msg.title : "",
+              text: typeof msg.text === "string" ? msg.text : "",
+            }),
+            signal: AbortSignal.timeout(8000),
+          });
+          const j = await res.json().catch(() => ({}));
+          if (!res.ok) {
+            const notice =
+              j && j.error === "quickEvalNotConfigured"
+                ? "快评不可用：未配置 AI 密钥（设置页 → 粘贴 AI 密钥）"
+                : "快评失败：" + ((j && j.error) || `HTTP ${res.status}`);
+            sendTab({ type: "quick-eval-error", error: notice });
+            break;
+          }
+          const result = { type: "quick-eval-result", grade: j.grade, score: j.score, reason: j.reason };
+          const key = quickKey(msg.url) || quickKey(msg.title);
+          if (key && j.score != null) {
+            quickScores[key] = { score: j.score, grade: j.grade || "", reason: j.reason || "" };
+            chrome.storage.local.set({ quickScores });
+            notifyQuickUpdated();
+          }
+          announce(result);
+          sendTab(result);
+        } catch (err) {
+          sendTab({ type: "quick-eval-error", error: "快评不可用：本地 web 服务/接口异常" });
+        }
+        sendResponse({ ok: true });
         break;
       }
       default:

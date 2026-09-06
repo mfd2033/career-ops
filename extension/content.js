@@ -11,6 +11,7 @@
 
 // The evaluated map lives in the background; this mirrors it locally on refresh.
 let evaluated = {}; // normalizedUrl → { score, reportNum }
+let quickMap = {}; // normalizedUrl → { score, grade, reason } (快评持久化徽章)
 let inited = false;
 
 // Canonical posting-URL key — mirrors web/src/lib/core/url-key.mjs `normalizeUrl`
@@ -81,6 +82,52 @@ function showToast(text, isError) {
   setTimeout(() => t.remove(), 2600);
 }
 
+const QUICK_ERR_ID = "career-ext-quick-error";
+// 持久错误框（非气泡）：气泡自动消失太快，来不及复制错误信息。此框带「复制」
+// 和「关闭」，停留到用户处理完，可选中文本。
+function showQuickError(text) {
+  let box = document.getElementById(QUICK_ERR_ID);
+  if (box) box.remove();
+  box = document.createElement("div");
+  box.id = QUICK_ERR_ID;
+  box.style.cssText =
+    "position:fixed;top:88px;right:16px;z-index:2147483647;max-width:420px;" +
+    "background:#d93026;color:#fff;border-radius:8px;box-shadow:0 6px 18px rgba(0,0,0,.35);" +
+    "font-family:system-ui,sans-serif;font-size:12px;padding:10px 12px;line-height:1.5;";
+  const label = document.createElement("div");
+  label.textContent = "快评出错（点击复制）";
+  label.style.cssText = "font-weight:700;margin-bottom:6px;font-size:11px;opacity:.9;";
+  const pre = document.createElement("pre");
+  pre.textContent = text;
+  pre.style.cssText =
+    "margin:0;white-space:pre-wrap;word-break:break-all;max-height:180px;overflow:auto;" +
+    "user-select:text;background:rgba(0,0,0,.25);border-radius:6px;padding:8px;";
+  const btnRow = document.createElement("div");
+  btnRow.style.cssText = "margin-top:8px;display:flex;gap:8px;justify-content:flex-end;";
+  const copyBtn = document.createElement("button");
+  copyBtn.textContent = "复制";
+  const closeBtn = document.createElement("button");
+  closeBtn.textContent = "关闭";
+  for (const b of [copyBtn, closeBtn]) {
+    b.style.cssText =
+      "border:none;border-radius:6px;padding:5px 12px;font-size:12px;cursor:pointer;" +
+      "font-family:system-ui,sans-serif;background:#fff;color:#d93026;font-weight:600;";
+  }
+  copyBtn.addEventListener("click", () => {
+    navigator.clipboard.writeText(text).then(() => {
+      copyBtn.textContent = "已复制";
+      setTimeout(() => (copyBtn.textContent = "复制"), 900);
+    });
+  });
+  closeBtn.addEventListener("click", () => box.remove());
+  btnRow.appendChild(copyBtn);
+  btnRow.appendChild(closeBtn);
+  box.appendChild(label);
+  box.appendChild(pre);
+  box.appendChild(btnRow);
+  document.body.appendChild(box);
+}
+
 function openReport(num) {
   chrome.runtime.sendMessage({ type: "open-report", num }, (res) => {
     if (chrome.runtime.lastError || !res || !res.ok) {
@@ -148,6 +195,46 @@ function injectCheckbox(card, key) {
 
 let detailInjected = false;
 let detailEvaluating = false;
+let quickEvaluating = false;
+
+/**
+ * 从详情页 DOM 提取 JD 文本（标题+薪资+描述正文），供快评直连 LLM，免服务端
+ * 二次抓取。描述区选择器尽量宽松：优先含「职位描述/职位直聘描述/岗位职责」标题
+ * 的文本容器，其次常见 .job-sec-text/.job-detail-txt/.text；都找不到则回退标题+
+ * body 紧凑文本。返回 {title,text}，text 为空表示提取失败（按钮置灰）。
+ */
+function extractDetailJd() {
+  const titleEl = document.querySelector("h1") || document.querySelector('[class*="job-name"],[class*="job_title"],[class*="name"]');
+  const title = titleEl ? titleEl.innerText.trim() : "";
+  const priceEl = document.querySelector('[class*="job-price"],[class*="salary"],[class*="job-area"]');
+  const price = priceEl ? priceEl.innerText.trim() : "";
+  // 优先找描述区：遍历元素，取第一个「文本短前缀命中职位描述类词 且 内容足够长」的容器。
+  let desc = "";
+  const descHit = document.querySelector('.job-sec-text, .job-detail-txt, [class*="job-sec"] .text, [class*="job-detail-text"], .text, .desc');
+  if (descHit) {
+    const t = descHit.innerText.trim();
+    if (t.length > 80) desc = t;
+  }
+  if (!desc) {
+    const anchors = ["职位描述", "职位直聘描述", "岗位职责", "职位详情", "职责"];
+    for (const el of document.querySelectorAll("div,section,dl,dd")) {
+      const txt = (el.innerText || "").trim();
+      if (!txt || txt.length < 120) continue;
+      const head = txt.replace(/\s+/g, "").slice(0, 12);
+      if (anchors.some((a) => head.includes(a)) || head.startsWith("职位")) {
+        desc = txt;
+        break;
+      }
+    }
+  }
+  // 组合：标题 + 薪资 + 描述正文。
+  const parts = [title];
+  if (price) parts.push(price);
+  if (desc) parts.push(desc);
+  const text = parts.join("\n").trim().slice(0, 12000);
+  return { title, text };
+}
+
 function injectDetailButton() {
   if (detailInjected) return;
   detailInjected = true;
@@ -174,22 +261,58 @@ function injectDetailButton() {
     });
   });
   document.body.appendChild(btn);
+
+  // 「快评」— 独立按钮，秒出分数徽章，只读（不写 tracker/报告/CV）。
+  const qbtn = document.createElement("button");
+  qbtn.textContent = "快评";
+  qbtn.style.cssText =
+    "position:fixed;right:20px;top:80px;z-index:2147483647;" +
+    "padding:10px 16px;border:none;border-radius:8px;cursor:pointer;" +
+    "background:#7c5cff;color:#fff;font-size:14px;font-weight:600;" +
+    "font-family:system-ui,sans-serif;box-shadow:0 4px 12px rgba(0,0,0,.3);";
+  qbtn.id = "career-ext-quick-btn";
+  qbtn.addEventListener("click", () => {
+    if (quickEvaluating || qbtn.disabled) return;
+    const { title, text } = extractDetailJd();
+    if (!text) {
+      showToast("快评：未能提取职位描述文本", true);
+      return;
+    }
+    quickEvaluating = true;
+    qbtn.disabled = true;
+    qbtn.textContent = "快评中...";
+    chrome.runtime.sendMessage({ type: "quick-evaluate", url: location.href, title, text }, (res) => {
+      if (chrome.runtime.lastError || !res || !res.ok) {
+        quickEvaluating = false;
+        qbtn.disabled = false;
+        qbtn.textContent = "快评";
+        showQuickError((res && res.error) || "快评发起失败：本地 web 服务未运行?");
+      }
+    });
+  });
+  document.body.appendChild(qbtn);
   updateButtonPosition();
 }
 
-// Keep the eval button vertically stacked under the detail badge; when no badge
-// is present it sits in the badge's own spot (top:80px). Re-measured whenever the
-// badge appears/disappears so an evaluation that just completes repositions it.
+// Keep the eval + quick buttons vertically stacked under the detail badge; when
+// no badge is present they sit in the badge's own spot (top:80px). Re-measured
+// whenever the badge appears/disappears so an evaluation repositions them.
 function updateButtonPosition() {
   const btn = document.getElementById("career-ext-eval-btn");
-  if (!btn) return;
+  const qbtn = document.getElementById("career-ext-quick-btn");
+  let top = 80;
   const badge = document.getElementById(DETAIL_BADGE_ID);
+  const qbadge = document.getElementById(DETAIL_QUICK_BADGE_ID);
   if (badge) {
     const r = badge.getBoundingClientRect();
-    btn.style.top = `${Math.round(r.bottom + 8)}px`;
-  } else {
-    btn.style.top = "80px";
+    top = Math.round(r.bottom + 8);
   }
+  if (qbadge) {
+    qbadge.style.top = `${top}px`;
+    top = Math.round(qbadge.getBoundingClientRect().bottom + 8);
+  }
+  if (btn) btn.style.top = `${top}px`;
+  if (qbtn) qbtn.style.top = btn ? `${top + btn.offsetHeight + 10}px` : `${top}px`;
 }
 
 // Detail-page badge: shows the evaluation score for an already-evaluated
@@ -197,6 +320,57 @@ function updateButtonPosition() {
 // opens the report on click. Kept in sync with the evaluated map via
 // refreshDetailBadge() on every applyAllInjections pass.
 const DETAIL_BADGE_ID = "career-ext-detail-badge";
+
+// Detail-page quick badge: shows the quick-eval score (purple pill, standalone
+// from the full-eval badge) once a quick eval has been run for the current URL —
+// even if that quick eval happened on the list page before navigation. Backed by
+// the background's quickScores map (chrome.storage.local), so it survives reload.
+const DETAIL_QUICK_BADGE_ID = "career-ext-detail-quick-badge";
+
+function refreshQuickDetailBadge() {
+  if (!location.pathname.includes("/job_detail/")) return;
+  const q = quickMap[normalizeUrl(location.href)];
+  const existing = document.getElementById(DETAIL_QUICK_BADGE_ID);
+  if (!q || q.score == null) {
+    if (existing) existing.remove();
+    updateButtonPosition();
+    return;
+  }
+  const label = `快评 ${q.score}/5`.trim();
+  if (existing) {
+    if (existing.textContent !== label) {
+      existing.textContent = label;
+      existing.title = q.reason ? `快评：${q.grade} — ${q.reason}` : `快评：${q.grade}`;
+      updateButtonPosition();
+    }
+    return;
+  }
+  const badge = document.createElement("div");
+  badge.id = DETAIL_QUICK_BADGE_ID;
+  badge.textContent = label;
+  badge.title = q.reason ? `快评：${q.grade} — ${q.reason}` : `快评：${q.grade}`;
+  badge.style.cssText =
+    "position:fixed;top:80px;right:20px;z-index:2147483646;" +
+    "cursor:default;font-size:13px;line-height:1;padding:8px 12px;border-radius:999px;" +
+    "background:#7c5cff;color:#fff;font-weight:600;" +
+    "box-shadow:0 4px 12px rgba(0,0,0,.3);font-family:system-ui,sans-serif;";
+  document.body.appendChild(badge);
+  updateButtonPosition();
+}
+
+function refreshQuick() {
+  return new Promise((resolve) => {
+    chrome.runtime.sendMessage({ type: "get-quick" }, (res) => {
+      if (chrome.runtime.lastError || !res || !res.ok) {
+        resolve(false);
+        return;
+      }
+      quickMap = res.map || {};
+      applyAllInjections();
+      resolve(true);
+    });
+  });
+}
 
 function refreshDetailBadge() {
   if (!location.pathname.includes("/job_detail/")) return;
@@ -316,6 +490,21 @@ function currentActiveUrl() {
   return a && a.href ? a.href : null;
 }
 
+/**
+ * 从列表页右栏(被选中职位的描述面板)提取 JD 文本，供「快评」用。回退到 active
+ * 卡片的标题。返回 {title,text}；text 为空表示提取失败。
+ */
+function extractListPaneJd() {
+  const pane = document.querySelector('.job-detail-body, [class*="job-detail-body"], .job-detail-info, [class*="job-sec"]');
+  let text = pane ? pane.innerText.trim() : "";
+  const ac = document.querySelector(`${CARD_SELECTOR}.active`) || document.querySelector(".job-card-wrap.active");
+  const titleEl = ac && (ac.querySelector('[class*="job-name"], [class*="name"]'));
+  const title = titleEl ? titleEl.innerText.trim() : "";
+  // 若描述区太短(没抓到正文)，拼上标题凑足可打分文本。
+  if (!text || text.length < 120) text = [title, text].filter(Boolean).join("\n");
+  return { title, text: text.trim().slice(0, 12000) };
+}
+
 function ensureRightPaneButton() {
   if (location.pathname.includes("/job_detail/")) {
     // Detail page — the dedicated full-page button owns this; don't add the pane one.
@@ -356,6 +545,40 @@ function ensureRightPaneButton() {
     /微信|分享/.test(el.textContent || ""),
   );
   opBar.insertBefore(btn, share || opBar.firstChild);
+
+  // 快评 — 列表右栏秒出分数徽章，独立于「评估本职位」(完整报告)。
+  const qbtn = document.createElement("button");
+  qbtn.id = "career-ext-list-quick-btn";
+  qbtn.textContent = "快评";
+  qbtn.style.cssText =
+    "padding:6px 12px;border:none;border-radius:6px;cursor:pointer;vertical-align:middle;" +
+    "background:#7c5cff;color:#fff;font-size:13px;font-weight:600;margin-left:8px;" +
+    "font-family:system-ui,sans-serif;box-shadow:0 2px 6px rgba(0,0,0,.2);";
+  qbtn.addEventListener("click", () => {
+    if (quickEvaluating || qbtn.disabled) return;
+    const url = currentActiveUrl();
+    if (!url) {
+      showToast("未选中职位，请先在左侧点击一个职位", true);
+      return;
+    }
+    const { title, text } = extractListPaneJd();
+    if (!text) {
+      showToast("快评：未能提取职位描述文本", true);
+      return;
+    }
+    quickEvaluating = true;
+    qbtn.disabled = true;
+    qbtn.textContent = "快评中...";
+    chrome.runtime.sendMessage({ type: "quick-evaluate", url, title, text }, (res) => {
+      if (chrome.runtime.lastError || !res || !res.ok) {
+        quickEvaluating = false;
+        qbtn.disabled = false;
+        qbtn.textContent = "快评";
+        showQuickError((res && res.error) || "快评发起失败：本地 web 服务未运行?");
+      }
+    });
+  });
+  opBar.insertBefore(qbtn, (share && share.nextSibling) || btn.nextSibling);
 }
 
 function applyAllInjections() {
@@ -375,6 +598,7 @@ function applyAllInjections() {
   });
   if (location.pathname.includes("/job_detail/")) injectDetailButton();
   refreshDetailBadge();
+  refreshQuickDetailBadge();
   ensureRightPaneButton();
 }
 
@@ -401,6 +625,48 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       listBtn.textContent = "评估本职位";
     }
     showToast((msg.error || "评估失败"), true);
+    sendResponse({ ok: true });
+    return;
+  }
+  if (msg && msg.type === "quick-updated") {
+    refreshQuick();
+    sendResponse({ ok: true });
+    return;
+  }
+  if (msg && msg.type === "quick-eval-result") {
+    // 快评完成：把分数写进按钮文本 + reason 放 title；同时刷新 quickMap 使详情页
+    // 也能立刻显示快评徽章。不覆盖完整评估。
+    quickEvaluating = false;
+    refreshQuick();
+    const qbtn = document.getElementById("career-ext-quick-btn");
+    if (qbtn) {
+      qbtn.disabled = false;
+      qbtn.textContent = `快评 ${msg.score}/5`;
+      qbtn.title = msg.reason ? `快评：${msg.grade} — ${msg.reason}` : `快评：${msg.grade}`;
+    }
+    const lqbtn = document.getElementById("career-ext-list-quick-btn");
+    if (lqbtn) {
+      lqbtn.disabled = false;
+      lqbtn.textContent = `快评 ${msg.score}/5`;
+      lqbtn.title = msg.reason ? `快评：${msg.grade} — ${msg.reason}` : `快评：${msg.grade}`;
+    }
+    showToast(`快评 ${msg.score}/5 · ${msg.grade}`);
+    sendResponse({ ok: true });
+    return;
+  }
+  if (msg && msg.type === "quick-eval-error") {
+    quickEvaluating = false;
+    const qbtn = document.getElementById("career-ext-quick-btn");
+    if (qbtn) {
+      qbtn.disabled = false;
+      qbtn.textContent = "快评";
+    }
+    const lqbtn = document.getElementById("career-ext-list-quick-btn");
+    if (lqbtn) {
+      lqbtn.disabled = false;
+      lqbtn.textContent = "快评";
+    }
+    showQuickError(msg.error || "快评不可用：本地 web 服务/接口异常");
     sendResponse({ ok: true });
     return;
   }
@@ -560,8 +826,11 @@ function init() {
   });
   observer.observe(document.body, { childList: true, subtree: true });
 
-  // Evening existing + listen for a first sync of the evaluated map.
+  // Even if existing + listen for a first sync of the evaluated map.
   refreshEvaluated().then(() => snap());
+  // Also sync the quick-score map so a detail page opened directly still shows
+  // a previous list-page quick eval's badge.
+  refreshQuick().then(() => snap());
 }
 
 if (document.body) init();

@@ -54,9 +54,14 @@ const PROVIDERS = [
   { id: "openai", label: "OpenAI" },
   { id: "google", label: "Google (Gemini)" },
   { id: "openrouter", label: "OpenRouter" },
+  // agnes 仅用于快评（OpenAI 兼容端点），默认 baseUrl 见 quick-eval.ts。
+  { id: "agnes", label: "Agnes AI" },
 ] as const;
 
 const STORAGE_KEY = "career-ops:config";
+// 快评配置独立存储对象：与 career-ops:config 完全隔离，改快评不影响 CLI 评估引擎。
+// 只存 provider/model/baseUrl，密钥绝不进 localStorage（仅服务端 gitignore 文件持有）。
+const QUICK_STORAGE_KEY = "career-ops:quickeval";
 
 export function ConfigForm() {
   const { t, lang, setLang, defaultLang, setDefaultLang } = useI18n();
@@ -76,6 +81,9 @@ export function ConfigForm() {
   const [modelCliId, setModelCliId] = useState<string>("");
   const [provider, setProvider] = useState("anthropic");
   const [apiKey, setApiKey] = useState("");
+  // 快评专用字段（model/baseUrl），与 CLI 模型的 model 状态隔离。
+  const [quickModel, setQuickModel] = useState("agnes-2.5-flash");
+  const [quickBaseUrl, setQuickBaseUrl] = useState("https://api.agnes-ai.cn/v1");
   const [logos, setLogos] = useState(true);
   const [applyBehavior, setApplyBehavior] = useState<ApplyBehavior>(APPLY_BEHAVIOR_DEFAULT);
   const [scanSource, setScanSource] = useState<ScanSource[]>([...SCAN_SOURCE_DEFAULT]);
@@ -101,6 +109,15 @@ export function ConfigForm() {
         else if (v.model && v.cliId) setModelCliId(v.cliId);
         if (v.provider) setProvider(v.provider);
         if (typeof v.logos === "boolean") setLogos(v.logos);
+      }
+      // 快评配置回显：只读非密钥字段；provider 以快评存储为准（若存在）。
+      const qraw = localStorage.getItem(QUICK_STORAGE_KEY);
+      if (qraw) {
+        const q = JSON.parse(qraw);
+        if (q.provider) setProvider(q.provider);
+        if (q.model) setQuickModel(q.model);
+        if (q.baseUrl) setQuickBaseUrl(q.baseUrl);
+        if (q.mode) setMode(q.mode as Mode);
       }
     } catch {
       /* ignore */
@@ -130,6 +147,31 @@ export function ConfigForm() {
   }, []);
 
   function save() {
+    // 快评（key 模式）：密钥 PUT 到服务端 gitignore 文件，只在前端存非密钥字段。
+    if (mode === "key") {
+      const savedProvider = provider;
+      localStorage.setItem(
+        QUICK_STORAGE_KEY,
+        JSON.stringify({ mode, provider: savedProvider, model: quickModel, baseUrl: quickBaseUrl }),
+      );
+      fetch("/api/quick-config", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          provider: savedProvider,
+          model: quickModel,
+          baseUrl: quickBaseUrl,
+          apiKey,
+        }),
+      })
+        .then((r) => {
+          if (!r.ok) throw new Error(`quick-config ${r.status}`);
+        })
+        .then(() => setSaved(true))
+        .catch(() => setSaved(false));
+      setTimeout(() => setSaved(false), 2000);
+      return; // 快评密钥走服务端，不写入 career-ops:config。
+    }
     // The API key is deliberately NOT persisted: nothing reads it yet (the
     // key/manual panel is unwired) and a secret must never sit in clear-text
     // localStorage. Keys belong in the user's own CLI/provider config.
@@ -202,8 +244,7 @@ export function ConfigForm() {
           onClick={() => setMode("key")}
           icon={KeyRound}
           title={t("config.modeKey")}
-          hint={t("config.comingSoon")}
-          disabled
+          hint={t("config.modeKeyHint")}
         />
         <ModeCard
           active={mode === "manual"}
@@ -347,16 +388,23 @@ export function ConfigForm() {
 
         {mode === "key" && (
           <div className="space-y-5">
-              <div>
-                <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-muted">
-                  {t("config.provider")}
-                </label>
+            <p className="text-xs text-faint">{t("config.quickEvalDesc")}</p>
+            <div>
+              <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-muted">
+                {t("config.provider")}
+              </label>
               <div className="grid gap-2 sm:grid-cols-2">
                 {PROVIDERS.map((p) => (
                   <button
                     key={p.id}
                     type="button"
-                    onClick={() => setProvider(p.id)}
+                    onClick={() => {
+                      setProvider(p.id);
+                      // 切换 provider 时同步默认端点到 baseUrl 输入框（用户仍可改）。
+                      if (p.id === "agnes") setQuickBaseUrl("https://api.agnes-ai.cn/v1");
+                      if (p.id === "openai") setQuickBaseUrl("https://api.openai.com/v1");
+                      if (p.id === "openrouter") setQuickBaseUrl("https://openrouter.ai/api/v1");
+                    }}
                     className={cn(
                       "rounded-xl border px-4 py-2.5 text-left text-sm transition-colors",
                       provider === p.id
@@ -369,11 +417,11 @@ export function ConfigForm() {
                 ))}
               </div>
             </div>
-              <div>
-                <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-muted">
-                  {t("config.pasteKey")}
-                </label>
-                <p className="mb-2 text-xs text-faint">{t("config.bringKey")}</p>
+            <div>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-muted">
+                {t("config.pasteKey")}
+              </label>
+              <p className="mb-2 text-xs text-faint">{t("config.bringKey")}</p>
               <input
                 type="password"
                 value={apiKey}
@@ -385,6 +433,33 @@ export function ConfigForm() {
               <p className="mt-2 text-xs text-faint">
                 {t("config.keyStored")}
               </p>
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-muted">
+                {t("config.quickModel")}
+              </label>
+              <input
+                type="text"
+                value={quickModel}
+                onChange={(e) => setQuickModel(e.target.value)}
+                placeholder="agnes-2.5-flash"
+                autoComplete="off"
+                className="w-full rounded-xl border border-border bg-surface/60 px-4 py-2.5 font-mono text-sm outline-none transition-colors placeholder:text-faint focus:border-brand/50"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-muted">
+                {t("config.quickBaseUrl")}
+              </label>
+              <input
+                type="text"
+                value={quickBaseUrl}
+                onChange={(e) => setQuickBaseUrl(e.target.value)}
+                placeholder="https://api.agnes-ai.cn/v1"
+                autoComplete="off"
+                className="w-full rounded-xl border border-border bg-surface/60 px-4 py-2.5 font-mono text-sm outline-none transition-colors placeholder:text-faint focus:border-brand/50"
+              />
+              <p className="mt-2 text-xs text-faint">{t("config.quickBaseUrlHint")}</p>
             </div>
           </div>
         )}
