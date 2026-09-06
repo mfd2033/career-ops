@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// build-dashboard-ui.mjs — package the career-ops web UI into the self-contained
-// career-dashboard-ui.exe launcher.
+// build-dashboard-ui.mjs — package the career-ops web UI into the lightweight
+// career-dashboard-launcher.exe (no embedded runtime; reads from .dashboard-runtime/).
 //
 // Pipeline:
 //   1. next build (standalone output)   → web/.next/standalone
@@ -9,11 +9,7 @@
 //   4. copy the clean standalone tree  → dashboard-ui/app   (Go embed source)
 //   5. copy the running node binary     → dashboard-ui/node.exe (Go embed source)
 //   6. go-winres make                   → rsrc_windows_amd64.syso (icon + manifest)
-//   7. go build -H windowsgui           → career-dashboard-ui.exe (repo root)
-//
-// Lightweight launcher variant (no embedded runtime):
-//   BUILDFULL=0 node dashboard-ui/build-dashboard-ui.mjs
-//   → career-dashboard-launcher.exe (~9 MB, reads from .dashboard-runtime/)
+//   7. go build -ldflags cacheVersion   → career-dashboard-launcher.exe (repo root)
 //
 // Requires: Node (builds the web app), Go 1.24+, and go-winres (auto-installed
 // on first run into dashboard-ui/.gobin). Run from anywhere:
@@ -28,7 +24,6 @@ const webDir = path.join(root, "web");
 const uiDir = path.join(root, "dashboard-ui");
 const gobinDir = path.join(uiDir, ".gobin");
 const goWinres = path.join(gobinDir, "go-winres.exe");
-const buildFull = process.env.BUILDFULL !== "0";
 
 function run(cmd, cwd, env = {}) {
   console.log(`\n$ ${cmd}`);
@@ -130,17 +125,9 @@ console.log(`✓ prepared runtime cache ${runtimeCacheDir} (v${cacheVersion})`);
 // 6. regenerate the Windows resources (icon + manifest + version) as .syso.
 run(`${goWinres} make --arch amd64`, uiDir);
 
-if (buildFull) {
-  // 7a. Full embedded launcher (~120 MB): node.exe + Next.js bundled inside.
-  run(`go build -ldflags "-H windowsgui -X main.cacheVersion=${cacheVersion}" -o ..\\career-dashboard-ui.exe .`, uiDir);
-  const out = path.join(root, "career-dashboard-ui.exe");
-  const mb = (fs.statSync(out).size / (1024 * 1024)).toFixed(1);
-  console.log(`\n✓ ${out} (${mb} MB)`);
-}
-// 7b. Lightweight launcher (~9 MB): no embedded runtime, reads from cache dir.
-// Same cacheVersion injection as 7a — without it the console variant falls
-// back to newest-by-mtime and a rebuilt launcher keeps serving the stale
-// .dashboard-runtime extraction (same trap the GUI variant's stamp fixes).
+// 7. Lightweight launcher (~9 MB): no embedded runtime, reads from cache dir.
+// cacheVersion injection prevents the launcher falling back to newest-by-mtime
+// and silently serving a stale .dashboard-runtime extraction after a rebuild.
 {
   const out = path.join(root, "career-dashboard-launcher.exe");
   run(`go build -ldflags "-X main.cacheVersion=${cacheVersion}" -o ..\\career-dashboard-launcher.exe .`, uiDir);
