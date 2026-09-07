@@ -53,6 +53,9 @@ const TRACKING_PARAMS = [
   /^pgRef$/i, /^d_sfrom$/i, /^d_ckId$/i, /^d_curPage$/i, /^d_pageSize$/i,
   /^d_headId$/i, /^d_posi$/i, /^skId$/i, /^fkId$/i, /^ckId$/i,
   /^sfrom$/i, /^curPage$/i, /^pageSize$/i, /^index$/i,
+  // 智联 board-specific: 页内跳转锚点带 refcode/srccode/preactionid,其中
+  // preactionid 每次操作即变 uuid。职位详情 URL(/jobdetail/{n}.htm) 本身无参数。
+  /^refcode$/i, /^srccode$/i, /^preactionid$/i,
 ];
 
 /**
