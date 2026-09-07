@@ -266,3 +266,42 @@ test("buildBatchPrompt: still demands the full 10-field TSV row and the honesty 
   assert.match(p, /10 TAB-separated columns/i);
   assert.match(p, /VERDICT:/i);
 });
+
+// ── buildBatchPrompt inline JD (ADR-0005 D4/D5) ──────────────────────────────
+//
+// 浏览器扩展详情页单评估带 {jdText, company}(DOM 提取,绕开登录墙/反爬):
+// 改写第 1 步为「用下方全文,不要 WebFetch」,JD 全文附在末尾;company 作为
+// 精确雇主名指令注入。不传时输出逐字节等于旧版(上面 4 个断言已锁定)。
+
+test("buildBatchPrompt: inline jdText skips WebFetch and appends the posting text", () => {
+  const p = buildBatchPrompt("042", {
+    input: "https://www.liepin.com/job/1998394056.shtml",
+    memory: "",
+    today: "2026-08-14",
+    jdText: "资深前端工程师\n岗位职责：负责核心业务开发。",
+  });
+  // 第 1 步被改写:不再要求 WebFetch
+  assert.ok(!/Use WebFetch to read the posting/i.test(p), "must not ask for WebFetch when jdText is given");
+  assert.match(p, /Verification: inline \(DOM\)/);
+  // JD 全文附在末尾标记内
+  assert.match(p, /=== POSTING TEXT \(inline, provided by the browser extension\) ===/);
+  assert.match(p, /资深前端工程师\n岗位职责：负责核心业务开发。/);
+  assert.match(p, /=== END POSTING TEXT ===/);
+});
+
+test("buildBatchPrompt: no inline markers when jdText is absent", () => {
+  const p = buildBatchPrompt("042", { input: "https://acme.com/jobs/7", memory: "", today: "2026-08-14" });
+  assert.ok(!/POSTING TEXT \(inline/.test(p), "no inline marker without jdText");
+  assert.match(p, /Use WebFetch to read the posting/, "original WebFetch instruction stays");
+});
+
+test("buildBatchPrompt: company injects an exact-name directive", () => {
+  const p = buildBatchPrompt("042", {
+    input: "https://www.liepin.com/job/1998394056.shtml",
+    memory: "",
+    today: "2026-08-14",
+    company: "某科技（北京）有限公司",
+  });
+  assert.match(p, /EMPLOYER \(provided by the browser extension, DOM-extracted\)/);
+  assert.match(p, /某科技（北京）有限公司/);
+});

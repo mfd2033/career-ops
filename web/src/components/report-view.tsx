@@ -8,6 +8,7 @@ import remarkGfm from "remark-gfm";
 import { useEffect, useState } from "react";
 import { prevNavHistory } from "@/lib/nav-history";
 import { readApplyBehavior, APPLY_BEHAVIOR_DEFAULT, type ApplyBehavior } from "@/lib/apply-behavior";
+import { readSavedUnknownEmployer } from "@/lib/saved-cli";
 import type { Application } from "@/lib/career-ops";
 import { Badge } from "@/components/ui/badge";
 import { scoreTone, scoreNum, legitimacyTone, parseReport } from "@/lib/format";
@@ -389,6 +390,14 @@ export function ReportView({
   };
   const meta = report ? parseReport(report) : null;
   const field = (label: string) => meta?.fields.find((f) => f.label === label)?.value;
+  // 未知雇主策略：历史 `?` 行 + 启用了「显示代招名」时，回退用报告 Via 的发帖方名
+  // 实时显示，不改底层数据（默认 `?` 保持现状）。
+  const viaValue = field("Via") ?? "";
+  const companyLabel = (() => {
+    const raw: string | number = app?.company ?? meta?.title ?? id;
+    if (raw === "?" && readSavedUnknownEmployer() === "agency" && viaValue) return viaValue;
+    return raw;
+  })();
   const score = app?.score || field("Score");
   // The tracker Date column keeps the INITIAL evaluation date (#2808, 方向 A);
   // the report's own `Date:` header is the date THIS report was written — for a
@@ -472,9 +481,9 @@ export function ReportView({
       <header className="mt-5">
         <p className="font-mono text-xs uppercase tracking-[0.18em] text-faint">#{id}</p>
         <div className="mt-2 flex items-center gap-3">
-          <CompanyLogo name={app?.company ?? meta?.title ?? `Report #${id}`} size={40} />
+          <CompanyLogo name={typeof companyLabel === "string" ? companyLabel : `Report #${companyLabel}`} size={40} />
           <h1 className="font-display text-3xl tracking-tight text-landing">
-            {app?.company ?? meta?.title ?? `Report #${id}`}
+            {typeof companyLabel === "string" ? companyLabel : `Report #${companyLabel}`}
           </h1>
         </div>
         {app?.role && <p className="mt-1 text-muted">{app.role}</p>}
@@ -491,10 +500,10 @@ export function ReportView({
           {meta?.legitimacy && <Badge tone={legitimacyTone(meta.legitimacy)}>{translateLegitimacy(meta.legitimacy)}</Badge>}
           {app && <StatusSelect n={id} current={app.status} />}
           {app && app.status !== "Discarded" && <SkipFromTracker n={id} />}
-          <GeneratePdfButton n={id} company={app?.company ?? meta?.title ?? id} pdfReady={pdfReady} />
-          <ReevaluateButton id={id} url={url && url.startsWith("http") ? url : undefined} company={app?.company ?? meta?.title ?? id} />
-          {pdfReady && <OpenCvFolderButton company={app?.company ?? meta?.title ?? id} />}
-          <ApplyButton n={id} url={url && url.startsWith("http") ? url : undefined} company={app?.company ?? meta?.title ?? id} pdfReady={pdfReady} />
+          <GeneratePdfButton n={id} company={companyLabel} pdfReady={pdfReady} />
+          <ReevaluateButton id={id} url={url && url.startsWith("http") ? url : undefined} company={companyLabel} />
+          {pdfReady && <OpenCvFolderButton company={typeof companyLabel === "string" ? companyLabel : id} />}
+          <ApplyButton n={id} url={url && url.startsWith("http") ? url : undefined} company={companyLabel} pdfReady={pdfReady} />
         </div>
 
         {app && canDelete && (

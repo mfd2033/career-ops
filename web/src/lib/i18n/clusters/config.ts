@@ -57,6 +57,13 @@ export const en: Dict = {
   "config.scanSourceBsk": "Browser (bsk)",
   "config.scanSourceBskDesc": "Scan the Chinese boards — BOSS直聘, 猎聘, 智联招聘 — through your own logged-in browser. Needs browser-skill.",
 
+  "config.unknownEmployerTitle": "Unknown employer",
+  "config.unknownEmployerDesc": "How an offer shows the company when the employer is hidden (job agency posting). Applies to evaluation reports, the pipeline, and quick evaluation.",
+  "config.unknownEmployerPlaceholder": "Show \"?\"",
+  "config.unknownEmployerPlaceholderDesc": "Display a neutral \"?\" — no employer named.",
+  "config.unknownEmployerAgency": "Show agency",
+  "config.unknownEmployerAgencyDesc": "Display the agency that posted the offer instead.",
+
   "config.defaultLangTitle": "Default display language",
   "config.defaultLangDesc": "Choose the language shown on first load. You can still switch anytime.",
   "config.langEnglish": "English",
@@ -141,6 +148,13 @@ export const zh: Dict = {
   "config.scanSourceAtsDesc": "扫描公开 ATS 网络 — Greenhouse、Lever、Ashby、Workday。纯 HTTP，零 token。",
   "config.scanSourceBsk": "浏览器抓取（bsk）",
   "config.scanSourceBskDesc": "通过你已登录的浏览器扫描国内平台 — BOSS直聘、猎聘、智联招聘。需安装 browser-skill。",
+
+  "config.unknownEmployerTitle": "未知雇主",
+  "config.unknownEmployerDesc": "当招聘信息隐藏终端雇主（代招/猎头代发）时，offer 中公司名如何显示。应用于评估报告、管道与快评。",
+  "config.unknownEmployerPlaceholder": "显示 \"?\"",
+  "config.unknownEmployerPlaceholderDesc": "显示中立占位符 \"?\" — 不透露雇主名。",
+  "config.unknownEmployerAgency": "显示代招方",
+  "config.unknownEmployerAgencyDesc": "改为显示发布该职位的代招方（agency）名称。",
 
   "config.defaultLangTitle": "默认显示语言",
   "config.defaultLangDesc": "选择首次加载时显示的语言。你随时可以切换。",

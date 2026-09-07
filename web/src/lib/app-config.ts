@@ -9,7 +9,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-export type AppConfig = { cliId?: string; model?: string };
+export type UnknownEmployerPolicy = "placeholder" | "agency";
+
+export type AppConfig = { cliId?: string; model?: string; unknownEmployer?: UnknownEmployerPolicy };
+
+export const UNKNOWN_EMPLOYER_OPTIONS: readonly UnknownEmployerPolicy[] = ["placeholder", "agency"];
 
 /** Persistent location for the salvageable web-level config (not the checkout). */
 export function appConfigPath(): string {
@@ -22,6 +26,8 @@ export function readAppConfig(): AppConfig {
     const out: AppConfig = {};
     if (typeof raw.cliId === "string" && raw.cliId) out.cliId = raw.cliId;
     if (typeof raw.model === "string" && raw.model) out.model = raw.model;
+    // 未知雇主策略只认两个白名单枚举；其余值（含脏值）一律忽略。
+    if (UNKNOWN_EMPLOYER_OPTIONS.includes(raw.unknownEmployer)) out.unknownEmployer = raw.unknownEmployer;
     return out;
   } catch {
     return {};

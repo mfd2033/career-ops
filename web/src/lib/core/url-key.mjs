@@ -38,6 +38,12 @@ const TRACKING_PARAMS = [
   // A listing's detail URL carries ?securityId=...&ka=... while the list card
   // link doesn't, so stripping keeps both views on the same dedup key.
   /^securityId$/i, /^ka$/i,
+  // 猎聘 board-specific: 反爬/跟踪参数每次请求变化,strip 后仅留 job/{id}.shtml
+  // 作去重键。skId/fkId/ckId 等价 BOSS 的 securityId。与扩展 site-liepin.js 的
+  // extraTrackingParams 保持同一清单。
+  /^pgRef$/i, /^d_sfrom$/i, /^d_ckId$/i, /^d_curPage$/i, /^d_pageSize$/i,
+  /^d_headId$/i, /^d_posi$/i, /^skId$/i, /^fkId$/i, /^ckId$/i,
+  /^sfrom$/i, /^curPage$/i, /^pageSize$/i, /^index$/i,
 ];
 
 /**

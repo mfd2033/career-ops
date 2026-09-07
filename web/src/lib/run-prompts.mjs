@@ -51,7 +51,23 @@ const SAFE_COMPANY_NAME = /^[\p{L}\p{N} .,&'()+/-]+$/u;
 /** ISO calendar date, the only form the dashboard's POSTED column parses. */
 const ISO_DATE_RE = /^20\d{2}-\d{2}-\d{2}$/;
 
-export function buildPrompt({ kind, input, memory, today, postedAt }) {
+/**
+ * Unknown-employer override for the evaluate prompt. Default ("placeholder",
+ * the "?" sentinel) injects nothing — the worker follows modes/oferta.md. The
+ * "agency" policy tells the worker to name the posting agency instead of "?"
+ * when the terminal employer is genuinely hidden (staffing/agency requisition).
+ *
+ * @param {string | undefined} policy  "placeholder" | "agency" | undefined
+ * @returns {string}
+ */
+function employerDirective(policy) {
+  if (policy !== "agency") return "";
+  return (
+    "\n\nUNKNOWN EMPLOYER POLICY: when the posting leaves the terminal employer unnamed (a staffing / agency / managed-service requisition, e.g. posted via a FESCO-style agency with no end client named), use the POSTING AGENCY as the company — in the report header, the {Company} TSV field, and the report filename slug — instead of the \"?\" sentinel. If a real employer IS named, use that company as usual."
+  );
+}
+
+export function buildPrompt({ kind, input, memory, today, postedAt, unknownEmployer }) {
   const mem = memory.trim() ? `\n\nDurable notes about the user (from their profile):\n${memory.trim()}\n` : "";
   if (kind === "research") {
     return `You are investigating the user's OWN work / portfolio to surface job-search-relevant strengths, headless. Investigate the target (use WebFetch for URLs; read local files if referenced) and report: what it is, why it is impressive, and how to leverage it in their job search — which roles/claims it supports and how to frame it on a CV. Be specific, honest, and encouraging. Report only: never submit, send, or click Apply anywhere, and contact no one — you are investigating the user's own work, not acting on it.${mem}
@@ -131,7 +147,7 @@ End with EXACTLY one final line: VERDICT: {5 if now live, else 1}/5 — {what yo
       {num}\t${today}\t{Company}\t{Role}\t{CanonicalStatus e.g. Evaluated}\t{score}/5\t❌\t[{num}](reports/{num}-{company-slug}-${today}.md)\t{one-line note}${postedSegment}\t{posting URL, or empty}
    d. Merge into the tracker: run \`node merge-tracker.mjs\` (it dedupes by company+role+report-num, validates the status, and writes data/applications.md — NEVER edit applications.md by hand).
 
-3. NEVER submit an application, fill no forms, contact no one. This is evaluation + persistence ONLY.${mem}
+3. NEVER submit an application, fill no forms, contact no one. This is evaluation + persistence ONLY.${mem}${employerDirective(unknownEmployer)}
 
 After everything above is written and merged, output EXACTLY one final line, nothing after it:
 VERDICT: {score}/5 — {reason in 12 words or fewer}
@@ -160,11 +176,20 @@ Posting URL: ${input}`;
  * and pins every `{num}` in the report/tracker templates to the assigned number.
  *
  * @param {string} reportNum  zero-padded 3-digit number the orchestrator reserved
- * @param {{input:string, memory:string, today:string, postedAt?:string}} args
+ * @param {{input:string, memory:string, today:string, postedAt?:string, unknownEmployer?:string, jdText?:string, company?:string}} args
  * @returns {string}
  */
-export function buildBatchPrompt(reportNum, { input, memory, today, postedAt }) {
-  let p = buildPrompt({ kind: "evaluate", input, memory, today, postedAt });
+export function buildBatchPrompt(reportNum, { input, memory, today, postedAt, unknownEmployer, jdText, company }) {
+  let p = buildPrompt({ kind: "evaluate", input, memory, today, postedAt, unknownEmployer });
+  // 内联 JD(浏览器扩展从 DOM 提取,绕开登录墙/反爬):改写第 1 步为「用下方提供
+  // 的全文,不要 WebFetch」;JD 全文附在 prompt 末尾。不传时逐字节保持原样。
+  const jd = typeof jdText === "string" && jdText.trim() ? jdText.trim() : "";
+  if (jd) {
+    p = p.replace(
+      /Use WebFetch to read the posting \(you are headless — Playwright is unavailable, so use WebFetch and mark the report header "Verification: unconfirmed \(batch mode\)"\)\./,
+      'The FULL posting text is provided below (between the "POSTING TEXT (inline)" markers). Do NOT WebFetch it — the page is already read. Mark the report header "Verification: inline (DOM)".',
+    );
+  }
   // Step 2a — stop asking the worker to reserve its own (racing) number.
   p = p.replace(
     /[^\n]*a\. Reserve a report number:.*\n/,
@@ -179,5 +204,14 @@ export function buildBatchPrompt(reportNum, { input, memory, today, postedAt }) 
   // Pin every `{num}` (report filename, TSV first field, report link) to the
   // number the orchestrator actually reserved, so all N workers write
   // DISTINCT reports/rows — no two can collide on the same number.
-  return p.replaceAll("{num}", reportNum);
+  let out = p.replaceAll("{num}", reportNum);
+  if (jd) {
+    out += `\n\n=== POSTING TEXT (inline, provided by the browser extension) ===\n${jd}\n=== END POSTING TEXT ===`;
+  }
+  // DOM 提取的雇主名精确可靠(D5):要求 worker 直接用,优先于 LLM 猜测/策略兜底。
+  const emp = typeof company === "string" && company.trim() ? company.trim() : "";
+  if (emp) {
+    out += `\n\nEMPLOYER (provided by the browser extension, DOM-extracted): use THIS exact name as the company in the report header, the {Company} TSV field, and the report filename slug — ${emp}`;
+  }
+  return out;
 }
