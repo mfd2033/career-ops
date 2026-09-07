@@ -1,6 +1,6 @@
 # Career-Ops（求职评估与招聘站扩展）
 
-用户求职自动化的领域模型：职位评估、报告与 tracker 持久化，以及侵入招聘站页面（BOSS直聘、猎聘）的浏览器扩展就地评估。核心职责：给职位打分、把结果写成报告并合并进 tracker、让用户在原站页面上直接看到已评估状态。
+用户求职自动化的领域模型：职位评估、报告与 tracker 持久化，以及侵入招聘站页面（BOSS直聘、猎聘、智联招聘）的浏览器扩展就地评估。核心职责：给职位打分、把结果写成报告并合并进 tracker、让用户在原站页面上直接看到已评估状态。
 
 ## 评估动作
 
@@ -19,7 +19,7 @@ _Avoid_: 已打过分、已评过
 ## 职位标识
 
 **归一 URL（normalizeUrl）**:
-把职位 URL 降为稳定比较键（strip 跟踪/反爬参数）的算法。`web/src/lib/core/url-key.mjs` 是根 `url-key.mjs` 的镜像，必须逐字节对齐（parity 测试守卫）；扩展 core 内联副本与 web 镜像同规则。BOSS 专属参数 `securityId`/`ka`，猎聘 `pgRef`/`skId`/`fkId`/`ckId`/`d_*`/`sfrom` 等。作用是判定「已评估」与去重的 key，不是展示用 URL。
+把职位 URL 降为稳定比较键（strip 跟踪/反爬参数）的算法。`web/src/lib/core/url-key.mjs` 是根 `url-key.mjs` 的镜像，必须逐字节对齐（parity 测试守卫）；扩展 core 内联副本与 web 镜像同规则。BOSS 专属参数 `securityId`/`ka`，猎聘 `pgRef`/`skId`/`fkId`/`ckId`/`d_*`/`sfrom`，智联 `refcode`/`srccode`/`preactionid`（智联职位详情 URL 本身无参数）。作用是判定「已评估」与去重的 key，不是展示用 URL。
 _Avoid_: 规范化 URL、标准 URL
 
 **报告号（reportNum）**:
@@ -33,7 +33,7 @@ _Avoid_: 已评列表
 ## 扩展构件
 
 **site 适配对象（site adapter）**:
-每招聘站导出的适配对象契约（`hostMatch`、`cardSelector`、`linkSelector`、`isDetailPath`、`extractDetailJd`、`extractPosterName`、`extraTrackingParams` 等），供站点无关的 core 消费。BOSS 额外提供 `extractListPaneJd`/`ensureRightPaneButton`（右栏面板），猎聘不提供（无右栏）。
+每招聘站导出的适配对象契约（`hostMatch`、`cardSelector`、`linkSelector`、`isDetailPath`、`extractDetailJd`、`extractPosterName`、`extraTrackingParams` 等），供站点无关的 core 消费。BOSS 直聘与智联是两栏布局（左列表+右描述面板），额外提供 `extractListPaneJd`/`ensureRightPaneButton`（右栏面板，列表快评入口）；猎聘无右栏，两者均不提供。智联卡片无职位 `<a>`，额外靠 `positionList` 数据源取职位 URL。
 _Avoid_: site 插件、适配器
 
 **徽章（badge）**:
@@ -45,7 +45,7 @@ content script 从详情页 DOM 提取的 `{title, text}` 文本。快评必带�
 _Avoid_: JD 文本、抓取文本
 
 **发帖方（poster）**:
-content script 尽力提取的发帖公司名（BOSS 选择器集合；猎聘 `.recruiter-container a` 去"· "前缀）。快评按未知雇主策略前缀"发布方公司："；完整评估随 `company` 字段传后端作报告公司。
+content script 尽力提取的发帖公司名（BOSS 选择器集合；猎聘 `.recruiter-container a` 去"· "前缀；智联 `DIV.company-info`）。快评按未知雇主策略前缀"发布方公司："；完整评估随 `company` 字段传后端作报告公司。
 _Avoid_: 公司名（报告概念才叫 company）
 
 **扩展后台（background）**:

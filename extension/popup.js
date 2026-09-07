@@ -213,8 +213,9 @@ copyDiagBtn.addEventListener("click", async () => {
     footTipEl.textContent = "诊断已复制 ✓";
   } catch {
     // Clipboard API can be unavailable in some popup contexts; fall back to
-    // a select-and-copy of the pre element.
-    diagEl.select();
+    // a select-and-copy of the pre element. `<pre>` 没有 .select()，须先判断，
+    // 否则抛 TypeError 变成 unhandled rejection。
+    if (typeof diagEl.select === "function") diagEl.select();
     document.execCommand("copy");
     footTipEl.textContent = "诊断已复制 ✓";
   }

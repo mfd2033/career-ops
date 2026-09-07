@@ -18,6 +18,11 @@
       "matches": ["https://*.liepin.com/*"],
       "js": ["core.js", "site-liepin.js"],
       "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://*.zhaopin.com/*"],
+      "js": ["core.js", "site-zhaopin.js"],
+      "run_at": "document_idle"
     }
   ],
   "action": {

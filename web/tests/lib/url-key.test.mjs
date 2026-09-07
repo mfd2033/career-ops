@@ -100,3 +100,31 @@ test("liepin: a NON-tracking retained query param survives beside stripped ones"
   assert.equal(webKey(url), expected);
   assert.equal(webKey(url), coreKey(url));
 });
+
+// 智联 ADR-0006 D5：页内跳转锚点带 refcode/srccode/preactionid(尤其 preactionid
+// 每次操作即变 uuid),strip 后职位详情 URL 保持干净;web 镜像与 core 逐字节一致。
+test("zhaopin: all ADR-0006 tracking params strip, on both sides", () => {
+  const TRACKING = "refcode=4019&srccode=401901&preactionid=7c0a3b98-0000-1000-8000-000000000000";
+  const url = `https://www.zhaopin.com/companydetail/CZ445905420.htm?${TRACKING}`;
+  const expected = "https://www.zhaopin.com/companydetail/CZ445905420.htm";
+  assert.equal(webKey(url), expected);
+  assert.equal(webKey(url), coreKey(url), "parity: web mirror must match core");
+});
+
+test("zhaopin: jobdetail posting URL is clean even with the preactionid that anchors carry", () => {
+  // 详情页 URL 本身无参数,但页内锚点可能带;strip 后仅留 /jobdetail/{number}.htm。
+  const url =
+    "https://www.zhaopin.com/jobdetail/CC445905420J40842265001.htm?refcode=1&preactionid=abc123";
+  const expected = "https://www.zhaopin.com/jobdetail/CC445905420J40842265001.htm";
+  assert.equal(webKey(url), expected);
+  assert.equal(webKey(url), coreKey(url));
+});
+
+test("zhaopin: retained search-query params (jl/kw) survive beside stripped beacon params", () => {
+  // jl/kw 是搜索查询条件,非反爬统计参数,应保留;只删 refcode/srccode/preactionid。
+  const url =
+    "https://www.zhaopin.com/jobs?jl=489&kw=%E5%B7%A5%E7%A8%8B%E5%B8%88&refcode=4019&preactionid=xyz";
+  const expected = "https://www.zhaopin.com/jobs?jl=489&kw=%E5%B7%A5%E7%A8%8B%E5%B8%88";
+  assert.equal(webKey(url), expected);
+  assert.equal(webKey(url), coreKey(url));
+});

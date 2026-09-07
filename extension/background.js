@@ -27,15 +27,24 @@ let probing = null;
 // debug box, since BOSS blocks DevTools by resizing/kicking the page).
 let lastContentDiag = null;
 
+// 最近一次版本探测失败的根因：http 状态下标为 `http:{status}`，网络/CORS 错误标记为 `net:{msg}`，CORS 拦截常表现为 TypeError。
+let lastProbeErr = null;
+
 async function versionOk(base) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), PROBE_TIMEOUT_MS);
   try {
     const res = await fetch(`${base}/api/version`, { signal: ctrl.signal });
-    if (!res.ok) return false;
+    if (!res.ok) {
+      lastProbeErr = `http:${res.status}`;
+      return false;
+    }
     const j = await res.json();
+    lastProbeErr = null;
     return !!(j && j.version);
-  } catch {
+  } catch (e) {
+    // CORS 拦截、host_permissions 缺失、拒绝连接等都会走到这里
+    lastProbeErr = `net:${(e && e.message) || e}`;
     return false;
   } finally {
     clearTimeout(timer);
@@ -48,7 +57,7 @@ function probePort() {
   if (probing) return probing;
   const attempts = [];
   for (let port = PORT_MIN; port <= PORT_MAX; port++) {
-    attempts.push(versionOk(`http://localhost:${port}`).then((ok) => (ok ? port : null)));
+    attempts.push(versionOk(`http://127.0.0.1:${port}`).then((ok) => (ok ? port : null)));
   }
   probing = Promise.all(attempts).then((found) => {
     probing = null;
@@ -76,7 +85,7 @@ async function needPort() {
  */
 async function ensureLivePort() {
   console.log("[bg] ensureLivePort cachedPort=", cachedPort);
-  if (cachedPort && (await versionOk(`http://localhost:${cachedPort}`))) {
+  if (cachedPort && (await versionOk(`http://127.0.0.1:${cachedPort}`))) {
     console.log("[bg] cached port live:", cachedPort);
     return cachedPort;
   }
@@ -149,12 +158,12 @@ chrome.storage.local.get(["quickScores"], (r) => {
   quickScores = r && r.quickScores && typeof r.quickScores === "object" ? r.quickScores : {};
 });
 
-/** Tell every supported-board tab (zhipin/liepin) to refresh quick-score + re-render. */
+/** Tell every supported-board tab (zhipin/liepin/zhaopin) to refresh quick-score + re-render. */
 async function notifyQuickUpdated() {
   const tabs = await chrome.tabs.query({});
   for (const tab of tabs) {
     if (!tab.id) continue;
-    if (tab.url && /^https?:\/\/([^/]*\.)?(zhipin|liepin)\.com\//.test(tab.url)) {
+    if (tab.url && /^https?:\/\/([^/]*\.)?(zhipin|liepin|zhaopin)\.com\//.test(tab.url)) {
       try {
         await chrome.tabs.sendMessage(tab.id, { type: "quick-updated" });
       } catch {
@@ -198,7 +207,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           sendResponse({ ok: false, connected: false, map: {} });
           break;
         }
-        const map = await loadEvaluated(`http://localhost:${port}`);
+        const map = await loadEvaluated(`http://127.0.0.1:${port}`);
         sendResponse({ ok: true, connected: true, port, map, keys: Object.keys(map).length });
         break;
       }
@@ -213,6 +222,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           connected: port != null,
           port,
           cachedPort,
+          extensionId: (chrome.runtime && chrome.runtime.id) || null,
+          versionErr: lastProbeErr,
           evalKeys: Object.keys(evaluated).length,
           contentDiag: lastContentDiag,
         });
@@ -246,8 +257,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             sendResponse({ ok: false, error: "无效报告号" });
             break;
           }
-          await chrome.tabs.create({ url: `http://localhost:${port}/report/${num}` });
-          sendResponse({ ok: true, reportUrl: `http://localhost:${port}/report/${num}` });
+          await chrome.tabs.create({ url: `http://127.0.0.1:${port}/report/${num}` });
+          sendResponse({ ok: true, reportUrl: `http://127.0.0.1:${port}/report/${num}` });
         } catch (err) {
           sendResponse({ ok: false, error: err.message });
         }
@@ -256,7 +267,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       case "refresh-evaluated": {
         try {
           const port = await ensureLivePort();
-          await loadEvaluated(`http://localhost:${port}`);
+          await loadEvaluated(`http://127.0.0.1:${port}`);
           await notifyContentScripts();
           sendResponse({ ok: true });
         } catch (err) {
@@ -307,7 +318,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         };
         try {
           const port = await ensureLivePort();
-          const base = `http://localhost:${port}`;
+          const base = `http://127.0.0.1:${port}`;
           // 快评跟随未知雇主策略：「显示代招名」时，把发帖公司名前缀进 JD 文本，
           // 使快评与完整评估口径一致（代招/"?" 不两张皮）。未配置策略 → 不前缀。
           let text = typeof msg.text === "string" ? msg.text : "";
@@ -357,12 +368,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   return true; // async sendResponse
 });
 
-/** Tell every supported-board tab (zhipin/liepin) to re-fetch evaluated + re-render. */
+/** Tell every supported-board tab (zhipin/liepin/zhaopin) to re-fetch evaluated + re-render. */
 async function notifyContentScripts() {
   const tabs = await chrome.tabs.query({});
   for (const tab of tabs) {
     if (!tab.id) continue;
-    if (tab.url && /^https?:\/\/([^/]*\.)?(zhipin|liepin)\.com\//.test(tab.url)) {
+    if (tab.url && /^https?:\/\/([^/]*\.)?(zhipin|liepin|zhaopin)\.com\//.test(tab.url)) {
       try {
         await chrome.tabs.sendMessage(tab.id, { type: "evaluated-updated" });
       } catch {
@@ -406,7 +417,7 @@ async function runBatch(urls, cliId, model, opts) {
     announce({ stage: "error", error: "没有可评估的职位" });
     return;
   }
-  const base = `http://localhost:${await ensureLivePort()}`;
+  const base = `http://127.0.0.1:${await ensureLivePort()}`;
 
   const cfg = await resolveEvalConfig(base);
   const body = { urls, cliId: cliId || cfg.cliId, model: model || cfg.model || null };
