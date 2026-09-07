@@ -92,10 +92,12 @@ async function ensureLivePort() {
 async function resolveEvalConfig(base) {
   let cliId = null;
   let model = null;
+  let unknownEmployer = null;
   try {
     const cfg = await (await fetch(`${base}/api/config`)).json();
     if (cfg && typeof cfg.cliId === "string" && cfg.cliId) cliId = cfg.cliId;
     if (cfg && typeof cfg.model === "string" && cfg.model) model = cfg.model;
+    if (cfg && cfg.unknownEmployer === "agency") unknownEmployer = "agency";
   } catch {
     /* server config missing — fall back below */
   }
@@ -115,7 +117,7 @@ async function resolveEvalConfig(base) {
       /* no CLIs readable */
     }
   }
-  return { cliId, model };
+  return { cliId, model, unknownEmployer };
 }
 
 // ---- evaluated map --------------------------------------------------------
@@ -147,12 +149,12 @@ chrome.storage.local.get(["quickScores"], (r) => {
   quickScores = r && r.quickScores && typeof r.quickScores === "object" ? r.quickScores : {};
 });
 
-/** Tell every zhipin tab to refresh its quick-score map and re-render. */
+/** Tell every supported-board tab (zhipin/liepin) to refresh quick-score + re-render. */
 async function notifyQuickUpdated() {
   const tabs = await chrome.tabs.query({});
   for (const tab of tabs) {
     if (!tab.id) continue;
-    if (tab.url && /^https?:\/\/([^/]*\.)?zhipin\.com\//.test(tab.url)) {
+    if (tab.url && /^https?:\/\/([^/]*\.)?(zhipin|liepin)\.com\//.test(tab.url)) {
       try {
         await chrome.tabs.sendMessage(tab.id, { type: "quick-updated" });
       } catch {
@@ -274,7 +276,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         }
         sendResponse({ ok: true });
         const tabId = sender.tab ? sender.tab.id : null;
-        runBatch([url], msg.cliId, msg.model).catch(async (err) => {
+        // 内联 JD/雇主名(详情页 DOM 提取,猎聘等登录墙站点绕开服务端抓取)。
+        const jdText = typeof msg.jdText === "string" && msg.jdText.trim() ? msg.jdText.trim() : "";
+        const company = typeof msg.company === "string" && msg.company.trim() ? msg.company.trim() : "";
+        runBatch([url], msg.cliId, msg.model, { jdText, company }).catch(async (err) => {
           announce({ stage: "error", error: err.message });
           // The action popup auto-closes when the user clicks the page button, so
           // `announce`'s eval port is usually gone. Route the failure back to the
@@ -303,13 +308,21 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         try {
           const port = await ensureLivePort();
           const base = `http://localhost:${port}`;
+          // 快评跟随未知雇主策略：「显示代招名」时，把发帖公司名前缀进 JD 文本，
+          // 使快评与完整评估口径一致（代招/"?" 不两张皮）。未配置策略 → 不前缀。
+          let text = typeof msg.text === "string" ? msg.text : "";
+          const poster = typeof msg.poster === "string" ? msg.poster.trim() : "";
+          const cfg = await resolveEvalConfig(base);
+          if (cfg.unknownEmployer === "agency" && poster) {
+            text = `发布方公司：${poster}\n${text}`;
+          }
           const res = await fetch(`${base}/api/quick-eval`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               url: typeof msg.url === "string" ? msg.url : "",
               title: typeof msg.title === "string" ? msg.title : "",
-              text: typeof msg.text === "string" ? msg.text : "",
+              text,
             }),
             signal: AbortSignal.timeout(8000),
           });
@@ -344,12 +357,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   return true; // async sendResponse
 });
 
-/** Tell every zhipin tab to re-fetch the evaluated map and re-render badges. */
+/** Tell every supported-board tab (zhipin/liepin) to re-fetch evaluated + re-render. */
 async function notifyContentScripts() {
   const tabs = await chrome.tabs.query({});
   for (const tab of tabs) {
     if (!tab.id) continue;
-    if (tab.url && /^https?:\/\/([^/]*\.)?zhipin\.com\//.test(tab.url)) {
+    if (tab.url && /^https?:\/\/([^/]*\.)?(zhipin|liepin)\.com\//.test(tab.url)) {
       try {
         await chrome.tabs.sendMessage(tab.id, { type: "evaluated-updated" });
       } catch {
@@ -388,7 +401,7 @@ function announce(ev) {
 }
 
 /** Stream /api/batch-evaluate NDJSON to the popup, then refresh the map. */
-async function runBatch(urls, cliId, model) {
+async function runBatch(urls, cliId, model, opts) {
   if (!Array.isArray(urls) || urls.length === 0) {
     announce({ stage: "error", error: "没有可评估的职位" });
     return;
@@ -397,56 +410,70 @@ async function runBatch(urls, cliId, model) {
 
   const cfg = await resolveEvalConfig(base);
   const body = { urls, cliId: cliId || cfg.cliId, model: model || cfg.model || null };
+  // 内联 JD/雇主名(仅详情页单评估场景;多 URL 批评估不带)。
+  if (opts && opts.jdText) body.jdText = opts.jdText;
+  if (opts && opts.company) body.company = opts.company;
 
   announce({ stage: "start", total: urls.length });
-  const res = await fetch(`${base}/api/batch-evaluate`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok || !res.body) {
-    let reason = `评估接口返回 ${res.status}`;
-    try {
-      const j = await res.json();
-      if (j && j.error) reason = j.error;
-    } catch {
-      /* non-json fallback */
-    }
-    throw new Error(reason);
-  }
-
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let buf = "";
-  let doneEv = null;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buf += decoder.decode(value, { stream: true });
-    let nl;
-    while ((nl = buf.indexOf("\n")) !== -1) {
-      const line = buf.slice(0, nl).trim();
-      buf = buf.slice(nl + 1);
-      if (!line) continue;
-      let ev;
+  // SW 保活:评估常跑 20-40s+,而 SW 空闲 30s 就会被 Chrome 终止 —— 正在读取的
+  // 流式响应不算活动事件,SW 一死此 fetch 连接被切断,服务端 ReadableStream.cancel()
+  // 触发 → worker 被 SIGTERM → 评估中断,且 evaluated-updated 永不送达 → 按钮卡
+  // "评估中"。每 20s 调一次平台 API 制造真实活动事件,把 SW 保活到流读完。
+  const keepalive = setInterval(() => {
+    chrome.runtime.getPlatformInfo().catch(() => {});
+  }, 20000);
+  try {
+    const res = await fetch(`${base}/api/batch-evaluate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok || !res.body) {
+      let reason = `评估接口返回 ${res.status}`;
       try {
-        ev = JSON.parse(line);
+        const j = await res.json();
+        if (j && j.error) reason = j.error;
       } catch {
-        continue;
+        /* non-json fallback */
       }
-      // map web event → popup-progress shape
-      if (ev.type === "status") announce({ stage: "status", text: ev.label });
-      else if (ev.type === "text") announce({ stage: "text", text: ev.text });
-      else if (ev.type === "keepalive") continue;
-      else if (ev.type === "item")
-        announce({ stage: "item", url: ev.url, ok: !!ev.ok, score: ev.score ?? null });
-      else if (ev.type === "done") doneEv = { ok: ev.ok, failed: ev.failed };
-      else if (ev.type === "error") announce({ stage: "error", error: ev.msg });
+      throw new Error(reason);
     }
-  }
-  announce({ stage: "done", ok: doneEv ? doneEv.ok : 0, failed: doneEv ? doneEv.failed : 0 });
 
-  // Freshly evaluated → reload map and refresh badges on every zhipin tab.
-  await loadEvaluated(base);
-  await notifyContentScripts();
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    let doneEv = null;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let nl;
+      while ((nl = buf.indexOf("\n")) !== -1) {
+        const line = buf.slice(0, nl).trim();
+        buf = buf.slice(nl + 1);
+        if (!line) continue;
+        let ev;
+        try {
+          ev = JSON.parse(line);
+        } catch {
+          continue;
+        }
+        // map web event → popup-progress shape
+        if (ev.type === "status") announce({ stage: "status", text: ev.label });
+        else if (ev.type === "text") announce({ stage: "text", text: ev.text });
+        else if (ev.type === "keepalive") continue;
+        else if (ev.type === "item")
+          announce({ stage: "item", url: ev.url, ok: !!ev.ok, score: ev.score ?? null });
+        else if (ev.type === "done") doneEv = { ok: ev.ok, failed: ev.failed };
+        else if (ev.type === "error") announce({ stage: "error", error: ev.msg });
+      }
+    }
+    announce({ stage: "done", ok: doneEv ? doneEv.ok : 0, failed: doneEv ? doneEv.failed : 0 });
+
+    // Freshly evaluated → reload map and refresh badges on every zhipin tab.
+    await loadEvaluated(base);
+    await notifyContentScripts();
+  } finally {
+    clearInterval(keepalive);
+  }
 }

@@ -16,7 +16,7 @@ import { cn } from "@/lib/cn";
 import { CadenceSettings } from "@/components/followups/cadence-settings";
 import { JdRulesSettings } from "@/components/jd-rules-settings";
 import { JobTargetSettings } from "@/components/job-target-settings";
-import { persistCliId, persistModel, readSavedCliId, readSavedModel } from "@/lib/saved-cli";
+import { persistCliId, persistModel, readSavedCliId, readSavedModel, readSavedUnknownEmployer, persistUnknownEmployer, type UnknownEmployerPolicy } from "@/lib/saved-cli";
 import { resolveModelPicker } from "@/lib/model-picker.mjs";
 import {
   readApplyBehavior,
@@ -87,6 +87,7 @@ export function ConfigForm() {
   const [logos, setLogos] = useState(true);
   const [applyBehavior, setApplyBehavior] = useState<ApplyBehavior>(APPLY_BEHAVIOR_DEFAULT);
   const [scanSource, setScanSource] = useState<ScanSource[]>([...SCAN_SOURCE_DEFAULT]);
+  const [unknownEmployer, setUnknownEmployer] = useState<UnknownEmployerPolicy>("placeholder");
   const [saved, setSaved] = useState(false);
 
   // Load saved prefs
@@ -124,6 +125,7 @@ export function ConfigForm() {
     }
     setApplyBehavior(readApplyBehavior());
     setScanSource(readScanSources());
+    setUnknownEmployer(readSavedUnknownEmployer());
   }, []);
 
   // Detect installed CLIs
@@ -147,6 +149,8 @@ export function ConfigForm() {
   }, []);
 
   function save() {
+    // 未知雇主策略独立于评估引擎，任何模式保存都生效（快评跟随走 /api/config）。
+    persistUnknownEmployer(unknownEmployer);
     // 快评（key 模式）：密钥 PUT 到服务端 gitignore 文件，只在前端存非密钥字段。
     if (mode === "key") {
       const savedProvider = provider;
@@ -618,6 +622,28 @@ export function ConfigForm() {
           );
         })}
       </div>
+
+      {/* 未知雇主处理策略：offer 隐藏终端雇主时代招方如何显示 */}
+      <label className="mt-8 mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-muted">
+        {t("config.unknownEmployerTitle")}
+      </label>
+      <p className="mb-3 text-xs text-faint">{t("config.unknownEmployerDesc")}</p>
+      <div className="relative">
+        <select
+          value={unknownEmployer}
+          onChange={(e) => setUnknownEmployer(e.target.value as UnknownEmployerPolicy)}
+          className="w-full appearance-none rounded-xl border border-border bg-surface/60 px-4 py-3 pr-9 text-sm text-foreground outline-none transition-colors focus:border-brand/50 focus-visible:ring-2 focus-visible:ring-brand/40"
+        >
+          <option value="placeholder">{t("config.unknownEmployerPlaceholder")}</option>
+          <option value="agency">{t("config.unknownEmployerAgency")}</option>
+        </select>
+        <ChevronDown className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-faint" />
+      </div>
+      <p className="mt-2 text-xs text-faint">
+        {unknownEmployer === "placeholder"
+          ? t("config.unknownEmployerPlaceholderDesc")
+          : t("config.unknownEmployerAgencyDesc")}
+      </p>
 
       <JobTargetSettings />
 

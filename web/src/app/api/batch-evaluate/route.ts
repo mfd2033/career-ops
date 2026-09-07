@@ -24,10 +24,11 @@ import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { resolveCli } from "@/lib/clis";
-import { withModelFlag } from "@/lib/run-cli-support.mjs";
+import { withModelFlag, isFatalGenericStderr } from "@/lib/run-cli-support.mjs";
 import { isReservedReportFile } from "@/lib/report-files.mjs";
 import { spawnHeadlessCli } from "@/lib/spawn-cli.mjs";
 import { careerOpsRoot, readMemory, readInbox, readScanDates } from "@/lib/career-ops";
+import { readAppConfig } from "@/lib/app-config";
 import { buildBatchPrompt } from "@/lib/run-prompts.mjs";
 import { acquireTrackerWrite, releaseTrackerWrite } from "@/lib/core/run-registry";
 import { registerActiveRun, unregisterActiveRun } from "@/lib/core/active-runs";
@@ -42,7 +43,7 @@ const MAX_PARALLEL = 3; // bounded worker pool; batch-runner.sh uses 1, this sta
 const execFileAsync = promisify(execFile);
 
 export async function POST(req: Request) {
-  let body: { urls?: unknown; cliId?: unknown; model?: unknown };
+  let body: { urls?: unknown; cliId?: unknown; model?: unknown; jdText?: unknown; company?: unknown };
   try {
     body = await req.json();
   } catch {
@@ -57,6 +58,13 @@ export async function POST(req: Request) {
   if (urls.length > MAX_URLS) {
     return new Response(JSON.stringify({ error: `too many URLs (max ${MAX_URLS} per batch)` }), { status: 400 });
   }
+  // 内联 JD 文本(浏览器扩展 DOM 提取,绕过登录墙):只对单 URL 评估有意义 —
+  // 一条 jdText 对应一个职位,多 URL 混用会让其余 worker 的提示错位。
+  const jdText = typeof body.jdText === "string" ? body.jdText : "";
+  if (jdText.trim() && urls.length !== 1) {
+    return new Response(JSON.stringify({ error: "jdText is only valid with exactly one URL" }), { status: 400 });
+  }
+  const company = typeof body.company === "string" ? body.company : "";
   const cliId = typeof body.cliId === "string" ? body.cliId : "";
   const model = typeof body.model === "string" ? body.model : "";
   const resolved = cliId ? resolveCli(cliId) : null;
@@ -188,11 +196,16 @@ export async function POST(req: Request) {
             // to the web UI even though it never touched this process's job-store.
             registerActiveRun(url, num);
             const postedAt = inboxPostedAt.get(url) ?? scanDates.get(url);
+            // 内联 JD/雇主名只对唯一 URL(扩展详情页单评估)有意义;多 URL 时
+            // 上面的 400 已拦截,这里无需按 i 区分。
             const prompt = buildBatchPrompt(String(num).padStart(3, "0"), {
               input: url,
               memory: readMemory(),
               today,
               postedAt,
+              unknownEmployer: readAppConfig().unknownEmployer,
+              jdText: jdText.trim() || undefined,
+              company: company.trim() || undefined,
             });
             // Plain-text argv (spec.args), not streamArgs: the batch route reads
             // the agent's output as text and extracts the VERDICT line — per-event
@@ -206,8 +219,23 @@ export async function POST(req: Request) {
               const vm = chunk.match(/VERDICT:[^\n]*/i);
               if (vm) verdict = vm[0];
             });
+            // 逐行分类 stderr,而非裸嗅探 "error|fatal":openCode/Claude 会把进度
+            // 遥测(横幅、模型行、MCP 透传)写到 stderr,裸词会误判干净运行为失败 —
+            // 与 /api/run 同一套 per-CLI 分类器(spec.stderrIsFatal,回退 generic)。
+            // 分块可能切在词中间,先按行缓冲再分类;关闭时冲刷残留行。
+            const isFatalStderr = spec.stderrIsFatal ?? isFatalGenericStderr;
+            let stderrBuf = "";
+            const flagStderrLine = (line: string) => {
+              if (line.trim() && isFatalStderr(line)) sawError = true;
+            };
             child.stderr?.on("data", (chunk: string) => {
-              if (/error|fatal/i.test(chunk)) sawError = true;
+              stderrBuf += chunk;
+              let nl;
+              while ((nl = stderrBuf.indexOf("\n")) !== -1) {
+                const line = stderrBuf.slice(0, nl);
+                stderrBuf = stderrBuf.slice(nl + 1);
+                flagStderrLine(line);
+              }
             });
             child.on("error", (err) => {
               unregisterActiveRun(url);
@@ -217,6 +245,10 @@ export async function POST(req: Request) {
             });
             child.on("close", (code) => {
               unregisterActiveRun(url);
+              if (stderrBuf) {
+                flagStderrLine(stderrBuf);
+                stderrBuf = "";
+              }
               resolve({ cleanExit: code === 0, sawError, verdict });
               children.delete(child);
             });

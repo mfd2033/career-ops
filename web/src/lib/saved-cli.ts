@@ -56,6 +56,34 @@ export function persistModel(model: string) {
   }
 }
 
+/** 未知雇主策略的合法取值（与 /api/config / AppConfig 白名单一致）。 */
+export const UNKNOWN_EMPLOYER_OPTIONS = ["placeholder", "agency"] as const;
+export type UnknownEmployerPolicy = (typeof UNKNOWN_EMPLOYER_OPTIONS)[number];
+
+export function readSavedUnknownEmployer(): UnknownEmployerPolicy {
+  try {
+    const raw = localStorage.getItem(CONFIG_KEY);
+    const v: unknown = raw ? JSON.parse(raw).unknownEmployer : "";
+    return UNKNOWN_EMPLOYER_OPTIONS.includes(v as UnknownEmployerPolicy)
+      ? (v as UnknownEmployerPolicy)
+      : "placeholder";
+  } catch {
+    return "placeholder";
+  }
+}
+
+/** 持久化未知雇主策略到本地 + 服务端 /api/config（供完整评估 prompt 注入与快评拉取）。 */
+export function persistUnknownEmployer(policy: UnknownEmployerPolicy) {
+  try {
+    const raw = localStorage.getItem(CONFIG_KEY);
+    const prev = raw ? JSON.parse(raw) : {};
+    localStorage.setItem(CONFIG_KEY, JSON.stringify({ ...prev, mode: prev.mode || "cli", unknownEmployer: policy }));
+    pushServerConfig({ unknownEmployer: policy });
+  } catch {
+    /* quota / private mode */
+  }
+}
+
 export function pickSoleInstalled(
   clis: { id: string; installed?: boolean }[] | undefined,
 ): string | null {
