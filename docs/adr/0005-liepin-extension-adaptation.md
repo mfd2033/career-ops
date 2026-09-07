@@ -1,6 +1,6 @@
 # ADR-0005：浏览器扩展适配猎聘（liepin.com）——站点解耦与内联评估
 
-- 状态：提议（Proposed）
+- 状态：已接受（Accepted）
 - 日期：2026-09-07
 - 相关：ADR-0002（BOSS 直聘扩展）、ADR-0001（浏览器全量采集）、`/api/batch-evaluate`、`extension/*`、`web/src/lib/core/url-key.mjs`
 
@@ -145,3 +145,28 @@ background 的 `quick-updated` / `evaluated-updated` 广播对象从 `*.zhipin.c
 - 猎聘批量评估（列表多选）——BOSS 侧勾选框本就 dormant，猎聘不复刻。
 - 后端采集侧 `zh-jobs.mjs` 的 `/a/` 路径正则修复——采集独立链路，后续处理。
 - 移动端 / 非 Chromium 浏览器。
+
+## 实施记录（2026-09-07）
+
+全部决策（D1–D9）已落地并验证：
+
+- **D1/D2**：`content.js` 拆为 `core.js` + `site-boss.js` + `site-liepin.js`；manifest 双 content_scripts entry。
+- **D3**：猎聘详情页「评估本职位」+「快评」按钮与双徽章；搜索页卡片已评估徽章；无右栏能力（core `typeof` 守卫）。
+- **D4/D5**：`single-evaluate`/`/api/batch-evaluate` 支持可选 `jdText`+`company`；`buildBatchPrompt` 改写第 1 步为「用提供的 JD 文本，不要 WebFetch」；`company` 走 `extractPosterName()`。猎聘完整评估实测出报告（#134，`Verification: inline (DOM)`），缺字段标注「未提取」。
+- **D7**：`extraTrackingParams` 14 项清单同步进 web 镜像与根 `url-key.mjs`；新增 parity 测试锁死。
+- **D8**：background 广播（`quick-updated`/`evaluated-updated`）覆盖 `*.zhipin.com` + `*.liepin.com`。
+
+### 超出 ADR 的后续修复（同一实施批次）
+
+- **BOSS 也启用 `evaluateInlineJd`**：原 ADR 只给猎聘内联，但 BOSS 的 WebFetch 同样被风控拦截返回空 → agent 落 `browser-extract` 卡死（实测 #136 卡 10 分钟两次）。给 `site-boss.js` 补 `evaluateInlineJd: true` 并让列表右栏按钮内联 `extractListPaneJd` + `extractPosterName`，根治评估卡死。
+- **background SW keepalive**：批评估流式期间每 20s `getPlatformInfo()` 防空闲终止（否则 `evaluated-updated` 永不送达、按钮卡「评估中」）。
+- **batch-evaluate 按 CLI 分类 stderr**：裸 `/error|fatal/i` 把 opencode 进度遥测误判为致命错误（报告已写却标 NOT recorded，工作器列表误消失）→ 改为 per-CLI `stderrIsFatal`（仅 auth/quota 判致命）。
+- **评估完成自动打开报告页**：`finalizeDetail` 去掉 `confirm`，收尾直接 `openReport(num)` 新标签，补上工作器列表临时卡消失的完成反馈。
+
+### 自动化测试（ADR「测试」节落地）
+
+- `web/tests/lib/liepin-site.test.mjs`（新增）：`isDetailPath`（`/job/`+`/a/`、列表路径排除）、site 契约形状、`extraTrackingParams` 全量、`evaluateInlineJd`、BOSS-only 可选键缺失。
+- `web/tests/lib/url-key.test.mjs`（扩展）：猎聘全量参数 strip → `job/{id}.shtml`/`a/{id}.shtml`、web 镜像与 core parity、保留参数不清除。
+- `site-liepin.js` 增加 node 测试桥（无 `window.__careerExtCore` 时 `module.exports` 纯函数），浏览器行为不变。
+- 全量：482 测试通过，`npm run typecheck` 无错。
+

@@ -14,8 +14,6 @@
 (function () {
   "use strict";
 
-  const C = window.__careerExtCore;
-
   // 猎聘搜索页卡片容器：外层带每次加载随机变化的哈希 class，不能依赖前缀以外
   // 的部分；职位链接稳定锚点是 a[data-nick="job-detail-job-info"]。
   const CARD_SELECTOR = "[class*='job-card-pc-container']";
@@ -123,5 +121,13 @@
     extractPosterName,
   };
 
-  C.init(LIEPIN_SITE);
+  // 浏览器环境: 交给 core 启动站点注入; 非浏览器(node 单元测试)只导出纯函数,
+  // 不引用 window/document/location。
+  if (typeof window === "undefined" || !window.__careerExtCore) {
+    if (typeof module !== "undefined" && module.exports) {
+      module.exports = { LIEPIN_SITE, isDetailPath, cardIsList, cardUrl, extractDetailJd, extractPosterName };
+    }
+    return;
+  }
+  window.__careerExtCore.init(LIEPIN_SITE);
 })();
