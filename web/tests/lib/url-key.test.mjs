@@ -72,3 +72,31 @@ test("unparseable / non-http(s) input keys to '' on both sides (NO KEY IS NOT A 
   assert.equal(webKey(null), "");
   assert.equal(webKey(undefined), "");
 });
+
+// 猎聘 ADR-0005 D7：全量反爬/跟踪参数 strip 后仅留 /job/{id}.shtml（或 /a/{id}.shtml），
+// web 镜像与 core 必须逐字节一致——否则 /api/report-status 已评估判定漂移。
+test("liepin: all ADR-0005 tracking params strip to job/{id}.shtml, on both sides", () => {
+  const TRACKING =
+    "pgRef=1&d_sfrom=search_feed&d_ckId=abc&d_curPage=0&d_pageSize=40&d_headId=xyz" +
+    "&d_posi=0&skId=sk123&fkId=fk123&ckId=ck123&sfrom=search_job_pc&curPage=0" +
+    "&pageSize=40&index=5";
+  const url = `https://www.liepin.com/job/1985305711.shtml?${TRACKING}`;
+  const expected = "https://www.liepin.com/job/1985305711.shtml";
+  assert.equal(webKey(url), expected);
+  assert.equal(webKey(url), coreKey(url), "parity: web mirror must match core");
+});
+
+test("liepin: /a/{id}.shtml recommendation variant strips the same params", () => {
+  const url = "https://www.liepin.com/a/1985305711.shtml?pgRef=1&skId=sk123&curPage=0";
+  const expected = "https://www.liepin.com/a/1985305711.shtml";
+  assert.equal(webKey(url), expected);
+  assert.equal(webKey(url), coreKey(url));
+});
+
+test("liepin: a NON-tracking retained query param survives beside stripped ones", () => {
+  // 确认 strip 只删反爬参数,不清掉无关保留参数(与核心 denylist 语义一致)。
+  const url = "https://www.liepin.com/job/1985305711.shtml?pgRef=1&sl=active";
+  const expected = "https://www.liepin.com/job/1985305711.shtml?sl=active";
+  assert.equal(webKey(url), expected);
+  assert.equal(webKey(url), coreKey(url));
+});
