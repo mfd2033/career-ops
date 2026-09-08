@@ -126,6 +126,7 @@ data/model-blacklist.json
 # IDE-specific local config
 .idea/
 .vscode/
+.trae/
 
 # Agent skill storage (local installations; share via skills-lock.json)
 .agents/skills/*
@@ -210,6 +211,9 @@ career-dashboard-ui.exe~
 career-dashboard-launcher.exe~
 # 根目录级 UI 截图 / 一次性图片（不入库），如 uu-job-header.png、config-model-select.png
 /*.png
+
+# One-off experiment scripts (dev scratch, never commit)
+experiments/
 
 # Log / error scratch files
 update-apply*.log
