@@ -81,8 +81,26 @@
   /**
    * 尽力提取发帖公司名。详情页公司块在 .recruiter-container a[href*="/company/"]，
    * 文本常带"· "前缀。取不到返回空串（快评跟随策略时退回不前缀）。
+   *
+   * 策略：先限在职位详情主区域内找，避免页面上推荐职位/侧边推荐等干扰区域的公司名
+   * 被首选匹配；找不到再回退全局搜索。
    */
   function extractPosterName() {
+    // 职位详情主区域容器（class 随站点改版可能变化，取宽匹配）。
+    const detailArea = document.querySelector(
+      '.job-apply-container, [class*="job-apply"], [class*="job-detail"]'
+    );
+    if (detailArea) {
+      const el = detailArea.querySelector(
+        '.recruiter-container a[href*="/company/"], a[href*="/company/"], [class*="company-name"]'
+      );
+      if (el) {
+        let t = (el.innerText || el.textContent || "").trim();
+        t = t.replace(/^[·\s.]+\s*/, "").trim();
+        if (t) return t.slice(0, 40);
+      }
+    }
+    // 回退：全局找第一个匹配（最后手段）。
     const sel = [
       '.recruiter-container a[href*="/company/"]',
       'a[href*="/company/"]',
@@ -92,7 +110,6 @@
     ].join(",");
     const el = document.querySelector(sel);
     if (!el) return "";
-    // 去"· "类分隔前缀（猎聘公司块文本形如 "· 字节跳动"）。
     let t = (el.innerText || el.textContent || "").trim();
     t = t.replace(/^[·\s.]+\s*/, "").trim();
     return t.slice(0, 40);
