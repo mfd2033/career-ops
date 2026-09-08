@@ -193,6 +193,7 @@ export function ConfigForm() {
         logos,
         applyBehavior,
         scanSource: cleanScanSources(scanSource),
+        unknownEmployer,
       }),
     );
     // The persisted value is now the "current model" — only after Save.
