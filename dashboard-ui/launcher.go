@@ -82,7 +82,12 @@ func main() {
 		return
 	}
 
-	port := pickFreePort()
+	port, err := pickFreePort()
+	if err != nil {
+		fatal("无法启动 dashboard：\n\n" + err.Error() +
+			"\n\n请结束占用 3000-3040 任一端口的进程后重试。")
+		return
+	}
 	cmd := startServer(nodePath, serverDir, careerRoot, port)
 	if cmd == nil {
 		return
@@ -175,20 +180,20 @@ func setupTrayLog(dir string) {
 	log.Printf("launcher started: pid=%d", os.Getpid())
 }
 
-func pickFreePort() int {
+// pickFreePort returns the first free port in 3000-3040 — the exact range the
+// browser extension probes (extension/background.js PORT_MIN..PORT_MAX). A port
+// outside that range would be invisible to the extension ("web 服务未运行"
+// forever), so when every port in the range is taken we must NOT fall back to an
+// OS-assigned port; the caller surfaces the collision instead.
+func pickFreePort() (int, error) {
 	for p := 3000; p <= 3040; p++ {
 		ln, err := net.Listen("tcp", "127.0.0.1:"+strconv.Itoa(p))
 		if err == nil {
 			_ = ln.Close()
-			return p
+			return p, nil
 		}
 	}
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		return 3000
-	}
-	defer ln.Close()
-	return ln.Addr().(*net.TCPAddr).Port
+	return 0, fmt.Errorf("端口 3000-3040 全部被占用（浏览器扩展只探测该范围，范围外的端口将无法连接）")
 }
 
 func httpAlive(port int) bool {
@@ -294,7 +299,13 @@ func watchServer(curCmd *atomic.Pointer[exec.Cmd], serviceExit chan<- error) {
 
 func restartServer(curCmd *atomic.Pointer[exec.Cmd], nodePath, serverDir, careerRoot, runtimeDir string, port int) int {
 	old := curCmd.Load()
-	newPort := pickFreePort()
+	newPort, err := pickFreePort()
+	if err != nil {
+		// 重启只发生在托盘菜单，此时没有 fatal 的消息框路径 — 记日志并保留旧端口，
+		// 让现有服务继续跑，而不是把 server 杀掉后卡死。
+		log.Printf("tray: restart aborted: %v", err)
+		return port
+	}
 	cmd := startServer(nodePath, serverDir, careerRoot, newPort)
 	if cmd == nil {
 		return port

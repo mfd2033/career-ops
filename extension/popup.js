@@ -59,6 +59,7 @@ async function paintDiag() {
     connected: d.connected,
     port: d.port,
     cachedPort: d.cachedPort,
+    versionErr: d.versionErr,
     evalKeys: d.evalKeys,
   };
   if (d.contentDiag) base.contentDiag = d.contentDiag;

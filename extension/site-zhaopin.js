@@ -171,12 +171,30 @@
   /**
    * 尽力提取发帖公司名。详情页公司块 DIV.company-info，文本形如
    * "天原集团 已上市 · 1000-9999人 · …"，公司名在首段。取不到返回空串。
+   *
+   * 策略：先限在职位详情主区域（.job-detail-panel / .describtion-card）内找，
+   * 避免页面上推荐职位/侧边推荐等干扰区域的公司名被首选匹配；找不到再回退全局搜索。
    */
   function extractPosterName() {
+    // 职位详情主区域容器（class 随站点改版可能变化，取宽匹配）。
+    const detailArea = document.querySelector(
+      '.job-detail-panel, .describtion-card, [class*="job-detail"], [class*="description"]'
+    );
+    if (detailArea) {
+      const el = detailArea.querySelector(
+        ".company-info, .job-company-info, [class*='company-info']"
+      );
+      if (el) {
+        let t = (el.innerText || el.textContent || "").trim();
+        t = t.split(/\s{2,}|[·|/,，,]/)[0] || "";
+        t = t.replace(/^\s+|\s+$/g, "").trim();
+        if (t) return t.slice(0, 40);
+      }
+    }
+    // 回退：全局找第一个匹配（最后手段）。
     const el = document.querySelector(".company-info, .job-company-info, [class*='company-info']");
     if (!el) return "";
     let t = (el.innerText || el.textContent || "").trim();
-    // 首段即公司名：按空白/常见分隔符切第一段。
     t = t.split(/\s{2,}|[·|/,，,]/)[0] || "";
     t = t.replace(/^\s+|\s+$/g, "").trim();
     return t.slice(0, 40);

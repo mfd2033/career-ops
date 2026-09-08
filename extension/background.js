@@ -18,7 +18,10 @@
 
 const PORT_MIN = 3000;
 const PORT_MAX = 3040;
-const PROBE_TIMEOUT_MS = 900;
+// Chromium 对 127.0.0.1 等私有地址的首次连接有 ~0.6-1.2s 预热延迟（PNA/IP 决策，
+// 不发 OPTIONS，同一浏览器进程内仅首次生效）。900ms 超时会恰好截断冷启动探测，
+// 导致"服务未运行"误报，故放宽到 3s。
+const PROBE_TIMEOUT_MS = 3000;
 
 let cachedPort = null;
 let probing = null;
@@ -51,17 +54,30 @@ async function versionOk(base) {
   }
 }
 
-/** Yes the first live port in 3000-3040 (all probed concurrently, first ok wins). */
-function probePort() {
-  if (cachedPort) return Promise.resolve(cachedPort);
-  if (probing) return probing;
+/** Sweep 3000-3040 once, return first live port (or null). */
+function sweepPorts() {
   const attempts = [];
   for (let port = PORT_MIN; port <= PORT_MAX; port++) {
     attempts.push(versionOk(`http://127.0.0.1:${port}`).then((ok) => (ok ? port : null)));
   }
-  probing = Promise.all(attempts).then((found) => {
+  return Promise.all(attempts).then((found) => found.find((p) => p != null) ?? null);
+}
+
+/**
+ * First live port in 3000-3040 (all probed concurrently, first ok wins).
+ * 冷启动时 Chromium 对私有地址首次连接有预热延迟，第一轮可能整体超时；
+ * 等预热完成再重扫一轮，避免把"刚启动的 web 服务"误判为未运行。
+ */
+function probePort() {
+  if (cachedPort) return Promise.resolve(cachedPort);
+  if (probing) return probing;
+  probing = sweepPorts().then(async (port) => {
+    if (port == null) {
+      await new Promise((r) => setTimeout(r, 250));
+      port = await sweepPorts();
+    }
     probing = null;
-    cachedPort = found.find((p) => p != null) ?? null;
+    cachedPort = port;
     return cachedPort;
   });
   return probing;
@@ -74,7 +90,7 @@ function invalidatePort() {
 
 async function needPort() {
   const port = await probePort();
-  if (port == null) throw new Error("本地 web 服务未运行（扫描 localhost:3000-3040 未命中）");
+  if (port == null) throw new Error("本地 web 服务未运行（扫描 127.0.0.1:3000-3040 未命中）");
   return port;
 }
 

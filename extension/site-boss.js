@@ -79,15 +79,32 @@
   /**
    * 尽力提取发帖公司名（详情页职位下方的公司块）。代招页发帖方恒在但 DOM 结构随
    * BOSS 改版变动，故选择器取宽、取不到返回空串（快评跟随策略时退回不前缀）。
+   *
+   * 策略：先限在职位详情主区域（.job-detail / .job-detail-banner）内找，避免页面
+   * 上推荐职位/看了又看等干扰区域的公司名被首选匹配；找不到再回退全局搜索。
    */
   function extractPosterName() {
+    // 职位详情主区域容器（class 随 BOSS 改版可能变化，取宽匹配）。
+    const detailArea = document.querySelector(
+      '.job-detail, .job-detail-banner, [class*="job-detail"], [class*="job-banner"]'
+    );
+    if (detailArea) {
+      const el = detailArea.querySelector(
+        '[class*="company-name"], [class*="company"] .name, .name-box .name, .job-co-name'
+      );
+      if (el) {
+        const t = (el.innerText || el.textContent || "").trim();
+        if (t) return t.slice(0, 40);
+      }
+    }
+    // 回退：全局找第一个匹配（最后手段）。
     const sel = [
       '[class*="company-name"]',
       '[class*="poster-name"]',
-      '[class*="company_info"] .name',
-      '.company-info .name',
-      '.name-box .name',
       '.job-co-name',
+      '.name-box .name',
+      '.company-info .name',
+      '[class*="company_info"] .name',
       '[class*="job"] [class*="company"] .name a',
     ].join(",");
     const el = document.querySelector(sel);

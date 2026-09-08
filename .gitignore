@@ -139,6 +139,7 @@ skills-lock.json
 # CLI-specific local config
 .claude/settings.local.json
 .claude/memory/
+.claude/.headroom_wrap_*
 .opencode/settings.local.json
 .opencode/memory/
 # OpenCode project config (often holds personal MCP/model/per-machine prefs).
