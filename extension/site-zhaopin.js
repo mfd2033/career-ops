@@ -253,15 +253,28 @@
       }
     };
 
-    const made = (id, text, q) => {
-      if (document.getElementById(id)) return null;
+    // 创建/取回按钮：已存在时返回既有元素，不重复创建。listener 绑定与创建
+    // 解耦，统一走 bindOnce —— 只有全新实例才绑定，既有实例直接跳过。
+    const make = (id, text, q) => {
+      const existing = document.getElementById(id);
+      if (existing) return existing;
       const b = C.makeButton({ id, text, css: q ? QUICK_BUTTON_CSS : BUTTON_CSS });
       panel.appendChild(b);
       return b;
     };
-    const btn = made(LIST_EVAL_BTN_ID, "评估本职位", false) || document.getElementById(LIST_EVAL_BTN_ID);
+    // 一次性绑定 click：同一按钮实例只绑一次监听器。防止 observer / applyAllInjections
+    // 反复调用 ensureRightPaneButton 时，对已存在于 DOM 的按钮叠加监听器 —— 否则
+    // 一次点击触发多个 handler、对同一职位派发多次评估（报告号 226→243 持续
+    // 增长即此缺陷）。面板若重建销毁旧按钮，新按钮无 dataset.extBound 标记，
+    // 会重新绑定，覆盖重建场景。
+    const bindOnce = (btn, tag, handler) => {
+      if (btn.dataset.extBound) return;
+      btn.dataset.extBound = tag;
+      btn.addEventListener("click", handler);
+    };
+    const btn = make(LIST_EVAL_BTN_ID, "评估本职位", false);
     if (btn) {
-      btn.addEventListener("click", () => {
+      bindOnce(btn, "eval", () => {
         const el = document.getElementById(LIST_EVAL_BTN_ID);
         const url = currentActiveUrl();
         if (!url) {
@@ -285,9 +298,9 @@
         }, extra);
       });
     }
-    const qbtn = made(LIST_QUICK_BTN_ID, "快评", true) || document.getElementById(LIST_QUICK_BTN_ID);
+    const qbtn = make(LIST_QUICK_BTN_ID, "快评", true);
     if (qbtn) {
-      qbtn.addEventListener("click", () => {
+      bindOnce(qbtn, "quick", () => {
         if (C.isQuickEvaluating() || qbtn.disabled) return;
         const url = currentActiveUrl();
         if (!url) {
@@ -310,7 +323,7 @@
         });
       });
     }
-    // 面板每次重建/换选都重排（made 命中已有元素时重算 top/left 仍安全幂等）。
+    // 面板每次重建/换选都重排（top/left 计算幂等，重复执行安全）。
     if (btn && qbtn) positionPaneButtons(btn, qbtn);
   }
 
