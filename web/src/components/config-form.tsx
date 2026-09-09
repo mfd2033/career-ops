@@ -32,10 +32,14 @@ import {
   SCAN_SOURCE_DEFAULT,
   type ScanSource,
 } from "@/lib/scan-mode";
+import { readScanMax, persistScanMax, SCAN_MAX_DEFAULT } from "@/lib/scan-max.mjs";
 import { useI18n } from "@/lib/i18n/context";
 
 type ModelOption = { id: string; label: string };
 type ModelMeta = { flag: string; default: string; options: ModelOption[] };
+
+/** 浏览器扫描三站采集上限的站点 key（与 scan-max.mjs 白名单一致）。 */
+type BrowserSourceId = "zhipin" | "liepin" | "zhaopin";
 
 type Cli = {
   id: string;
@@ -87,6 +91,7 @@ export function ConfigForm() {
   const [logos, setLogos] = useState(true);
   const [applyBehavior, setApplyBehavior] = useState<ApplyBehavior>(APPLY_BEHAVIOR_DEFAULT);
   const [scanSource, setScanSource] = useState<ScanSource[]>([...SCAN_SOURCE_DEFAULT]);
+  const [scanMax, setScanMax] = useState<Record<BrowserSourceId, number>>({ ...SCAN_MAX_DEFAULT });
   const [unknownEmployer, setUnknownEmployer] = useState<UnknownEmployerPolicy>("placeholder");
   const [saved, setSaved] = useState(false);
 
@@ -125,6 +130,7 @@ export function ConfigForm() {
     }
     setApplyBehavior(readApplyBehavior());
     setScanSource(readScanSources());
+    setScanMax(readScanMax() as Record<BrowserSourceId, number>);
     setUnknownEmployer(readSavedUnknownEmployer());
   }, []);
 
@@ -151,6 +157,8 @@ export function ConfigForm() {
   function save() {
     // 未知雇主策略独立于评估引擎，任何模式保存都生效（快评跟随走 /api/config）。
     persistUnknownEmployer(unknownEmployer);
+    // 浏览器扫描每站采集上限同样独立于评估引擎，任何模式保存都生效。
+    persistScanMax(scanMax);
     // 快评（key 模式）：密钥 PUT 到服务端 gitignore 文件，只在前端存非密钥字段。
     if (mode === "key") {
       const savedProvider = provider;
@@ -620,6 +628,36 @@ export function ConfigForm() {
                 {s === "ats" ? t("config.scanSourceAtsDesc") : t("config.scanSourceBskDesc")}
               </span>
             </button>
+          );
+        })}
+      </div>
+
+      {/* 浏览器扫描每站采集上限：分页型平台(猎聘)大关键词会撞 400 默认上限截掉末页,
+          此处按站点覆盖。猎聘默认 1200, BOSS/智联懒加载保持 400。*/}
+      <label className="mt-8 mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-muted">
+        {t("config.scanMaxTitle")}
+      </label>
+      <p className="mb-3 text-xs text-faint">{t("config.scanMaxDesc")}</p>
+      <div className="grid gap-2 sm:grid-cols-3">
+        {(Object.keys(SCAN_MAX_DEFAULT) as BrowserSourceId[]).map((src) => {
+          const label = src === "zhipin" ? "BOSS直聘" : src === "liepin" ? "猎聘" : "智联招聘";
+          return (
+            <label key={src} className="block rounded-xl border border-border bg-surface/50 px-4 py-3">
+              <span className="mb-1 block text-sm font-medium text-foreground">{label}</span>
+              <input
+                type="number"
+                min={1}
+                step={100}
+                value={scanMax[src]}
+                onChange={(e) => {
+                  const n = parseInt(e.target.value, 10);
+                  const next = { ...scanMax };
+                  next[src] = Number.isFinite(n) && n > 0 ? n : SCAN_MAX_DEFAULT[src];
+                  setScanMax(next);
+                }}
+                className="w-full rounded-lg border border-border bg-surface/60 px-3 py-2 text-sm text-foreground outline-none transition-colors focus:border-brand/50 focus-visible:ring-2 focus-visible:ring-brand/40"
+              />
+            </label>
           );
         })}
       </div>

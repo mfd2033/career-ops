@@ -677,15 +677,25 @@
       scan.holdTicks -= 1;
       return;
     }
+    const quiet = Date.now() - scan.lastNewAt;
+    // 翻页后主动全量重扫当前页卡片(不依赖 MutationObserver 捕获)。猎聘 SPA 翻页
+    // 复用卡片节点/列表容器时 childList 只报增删,textContent 替换或同层节点复用
+    // 会被 observer 漏掉 → 漏采整页。URL 去重保证重扫幂等,首次进累积器才计新卡。
+    // 仅在 URL 已切到新页(与点击时不同)才消费 pendingRescan —— 翻页未完成(还停
+    // 旧页)时不浪费全扫,留待下一 tick 新页就绪后再扫,避免扫到空/旧列表。
+    if (scan.pendingRescan && location.href !== scan.lastClickUrl) {
+      scan.pendingRescan = false;
+      document.querySelectorAll(site.cardSelector).forEach((c) => scanCollect(c));
+    }
     const nextBtn = site.findNextPageBtn ? site.findNextPageBtn() : null;
     if (!nextBtn) {
       // 无下一页控件 = 已到末页。该页新卡已采(或本就没有),等待静默收尾。
-      if (Date.now() - scan.lastNewAt > SCAN_QUIET_MS) finishScan("paged");
+      if (quiet > SCAN_QUIET_MS) finishScan("paged");
       return;
     }
     // 末页判定兜底:控件存在但被禁用(点击无效果) → 视为无下一页。
     if (nextBtn.disabled || (nextBtn.getAttribute && nextBtn.getAttribute("aria-disabled") === "true")) {
-      if (Date.now() - scan.lastNewAt > SCAN_QUIET_MS) finishScan("paged");
+      if (quiet > SCAN_QUIET_MS) finishScan("paged");
       return;
     }
     // 翻页节流:距上次点击不足最小间隔则等待(给 MutationObserver 采当前页时间)。
@@ -693,6 +703,13 @@
     try {
       nextBtn.click();
       scan.lastPageClickAt = Date.now();
+      // 点击变换新页后 URL/页面异步渲染,期间「无新卡」是正常的 —— 立即把 lastNewAt
+      // 拉回当下,避免旧页最后一张卡的时间戳被误判为"已静默 8s"而提前收尾,漏采
+      // 刚加载的下一页。新页卡经 MutationObserver 采入后会继续刷新 lastNewAt。
+      // pendingRescan=true 让下一 tick 主动全扫新页卡片,双保险兜 observer 漏采。
+      scan.lastNewAt = Date.now();
+      scan.pendingRescan = true;
+      scan.lastClickUrl = location.href;
     } catch {
       /* 点击场景:元素在点击瞬间失效(页面重渲染),交给下次 tick 重试 */
     }
@@ -754,7 +771,7 @@
 
   /** 开始一轮采集(scanId 为空时生成一次会话 id)。智联需先经 ensureZpState 刷新
    *  data-zpstate url 缓存(isolated world 读不到页面 state),其它站无此钩子直接开跑。 */
-  async function startScan(rawScanId) {
+  async function startScan(rawScanId, maxCount) {
     if (!SCAN || !site) return;
     if (scan) return; // 已在采集,幂等
     if (site.isDetailPath(location.pathname)) return;
@@ -768,8 +785,12 @@
     scan = {
       scanId: rawScanId && String(rawScanId).trim() ? String(rawScanId).trim() : `ext-scan-${Date.now()}`,
       ctx: typeof site.buildScanCityMap === "function" ? { cityMap: site.buildScanCityMap() } : {},
-      acc: SCAN.createScanAccumulator({ normalizeKey: normalizeUrl }),
+      // maxCount 覆盖硬编码 SCAN_MAX:分页型平台(猎聘)大关键词 >400 条时不被截末页。
+      // 未传(旧版本/手动扫)回落 scan-pure 默认。
+      acc: SCAN.createScanAccumulator({ normalizeKey: normalizeUrl, maxCount }),
       lastNewAt: Date.now(),
+      pendingRescan: false, // 首屏由下方初始 forEach 采;翻页后才置 true 主动重扫
+      lastClickUrl: "",
       hasScrolled: false,
       noMoveTicks: 0,
       holdTicks: 0,
@@ -834,7 +855,7 @@
         sendResponse({ ok: false, error: "需在列表页才能采集" });
         return true;
       }
-      startScan(msg.scanId).then(() => {
+      startScan(msg.scanId, typeof msg.maxCount === "number" && msg.maxCount > 0 ? msg.maxCount : undefined).then(() => {
         sendResponse({ ok: true, scanId: scan ? scan.scanId : null });
       });
       return true;

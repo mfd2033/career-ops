@@ -23,6 +23,7 @@ import { makeAiStreamParser, type AiTraceChunk } from "@/lib/explore-ai";
 import { MAX_OFFER_LIMIT } from "@/lib/whats-new.mjs";
 import { isScannerMissing, isBrowserCollectorMissing } from "@/lib/explore-error.mjs";
 import { expandSearchTargets } from "@/lib/browser-search.mjs";
+import { readScanMax } from "@/lib/scan-max.mjs";
 import { useI18n } from "@/lib/i18n/context";
 import {
   readScanSources,
@@ -389,6 +390,9 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
       const city = f.zhCity?.trim() ?? "";
       // 目标成对展开：猎聘拆词逐词一 URL，其余平台整串一条（见 expandSearchTargets）。
       const targets = expandSearchTargets(platforms as unknown as string[], queryForUrl, city);
+      // 每站采集上限走用户配置（配置页可改，默认猎聘 1200 / BOSS/智联 400），随消息
+      // 传给扩展 content script 的累积器，防分页型大关键词被 400 硬上限截掉末页。
+      const scanMax = readScanMax();
       const scanId =
         typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
           ? crypto.randomUUID()
@@ -400,7 +404,11 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
         {
           type: "drive-scan",
           scanId,
-          sources: targets.map((t) => ({ source: t.source, url: t.url })),
+          sources: targets.map((t) => ({
+            source: t.source,
+            url: t.url,
+            maxCount: scanMax[t.source as keyof typeof scanMax] ?? 400,
+          })),
         },
         45_000, // 开 tab + content 注入可能比默认 4s 久,放宽等全部平台驱动完成
       );

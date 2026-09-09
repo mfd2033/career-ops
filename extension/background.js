@@ -238,10 +238,13 @@ const driveKey = (source, url) => `${source}|${url}`;
 // 收尾后一次取回用于结果渲染(/api/explore/add 已落库为权威,此为前端展示镜像)。
 const scanOffers = new Map();
 
-/** 向某 tab 的 content script 发 start-scan(tab 未注入/已关闭时返回 {ok:false})。 */
-async function tryStartScan(tabId, scanId) {
+/** 向某 tab 的 content script 发 start-scan(tab 未注入/已关闭时返回 {ok:false})。
+ *  maxCount:该站采集条数上限(来自 web 配置),透传给累积器覆盖硬编码 SCAN_MAX。 */
+async function tryStartScan(tabId, scanId, maxCount) {
   try {
-    return (await chrome.tabs.sendMessage(tabId, { type: "start-scan", scanId })) || { ok: false };
+    const msg = { type: "start-scan", scanId };
+    if (typeof maxCount === "number" && maxCount > 0) msg.maxCount = maxCount;
+    return (await chrome.tabs.sendMessage(tabId, msg)) || { ok: false };
   } catch {
     return { ok: false, error: "no-receiver" };
   }
@@ -263,16 +266,16 @@ function waitTabLoaded(tabId, timeoutMs = 15000) {
 }
 
 /** 新开搜索 tab、等加载完成、驱动扫描;content 未及时就绪时多等 800ms 重试一轮。 */
-async function openAndDrive(source, url, scanId) {
+async function openAndDrive(source, url, scanId, maxCount) {
   try {
     const key = driveKey(source, url);
     const tab = await chrome.tabs.create({ url });
     activeDrives.set(key, { scanId, tabId: tab.id });
     await waitTabLoaded(tab.id);
-    let res = await tryStartScan(tab.id, scanId);
+    let res = await tryStartScan(tab.id, scanId, maxCount);
     if (!res || !res.ok) {
       await new Promise((r) => setTimeout(r, 800));
-      res = await tryStartScan(tab.id, scanId);
+      res = await tryStartScan(tab.id, scanId, maxCount);
     }
     if (res && res.ok) {
       return { source, status: "created", tabId: tab.id, scanId: res.scanId || scanId };
@@ -288,13 +291,13 @@ async function openAndDrive(source, url, scanId) {
  * 驱动单个平台:查既存 hosts 命中 tab,优先取列表页驱动;都不可用/被拒则新开搜索
  * tab。activeDrives 按 {source,url} 登记成功来源,scan-done 时清除,避免重复驱动。
  */
-async function driveSource(source, url, scanId) {
+async function driveSource(source, url, scanId, maxCount) {
   const spec = DRIVE_SOURCES[source];
   const key = driveKey(source, url);
   const active = activeDrives.get(key);
   if (active) return { source, status: "active", tabId: active.tabId, scanId: active.scanId };
   if (!spec) return { source, status: "failed", error: "unknown source" };
-  return openAndDrive(source, url, scanId);
+  return openAndDrive(source, url, scanId, maxCount);
 }
 
 /**
@@ -307,12 +310,13 @@ async function driveScan(msg) {
     ? msg.sources
         .map((s) => (s && typeof s.source === "string" ? s : { source: s }))
         .filter((s) => s && typeof s.source === "string" && DRIVE_SOURCES[s.source] && typeof s.url === "string" && /^https?:\/\//i.test(s.url))
+        .map((s) => ({ source: s.source, url: s.url, maxCount: typeof s.maxCount === "number" && s.maxCount > 0 ? s.maxCount : undefined }))
     : [];
   if (requested.length === 0) return { ok: true, scanId, connected: true, tasks: [] };
   const tasks = [];
   for (const s of requested) {
     // 顺序驱动(每平台一次采集会话,避免同时弹多个搜索 tab)。每步失败不中断其它平台。
-    tasks.push(await driveSource(s.source, s.url, scanId));
+    tasks.push(await driveSource(s.source, s.url, scanId, s.maxCount));
   }
   return { ok: true, scanId, connected: true, tasks };
 }
