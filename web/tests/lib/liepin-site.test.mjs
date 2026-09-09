@@ -54,6 +54,10 @@ test("LIEPIN_SITE: contract shape required keys are present and non-empty", () =
   assert.equal(typeof LIEPIN_SITE.cardUrl, "function");
   assert.equal(typeof LIEPIN_SITE.extractDetailJd, "function");
   assert.equal(typeof LIEPIN_SITE.extractPosterName, "function");
+  // 分页型平台扫描契约(猎聘改版为分页显示):core scan mode 以此为据走 DOM 翻页
+  // 而非滚动。isPageMode 必须为 true,findNextPageBtn 必须可调(有下一页即返回)。
+  assert.equal(LIEPIN_SITE.isPageMode, true, "猎聘搜索页是分页型,不是懒加载滚动");
+  assert.equal(typeof LIEPIN_SITE.findNextPageBtn, "function", "分页扫描需提供「下一页」定位函数");
 });
 
 test("LIEPIN_SITE: evaluateInlineJd is declared (detail-page eval inlines DOM JD)", () => {

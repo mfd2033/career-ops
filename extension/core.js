@@ -596,12 +596,23 @@
     return (site && typeof site.source === "string" && site.source) || "browser";
   }
 
-  /** 采集循环:每个 tick 先查终止条件,再滚一步 / 让出用户接管。 */
+  /** 采集循环:每个 tick 先查终止条件,再滚一步 / 点下一页 / 让出用户接管。 */
   function scanTick() {
     if (!scan) return;
     // SPA 导航到详情页 → 列表不存在,立即收尾。
     if (site.isDetailPath(location.pathname)) {
       finishScan("navigated");
+      return;
+    }
+    // 终态:满上限(needs 收集循环主动兜底,不依赖 flush 时机)。
+    if (scan.acc.reachedMax) {
+      finishScan("max");
+      return;
+    }
+    // 分页型平台(猎聘):不走滚动/静止判定,驱动「下一页」逐页采集。
+    if (site.isPageMode === true) {
+      pagingAwareStep();
+      if (scan) scan.scanTicks += 1;
       return;
     }
     // 终态:连续多 tick 无位移(无可见滚动区)。pendingEnrich(智联翻页 API 补采
@@ -613,11 +624,6 @@
     // 终态:已滚过且连续 8s 无新卡(懒加载到头)。翻页补采在途同样不终止。
     if (scan.hasScrolled && !scan.pendingEnrich && Date.now() - scan.lastNewAt > SCAN_QUIET_MS) {
       finishScan("quiet");
-      return;
-    }
-    // 终态:满上限(needs 收集循环主动兜底,不依赖 flush 时机)。
-    if (scan.acc.reachedMax) {
-      finishScan("max");
       return;
     }
     scrollAwareStep();
@@ -652,6 +658,44 @@
     scan.hasScrolled = scan.hasScrolled || scroller.scrollTop > 0;
     // 触底(滚到底但还有懒加载区)不累计 noMoveTicks —— no-scroll 只按 maxY<=0 判。
     scan.noMoveTicks = 0;
+  }
+
+  // 分页型平台(猎聘)翻页驱动节奏:点击「下一页」后页面原生加载,新卡片经
+  // MutationObserver 采入累积器;900ms tick 内采不完会连点下一页,加载慢交给
+  // SCAN_QUIET_MS 兜底。任一终态即停 —— 满上限(scanTick 已查) / 无下一页控件后
+  // 连续静默(末页数据已采完)。
+  const SCAN_PAGING_MIN_GAP_MS = 1500; // 两次翻页最小间隔,防连点触发风控/重复加载
+
+  /** 分页型平台:每个 tick 点一次「下一页」(有控件且距上次足够久),无控件则等到
+   *  静默超阈值收尾。用户可自由点页码,采集只读不干预。lastPageClickAt 挂在 scan
+   *  上(非模块级),避免多次扫描串扰。 */
+  function pagingAwareStep() {
+    if (!scan) return;
+    const lastClick = scan.lastPageClickAt || 0;
+    // 用户滚轮接管期语义保留(翻页页无滚动,实际不影响,仅防重复 handler)。
+    if (scan.holdTicks > 0) {
+      scan.holdTicks -= 1;
+      return;
+    }
+    const nextBtn = site.findNextPageBtn ? site.findNextPageBtn() : null;
+    if (!nextBtn) {
+      // 无下一页控件 = 已到末页。该页新卡已采(或本就没有),等待静默收尾。
+      if (Date.now() - scan.lastNewAt > SCAN_QUIET_MS) finishScan("paged");
+      return;
+    }
+    // 末页判定兜底:控件存在但被禁用(点击无效果) → 视为无下一页。
+    if (nextBtn.disabled || (nextBtn.getAttribute && nextBtn.getAttribute("aria-disabled") === "true")) {
+      if (Date.now() - scan.lastNewAt > SCAN_QUIET_MS) finishScan("paged");
+      return;
+    }
+    // 翻页节流:距上次点击不足最小间隔则等待(给 MutationObserver 采当前页时间)。
+    if (Date.now() - lastClick < SCAN_PAGING_MIN_GAP_MS) return;
+    try {
+      nextBtn.click();
+      scan.lastPageClickAt = Date.now();
+    } catch {
+      /* 点击场景:元素在点击瞬间失效(页面重渲染),交给下次 tick 重试 */
+    }
   }
 
   /** 尝试把一张卡片收入扫描累积器(URL 已采则忽略,绝不重报)。取不到 url 的卡
@@ -730,6 +774,7 @@
       noMoveTicks: 0,
       holdTicks: 0,
       scanTicks: 0,
+      lastPageClickAt: 0, // 分页型平台最近一次点击「下一页」的时间戳(防连点)
       pendingReports: 0,
       timers: null,
       wheelFn: null,

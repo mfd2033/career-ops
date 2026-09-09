@@ -22,7 +22,7 @@ import {
 import { makeAiStreamParser, type AiTraceChunk } from "@/lib/explore-ai";
 import { MAX_OFFER_LIMIT } from "@/lib/whats-new.mjs";
 import { isScannerMissing, isBrowserCollectorMissing } from "@/lib/explore-error.mjs";
-import { buildSearchUrls } from "@/lib/browser-search.mjs";
+import { expandSearchTargets } from "@/lib/browser-search.mjs";
 import { useI18n } from "@/lib/i18n/context";
 import {
   readScanSources,
@@ -387,7 +387,8 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     const driveViaExtension = async (): Promise<void> => {
       const queryForUrl = query.replace(/\s+/g, " OR ");
       const city = f.zhCity?.trim() ?? "";
-      const urls = buildSearchUrls(platforms as unknown as string[], queryForUrl, city);
+      // 目标成对展开：猎聘拆词逐词一 URL，其余平台整串一条（见 expandSearchTargets）。
+      const targets = expandSearchTargets(platforms as unknown as string[], queryForUrl, city);
       const scanId =
         typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
           ? crypto.randomUUID()
@@ -399,7 +400,7 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
         {
           type: "drive-scan",
           scanId,
-          sources: (platforms as unknown as string[]).map((source, i) => ({ source, url: urls[i] })),
+          sources: targets.map((t) => ({ source: t.source, url: t.url })),
         },
         45_000, // 开 tab + content 注入可能比默认 4s 久,放宽等全部平台驱动完成
       );
