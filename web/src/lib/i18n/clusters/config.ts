@@ -57,6 +57,9 @@ export const en: Dict = {
   "config.scanSourceBsk": "Browser (bsk)",
   "config.scanSourceBskDesc": "Scan the Chinese boards — BOSS直聘, 猎聘, 智联招聘 — through your own logged-in browser. Needs browser-skill.",
 
+  "config.scanMaxTitle": "Per-site scan cap",
+  "config.scanMaxDesc": "Max postings collected per Chinese board in the Explorer browser scan. Liepin (paged) defaults to 1200 so large keywords aren't truncated at the 400 cap; BOSS/Zhaopin (lazy-load) keep 400.",
+
   "config.unknownEmployerTitle": "Unknown employer",
   "config.unknownEmployerDesc": "How an offer shows the company when the employer is hidden (job agency posting). Applies to evaluation reports, the pipeline, and quick evaluation.",
   "config.unknownEmployerPlaceholder": "Show \"?\"",
@@ -148,6 +151,9 @@ export const zh: Dict = {
   "config.scanSourceAtsDesc": "扫描公开 ATS 网络 — Greenhouse、Lever、Ashby、Workday。纯 HTTP，零 token。",
   "config.scanSourceBsk": "浏览器抓取（bsk）",
   "config.scanSourceBskDesc": "通过你已登录的浏览器扫描国内平台 — BOSS直聘、猎聘、智联招聘。需安装 browser-skill。",
+
+  "config.scanMaxTitle": "每站采集上限",
+  "config.scanMaxDesc": "探索页浏览器扫描时，每个国内平台最多采集的职位条数。猎聘（分页型）默认 1200，避免大关键词被 400 上限截掉末页；BOSS/智联（懒加载）保持 400。",
 
   "config.unknownEmployerTitle": "未知雇主",
   "config.unknownEmployerDesc": "当招聘信息隐藏终端雇主（代招/猎头代发）时，offer 中公司名如何显示。应用于评估报告、管道与快评。",
