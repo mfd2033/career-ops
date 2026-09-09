@@ -580,10 +580,15 @@
   const SCAN_BATCH_INTERVAL_MS = 2000; // 50 条/2s 节流上报(E5,防 web 端连点/风控)
   const SCAN_SCROLL_INTERVAL_MS = 900; // 滚动步进节奏
   const SCAN_SCROLL_HOLD_TICKS = 3; // 用户滚轮后暂停自动滚动 tick 数(让出接管)
-  const SCAN_MAX_MOVE_TICKS = 3; // 连续多次无滚动位移 = 页面无可见滚动区,尽快收尾
+  // 无可见滚动区的判定取「页面整页装下」而非「scrollTop 贴底不动」:触底贴住是
+  // 懒加载页(智联分页/懒加载)的正常等待态,滚到底却仍有更多卡片时,自动滚动位置
+  // 不动但 DOM 在涨,绝不按 scrollTop 判死。只有 maxY<=0(一屏装下,真无滚动区)
+  // 才累计 noMoveTicks 收尾;触底后新卡来得慢的情况交给 SCAN_QUIET_MS 兜底。
+  const SCAN_MAX_MOVE_TICKS = 3; // 无滚动区(整页装下)连续 tick 数,尽快收尾
 
   // 活跃扫描状态;null 表示未在采集。扫描本身不锁,用户可自由滚动/翻页 ——
   // MutationObserver 持续捕获新卡,滚轮只在短暂 holdTicks 内让出自动滚动。
+  // pendingEnrich 字段:站点补充采集(智联翻页 API)在途标志,抑制终止条件。
   let scan = null;
 
   /** 站点平台名(web 侧 BROWSER_SOURCES 口径),来自 site.source;缺省 browser。 */
@@ -599,13 +604,14 @@
       finishScan("navigated");
       return;
     }
-    // 终态:连续多 tick 无位移(无可见滚动区)。
-    if (scan.noMoveTicks >= SCAN_MAX_MOVE_TICKS) {
+    // 终态:连续多 tick 无位移(无可见滚动区)。pendingEnrich(智联翻页 API 补采
+    // 在途)期间不终止 — 首屏可能一屏装下提前触发 no-scroll,翻页数据还没回来。
+    if (!scan.pendingEnrich && scan.noMoveTicks >= SCAN_MAX_MOVE_TICKS) {
       finishScan("no-scroll");
       return;
     }
-    // 终态:已滚过且连续 8s 无新卡(懒加载到头)。
-    if (scan.hasScrolled && Date.now() - scan.lastNewAt > SCAN_QUIET_MS) {
+    // 终态:已滚过且连续 8s 无新卡(懒加载到头)。翻页补采在途同样不终止。
+    if (scan.hasScrolled && !scan.pendingEnrich && Date.now() - scan.lastNewAt > SCAN_QUIET_MS) {
       finishScan("quiet");
       return;
     }
@@ -618,7 +624,9 @@
     if (scan) scan.scanTicks += 1;
   }
 
-  /** 向当前 window 滚动容器步进一段;无位移累计 noMoveTicks,有位移清零。 */
+  /** 向当前 window 滚动容器步进一段。只有页面整页装下(无可见滚动区)才累计
+   *  noMoveTicks;滚到底贴住但仍有更多卡片(懒加载)时正常等待,让 DOM 增长,
+   *  no-scroll 终止交给 maxY<=0 兜底,加载慢交给 SCAN_QUIET_MS。 */
   function scrollAwareStep() {
     if (!scan) return;
     // 用户滚轮接管期:让出自动滚动,等hold结束再续(无锁,只是短暂让步)。
@@ -632,19 +640,25 @@
       return;
     }
     const maxY = scroller.scrollHeight - scroller.clientHeight;
+    scan.maxY = maxY;
+    scan.lastScrollTop = scroller.scrollTop;
     if (maxY <= 0) {
       // 无可见滚动区(整页装下) → 后续 tick 收尾。
       scan.noMoveTicks += 1;
       return;
     }
     const targetY = Math.min(scroller.scrollTop + Math.max(400, (window.innerHeight || 800) * 0.8), maxY);
-    const moved = scroller.scrollTop !== targetY;
     scroller.scrollTop = targetY;
-    scan.hasScrolled = scan.hasScrolled || moved;
-    scan.noMoveTicks = moved ? 0 : scan.noMoveTicks + 1;
+    scan.hasScrolled = scan.hasScrolled || scroller.scrollTop > 0;
+    // 触底(滚到底但还有懒加载区)不累计 noMoveTicks —— no-scroll 只按 maxY<=0 判。
+    scan.noMoveTicks = 0;
   }
 
-  /** 尝试把一张卡片收入扫描累积器(URL 已采则忽略,绝不重报)。 */
+  /** 尝试把一张卡片收入扫描累积器(URL 已采则忽略,绝不重报)。取不到 url 的卡
+   * 直接跳过:智联懒加载新卡(首屏 20 外)的职位 url 既不在 positionList 里,DOM
+   * 也无锚点 — 这些职位由 site.fetchRestPages 直连搜索 API 补采(ADR-0008),
+   * 卡片路径只负责首屏;曾试过的"刷新缓存重试"每次拉回同样 20 条,纯开销,已撤。
+   */
   function scanCollect(card) {
     if (!scan || !SCAN || !card || !site.cardIsList(card)) return;
     let meta;
@@ -694,11 +708,19 @@
     showToast(`采集结束：${count} 条新职位`, false);
   }
 
-  /** 开始一轮采集(scanId 为空时生成一次会话 id)。 */
-  function startScan(rawScanId) {
+  /** 开始一轮采集(scanId 为空时生成一次会话 id)。智联需先经 ensureZpState 刷新
+   *  data-zpstate url 缓存(isolated world 读不到页面 state),其它站无此钩子直接开跑。 */
+  async function startScan(rawScanId) {
     if (!SCAN || !site) return;
     if (scan) return; // 已在采集,幂等
     if (site.isDetailPath(location.pathname)) return;
+    // 智联 isolated world 读不到页面 state → 先经 ensureZpState 刷新
+    // html[data-zpstate] url 缓存(background MAIN world 注入读 __INITIAL_STATE__);
+    // 其它站无此钩子直接跳过,不影响同步路径。
+    if (typeof site.ensureZpState === "function") {
+      await site.ensureZpState();
+    }
+    if (scan) return; // ensureZpState await 期间被用户/其它消息停掉
     scan = {
       scanId: rawScanId && String(rawScanId).trim() ? String(rawScanId).trim() : `ext-scan-${Date.now()}`,
       ctx: typeof site.buildScanCityMap === "function" ? { cityMap: site.buildScanCityMap() } : {},
@@ -714,6 +736,27 @@
     };
     // 初始:已渲染的卡片先采一轮(懒加载的由 MutationObserver 后续喂入)。
     document.querySelectorAll(site.cardSelector).forEach((c) => scanCollect(c));
+    // 站点补充采集(智联,ADR-0008):直连搜索 API 拉首屏 20 条外的剩余页,回传
+    // meta[] 直喂累积器(按归一 URL 与卡片路径去重)。在途期间抑制 quiet/no-scroll
+    // 终止(pendingEnrich);60s 看门狗防 relay 悬挂把扫描卡成永不收尾。
+    if (typeof site.fetchRestPages === "function") {
+      scan.pendingEnrich = true;
+      const enrichWatchdog = trackTimer(
+        setTimeout(() => {
+          if (scan) scan.pendingEnrich = false;
+        }, 60000),
+      );
+      site.fetchRestPages((metas) => {
+        clearTimeout(enrichWatchdog);
+        if (!scan) return; // 扫描已被用户/导航收尾,迟到的翻页数据丢弃
+        scan.pendingEnrich = false;
+        if (!Array.isArray(metas) || !metas.length) return;
+        for (const m of metas) {
+          const res = scan.acc.add(m);
+          if (res.added) scan.lastNewAt = Date.now();
+        }
+      });
+    }
     const scrollT = trackTimer(setInterval(scanTick, SCAN_SCROLL_INTERVAL_MS));
     const batchT = trackTimer(setInterval(() => flushScanBatch(), SCAN_BATCH_INTERVAL_MS));
     const wheelFn = () => {
@@ -746,8 +789,9 @@
         sendResponse({ ok: false, error: "需在列表页才能采集" });
         return true;
       }
-      startScan(msg.scanId);
-      sendResponse({ ok: true, scanId: scan ? scan.scanId : null });
+      startScan(msg.scanId).then(() => {
+        sendResponse({ ok: true, scanId: scan ? scan.scanId : null });
+      });
       return true;
     }
     if (msg && msg.type === "stop-scan") {
@@ -1008,6 +1052,10 @@
     openReport,
     sendSingleEvaluate,
     sendQuickEval,
+    // 通用消息通道(带回调):site 文件可用它向 background 发请求并取回(structured
+    // clone 回传),如智联 zp-get-state relay。回调签名 cb(res)。content script 侧
+    // chrome.runtime 可用,background 的 executeScript 结果经此取回。
+    sendMsg,
     // 评估收尾轮询的登记/清除:site 文件(如 BOSS 列表右栏按钮)发起完整评估时
     // 调用 beginEval(url) 登记,成功后轮询自动收尾;发起失败时 endEval() 释放。
     beginEval: (url) => startEvalPoll(url),

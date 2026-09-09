@@ -10,6 +10,9 @@
 //   • 搜索卡片 DIV.job-card 内【无职位 <a>】（唯一 <a> 指向公司详情）→ 职位 URL
 //     无法从卡片 DOM 取得，必须用 window.__INITIAL_STATE__.positionList 的
 //     positionUrl 按卡片 index 映射；
+//   • 列表 SSR 只渲染首屏 20 条且 positionList 不随懒加载增长（顺序还会错位）→
+//     首屏外的职位经 fetchRestPages 由 background MAIN world 直连
+//     /c/i/search/positions 翻页拉取（ADR-0008），不依赖 DOM 卡片；
 //   • active 卡 = DIV.job-card--active（点击实时重渲染右栏）;__INITIAL_STATE__
 //     .selectedJobId 是冻结快照、不随动 —— 读当前职位一律以 .job-card--active +
 //     右栏内容为准，不信 selectedJobId；
@@ -34,15 +37,85 @@
    * 从 window.__INITIAL_STATE__.positionList 读取职位列表。
    * 数组对象 key 极多，positionUrl（完整绝对 URL）与 number（=公司号+J+jobId）
    * 是关键；positionCount 恒为 0 不可信。返回数组，读不到返回 []。
+   *
+   * 智联改版后 __INITIAL_STATE__ 只在主世界可见，isolated world 直接读
+   * window.__INITIAL_STATE__ 拿不到(positionList 在扩展侧实测恒空，卡无职位锚
+   * 致 url 全 null、扫描 count=0)。故改为：主世界注入脚本把精简后的
+   * positionList 写入 <html data-zpstate='...'>，本函数从该 dataset 解析；
+   * 缓存缺或为空时触发一次主世界注入刷新，绕开 world 隔离拿到职位 url。
    */
+  let _zpCacheTs = 0;
+  const ZP_STATE_ATTR = "data-zpstate";
+
+  /** 从 html[data-zpstate] 读精简 positionList 缓存,无/空返回 null。 */
+  function _zpFromAttr() {
+    const raw = document.documentElement.getAttribute(ZP_STATE_ATTR);
+    if (!raw) return null;
+    try {
+      const arr = JSON.parse(raw);
+      return Array.isArray(arr) && arr.length ? arr : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * 刷新 data-zpstate 缓存(该字段为智联职位 url 数据源,loaded 自后台 MAIN world 读取)。
+   * 后台经 chrome.scripting.executeScript({world:'MAIN'}) 读 window.__INITIAL_STATE__
+   * .positionList(页面 CSP script-src 禁内联注入,故不走 <script> 弹入;扩展 programmatic
+   * 注入豁免 CSP),精简 {url,name,city}[] 回传后写入本属性。返回实际写入条数。
+   */
+  function useMainWorldToReadPositionList(cb) {
+    if (C && typeof C.sendMsg === "function") {
+      C.sendMsg({ type: "zp-get-state" }, (res) => {
+        const list = (res && res.ok && Array.isArray(res.list) && res.list) || [];
+        try {
+          document.documentElement.setAttribute(ZP_STATE_ATTR, JSON.stringify(list));
+        } catch (e) {
+          /* attr write best-effort */
+        }
+        _zpCacheTs = Date.now();
+        if (typeof cb === "function") cb(list);
+      });
+      return;
+    }
+    if (typeof cb === "function") cb([]);
+  }
+
   function getPositionList() {
     try {
+      const cached = _zpFromAttr();
+      if (cached) return cached;
+      // 无缓存:直接读 window 快照兜底(大多数情况空,因隔离;至少不崩)。
       const st = window.__INITIAL_STATE__;
       if (st && Array.isArray(st.positionList)) return st.positionList;
     } catch (e) {
       /* state read must never sink the DOM read */
     }
     return [];
+  }
+
+  /** 启动采集前确保 url 缓存就绪(异步):refresh 一次填充 data-zpstate。 */
+  function ensureZpState() {
+    return new Promise((resolve) => useMainWorldToReadPositionList(() => resolve()));
+  }
+
+  /**
+   * 翻页采集 relay(ADR-0008):SSR 首屏 20 条之外的剩余页,经 background MAIN world
+   * 注入循环 POST /c/i/search/positions 直接拉取(页面自身 load-more XHR 实测挂起,
+   * 见 ADR-0008 调研)。回传精简 {url,title,company,salary,city}[],由 core 直喂
+   * 采集累积器 — 不依赖 DOM 卡片增长,与首屏卡片按归一 URL 去重。node 环境(单测)
+   * 无 C.sendMsg,回空调空数组,不影响纯函数路径。
+   */
+  function fetchRestPagesViaBackground(cb) {
+    if (C && typeof C.sendMsg === "function") {
+      C.sendMsg({ type: "zp-fetch-pages" }, (res) => {
+        const metas = (res && res.ok && Array.isArray(res.metas) && res.metas) || [];
+        if (typeof cb === "function") cb(metas);
+      });
+      return;
+    }
+    if (typeof cb === "function") cb([]);
   }
 
   /** 详情页：/jobdetail/{number}.htm。不带查询条件与列表路径,用正则精确匹配。 */
@@ -96,12 +169,16 @@
     const idx = cards.indexOf(card);
     if (idx >= 0 && idx < list.length) {
       const p = list[idx];
-      if (p && (p.positionUrl || p.positionURL)) return p;
+      // data-zpstate 缓存存精简壳字段 url(name/city);直读 __INITIAL_STATE__ 是
+      // positionUrl。两种都认,避免缓存字段名与原始状态错位致 url 取不到。
+      if (p && (p.positionUrl || p.positionURL || p.url)) return p;
     }
     const titleEl = card && card.querySelector('[class*="job-card__title"], h2, a');
     const title = titleEl ? (titleEl.innerText || titleEl.textContent || "").trim() : "";
     if (title) {
-      return list.find((p) => p && p.name && (p.name === title || title.includes(p.name))) || null;
+      const hit = list.find((p) => p && p.name && (p.name === title || title.includes(p.name)));
+      // 命中后同样认缓存 shell 的 url 字段。
+      return hit && (hit.positionUrl || hit.positionURL || hit.url) ? hit : null;
     }
     return null;
   }
@@ -113,7 +190,7 @@
    */
   function cardMeta(card, ctx) {
     const p = zhaopinPositionFor(card);
-    const url = p ? String(p.positionUrl || p.positionURL) : null;
+    const url = p ? String(p.positionUrl || p.positionURL || p.url) : null;
     const text = (sel) => {
       const el = card.querySelector(sel);
       return el ? (el.innerText || el.textContent || "").trim() : "";
@@ -137,7 +214,7 @@
     const list = Array.isArray(positionList) ? positionList : [];
     for (const p of list) {
       if (!p) continue;
-      const u = p.positionUrl || p.positionURL;
+      const u = p.positionUrl || p.positionURL || p.url;
       if (u && p.workCity) map[String(u)] = String(p.workCity).trim();
     }
     return map;
@@ -400,6 +477,12 @@
     cardUrl,
     cardMeta,
     buildScanCityMap: () => buildZhaopinCityMap(getPositionList()),
+    // core 采集启动前 await 此钩子,确保 html[data-zpstate] url 缓存就位
+    // (isolation 读不到页面 state → background MAIN world 注入读取)。
+    ensureZpState,
+    // 翻页采集 relay:首屏 20 条外的剩余页经 background 直连搜索 API 拉取
+    // (ADR-0008),core 在采集启动后并行拉起,回传 meta[] 直喂累积器。
+    fetchRestPages: fetchRestPagesViaBackground,
     currentActiveUrl,
     extractDetailJd,
     extractPosterName,
