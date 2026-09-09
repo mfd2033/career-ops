@@ -22,6 +22,7 @@ import {
 import { makeAiStreamParser, type AiTraceChunk } from "@/lib/explore-ai";
 import { MAX_OFFER_LIMIT } from "@/lib/whats-new.mjs";
 import { isScannerMissing, isBrowserCollectorMissing } from "@/lib/explore-error.mjs";
+import { buildSearchUrls } from "@/lib/browser-search.mjs";
 import { useI18n } from "@/lib/i18n/context";
 import {
   readScanSources,
@@ -134,6 +135,35 @@ type ResultSnapshot = {
   aiCost: AiCost;
   aiIntent: string;
 };
+
+// ── 扩展桥(localhost 页面 → 扩展 background,ADR-0007 E5)──────────────────────
+const EXT_BRIDGE_TAG = "__careerExt";
+let extMsgSeq = 0;
+
+/** 探索页 → 扩展 SW(req/res 经 web-bridge.js content script 转发)。桥缺失/超时 → {ok:false}。
+ *  timeoutMs 可配:普通探测默认 4s;drive-scan 要等开 tab + content 注入,给 45s。 */
+function extRequest(msg: unknown, timeoutMs = 4000): Promise<Record<string, unknown>> {
+  return new Promise((resolve) => {
+    if (typeof window === "undefined") {
+      resolve({ ok: false, error: "no-window" });
+      return;
+    }
+    const id = ++extMsgSeq;
+    const timer = window.setTimeout(() => {
+      window.removeEventListener("message", onMsg);
+      resolve({ ok: false, error: "ext-bridge-timeout" });
+    }, timeoutMs);
+    function onMsg(e: MessageEvent) {
+      const d = e.data;
+      if (!d || d.tag !== `${EXT_BRIDGE_TAG}:res` || d.id !== id) return;
+      window.removeEventListener("message", onMsg);
+      clearTimeout(timer);
+      resolve((d.res || { ok: false }) as Record<string, unknown>);
+    }
+    window.addEventListener("message", onMsg);
+    window.postMessage({ tag: `${EXT_BRIDGE_TAG}:req`, id, msg }, "*");
+  });
+}
 
 export function ExploreProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -349,6 +379,96 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     setStatus(t("explore.disc.castingBrowser"));
     if (typeof window !== "undefined") {
       window.history.replaceState(null, "", `/explore?${browserToParams(query, platforms as unknown as string[], f.zhCity)}`);
+    }
+
+    // 扩展驱动的探索页采集(ADR-0007 E2/E5/E6 seam):逐平台查/开 tab 驱动 content
+    // script 采集,前端 2s 轮询 scan-progress;扩展未连通则走下方 Playwright 兜底流。
+    // 端口/搜索 URL 与 runBrowserDiscovery 同源(buildSearchUrls + " OR " 展开)。
+    const driveViaExtension = async (): Promise<void> => {
+      const queryForUrl = query.replace(/\s+/g, " OR ");
+      const city = f.zhCity?.trim() ?? "";
+      const urls = buildSearchUrls(platforms as unknown as string[], queryForUrl, city);
+      const scanId =
+        typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+          ? crypto.randomUUID()
+          : `ext-scan-${Date.now()}`;
+      setPhase("scanning");
+      setStatus(t("explore.disc.castingExtension"));
+
+      const drive = await extRequest(
+        {
+          type: "drive-scan",
+          scanId,
+          sources: (platforms as unknown as string[]).map((source, i) => ({ source, url: urls[i] })),
+        },
+        45_000, // 开 tab + content 注入可能比默认 4s 久,放宽等全部平台驱动完成
+      );
+      const tasks = Array.isArray(drive.tasks) ? (drive.tasks as Array<{ source: string; status: string }>) : [];
+      const failed = tasks.filter((x) => x && x.status === "failed");
+      const failedSet = new Set(failed.map((x) => x.source));
+      if (failed.length) {
+        setSources((s) => {
+          const next = { ...s };
+          for (const tsk of failed) next[tsk.source] = { state: "noisy", unreachable: 1 };
+          return next;
+        });
+      }
+
+      // 温和轮询(2s):条数走 scan-progress,收尾走桥 scan-status 的 active 列表为空。
+      // 超时 180s 兜底(防 SW/tab 意外丢失卡死)。drive 全败 → 直接跳过等待。
+      const collectedCount = async () => {
+        try {
+          const j = (await fetch(`/api/explore/scan-progress?scanId=${encodeURIComponent(scanId)}`).then((r) => r.json()).catch(() => ({}))) as { collected?: number };
+          return Number(j.collected) || 0;
+        } catch {
+          return 0;
+        }
+      };
+      let tick = 0;
+      const maxTicks = 90;
+      while (tick < maxTicks) {
+        tick += 1;
+        await new Promise((r) => setTimeout(r, 2000));
+        const collected = await collectedCount();
+        let active: string[] = [];
+        try {
+          const st = await extRequest({ type: "scan-status", scanId });
+          active = Array.isArray(st.active) ? (st.active as string[]).filter((x) => !failedSet.has(x)) : [];
+        } catch {
+          /* transient — keep polling */
+        }
+        setStatus(t("explore.disc.collected", { n: collected }));
+        if (active.length === 0) break;
+      }
+
+      // 收尾:标记仍 active/queued 的平台为 swept,取回本 scanId 采集到的最前端显示。
+      setSources((s) => {
+        const next = { ...s };
+        for (const k of Object.keys(next))
+          if (next[k]?.state === "queued" || next[k]?.state === "active") next[k] = { ...next[k]!, state: "swept" };
+        return next;
+      });
+      const offersRes = await extRequest({ type: "scan-offers", scanId });
+      const found = Array.isArray(offersRes.offers) ? (offersRes.offers as DiscoveredOffer[]) : [];
+      setOffers(found);
+      if (found.length > 0) {
+        setMatchCount(found.length);
+        setCompaniesScanned(found.length);
+        setPhase("revealing");
+        setStatus(t(found.length === 1 ? "explore.disc.browserFoundOne" : "explore.disc.browserFoundMany", { n: found.length }));
+        window.setTimeout(() => setPhase("results"), 850);
+      } else if (failed.length) {
+        setPhase("degraded");
+      } else {
+        setPhase("empty-loose");
+      }
+      runningRef.current = false;
+    };
+
+    const extPing = await extRequest({ type: "ext-ping" });
+    if (extPing && extPing.ok) {
+      await driveViaExtension();
+      return;
     }
 
     const acc: DiscoveredOffer[] = [];

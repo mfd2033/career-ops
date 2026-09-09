@@ -32,6 +32,27 @@
     return href && /^https?:\/\//i.test(href) ? href : null;
   }
 
+  /**
+   * 列表卡片的全量元字段（URL 复用 cardUrl）。BOSS v 改版多，选择器取宽、尽力而为：
+   * 抓不到即空串，绝不因某字段缺失抛错。city 不在此定点（BOSS 卡片无稳定城市 class，
+   * 城市过滤交由 web 侧 matchesBrowserCity 以 title 兜底，ADR-0007 E4）。
+   */
+  function cardMeta(card) {
+    const text = (sel) => {
+      const el = card.querySelector(sel);
+      return el ? (el.innerText || el.textContent || "").trim() : "";
+    };
+    const salary = text('[class*="salary"],[class*="job-price"],[class*="price"],.job-area');
+    const company = text('[class*="company-name"],[class*="company"] .name,.company-info .name,[class*="brand"]');
+    return {
+      url: cardUrl(card),
+      title: text(LINK_SELECTOR),
+      company,
+      salary,
+      city: undefined, // BOSS 无卡片城市 class —— 城市过滤走 web 侧 title 匹配
+    };
+  }
+
   function currentActiveUrl() {
     const ac = document.querySelector(`${CARD_SELECTOR}.active`) || document.querySelector(".job-card-wrap.active");
     const a = ac && ac.querySelector(LINK_SELECTOR);
@@ -218,6 +239,8 @@
 
   const BOSS_SITE = {
     hostMatch: /(^|\.)zhipin\.com$/i,
+    // scan mode 上报的 source 根:web 侧按 browser-{source} 归属平台(BROWSER_SOURCES)。
+    source: "zhipin",
     cardSelector: CARD_SELECTOR,
     linkSelector: LINK_SELECTOR,
     // BOSS直聘 board-specific: securityId is the anti-bot session token and ka is
@@ -227,6 +250,7 @@
     isDetailPath,
     cardIsList,
     cardUrl,
+    cardMeta,
     currentActiveUrl,
     extractDetailJd,
     extractPosterName,

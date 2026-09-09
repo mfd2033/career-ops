@@ -10,18 +10,23 @@
   "background": { "service_worker": "background.js" },
   "content_scripts": [
     {
+      "matches": ["http://localhost/*", "http://127.0.0.1/*"],
+      "js": ["web-bridge.js"],
+      "run_at": "document_start"
+    },
+    {
       "matches": ["https://*.zhipin.com/*"],
-      "js": ["core.js", "site-boss.js"],
+      "js": ["scan-pure.js", "core.js", "site-boss.js"],
       "run_at": "document_idle"
     },
     {
       "matches": ["https://*.liepin.com/*"],
-      "js": ["core.js", "site-liepin.js"],
+      "js": ["scan-pure.js", "core.js", "site-liepin.js"],
       "run_at": "document_idle"
     },
     {
       "matches": ["https://*.zhaopin.com/*"],
-      "js": ["core.js", "site-zhaopin.js"],
+      "js": ["scan-pure.js", "core.js", "site-zhaopin.js"],
       "run_at": "document_idle"
     }
   ],

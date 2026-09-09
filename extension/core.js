@@ -15,6 +15,9 @@
 
   // ---- site 适配对象（由 site-*.js 注入，init 前即就位） -------------------
   let site = null;
+  // scan-pure.js 的纯逻辑层(先于本文件加载,window.__careerScanPure)。node 无此
+  // 上下文;scan mode 全部走 SCAN.* 守卫,缺失即静默不提供采集。
+  let SCAN = null;
 
   // The evaluated map lives in the background; this mirrors it locally on refresh.
   let evaluated = {}; // normalizedUrl → { score, reportNum }
@@ -568,12 +571,195 @@
     if (typeof site.ensureRightPaneButton === "function") site.ensureRightPaneButton();
   }
 
+  // ---- scan mode（扩展驱动采集，ADR-0007） ----------------------------------
+
+  // 采集循环节奏常量(与 scan-pure.js 的批/上限分离:一个是纯切批,这里的节流/滚动
+  // /静止判据是 DOM 实时节奏)。任一终止条件即停 —— 满上限 / 连续 8s 无新卡 /
+  // 页面无可见滚动区(ADR-0007 E7)。
+  const SCAN_QUIET_MS = 8000; // 连续无新卡片静默 8s = 懒加载到头
+  const SCAN_BATCH_INTERVAL_MS = 2000; // 50 条/2s 节流上报(E5,防 web 端连点/风控)
+  const SCAN_SCROLL_INTERVAL_MS = 900; // 滚动步进节奏
+  const SCAN_SCROLL_HOLD_TICKS = 3; // 用户滚轮后暂停自动滚动 tick 数(让出接管)
+  const SCAN_MAX_MOVE_TICKS = 3; // 连续多次无滚动位移 = 页面无可见滚动区,尽快收尾
+
+  // 活跃扫描状态;null 表示未在采集。扫描本身不锁,用户可自由滚动/翻页 ——
+  // MutationObserver 持续捕获新卡,滚轮只在短暂 holdTicks 内让出自动滚动。
+  let scan = null;
+
+  /** 站点平台名(web 侧 BROWSER_SOURCES 口径),来自 site.source;缺省 browser。 */
+  function currentPlatform() {
+    return (site && typeof site.source === "string" && site.source) || "browser";
+  }
+
+  /** 采集循环:每个 tick 先查终止条件,再滚一步 / 让出用户接管。 */
+  function scanTick() {
+    if (!scan) return;
+    // SPA 导航到详情页 → 列表不存在,立即收尾。
+    if (site.isDetailPath(location.pathname)) {
+      finishScan("navigated");
+      return;
+    }
+    // 终态:连续多 tick 无位移(无可见滚动区)。
+    if (scan.noMoveTicks >= SCAN_MAX_MOVE_TICKS) {
+      finishScan("no-scroll");
+      return;
+    }
+    // 终态:已滚过且连续 8s 无新卡(懒加载到头)。
+    if (scan.hasScrolled && Date.now() - scan.lastNewAt > SCAN_QUIET_MS) {
+      finishScan("quiet");
+      return;
+    }
+    // 终态:满上限(needs 收集循环主动兜底,不依赖 flush 时机)。
+    if (scan.acc.reachedMax) {
+      finishScan("max");
+      return;
+    }
+    scrollAwareStep();
+    if (scan) scan.scanTicks += 1;
+  }
+
+  /** 向当前 window 滚动容器步进一段;无位移累计 noMoveTicks,有位移清零。 */
+  function scrollAwareStep() {
+    if (!scan) return;
+    // 用户滚轮接管期:让出自动滚动,等hold结束再续(无锁,只是短暂让步)。
+    if (scan.holdTicks > 0) {
+      scan.holdTicks -= 1;
+      return;
+    }
+    const scroller = document.scrollingElement || document.documentElement;
+    if (!scroller) {
+      scan.noMoveTicks += 1;
+      return;
+    }
+    const maxY = scroller.scrollHeight - scroller.clientHeight;
+    if (maxY <= 0) {
+      // 无可见滚动区(整页装下) → 后续 tick 收尾。
+      scan.noMoveTicks += 1;
+      return;
+    }
+    const targetY = Math.min(scroller.scrollTop + Math.max(400, (window.innerHeight || 800) * 0.8), maxY);
+    const moved = scroller.scrollTop !== targetY;
+    scroller.scrollTop = targetY;
+    scan.hasScrolled = scan.hasScrolled || moved;
+    scan.noMoveTicks = moved ? 0 : scan.noMoveTicks + 1;
+  }
+
+  /** 尝试把一张卡片收入扫描累积器(URL 已采则忽略,绝不重报)。 */
+  function scanCollect(card) {
+    if (!scan || !SCAN || !card || !site.cardIsList(card)) return;
+    let meta;
+    try {
+      meta = site.cardMeta(card, scan.ctx);
+    } catch {
+      return; // 某站提取异常不影响采集循环
+    }
+    if (!meta || !meta.url) return;
+    const res = scan.acc.add(meta);
+    if (res.added) scan.lastNewAt = Date.now();
+  }
+
+  /** 按批(50条)将待上报卡 POST 到 background(经 SW 转发 web,ADR-0007 E5)。 */
+  function flushScanBatch() {
+    if (!scan || !SCAN) return;
+    const { batch } = scan.acc.flush(SCAN.SCAN_BATCH_SIZE);
+    if (batch.length) {
+      scan.pendingReports += batch.length;
+      const offers = batch.map((e) => SCAN.toDiscoveredOffer(e.meta, currentPlatform()));
+      sendMsg({ type: "scan-batch", scanId: scan.scanId, offers });
+    }
+    if (scan.acc.reachedMax) finishScan("max");
+  }
+
+  /** 清空定时器 / 监听器,上报剩余批次 + 完成通知,置 scan=null。 */
+  function finishScan(reason) {
+    if (!scan) return;
+    const s = scan;
+    if (SCAN) {
+      // 收尾时把池中剩余一次性清空(超上半段一并上报),不被批大小截断。
+      const { batch } = s.acc.flush(Infinity);
+      if (batch.length) {
+        s.pendingReports += batch.length;
+        const offers = batch.map((e) => SCAN.toDiscoveredOffer(e.meta, currentPlatform()));
+        sendMsg({ type: "scan-batch", scanId: s.scanId, offers });
+      }
+    }
+    if (s.timers) {
+      clearInterval(s.timers.scrollT);
+      clearInterval(s.timers.batchT);
+    }
+    if (s.wheelFn) window.removeEventListener("wheel", s.wheelFn, { passive: true });
+    const count = s.acc.count;
+    scan = null;
+    sendMsg({ type: "scan-done", scanId: s.scanId, count, reason });
+    showToast(`采集结束：${count} 条新职位`, false);
+  }
+
+  /** 开始一轮采集(scanId 为空时生成一次会话 id)。 */
+  function startScan(rawScanId) {
+    if (!SCAN || !site) return;
+    if (scan) return; // 已在采集,幂等
+    if (site.isDetailPath(location.pathname)) return;
+    scan = {
+      scanId: rawScanId && String(rawScanId).trim() ? String(rawScanId).trim() : `ext-scan-${Date.now()}`,
+      ctx: typeof site.buildScanCityMap === "function" ? { cityMap: site.buildScanCityMap() } : {},
+      acc: SCAN.createScanAccumulator({ normalizeKey: normalizeUrl }),
+      lastNewAt: Date.now(),
+      hasScrolled: false,
+      noMoveTicks: 0,
+      holdTicks: 0,
+      scanTicks: 0,
+      pendingReports: 0,
+      timers: null,
+      wheelFn: null,
+    };
+    // 初始:已渲染的卡片先采一轮(懒加载的由 MutationObserver 后续喂入)。
+    document.querySelectorAll(site.cardSelector).forEach((c) => scanCollect(c));
+    const scrollT = trackTimer(setInterval(scanTick, SCAN_SCROLL_INTERVAL_MS));
+    const batchT = trackTimer(setInterval(() => flushScanBatch(), SCAN_BATCH_INTERVAL_MS));
+    const wheelFn = () => {
+      if (scan) scan.holdTicks = SCAN_SCROLL_HOLD_TICKS; // 用户接管:短暂让出自动滚动
+    };
+    window.addEventListener("wheel", wheelFn, { passive: true });
+    scan.timers = { scrollT, batchT };
+    scan.wheelFn = wheelFn;
+    showToast("开始采集职位...", false);
+  }
+
   // ---- message listeners ----------------------------------------------------
 
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     // 上下文已失效(扩展重载后):丢弃消息,不再调 sendResponse —— 背景端
     // sendMessage 会拿 lastError 并已 catch,静默即可。
     if (invalidated) return;
+    if (msg && msg.type === "start-scan") {
+      // background 驱动的扩展采集入口(ADR-0007 E2/E5)。scan-pure 缺失(旧版本
+      // 缓存)时静默拒绝,不进采集循环。
+      if (!SCAN || !site) {
+        sendResponse({ ok: false, error: "scan module unavailable" });
+        return true;
+      }
+      if (scan) {
+        sendResponse({ ok: true, already: true, scanId: scan.scanId });
+        return true;
+      }
+      if (site.isDetailPath(location.pathname)) {
+        sendResponse({ ok: false, error: "需在列表页才能采集" });
+        return true;
+      }
+      startScan(msg.scanId);
+      sendResponse({ ok: true, scanId: scan ? scan.scanId : null });
+      return true;
+    }
+    if (msg && msg.type === "stop-scan") {
+      if (scan) {
+        const id = scan.scanId;
+        finishScan("stopped");
+        sendResponse({ ok: true, scanId: id });
+      } else {
+        sendResponse({ ok: false, error: "no active scan" });
+      }
+      return true;
+    }
     if (msg && msg.type === "evaluated-updated") {
       // 快速路径:消息能到说明 SW 活着;refreshEvaluated 完成后 map 已新,立即
       // 收尾(toast/confirm + 重置)。轮询兜底仍在 —— finalizeDetail 内部会停。
@@ -663,9 +849,13 @@
       }
     }
     for (const c of batch) {
-      if (c && !c.__careerExt) {
-        processCard(c);
-        touched++;
+      if (c) {
+        if (!c.__careerExt) {
+          processCard(c);
+          touched++;
+        }
+        // 采集态:新落到的卡片同样计入扫描(累积器自身去重,幂等)。
+        scanCollect(c);
       }
     }
     return touched;
@@ -679,6 +869,8 @@
     }
     site = nextSite;
     inited = true;
+    // scan-pure.js 先行加载;取不到(异常注入顺序)则 scan mode 静默不可用。
+    SCAN = (typeof window !== "undefined" && window.__careerScanPure) || null;
 
     // Diag: snapshot + report DOM state to the background (BOSS blocks DevTools
     // by resizing/kicking the page, so the popup reads this instead). Re-sent on

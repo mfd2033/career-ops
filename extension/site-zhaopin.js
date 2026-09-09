@@ -86,6 +86,64 @@
   }
 
   /**
+   * 返回该列表卡片命中的 positionList 项（index 映射优先，名称匹配兜底），取不到 null。
+   * URL / workCity / 标题都从这一项取，保证卡片与状态数据永远对齐。
+   */
+  function zhaopinPositionFor(card) {
+    const list = getPositionList();
+    if (!list || !list.length) return null;
+    const cards = Array.prototype.slice.call(document.querySelectorAll(CARD_SELECTOR));
+    const idx = cards.indexOf(card);
+    if (idx >= 0 && idx < list.length) {
+      const p = list[idx];
+      if (p && (p.positionUrl || p.positionURL)) return p;
+    }
+    const titleEl = card && card.querySelector('[class*="job-card__title"], h2, a');
+    const title = titleEl ? (titleEl.innerText || titleEl.textContent || "").trim() : "";
+    if (title) {
+      return list.find((p) => p && p.name && (p.name === title || title.includes(p.name))) || null;
+    }
+    return null;
+  }
+
+  /**
+   * 列表卡片全量元字段。url 取 positionList 状态（卡片 DOM 无职位 <a>，同 cardUrl 口径）；
+   * city 权威源是 positionList[].workCity（ADR-0007 E4）：优先查传入的 cityMap 快照
+   * （{归一/原始 positionUrl → workCity}），查不到回退 positionList 对应项，再回退 title。
+   */
+  function cardMeta(card, ctx) {
+    const p = zhaopinPositionFor(card);
+    const url = p ? String(p.positionUrl || p.positionURL) : null;
+    const text = (sel) => {
+      const el = card.querySelector(sel);
+      return el ? (el.innerText || el.textContent || "").trim() : "";
+    };
+    const title = text('[class*="job-card__title"], h2');
+    let city;
+    if (ctx && ctx.cityMap && url) {
+      const hit = ctx.cityMap[url];
+      if (hit) city = hit;
+    }
+    if (!city && p && p.workCity) city = String(p.workCity).trim();
+    return { url, title, company: text('[class*="company-name"],[class*="company"] .name,h3'), salary: text('[class*="salary"],[class*="price"]'), city: city || undefined };
+  }
+
+  /**
+   * 由 positionList 快照构建 {positionUrl → workCity} 映射表（ADR-0007 E4）。
+   * 采集开始时快照一次，cardMeta 优先查此表，避免工作时反复读 window 状态。
+   */
+  function buildZhaopinCityMap(positionList) {
+    const map = {};
+    const list = Array.isArray(positionList) ? positionList : [];
+    for (const p of list) {
+      if (!p) continue;
+      const u = p.positionUrl || p.positionURL;
+      if (u && p.workCity) map[String(u)] = String(p.workCity).trim();
+    }
+    return map;
+  }
+
+  /**
    * 当前选中职位 URL。优先取右栏面板内职位标题 <a href*=...jobdetail...>.htm>
    * （纯 DOM，不受扩展 isolated world 读不到 __INITIAL_STATE__.positionList 影响，
    * 修复"未选中职位"）；取不到再回退 active 卡 + positionList 映射。
@@ -329,6 +387,7 @@
 
   const ZHAOPIN_SITE = {
     hostMatch: /(^|\.)zhaopin\.com$/i,
+    source: "zhaopin",
     cardSelector: CARD_SELECTOR,
     linkSelector: LINK_SELECTOR,
     // 智联板反爬/跟踪参数：页内跳转锚点带 refcode/srccode/preactionid，其中
@@ -339,6 +398,8 @@
     isDetailPath,
     cardIsList,
     cardUrl,
+    cardMeta,
+    buildScanCityMap: () => buildZhaopinCityMap(getPositionList()),
     currentActiveUrl,
     extractDetailJd,
     extractPosterName,
