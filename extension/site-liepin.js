@@ -29,6 +29,38 @@
     return !isDetailPath(location.pathname) && !!card.querySelector(LINK_SELECTOR);
   }
 
+  // 猎聘搜索页是「分页型」平台（非懒加载滚动，ADR-0001）：职位量靠翻页控件逐页
+  // 加载。扫描采集经 DOM 翻页驱动 —— 点击「下一页」按钮引页面原生加载，新卡片由
+  // core 的 MutationObserver 捕获进累积器（猎聘卡片有真实锚点，无需智联式 API 直连）。
+  // 下一页按钮选择器：
+  //   1) antd 分页（现猎聘前端，实测 2026-09-11）：`ul.ant-pagination > li.ant-pagination-next
+  //      > button.ant-pagination-item-link`，末页时 li 打 `ant-pagination-disabled` class、
+  //      按钮打 `ant-pagination-item-link-disabled`，都排除；
+  //   2) 旧版猎聘骨架（zh-collect.mjs findNextPage 沿用）`a.pager-next` 等作兼容兜底。
+  // 优先命中可见且未禁用的 next 控件。
+  const PAGE_NEXT_SELECTORS = [
+    'li.ant-pagination-next:not(.ant-pagination-disabled) button.ant-pagination-item-link',
+    'li.ant-pagination-next:not(.ant-pagination-disabled) a',
+    'a.ant-pagination-item-link:not(.ant-pagination-item-link-disabled)',
+    'a.pager-next:not([class*="disabled"]):not([aria-disabled="true"])',
+    'li.pager-next:not([class*="disabled"]) a',
+    '.pager a.next:not([class*="disabled"]):not([aria-disabled="true"])',
+    'li.next a:not([class*="disabled"]):not([aria-disabled="true"])',
+    'a[class*="pager-next"]:not([class*="disabled"]):not([aria-disabled="true"])',
+    'button[class*="next"]:not([disabled])',
+  ];
+
+  /** 找猎聘分页「下一页」控件（可见、未禁用）。找不到返回 null = 已到末页。 */
+  function findNextPageBtn() {
+    for (const sel of PAGE_NEXT_SELECTORS) {
+      const el = document.querySelector(sel);
+      if (!el) continue;
+      // 可见性：命中但被隐藏/移出视口的控件不采（offsetParent 为 null 即不可见）。
+      if (el.offsetParent !== null || el.getClientRects().length > 0) return el;
+    }
+    return null;
+  }
+
   /** 列表卡片的职位绝对 URL（取自详情锚点）。 */
   function cardUrl(card) {
     const a = card.querySelector(LINK_SELECTOR);
@@ -146,6 +178,11 @@
       /^d_headId$/i, /^d_posi$/i, /^skId$/i, /^fkId$/i, /^ckId$/i,
       /^sfrom$/i, /^curPage$/i, /^pageSize$/i, /^index$/i,
     ],
+    // 猎聘搜索页是分页型平台：扫全量靠点「下一页」而非滚动。core scan mode 见
+    // isPageMode=true 即走 DOM 翻页驱动（findNextPageBtn → click → MutationObserver
+    // 采新卡），不再滚动步进；无下一页控件 = 末页，配合静默阈值收尾。
+    isPageMode: true,
+    findNextPageBtn,
     // 猎聘无列表右栏面板，不提供 ids/ensureRightPaneButton/extractListPaneJd/
     // currentActiveUrl —— core 以 typeof 守卫，缺失即跳过。
     // evaluateInlineJd: 详情页完整评估带 DOM 提取的 JD 全文+雇主名,绕开服务端
@@ -163,7 +200,7 @@
   // 不引用 window/document/location。
   if (typeof window === "undefined" || !window.__careerExtCore) {
     if (typeof module !== "undefined" && module.exports) {
-      module.exports = { LIEPIN_SITE, isDetailPath, cardIsList, cardUrl, cardMeta, extractDetailJd, extractPosterName };
+      module.exports = { LIEPIN_SITE, isDetailPath, cardIsList, cardUrl, cardMeta, extractDetailJd, extractPosterName, findNextPageBtn };
     }
     return;
   }

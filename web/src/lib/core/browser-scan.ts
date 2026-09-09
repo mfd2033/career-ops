@@ -2,7 +2,7 @@ import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { careerOpsRoot, rootScript } from "@/lib/career-ops";
-import { buildSearchUrls, cleanBrowserSources, matchesBrowserCity } from "../browser-search.mjs";
+import { cleanBrowserSources, expandSearchTargets, matchesBrowserCity } from "../browser-search.mjs";
 import { type BrowserSource, type DiscoveredOffer, type ExploreFilters, type ScanEvent } from "@/lib/explore";
 
 export type { DiscoveredOffer, ScanEvent } from "@/lib/explore";
@@ -54,7 +54,11 @@ export function runBrowserDiscovery(
     // 语义把连续空白替换成 OR，使各平台按"多候选职位"处理，而不是把整串当作单个 AND 短语。
     const query = (filters.zhQuery ?? "").trim().replace(/\s+/g, " OR ");
     const city = filters.zhCity?.trim() ?? "";
-    const urls = buildSearchUrls(sources, query, city);
+    // 采集目标成对展开：猎聘搜索框不支持 OR 分隔的多关键词（只认单关键词），逐词
+    // 拆成多条搜索 URL，每词一个采集会话；BOSS/智联整串一条。避免 buildSearchUrls
+    // 的 source↔url 齐序被拆词破坏。
+    const targets = expandSearchTargets(sources, query, city);
+    const urls = targets.map((t) => t.url);
 
     const offers: DiscoveredOffer[] = [];
     const seen = new Set<string>();
@@ -84,7 +88,7 @@ export function runBrowserDiscovery(
         return;
       }
       const url = urls[idx];
-      const platform = sources[idx] as BrowserSource;
+      const platform = targets[idx].source as BrowserSource;
       idx += 1;
 
       onEvent({ kind: "atsStart", ats: platform, companies: 0 });

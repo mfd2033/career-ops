@@ -191,6 +191,42 @@ export function buildSearchUrls(sources, query, cityName) {
   return out;
 }
 
+/**
+ * 扩展/bsk 采集的目标展开：返回 {source, url}[]（成对，避免 buildSearchUrls 的
+ * source↔url 齐序被拆词破坏）。
+ *
+ * 猎聘搜索框**不支持** `OR`/空格分隔的多关键词 —— 只认单关键词，整串会被当字面
+ * 关键词匹配而漏采。故对猎聘把 OR 分隔的词组逐词拆成多条搜索 URL（每词一次采集）；
+ * BOSS/智联搜索框接受空格/OR 分隔的多候选，维持整串一条。
+ *
+ * @param {string[]} sources
+ * @param {string} query 已含 ` OR ` 分隔的查询串（调用方构成）
+ * @param {string} [cityName] logical Chinese city, e.g. "郑州"; "" = national
+ * @returns {Array<{source: string, url: string}>}
+ */
+export function expandSearchTargets(sources, query, cityName) {
+  const out = [];
+  for (const s of sources) {
+    const tpl = SEARCH_TEMPLATES[s];
+    if (!tpl) continue;
+    const append = (word) => {
+      const base = tpl.replace("{q}", encodeURIComponent(String(word ?? "").trim()));
+      out.push({ source: s, url: applyBrowserCity(s, base, browserCityValue(s, cityName)) });
+    };
+    if (s === "liepin") {
+      // 猎聘单关键词限制：按 OR 拆词逐条。空段丢弃；纯空白查询退化为全国空搜。
+      const words = String(query ?? "")
+        .split(/ OR | or /i)
+        .map((w) => w.trim())
+        .filter(Boolean);
+      (words.length ? words : [""]).forEach(append);
+    } else {
+      append(String(query ?? "").trim() || "");
+    }
+  }
+  return out;
+}
+
 /** Keep only known browser sources; the empty/absent/ non-array value means "all". */
 export function cleanBrowserSources(v) {
   if (!Array.isArray(v)) return [...BROWSER_SOURCES];

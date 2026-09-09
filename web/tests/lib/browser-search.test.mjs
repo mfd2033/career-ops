@@ -6,7 +6,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { extractBrowserQuery } from "../../src/lib/browser-search.mjs";
+import { extractBrowserQuery, buildSearchUrls, expandSearchTargets } from "../../src/lib/browser-search.mjs";
 
 test("drops site:/OR/city tokens and keeps every position keyword across OR groups", () => {
   assert.equal(
@@ -55,4 +55,43 @@ test("site:-only first group → falls through and keeps later position keywords
 
 test("leading OR does not crash — yields the following phrase without city", () => {
   assert.equal(extractBrowserQuery("OR 项目经理 郑州"), "项目经理");
+});
+
+// ── buildSearchUrls / expandSearchTargets —— 多关键词展开与猎聘单关键词限制 ──
+
+test("buildSearchUrls keeps one URL per source with OR-joined query", () => {
+  const urls = buildSearchUrls(["zhipin", "liepin", "zhaopin"], "经理 OR 工程师", "郑州");
+  assert.equal(urls.length, 3);
+  for (const u of urls) assert.ok(u.includes("OR"), `期望 OR 保留在整串查询里: ${u}`);
+});
+
+test("expandSearchTargets splits liepin multi-keyword into one URL per word", () => {
+  // 猎聘搜索框不支持 OR/空格分隔的多关键词 —— 逐词拆成多条搜索 URL。
+  const targets = expandSearchTargets(["liepin"], "经理 OR 工程师 OR 架构师", "郑州");
+  assert.equal(targets.length, 3);
+  assert.ok(targets.every((t) => t.source === "liepin"));
+  assert.ok(targets.some((t) => t.url.includes(encodeURIComponent("经理"))), "含第一词 URL");
+  assert.ok(targets.some((t) => t.url.includes(encodeURIComponent("工程师"))), "含第二词 URL");
+  assert.ok(targets.some((t) => t.url.includes(encodeURIComponent("架构师"))), "含第三词 URL");
+});
+
+test("expandSearchTargets keeps BOSS/zhaopin as a single OR-joined URL (they accept multi keywords)", () => {
+  const targets = expandSearchTargets(["zhipin", "zhaopin"], "经理 OR 工程师", "郑州");
+  assert.equal(targets.length, 2); // 每源仍一条
+  for (const t of targets) assert.ok(t.url.includes("OR"));
+});
+
+test("expandSearchTargets mixes sources correctly without heal-order drift", () => {
+  const targets = expandSearchTargets(["zhipin", "liepin"], "经理 OR 工程师", "");
+  // order: zhipin×1, liepin×2
+  assert.equal(targets.length, 3);
+  assert.equal(targets[0].source, "zhipin");
+  assert.equal(targets[1].source, "liepin");
+  assert.equal(targets[2].source, "liepin");
+});
+
+test("expandSearchTargets empty liepin query degrades to a single national search", () => {
+  const targets = expandSearchTargets(["liepin"], "  ", "郑州");
+  assert.equal(targets.length, 1);
+  assert.ok(targets[0].url.startsWith("https://www.liepin.com/zhaopin/?key="));
 });

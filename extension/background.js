@@ -227,22 +227,16 @@ const DRIVE_SOURCES = {
   },
 };
 
-// source → { scanId, tabId };同一 source 已有活跃驱动时,重复 drive-scan 直接回报
-// "active" 且不新开 tab(防连点/重放产生重复采集 tab)。
+// {source, url} → { scanId, tabId };同一 source+url 已有活跃驱动时,重复 drive-scan
+// 直接回报 "active" 且不新开 tab(防连点/重放产生重复采集 tab)。key 为
+// `${source}|${url}`:拆词扫描时猎聘同 source 多条不同关键词 URL 需独立 tab 各自
+// 采集,不能按 source 去重 —— 否则第二条词会被 activeDrives 吞掉(采不全)。
 const activeDrives = new Map();
+const driveKey = (source, url) => `${source}|${url}`;
 
 // scanId → DiscoveredOffer[];content script 分批上报的增量本地缓冲,供探索页在采集
 // 收尾后一次取回用于结果渲染(/api/explore/add 已落库为权威,此为前端展示镜像)。
 const scanOffers = new Map();
-
-/** 由 content-script tab 的 URL 反推三站平台名(供 scan-done 清 activeDrives);非三站返回 null。 */
-function sourceForUrl(url) {
-  if (typeof url !== "string") return null;
-  for (const source of Object.keys(DRIVE_SOURCES)) {
-    if (DRIVE_SOURCES[source].hostRe.test(url)) return source;
-  }
-  return null;
-}
 
 /** 向某 tab 的 content script 发 start-scan(tab 未注入/已关闭时返回 {ok:false})。 */
 async function tryStartScan(tabId, scanId) {
@@ -271,8 +265,9 @@ function waitTabLoaded(tabId, timeoutMs = 15000) {
 /** 新开搜索 tab、等加载完成、驱动扫描;content 未及时就绪时多等 800ms 重试一轮。 */
 async function openAndDrive(source, url, scanId) {
   try {
+    const key = driveKey(source, url);
     const tab = await chrome.tabs.create({ url });
-    activeDrives.set(source, { scanId, tabId: tab.id });
+    activeDrives.set(key, { scanId, tabId: tab.id });
     await waitTabLoaded(tab.id);
     let res = await tryStartScan(tab.id, scanId);
     if (!res || !res.ok) {
@@ -282,7 +277,7 @@ async function openAndDrive(source, url, scanId) {
     if (res && res.ok) {
       return { source, status: "created", tabId: tab.id, scanId: res.scanId || scanId };
     }
-    activeDrives.delete(source); // 启动失败:清登记,允许后续重试驱动
+    activeDrives.delete(key); // 启动失败:清登记,允许后续重试驱动
     return { source, status: "failed", tabId: tab.id, error: (res && res.error) || "content not ready" };
   } catch (e) {
     return { source, status: "failed", error: (e && e.message) || String(e) };
@@ -291,35 +286,14 @@ async function openAndDrive(source, url, scanId) {
 
 /**
  * 驱动单个平台:查既存 hosts 命中 tab,优先取列表页驱动;都不可用/被拒则新开搜索
- * tab。activeDrives 登记成功来源,scan-done 时清除,避免重复驱动。
+ * tab。activeDrives 按 {source,url} 登记成功来源,scan-done 时清除,避免重复驱动。
  */
 async function driveSource(source, url, scanId) {
   const spec = DRIVE_SOURCES[source];
-  const active = activeDrives.get(source);
+  const key = driveKey(source, url);
+  const active = activeDrives.get(key);
   if (active) return { source, status: "active", tabId: active.tabId, scanId: active.scanId };
   if (!spec) return { source, status: "failed", error: "unknown source" };
-  const tabs = await chrome.tabs.query({});
-  // host 命中的既有 tab 里,优先找列表页(非详情);全详情/无法解析则退而取任一同站 tab。
-  const hits = tabs.filter((t) => t.id && t.url && spec.hostRe.test(t.url));
-  let candidate = null;
-  for (const t of hits) {
-    let detail = false;
-    try {
-      detail = spec.isDetail(new URL(t.url).pathname);
-    } catch {
-      detail = false;
-    }
-    if (!detail) { candidate = t; break; }
-  }
-  if (!candidate && hits.length) candidate = hits[0];
-  if (candidate && candidate.url) {
-    const res = await tryStartScan(candidate.id, scanId);
-    if (res && res.ok) {
-      activeDrives.set(source, { scanId: res.scanId || scanId, tabId: candidate.id });
-      return { source, status: "driven", tabId: candidate.id, scanId: res.scanId || scanId };
-    }
-    // content 拒绝(如误判详情/未注入)→ 回退新开搜索 tab 兜底。
-  }
   return openAndDrive(source, url, scanId);
 }
 
@@ -671,9 +645,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         break;
       }
       case "scan-status": {
-        // 探索页 2s 轮询驱动状态:哪些平台仍在采集(activeDrives 键),配合
-        // /api/explore/scan-progress 的计数条数,前端拼"已采集 N 条"进度卡(06)。
-        sendResponse({ ok: true, scanId: typeof msg.scanId === "string" ? msg.scanId : null, active: Array.from(activeDrives.keys()) });
+        // 探索页 2s 轮询驱动状态:哪些平台仍在采集(activeDrives 键,key=`source|url`,
+        // 拆词时同 source 多条 → 去回 source 再返回),配合 /api/explore/scan-progress
+        // 的计数条数与前端拼"已采集 N 条"进度卡(06)。
+        const activeSources = [];
+        for (const key of activeDrives.keys()) {
+          const source = String(key).split("|")[0];
+          if (source && !activeSources.includes(source)) activeSources.push(source);
+        }
+        sendResponse({ ok: true, scanId: typeof msg.scanId === "string" ? msg.scanId : null, active: activeSources });
         break;
       }
       case "scan-batch": {
@@ -698,10 +678,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         break;
       }
       case "scan-done": {
-        // 平台采集收尾:清 activeDrives(允许同平台后续再驱动)。进度由 web 侧轮询
+        // 平台采集收尾:清 activeDrives 对应此 tab URL 的登记(允许后续再驱动)。
+        // key 是 `${source}|${url}`,故按发送者 tab 的 URL 匹配清理 —— 拆词时同
+        // source 多条 URL 各自独立登记,不能按 source 一把清。进度由 web 侧轮询
         // whats-new 呈现(E14),无需回传;仅响 ack。
-        const src = sender && sender.tab && sender.tab.url ? sourceForUrl(sender.tab.url) : null;
-        if (src && activeDrives.get(src)) activeDrives.delete(src);
+        const doneUrl = sender && sender.tab && sender.tab.url ? sender.tab.url : null;
+        if (doneUrl) {
+          for (const [key, entry] of activeDrives) {
+            if (entry.tabId === sender.tab.id || key.endsWith(`|${doneUrl}`)) activeDrives.delete(key);
+          }
+        }
         sendResponse({ ok: true });
         break;
       }
