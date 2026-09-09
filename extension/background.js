@@ -204,6 +204,161 @@ async function loadEvaluated(base) {
   return evaluated;
 }
 
+// ---- extension-driven explore scan (ADR-0007 E2/E5) -----------------------
+
+// 探索页浏览器采集驱动从 Playwright 换到扩展:background 收「驱动扫描」后查既存
+// 三站 tab,命中向该 tab content script 发 start-scan;无则 chrome.tabs.create 开
+// 对应搜索 URL 再驱动。复用用户真实登录态,不新开独立 profile(E2)。
+//
+// 三站列表/详情 pathname 判定(与 site-*.js isDetailPath 保持一致,仅用于选既存
+// tab 时尽量避开详情页;content 侧 start-scan 仍会再拦,双保险)。
+const DRIVE_SOURCES = {
+  zhipin: {
+    hostRe: /^https?:\/\/([^/]*\.)?zhipin\.com\//i,
+    isDetail: (p) => p.includes("/job_detail/"),
+  },
+  liepin: {
+    hostRe: /^https?:\/\/([^/]*\.)?liepin\.com\//i,
+    isDetail: (p) => /^\/(job|a)\/\d+\.shtml$/i.test(p),
+  },
+  zhaopin: {
+    hostRe: /^https?:\/\/([^/]*\.)?zhaopin\.com\//i,
+    isDetail: (p) => /^\/jobdetail\/[^/?#]+\.htm$/i.test(p),
+  },
+};
+
+// source → { scanId, tabId };同一 source 已有活跃驱动时,重复 drive-scan 直接回报
+// "active" 且不新开 tab(防连点/重放产生重复采集 tab)。
+const activeDrives = new Map();
+
+// scanId → DiscoveredOffer[];content script 分批上报的增量本地缓冲,供探索页在采集
+// 收尾后一次取回用于结果渲染(/api/explore/add 已落库为权威,此为前端展示镜像)。
+const scanOffers = new Map();
+
+/** 由 content-script tab 的 URL 反推三站平台名(供 scan-done 清 activeDrives);非三站返回 null。 */
+function sourceForUrl(url) {
+  if (typeof url !== "string") return null;
+  for (const source of Object.keys(DRIVE_SOURCES)) {
+    if (DRIVE_SOURCES[source].hostRe.test(url)) return source;
+  }
+  return null;
+}
+
+/** 向某 tab 的 content script 发 start-scan(tab 未注入/已关闭时返回 {ok:false})。 */
+async function tryStartScan(tabId, scanId) {
+  try {
+    return (await chrome.tabs.sendMessage(tabId, { type: "start-scan", scanId })) || { ok: false };
+  } catch {
+    return { ok: false, error: "no-receiver" };
+  }
+}
+
+/** 等 tab 加载到 status complete,或超时放行(SPA 注入可能晚于 complete,放行后再试)。 */
+function waitTabLoaded(tabId, timeoutMs = 15000) {
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, timeoutMs);
+    const listener = (id, info) => {
+      if (id === tabId && info.status === "complete") {
+        clearTimeout(timer);
+        chrome.tabs.onUpdated.removeListener(listener);
+        resolve();
+      }
+    };
+    chrome.tabs.onUpdated.addListener(listener);
+  });
+}
+
+/** 新开搜索 tab、等加载完成、驱动扫描;content 未及时就绪时多等 800ms 重试一轮。 */
+async function openAndDrive(source, url, scanId) {
+  try {
+    const tab = await chrome.tabs.create({ url });
+    activeDrives.set(source, { scanId, tabId: tab.id });
+    await waitTabLoaded(tab.id);
+    let res = await tryStartScan(tab.id, scanId);
+    if (!res || !res.ok) {
+      await new Promise((r) => setTimeout(r, 800));
+      res = await tryStartScan(tab.id, scanId);
+    }
+    if (res && res.ok) {
+      return { source, status: "created", tabId: tab.id, scanId: res.scanId || scanId };
+    }
+    activeDrives.delete(source); // 启动失败:清登记,允许后续重试驱动
+    return { source, status: "failed", tabId: tab.id, error: (res && res.error) || "content not ready" };
+  } catch (e) {
+    return { source, status: "failed", error: (e && e.message) || String(e) };
+  }
+}
+
+/**
+ * 驱动单个平台:查既存 hosts 命中 tab,优先取列表页驱动;都不可用/被拒则新开搜索
+ * tab。activeDrives 登记成功来源,scan-done 时清除,避免重复驱动。
+ */
+async function driveSource(source, url, scanId) {
+  const spec = DRIVE_SOURCES[source];
+  const active = activeDrives.get(source);
+  if (active) return { source, status: "active", tabId: active.tabId, scanId: active.scanId };
+  if (!spec) return { source, status: "failed", error: "unknown source" };
+  const tabs = await chrome.tabs.query({});
+  // host 命中的既有 tab 里,优先找列表页(非详情);全详情/无法解析则退而取任一同站 tab。
+  const hits = tabs.filter((t) => t.id && t.url && spec.hostRe.test(t.url));
+  let candidate = null;
+  for (const t of hits) {
+    let detail = false;
+    try {
+      detail = spec.isDetail(new URL(t.url).pathname);
+    } catch {
+      detail = false;
+    }
+    if (!detail) { candidate = t; break; }
+  }
+  if (!candidate && hits.length) candidate = hits[0];
+  if (candidate && candidate.url) {
+    const res = await tryStartScan(candidate.id, scanId);
+    if (res && res.ok) {
+      activeDrives.set(source, { scanId: res.scanId || scanId, tabId: candidate.id });
+      return { source, status: "driven", tabId: candidate.id, scanId: res.scanId || scanId };
+    }
+    // content 拒绝(如误判详情/未注入)→ 回退新开搜索 tab 兜底。
+  }
+  return openAndDrive(source, url, scanId);
+}
+
+/**
+ * 收「驱动扫描」:遍历请求的平台,查/开 tab 并驱动。scanId 缺省时生成一次会话 id
+ * 并随结果返回(web 侧后续重放同 id 走路由幂等)。返回每平台 task 状态。
+ */
+async function driveScan(msg) {
+  const scanId = typeof msg.scanId === "string" && msg.scanId.trim() ? msg.scanId.trim() : `ext-scan-${Date.now()}`;
+  const requested = Array.isArray(msg.sources)
+    ? msg.sources
+        .map((s) => (s && typeof s.source === "string" ? s : { source: s }))
+        .filter((s) => s && typeof s.source === "string" && DRIVE_SOURCES[s.source] && typeof s.url === "string" && /^https?:\/\//i.test(s.url))
+    : [];
+  if (requested.length === 0) return { ok: true, scanId, connected: true, tasks: [] };
+  const tasks = [];
+  for (const s of requested) {
+    // 顺序驱动(每平台一次采集会话,避免同时弹多个搜索 tab)。每步失败不中断其它平台。
+    tasks.push(await driveSource(s.source, s.url, scanId));
+  }
+  return { ok: true, scanId, connected: true, tasks };
+}
+
+/**
+ * content script 分批上报 → SW 转发 web /api/explore/add(E5)。批量上报本身即活动
+ * 事件,间隔常醒来 SW,无需额外 keepalive。环回同源走 host_permissions,CORS 豁免。
+ */
+async function relayScanBatch(scanId, offers) {
+  const base = `http://127.0.0.1:${await ensureLivePort()}`;
+  const res = await fetch(`${base}/api/explore/add`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ scanId, offers }),
+  });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) console.log(`[bg] scan-batch relay ${res.status}:`, j && j.error);
+  return j;
+}
+
 // ---- message routing ------------------------------------------------------
 
 const selectionByTab = new Map(); // tabId → string[] (selected posting URLs)
@@ -374,6 +529,52 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         } catch (err) {
           sendTab({ type: "quick-eval-error", error: "快评不可用：本地 web 服务/接口异常" });
         }
+        sendResponse({ ok: true });
+        break;
+      }
+      case "drive-scan": {
+        // 探索页发起(经 localhost 桥转发)→ 查/开三站 tab 并驱动采集(E2)。异步
+        // 完成,稍后 sendResponse,保持通道打开。失败不影响响应:错误落 tasks 内。
+        driveScan(msg).then((r) => sendResponse(r));
+        break;
+      }
+      case "ext-ping": {
+        // 连通性探测(探索页切换采集驱动前走一遍,ADR-0007 E6):SW 活着即答 ok。
+        sendResponse({ ok: true });
+        break;
+      }
+      case "scan-status": {
+        // 探索页 2s 轮询驱动状态:哪些平台仍在采集(activeDrives 键),配合
+        // /api/explore/scan-progress 的计数条数,前端拼"已采集 N 条"进度卡(06)。
+        sendResponse({ ok: true, scanId: typeof msg.scanId === "string" ? msg.scanId : null, active: Array.from(activeDrives.keys()) });
+        break;
+      }
+      case "scan-batch": {
+        // content script 分批上报 → SW 转发 web(单 fly,不阻塞心跳 ack)。
+        sendResponse({ ok: true });
+        const offers = Array.isArray(msg.offers) ? msg.offers : [];
+        if (offers.length) {
+          // 缓冲一份给探索页收尾取回渲染结果(不含于落库,仅前端展示镜像)。
+          const sid = typeof msg.scanId === "string" && msg.scanId.trim() ? msg.scanId.trim() : "?";
+          if (!scanOffers.has(sid)) scanOffers.set(sid, []);
+          scanOffers.get(sid).push(...offers);
+          relayScanBatch(sid, offers).catch((err) =>
+            console.log("[bg] scan-batch relay error:", err && err.message)
+          );
+        }
+        break;
+      }
+      case "scan-offers": {
+        // 探索页收尾后取回本 scanId 采集到的 offer(结果渲染用)。
+        const sid = typeof msg.scanId === "string" ? msg.scanId : "";
+        sendResponse({ ok: true, offers: sid ? scanOffers.get(sid) || [] : [] });
+        break;
+      }
+      case "scan-done": {
+        // 平台采集收尾:清 activeDrives(允许同平台后续再驱动)。进度由 web 侧轮询
+        // whats-new 呈现(E14),无需回传;仅响 ack。
+        const src = sender && sender.tab && sender.tab.url ? sourceForUrl(sender.tab.url) : null;
+        if (src && activeDrives.get(src)) activeDrives.delete(src);
         sendResponse({ ok: true });
         break;
       }

@@ -56,6 +56,20 @@ _Avoid_: 后台脚本
 扩展后台对 `localhost:3000-3040` 逐个 `GET /api/version` 定位本地 web 服务（与 launcher `pickFreePort` 区间一致），命中缓存、失活重探。
 _Avoid_: 端口发现、端口扫描
 
+## 探索页扫描
+
+**扫描驱动（scan driver）**:
+探索页 browser 模式驱动中国招聘平台采集的方式。现已从 Playwright/CDP（ADR-0001）切换为职位评估扩展 content script（ADR-0007）：content script 跑在用户真实已登录浏览器，`MutationObserver` 捕获页面自身懒加载产生的 DOM 变化即获全量卡片，无需伪造滚轮事件。
+_Avoid_: 采集器、浏览器驱动（太泛）
+
+**卡片元数据（cardMeta）**:
+列表卡片上扩展采集的 `{url, title, company, salary, city?}` 字段。每站 site 适配对象提供 `cardMeta(card)`；智联 city 权威源是 `positionList[].workCity`（window 状态数据）非 DOM，BOSS/猎聘靠 title 兜底。供 `/api/explore/add` 落库与探索页扫描。
+_Avoid_: 卡片数据、卡片字段
+
+**幂等扫描（scanId）**:
+对单次探索页扫描生成的操作号，路由侧用作幂等键，防前端连点重复写 pipeline/scan-history（`addOffersToPipeline` 不去重）。content script 另持本页已采 URL Set 防内部重发——双层幂等。
+_Avoid_: 扫描 ID（易与报告号混淆）
+
 ## 雇主策略
 
 **未知雇主（unknown employer）**:

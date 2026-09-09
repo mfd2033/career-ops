@@ -38,6 +38,25 @@
   }
 
   /**
+   * 列表卡片全量元字段（URL 复用 cardUrl）。猎聘卡片容器哈希 class 多变，内容选择器
+   * 取宽、尽力而为，抓不到即空串。city 不在此定点（无稳定卡片城市 class，城市过滤
+   * 走 web 侧 matchesBrowserCity 以 title 兜底，ADR-0007 E4）。
+   */
+  function cardMeta(card) {
+    const text = (sel) => {
+      const el = card.querySelector(sel);
+      return el ? (el.innerText || el.textContent || "").trim() : "";
+    };
+    return {
+      url: cardUrl(card),
+      title: text(LINK_SELECTOR),
+      company: text('[class*="company"].job-company, .item-company, [class*="company-name"], [class*="company"] .name'),
+      salary: text('[class*="salary"],[class*="item-salary"],[class*="price"]'),
+      city: undefined, // 猎聘无卡片城市 class —— 城市过滤走 web 侧 title 匹配
+    };
+  }
+
+  /**
    * 从详情页 DOM 提取 JD 文本。猎聘无 <h1>，标题在
    * .job-apply-container .name-box > span.name；薪资 span.salary；职位描述
    * section.job-intro-container dl.paragraph dd[data-selector="job-intro-content"]
@@ -117,6 +136,7 @@
 
   const LIEPIN_SITE = {
     hostMatch: /(^|\.)liepin\.com$/i,
+    source: "liepin",
     cardSelector: CARD_SELECTOR,
     linkSelector: LINK_SELECTOR,
     // 猎聘反爬/跟踪参数：每次请求变化，去重键 strip 后仅留 job/{id}.shtml。
@@ -134,6 +154,7 @@
     isDetailPath,
     cardIsList,
     cardUrl,
+    cardMeta,
     extractDetailJd,
     extractPosterName,
   };
@@ -142,7 +163,7 @@
   // 不引用 window/document/location。
   if (typeof window === "undefined" || !window.__careerExtCore) {
     if (typeof module !== "undefined" && module.exports) {
-      module.exports = { LIEPIN_SITE, isDetailPath, cardIsList, cardUrl, extractDetailJd, extractPosterName };
+      module.exports = { LIEPIN_SITE, isDetailPath, cardIsList, cardUrl, cardMeta, extractDetailJd, extractPosterName };
     }
     return;
   }
