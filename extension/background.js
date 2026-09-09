@@ -543,6 +543,133 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         sendResponse({ ok: true });
         break;
       }
+      case "zp-get-state": {
+        // 智联职位 url 数据源:扩展 isolated world 读不到 window.__INITIAL_STATE__
+        // (页面主世界属性隔离,ADR-0007 时代直接可读已退化)。用 chrome.scripting
+        // programmatic 注入到 MAIN world 读取(命中页面 CSP script-src,扩展注入豁免),
+        // 精简 {url,name,city}[] 回传 content script,由它写 html[data-zpstate] 缓存。
+        const tabId = sender && sender.tab && typeof sender.tab.id === "number" ? sender.tab.id : null;
+        if (!tabId) {
+          sendResponse({ ok: false, error: "no tab" });
+          break;
+        }
+        chrome.scripting
+          .executeScript({
+            target: { tabId },
+            world: "MAIN",
+            func: () => {
+              try {
+                const L = (window && window.__INITIAL_STATE__ && window.__INITIAL_STATE__.positionList) || [];
+                return L.map((p) => ({ url: (p && (p.positionUrl || p.positionURL)) || "", name: (p && p.name) || "", city: (p && p.workCity) || "" }));
+              } catch (e) {
+                return [];
+              }
+            },
+          })
+          .then((res) => {
+            const list = (res && res[0] && Array.isArray(res[0].result) && res[0].result) || [];
+            sendResponse({ ok: true, list });
+          })
+          .catch((err) => {
+            sendResponse({ ok: false, error: String((err && err.message) || err) });
+          });
+        break;
+      }
+      case "zp-fetch-pages": {
+        // 智联翻页采集(MAIN world):SSR 首屏只 20 条,页面自身 load-more 的 XHR
+        // 实测会静默挂起(风控),但同一 /c/i/search/positions 接口从页面上下文
+        // 直接 POST 稳定可用(带登录 cookie)。注入主世界循环拉 pageIndex 2..N,
+        // 精简 {url,title,company,salary,city}[] 回传 content script 直喂采集
+        // 累积器 — 绕开 DOM 滚动与页面内部状态,职位 url 用 number 拼规范的
+        // /jobdetail/{number}.htm(与 SSR positionList 同格式,去重键统一)。
+        const tabId = sender && sender.tab && typeof sender.tab.id === "number" ? sender.tab.id : null;
+        if (!tabId) {
+          sendResponse({ ok: false, error: "no tab" });
+          break;
+        }
+        chrome.scripting
+          .executeScript({
+            target: { tabId },
+            world: "MAIN",
+            func: async () => {
+              try {
+                const st = (window && window.__INITIAL_STATE__) || {};
+                const q = st.queryParams || {};
+                const kw = q.kw || "";
+                const jl = q.jl || "";
+                const at = (st.cookiesData || {}).at || "";
+                const rt = (st.cookiesData || {}).rt || "";
+                const actionid = (st.statBaseData || {}).actionid || "";
+                const resumeNumber = st.resumeNumber || "";
+                const pageSize = st.pageSize || 20;
+                if (!kw || !at || !rt) return { ok: false, error: "missing kw/at/rt" };
+                const base =
+                  "https://fe-api.zhaopin.com/c/i/search/positions?at=" +
+                  encodeURIComponent(at) + "&rt=" + encodeURIComponent(rt) +
+                  "&platform=13&version=0.0.0";
+                const metas = [];
+                let count = 0;
+                const MAX_PAGES = 25; // 安全上限 25*20=500,超 SCAN_MAX 由累积器截断
+                for (let p = 2; p <= MAX_PAGES; p++) {
+                  // 参数镜像页面自身 load-more 请求(登录态 B 分支):order=0 +
+                  // sortType=DEFAULT,anonymous=0,actionid/resumeNumber 来自 SSR state。
+                  const body = {
+                    S_SOU_FULL_INDEX: kw,
+                    S_SOU_WORK_CITY: jl,
+                    order: 0,
+                    actionid,
+                    pageSize,
+                    pageIndex: p,
+                    cvNumber: resumeNumber,
+                    at,
+                    rt,
+                    eventScenario: "pcSearchedSouSearch",
+                    anonymous: 0,
+                    resumeNumber,
+                    clickFilterBlackCompany: false,
+                    platform: 13,
+                    version: "0.0.0",
+                    sortType: "DEFAULT",
+                  };
+                  const r = await fetch(base, {
+                    method: "POST",
+                    credentials: "include",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(body),
+                  });
+                  if (!r.ok) break;
+                  const j = await r.json().catch(() => null);
+                  if (!j || j.code !== 200 || !j.data || !Array.isArray(j.data.list)) break;
+                  if (typeof j.data.count === "number" && j.data.count > 0) count = j.data.count;
+                  for (const it of j.data.list) {
+                    if (!it || !it.number) continue;
+                    metas.push({
+                      url: "https://www.zhaopin.com/jobdetail/" + it.number + ".htm",
+                      title: it.name || "",
+                      company: it.companyName || "",
+                      salary: it.salary60 || "",
+                      city: it.workCity || "",
+                    });
+                  }
+                  if (j.data.list.length < pageSize) break; // 末页不满 = 到头
+                  if (count && p * pageSize >= count) break; // 已覆盖总数
+                  await new Promise((res) => setTimeout(res, 350)); // 节流降风控
+                }
+                return { ok: true, count, metas };
+              } catch (e) {
+                return { ok: false, error: String((e && e.message) || e) };
+              }
+            },
+          })
+          .then((res) => {
+            const r = (res && res[0] && res[0].result) || { ok: false, error: "no result" };
+            sendResponse(r);
+          })
+          .catch((err) => {
+            sendResponse({ ok: false, error: String((err && err.message) || err) });
+          });
+        break;
+      }
       case "scan-status": {
         // 探索页 2s 轮询驱动状态:哪些平台仍在采集(activeDrives 键),配合
         // /api/explore/scan-progress 的计数条数,前端拼"已采集 N 条"进度卡(06)。

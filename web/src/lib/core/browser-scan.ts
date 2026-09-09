@@ -9,52 +9,40 @@ export type { DiscoveredOffer, ScanEvent } from "@/lib/explore";
 
 /**
  * Browser-mode discovery — walks the Chinese boards (BOSS直聘/猎聘/智联招聘)
- * through an INDEPENDENT job-seeking Edge profile via `zh-collect.mjs`
- * (Playwright; CDP trusted `page.mouse.wheel()` for the lazy-load boards and
- * pagination for 猎聘). Those boards wall headless and logged-out browsers; the
- * independent profile keeps its own login cookies, isolated from the user's
- * daily Edge (ADR-0001). Each platform run starts with a multi-signal login
- * precheck; when not logged in the collector auto-pops the login window, waits
- * for the scan, then resumes (G8/A) — 猎聘 hard-requires login, BOSS/智联
- * degrade to a logged-out collect on login timeout.
+ * through the USER'S OWN logged-in browser via `bsk-extract.mjs --mode listing`
+ * (browser-skill / `bsk` CLI). Those boards wall headless and logged-out
+ * browsers; using the real browser session keeps a live login, so the fallback
+ * path never regresses to a logged-out Playwright profile (which the three
+ * boards all refuse). This is the designated Playwright-free fallback when the
+ * extension driver is not connected (ADR-0007 E6): extension takes priority,
+ * bsk fallback preserves login, and ATS HTTP scanning stays untouched.
  *
  * DISCOVERY STAYS FREE — zero LLM tokens; the collector only drives a browser.
  *
- * Run is SEQUENTIAL (one browser session at a time — sessions are per-platform
- * start/stop and the browser is a scarce shared resource); a platform failure
- * counts as unreachable and the hunt continues with the next one. ATS API
- * scanning is untouched and fully independent of this path.
+ * Run is SEQUENTIAL (one browser session at a time — bsk drives the shared real
+ * browser and a platform failure counts as unreachable, the hunt continues).
  */
-
-/** Independent job-seeking Edge profile directory (cookie-persistent). */
 export const BROWSER_PROFILE_DIR = path.join(careerOpsRoot(), ".cache", "job-profile");
 
-// System Edge install locations (msedge channel). Playwright resolves the
-// channel from PATH too; these are the common fixed paths checked by the gate.
-const EDGE_EXE_CANDIDATES = [
-  "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
-  "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
-];
+// bsk 是唯一的运行前提（真实浏览器驱动自带登录态）。保留 BROWSER_PROFILE_DIR 导出以防
+// 其他调用方引用；本路径已不创建独立 profile。
+const BSK_EXE = "bsk";
 
-/** Probe once whether the browser collector can run (zh-collect + Playwright +
- *  system Edge). Called by the route BEFORE any stream so a missing capability
- *  fails as a structured 400 (browserCollectorMissing), never as a mid-stream
- *  runtime error. */
+/** Probe once whether the bsk collector can run (`bsk` CLI on PATH + browser-skill
+ *  extension connected). Called by the route BEFORE any stream so a missing
+ *  capability fails as a structured 400 (browserCollectorMissing), never as a
+ *  mid-stream runtime error. Depends only on bsk — no Playwright, no Edge path. */
 export function browserCollectorReady(): boolean {
   try {
-    if (!fs.existsSync(rootScript("zh-collect"))) return false;
-    if (!fs.existsSync(path.join(careerOpsRoot(), "node_modules", "playwright", "package.json"))) return false;
-    return EDGE_EXE_CANDIDATES.some((p) => fs.existsSync(p));
+    if (!fs.existsSync(rootScript("bsk-extract"))) return false;
+    const r = spawnSync(BSK_EXE, ["status"], { windowsHide: true, timeout: 10_000 });
+    return r.status === 0;
   } catch {
     return false;
   }
 }
 
 type BskListing = { url?: string; jobs?: Array<{ title?: string; url?: string; city?: string }> };
-
-// Structured collector failures (stderr JSON { error, code }) that deserve a
-// distinct user-facing hint vs a generic platform failure.
-const LOGIN_HINT_CODES = new Set(["login_required", "login_timeout"]);
 
 export function runBrowserDiscovery(
   filters: ExploreFilters,
@@ -102,17 +90,7 @@ export function runBrowserDiscovery(
       onEvent({ kind: "atsStart", ats: platform, companies: 0 });
       const child = spawn(
         process.execPath,
-        [
-          rootScript("zh-collect"),
-          url,
-          "--platform",
-          platform,
-          "--profile",
-          BROWSER_PROFILE_DIR,
-          "--max",
-          "200",
-          "--login-wait",
-        ],
+        [rootScript("bsk-extract"), url, "--mode", "listing", "--max", "200"],
         { cwd: careerOpsRoot(), windowsHide: true },
       );
 
@@ -157,12 +135,9 @@ export function runBrowserDiscovery(
         if (code !== 0) {
           unreachable += 1;
           onEvent({ kind: "atsDone", ats: platform, unreachable: 1 });
-          const hint = structuredErr?.code && LOGIN_HINT_CODES.has(structuredErr.code);
           onEvent({
             kind: "error",
-            message: hint
-              ? `浏览器采集 ${platform} 需要登录：${structuredErr?.error ?? "请登录后重试。"}`
-              : `browser collection failed for ${platform} (code ${code})${structuredErr?.error ? `: ${structuredErr.error}` : ""}`,
+            message: `browser collection failed for ${platform} (code ${code})${structuredErr?.error ? `: ${structuredErr.error}` : ""}`,
           });
           runNext();
           return;

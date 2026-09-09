@@ -84,3 +84,11 @@ test("ZHAOPIN_SITE: extraTrackingParams covers the full ADR-0006 denylist", () =
     );
   }
 });
+
+test("ZHAOPIN_SITE: fetchRestPages relay declared and degrades to empty in node (ADR-0008)", async () => {
+  // 翻页采集 relay:core 以 typeof 守卫拉起;node 无 window.__careerExtCore(C=null)
+  // → 回调空数组,不抛错 — 保证纯函数路径可测、浏览器路径走 sendMsg relay。
+  assert.equal(typeof ZHAOPIN_SITE.fetchRestPages, "function");
+  const metas = await new Promise((resolve) => ZHAOPIN_SITE.fetchRestPages(resolve));
+  assert.deepEqual(metas, []);
+});
