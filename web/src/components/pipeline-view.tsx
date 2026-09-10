@@ -229,8 +229,8 @@ export function PipelineView({
   }, [selected, urlMap, urlMapLoading, startJob, t]);
 
   return (
-    <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8 max-sm:pb-24">
-      <div className="flex items-end justify-between gap-4">
+    <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8 max-sm:pb-24 md:flex md:h-screen md:flex-col">
+      <div className="flex items-end justify-between gap-4 md:shrink-0">
         <div>
           <h1 className="font-display text-2xl tracking-tight text-landing">{t("pipeline.title")}</h1>
           <p className="mt-1 text-sm text-muted">
@@ -252,7 +252,7 @@ export function PipelineView({
       </div>
 
       {/* tabs */}
-      <div className="mt-6 flex flex-wrap gap-1 border-b border-border">
+      <div className="mt-6 flex flex-wrap gap-1 border-b border-border md:shrink-0">
         {TABS.map((tabKey) => {
           const count =
             tabKey === "INBOX"
@@ -278,7 +278,7 @@ export function PipelineView({
       </div>
 
       {tab !== "INBOX" && minFilter != null && (
-        <div className="mt-3 flex items-center gap-2">
+        <div className="mt-3 flex items-center gap-2 md:shrink-0">
           <span className="text-xs text-faint">{t("pipeline.filtered")}</span>
           <button
             type="button"
@@ -293,7 +293,7 @@ export function PipelineView({
       )}
 
       {tab !== "INBOX" && selected.size > 0 && (
-        <div className="mt-3 flex flex-wrap items-center gap-2 rounded-full border border-brand/30 bg-brand-soft/40 px-3 py-1.5 text-xs">
+        <div className="mt-3 flex flex-wrap items-center gap-2 rounded-full border border-brand/30 bg-brand-soft/40 px-3 py-1.5 text-xs md:shrink-0">
           <span className="font-medium text-brand">{t("pipeline.batchSelected", { count: selected.size })}</span>
           {urlMapLoading ? (
             <span className="inline-flex items-center gap-1 text-muted">
@@ -338,9 +338,9 @@ export function PipelineView({
            but a table too wide for the viewport can now be scrolled to instead
            of being silently cut off. min-w keeps the columns readable rather
            than letting w-full crush them on a phone. */
-        <div className="mt-4 overflow-x-auto rounded-2xl border border-border">
+        <div className="mt-4 overflow-x-auto rounded-2xl border border-border md:min-h-0 md:flex-1 md:overflow-y-auto">
           <table className="w-full min-w-[44rem] text-sm">
-            <thead className="bg-surface/60 text-left text-xs uppercase tracking-wide text-faint">
+            <thead className="sticky top-0 z-10 border-b border-border bg-surface text-left text-xs uppercase tracking-wide text-faint">
               <tr>
                 <th className="w-10 px-2 py-2.5">
                   <input
