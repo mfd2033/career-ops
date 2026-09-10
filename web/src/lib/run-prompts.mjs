@@ -140,6 +140,11 @@ End with EXACTLY one final line: VERDICT: {5 if now live, else 1}/5 — {what yo
 
 1. Read modes/oferta.md and follow it EXACTLY (blocks A–F, G posting-legitimacy, and the Machine Summary). Ground the fit in THIS person: read cv.md, config/profile.yml and modes/_profile.md. Use WebFetch to read the posting (you are headless — Playwright is unavailable, so use WebFetch and mark the report header "Verification: unconfirmed (batch mode)").
 
+   BLOCKED BOARDS: postings on zhipin.com / kanzhun.com (BOSS直聘), zhaopin.com (智联) and liepin.com (猎聘) block plain WebFetch and headless/logged-out browsers with a captcha/login wall. The user's LOGGED-IN browser IS reachable via bsk, so for these domains run the extractor FIRST instead of plain WebFetch:
+   node browser-extract.mjs "<url>" --mode jd --extractor auto
+   \`--extractor auto\` routes the zh boards to bsk (the user's logged-in browser); if a slider captcha appears it hands it to the user via request-help, which is expected — wait for it. Use the returned \`text\` as the FULL JD. If it exits non-zero (e.g. code bsk_missing, session_failed, captcha help timeout, navigation_error) or returns empty \`text\`, then STOP — do NOT fabricate the JD/score, do NOT WebFetch (it only hits the same wall), do NOT ask the user to paste, do NOT write the report/TSV — and end with EXACTLY one terminal line on stdout, verbatim:
+   ERROR: cannot extract JD for {host} — {host} extraction via bsk failed ({code}); provide the JD text inline.
+
 2. Persist the result CANONICALLY so the web and the CLI share ONE source of truth:
    a. Reserve a report number: run \`node reserve-report-num.mjs\` — its stdout is a 3-digit number (e.g. 035).
    b. Write the full report to reports/{num}-{company-slug}-${today}.md  (company-slug = company lowercased, non-alphanumerics → hyphens).

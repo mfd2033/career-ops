@@ -305,3 +305,28 @@ test("buildBatchPrompt: company injects an exact-name directive", () => {
   assert.match(p, /EMPLOYER \(provided by the browser extension, DOM-extracted\)/);
   assert.match(p, /某科技（北京）有限公司/);
 });
+
+test("buildPrompt: has BLOCKED BOARDS instruction for headless evaluation", () => {
+  const p = buildPrompt({
+    kind: "evaluate",
+    input: "https://www.zhipin.com/job_detail/123.html",
+    memory: "",
+    today: "2026-08-14",
+  });
+  assert.match(p, /BLOCKED BOARDS/);
+  assert.match(p, /zhipin\.com.*zhaopin\.com.*liepin\.com/);
+  assert.match(p, /ERROR: cannot extract JD/);
+});
+
+test("buildBatchPrompt: BLOCKED BOARDS instruction preserved when jdText is present", () => {
+  const p = buildBatchPrompt("042", {
+    input: "https://www.zhipin.com/job_detail/123.html",
+    memory: "",
+    today: "2026-08-14",
+    jdText: "JD 全文在这里",
+  });
+  // The BLOCKED BOARDS text lives in buildPrompt, which is wrapped by buildBatchPrompt.
+  // The jdText replacement only changes the first step of buildPrompt.
+  assert.match(p, /BLOCKED BOARDS/);
+  assert.match(p, /ERROR: cannot extract JD/);
+});
