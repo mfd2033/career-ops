@@ -199,9 +199,12 @@ export async function POST(req: Request) {
         // of which worker grabs a slot first. A worker dequeued while queued is
         // counted `cancelled` and never spawns.
         const evaluateOne = (i: number, num: number) =>
-          new Promise<{ cleanExit: boolean; sawError: boolean; verdict: string | null; cancelled: boolean }>((resolve) => {
+          new Promise<{ cleanExit: boolean; sawError: boolean; verdict: string | null; errMsg: string | null; cancelled: boolean }>((resolve) => {
             let sawError = false;
             let verdict: string | null = null;
+            // 代理显式输出的错误行(如登录墙 `ERROR: cannot extract JD ...`)。
+            // 用于让 pipeline 卡片显示真实失败原因,而非误导性的通用双消息。
+            let errMsg: string | null = null;
             const url = urls[i];
             const poolHandle = acquire({ url, title: url, reportNum: num, source: "batch" });
             poolHandles.add(poolHandle);
@@ -221,17 +224,17 @@ export async function POST(req: Request) {
             // the agent's output as text and extracts the VERDICT line — per-event
             // parsing is /api/run's single-run concern.
             const args = withModelFlag(spec.args(prompt), spec.model, model);
-            const finish = (outcome: { cleanExit: boolean; sawError: boolean; verdict: string | null; cancelled?: boolean }) => {
+            const finish = (outcome: { cleanExit: boolean; sawError: boolean; verdict: string | null; errMsg: string | null; cancelled?: boolean }) => {
               poolHandles.delete(poolHandle);
               release(poolHandle.id);
-              resolve(outcome as { cleanExit: boolean; sawError: boolean; verdict: string | null; cancelled: boolean });
+              resolve(outcome as { cleanExit: boolean; sawError: boolean; verdict: string | null; errMsg: string | null; cancelled: boolean });
             };
             // Queue in the global pool; spawn only once a slot is granted. If the
             // task is dequeued (queued-cancel) while waiting, grant=false → skip.
             void (async () => {
               const started = await poolHandle.ready;
               if (!started) {
-                finish({ cleanExit: false, sawError: true, verdict: null, cancelled: true });
+                finish({ cleanExit: false, sawError: true, verdict: null, errMsg: null, cancelled: true });
                 return;
               }
               const child = spawnHeadlessCli(binPath, args, { cwd: root, env: process.env });
@@ -241,6 +244,9 @@ export async function POST(req: Request) {
               child.stdout?.on("data", (chunk: string) => {
                 const vm = chunk.match(/VERDICT:[^\n]*/i);
                 if (vm) verdict = vm[0];
+                // 捕捉显式错误行;多行时保留最后一条(最贴近失败处)。
+                const em = chunk.match(/ERROR:[^\n]*/i);
+                if (em) errMsg = em[0];
               });
               // 逐行分类 stderr,而非裸嗅探 "error|fatal":openCode/Claude 会把进度
               // 遥测(横幅、模型行、MCP 透传)写到 stderr,裸词会误判干净运行为失败 —
@@ -263,14 +269,14 @@ export async function POST(req: Request) {
               child.on("error", (err) => {
                 sawError = true;
                 send({ type: "text", text: `\u274C ${url}: ${err.message}\n` });
-                finish({ cleanExit: false, sawError: true, verdict: null });
+                finish({ cleanExit: false, sawError: true, verdict: null, errMsg });
               });
               child.on("close", (code) => {
                 if (stderrBuf) {
                   flagStderrLine(stderrBuf);
                   stderrBuf = "";
                 }
-                finish({ cleanExit: code === 0, sawError, verdict });
+                finish({ cleanExit: code === 0, sawError, verdict, errMsg });
                 children.delete(child);
               });
             })();
@@ -309,9 +315,11 @@ export async function POST(req: Request) {
                       ? undefined
                       : outcome.cancelled
                         ? "cancelled"
-                        : !outcome.cleanExit || outcome.sawError
-                          ? "the run hit an error before finishing — re-run it to verify"
-                          : "the worker ran but never saved a report/tracker row",
+                        : outcome.errMsg
+                          ? outcome.errMsg.slice(0, 200)
+                          : !outcome.cleanExit || outcome.sawError
+                            ? "the run hit an error before finishing — re-run it to verify"
+                            : "the worker ran but never saved a report/tracker row",
                   });
                   send({
                     type: "text",
