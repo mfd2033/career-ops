@@ -81,20 +81,25 @@ export function InboxTriage({ inbox, scoredUrls }: { inbox: InboxJob[]; scoredUr
   // stable "now" for freshness (per mount)
   const now = useMemo(() => Date.now(), []);
 
-  // Dedupe by URL — pipeline.md can list the same posting twice; it's one job, so it
-  // triages once (and Save/Skip/score, all keyed by URL, act on it coherently).
+  // Dedupe by CANONICAL key (normalizeUrl) — the same posting triaged under two
+  // raw URLs that differ only in scheme/click-or-tracking params (e.g. an
+  // `http://www.zhaopin.com/...` row and its `https://...` twin, or a BOSS/猎聘
+  // URL with per-request securityId/ka) is ONE job, so it triages once. This is
+  // the SAME identity the score lookups use, so a dedupe'd card's score badge,
+  // Save and Skip all key uniformly instead of scattering per raw URL.
   const enriched = useMemo(() => {
     const seen = new Set<string>();
     const out: { job: InboxJob; source: AtsSource | null; seniority: Seniority | null; age: number | null; urlKey: string }[] = [];
     for (const job of inbox) {
-      if (seen.has(job.url)) continue;
-      seen.add(job.url);
+      const urlKey = normalizeUrl(job.url);
+      if (seen.has(urlKey)) continue;
+      seen.add(urlKey);
       out.push({
         job,
         source: sourceFromUrl(job.url),
         seniority: seniorityFromTitle(job.role),
         age: daysSince(job.postedAt, now),
-        urlKey: normalizeUrl(job.url),
+        urlKey,
       });
     }
     return out;
@@ -133,12 +138,12 @@ export function InboxTriage({ inbox, scoredUrls }: { inbox: InboxJob[]; scoredUr
   // facet options — only surface what's actually present in the (non-hidden) data
   const availSources = useMemo(() => {
     const set = new Set<AtsSource>();
-    for (const e of enriched) if (e.source && !hidden.includes(e.job.url)) set.add(e.source);
+    for (const e of enriched) if (e.source && !hidden.includes(e.urlKey)) set.add(e.source);
     return ATS_SOURCES.filter((s) => set.has(s));
   }, [enriched, hidden]);
   const availSeniorities = useMemo(() => {
     const set = new Set<Seniority>();
-    for (const e of enriched) if (e.seniority && !hidden.includes(e.job.url)) set.add(e.seniority);
+    for (const e of enriched) if (e.seniority && !hidden.includes(e.urlKey)) set.add(e.seniority);
     return SENIORITY_ORDER.filter((s) => set.has(s));
   }, [enriched, hidden]);
 
@@ -150,7 +155,7 @@ export function InboxTriage({ inbox, scoredUrls }: { inbox: InboxJob[]; scoredUr
   const filtered = useMemo(
     () =>
       enriched.filter((e) => {
-        if (hidden.includes(e.job.url)) return false;
+        if (hidden.includes(e.urlKey)) return false;
         if (within != null && (e.age == null || e.age > within)) return false;
         if (sources.size && (!e.source || !sources.has(e.source))) return false;
         if (seniorities.size && (!e.seniority || !seniorities.has(e.seniority))) return false;
@@ -175,12 +180,14 @@ export function InboxTriage({ inbox, scoredUrls }: { inbox: InboxJob[]; scoredUr
   const isShortlisted = (url: string) => shortlist.some((s) => s.url === url);
 
   const save = (job: InboxJob) => {
-    if (isShortlisted(job.url)) return;
-    setShortlist((s) => [...s, { url: job.url, company: job.company, role: job.role }]);
+    const urlKey = normalizeUrl(job.url);
+    if (isShortlisted(urlKey)) return;
+    setShortlist((s) => [...s, { url: urlKey, company: job.company, role: job.role }]);
   };
   const skip = (job: InboxJob) => {
-    setHidden((h) => (h.includes(job.url) ? h : [...h, job.url]));
-    setUndo({ label: t("inbox.skipped", { company: job.company }), fn: () => setHidden((h) => h.filter((u) => u !== job.url)) });
+    const urlKey = normalizeUrl(job.url);
+    setHidden((h) => (h.includes(urlKey) ? h : [...h, urlKey]));
+    setUndo({ label: t("inbox.skipped", { company: job.company }), fn: () => setHidden((h) => h.filter((u) => u !== urlKey)) });
   };
   const toggleSelect = (url: string) =>
     setSelected((s) => {
@@ -191,8 +198,8 @@ export function InboxTriage({ inbox, scoredUrls }: { inbox: InboxJob[]; scoredUr
     });
   const saveSelected = () => {
     const add = enriched
-      .filter((e) => selected.has(e.job.url) && !isShortlisted(e.job.url))
-      .map((e) => ({ url: e.job.url, company: e.job.company, role: e.job.role }));
+      .filter((e) => selected.has(e.urlKey) && !isShortlisted(e.urlKey))
+      .map((e) => ({ url: e.urlKey, company: e.job.company, role: e.job.role }));
     if (add.length) setShortlist((s) => [...s, ...add]);
     setSelected(new Set());
   };
@@ -200,10 +207,10 @@ export function InboxTriage({ inbox, scoredUrls }: { inbox: InboxJob[]; scoredUr
   // Select-all operates on the FULL filtered set (not the capped first slice), so the
   // "只看未评分 → 全选 → 批量跳过/保存" flow covers every match in one pass. The header
   // button toggles: already-everything-selected turns it into a clear-all.
-  const allFilteredSelected = filtered.length > 0 && filtered.every((e) => selected.has(e.job.url));
+  const allFilteredSelected = filtered.length > 0 && filtered.every((e) => selected.has(e.urlKey));
   const toggleSelectAll = () => {
     if (allFilteredSelected) setSelected(new Set());
-    else setSelected(new Set(filtered.map((e) => e.job.url)));
+    else setSelected(new Set(filtered.map((e) => e.urlKey)));
   };
   // Batch skip hides every selected url at once; the aggregated undo restores them all.
   const skipSelected = () => {
@@ -309,14 +316,14 @@ export function InboxTriage({ inbox, scoredUrls }: { inbox: InboxJob[]; scoredUr
         <ul className="mt-3 divide-y divide-border overflow-hidden rounded-2xl border border-border bg-surface/40">
           {visible.map((e) => (
             <TriageRow
-              key={e.job.url}
+              key={e.urlKey}
               job={e.job}
               source={e.source}
               age={e.age}
               scored={resolveRowScore(liveScores.get(e.urlKey), persistedScores.get(e.urlKey))}
-              selected={selected.has(e.job.url)}
-              shortlisted={isShortlisted(e.job.url)}
-              onToggleSelect={() => toggleSelect(e.job.url)}
+              selected={selected.has(e.urlKey)}
+              shortlisted={isShortlisted(e.urlKey)}
+              onToggleSelect={() => toggleSelect(e.urlKey)}
               onSave={() => save(e.job)}
               onSkip={() => skip(e.job)}
             />

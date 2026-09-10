@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { CompanyLogo } from "@/components/company-logo";
 import { canonStatus, scoreTone, statusDot } from "@/lib/format";
 import { orderApplications, buildContextQuery } from "@/lib/pipeline-order.mjs";
+import { normalizeUrl } from "@/lib/core/url-key.mjs";
 import { sourceLabel } from "@/lib/source-label.mjs";
 import { InboxTriage } from "@/components/inbox/inbox-triage";
 import { useJobs } from "@/components/jobs/job-store";
@@ -112,14 +113,16 @@ export function PipelineView({
     [params, router, pathname],
   );
 
-  // Pending + deduped by URL (pipeline.md can list the same posting twice) so the
-  // header count, the tab count and the triage list all agree on one number.
+  // Pending + deduped by CANONICAL url key (normalizeUrl) so header count, tab
+  // count and triage list all agree on one number even when pipeline.md lists
+  // the same posting under two raw urls (http/https twin, tracking params).
   const pendingInbox = useMemo(() => {
     const seen = new Set<string>();
     const out: InboxJob[] = [];
     for (const j of inbox) {
-      if (j.done || seen.has(j.url)) continue;
-      seen.add(j.url);
+      const key = normalizeUrl(j.url);
+      if (j.done || seen.has(key)) continue;
+      seen.add(key);
       out.push(j);
     }
     return out;
