@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Check, AlertTriangle, Loader2, Trash2 } from "lucide-react";
+import { Check, AlertTriangle, Loader2, Trash2, Clock } from "lucide-react";
 import { useJobs } from "@/components/jobs/job-store";
 import { pillTone } from "@/components/jobs/worker-pills";
 import { useI18n } from "@/lib/i18n/context";
@@ -16,6 +16,7 @@ const TONE_CHIP = {
 
 const STATUS_LABEL: Record<string, string> = {
   running: "jobs.statusRunning",
+  queued: "jobs.queued",
   done: "jobs.statusDone",
   error: "jobs.statusError",
 };
@@ -33,7 +34,7 @@ export default function JobsHistory() {
             {t("jobs.historyIntro")}<span className="tabular-nums">{jobs.length}</span>{t("jobs.total")}
           </p>
         </div>
-        {jobs.some((j) => j.status !== "running") && (
+        {jobs.some((j) => j.status !== "running" && j.status !== "queued") && (
           <button
             onClick={clearFinished}
             className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-3 py-1.5 text-xs text-muted transition-colors hover:bg-surface-hover hover:text-foreground"
@@ -54,7 +55,13 @@ export default function JobsHistory() {
             return (
               <li key={j.id}>
                 <Link href={`/jobs/${j.id}`} className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-surface-hover">
-                  {j.status === "running" ? (
+                  <span className="hidden shrink-0 text-xs capitalize text-faint sm:block">{t(STATUS_LABEL[j.status] ?? j.status)}</span>
+                  {j.status === "queued" && j.queuedPos != null && (
+                    <span className="shrink-0 text-xs tabular-nums text-faint">#{j.queuedPos}</span>
+                  )}
+                  {j.status === "queued" ? (
+                    <Clock className="size-4 shrink-0 text-zinc-400" />
+                  ) : j.status === "running" ? (
                     <Loader2 className="size-4 shrink-0 animate-spin text-brand" />
                   ) : j.status === "error" ? (
                     <AlertTriangle className="size-4 shrink-0 text-red-400" />

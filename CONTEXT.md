@@ -95,5 +95,23 @@ _Avoid_: 评估速度、评估耗时（口语）
 _Avoid_: 计时、性能日志
 
 **PDF 延后（PDF on demand）**:
-完整评估默认不自动生成 PDF/申请答案，先交付报告，用户确认后才生成（覆盖 auto-pipeline 自动默认）。低分岗不推荐投递，自动 PDF 常属浪费。
+一次完整评估默认不自动生成 PDF/申请答案，先交付报告，用户确认后才生成（覆盖 auto-pipeline 自动默认）。低分岗不推荐投递，自动 PDF 常属浪费。
 _Avoid_: PDF 延迟、PDF 选项
+
+## 并发执行
+
+**全局并发池(global concurrency pool)**:
+web 端调度所有 CLI 工作器子进程的 module-level 调度器，用一个并发数字限制同时运行的上限(默认 4，config 页可调)。覆盖全部入口——web 单卡、web 批量、BOSS 扩展——统一共享同一池。粒度按 CLI 子进程计，不按批次(ADR-0014)。
+_Avoid_: 线程池、进程池(易与 OS 概念混淆)
+
+**执行槽(execution slot)**:
+全局并发池的并发单位，一个 CLI 子进程占一槽。取到槽才允许 spawn，未取到则入队等待。
+_Avoid_: 名额、额度(口语)
+
+**执行中(running)**:
+任务已取得执行槽、CLI 已 spawn 的态。与「排队中」对立，类似 active-runs 原 in-flight 语义；写令牌(tracker 互斥)只在此时持有。
+_Avoid_: 在飞(旧词，歧义，见排队中)
+
+**排队中(queued)**:
+任务已接受但未取到执行槽、未 spawn CLI 的态。不占写令牌；可被用户取消(dequeue)。对应 `/api/active-runs` 的 `queued` 聚合。
+_Avoid_: 在飞、等待中(口语)

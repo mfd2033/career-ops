@@ -11,7 +11,12 @@ import path from "node:path";
 
 export type UnknownEmployerPolicy = "placeholder" | "agency";
 
-export type AppConfig = { cliId?: string; model?: string; unknownEmployer?: UnknownEmployerPolicy };
+export type AppConfig = {
+  cliId?: string;
+  model?: string;
+  unknownEmployer?: UnknownEmployerPolicy;
+  concurrencyPool?: number; // global CLI-concurrency cap; default 4 (see concurrency-pool.ts)
+};
 
 export const UNKNOWN_EMPLOYER_OPTIONS: readonly UnknownEmployerPolicy[] = ["placeholder", "agency"];
 
@@ -28,6 +33,10 @@ export function readAppConfig(): AppConfig {
     if (typeof raw.model === "string" && raw.model) out.model = raw.model;
     // 未知雇主策略只认两个白名单枚举；其余值（含脏值）一律忽略。
     if (UNKNOWN_EMPLOYER_OPTIONS.includes(raw.unknownEmployer)) out.unknownEmployer = raw.unknownEmployer;
+    // 并发上限必须是 >=1 的整数；脏值/越界一律忽略（池回落到默认 4）。
+    if (typeof raw.concurrencyPool === "number" && Number.isInteger(raw.concurrencyPool) && raw.concurrencyPool >= 1) {
+      out.concurrencyPool = raw.concurrencyPool;
+    }
     return out;
   } catch {
     return {};

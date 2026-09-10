@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Check, X, Loader2, AlertTriangle } from "lucide-react";
+import { Check, X, Loader2, AlertTriangle, Clock } from "lucide-react";
 import type { Job } from "@/components/jobs/job-store";
 import { useI18n } from "@/lib/i18n/context";
 import { cn } from "@/lib/cn";
@@ -68,6 +68,7 @@ export const TONE = {
 
 export function pillTone(j: Job): keyof typeof TONE {
   if (j.status === "error") return "bad";
+  if (j.status === "queued") return "muted";
   if (j.status === "done") return j.result?.tone ?? "muted";
   return "muted";
 }
@@ -83,6 +84,7 @@ export function WorkerCard({
 }) {
   const tone = TONE[pillTone(job)];
   const running = job.status === "running";
+  const queued = job.status === "queued";
   const elapsed = useElapsed(running, job.startedAt);
   const { t } = useI18n();
   const rawLast = job.steps[job.steps.length - 1]?.label;
@@ -96,8 +98,10 @@ export function WorkerCard({
   return (
     <div className={cn(inline && "rounded-xl border border-border bg-surface/60 p-2.5")}>
       <div className="flex items-center gap-2">
-        {job.status === "running" ? (
+        {running ? (
           <Loader2 className="size-3 shrink-0 animate-spin text-brand" />
+        ) : queued ? (
+          <Clock className="size-3 shrink-0 text-zinc-400" />
         ) : job.status === "error" ? (
           <AlertTriangle className={cn("size-3 shrink-0", tone.icon)} />
         ) : (
@@ -120,15 +124,21 @@ export function WorkerCard({
         )}
       </div>
       <div className={cn("mt-1.5 w-full overflow-hidden rounded-full bg-surface-hover", inline ? "h-1.5" : "h-1")}>
-        {job.status === "running" ? (
+        {running ? (
           <div className="job-indeterminate h-full w-full" />
+        ) : queued ? (
+          <div className={cn("h-full w-full", tone.bar)} />
         ) : (
           <div className={cn("h-full w-full rounded-full", tone.bar)} />
         )}
       </div>
-      {(bottom || running) && (
+      {(bottom || running || queued) && (
         <div className={cn("mt-1 truncate text-faint", inline ? "text-xs" : "text-[10px]")}>
-          {running ? `${last ?? t("jobs.working")} · ${fmtElapsed(elapsed)}` : bottom}
+          {queued
+            ? `${t("jobs.queued")}${job.queuedPos != null ? ` · ${t("jobs.queuedPos", { n: job.queuedPos })}` : ""}`
+            : running
+              ? `${last ?? t("jobs.working")} · ${fmtElapsed(elapsed)}`
+              : bottom}
         </div>
       )}
       {authError && (

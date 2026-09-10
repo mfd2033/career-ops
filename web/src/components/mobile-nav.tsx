@@ -41,7 +41,7 @@ export function MobileNav() {
   const [open, setOpen] = useState(false);
   const panelRef = useRef<HTMLElement>(null);
   const { jobs } = useJobs();
-  const running = jobs.filter((j) => j.status === "running").length;
+  const running = jobs.filter((j) => j.status === "running" || j.status === "queued").length;
   const { t } = useI18n();
 
   // Close on route change.

@@ -16,6 +16,11 @@ import { createCvEnvelopeFilter, type CvEnvelope } from "@/lib/cv-envelope.mjs";
 import { buildPrompt, isShellSafeCompanyName } from "@/lib/run-prompts.mjs";
 import { claudeCliArgs } from "@/lib/claude-invocation.mjs";
 import { acquireTrackerWrite, releaseTrackerWrite } from "@/lib/core/run-registry";
+import { acquire, release, __setSizeSource, DEFAULT_POOL_SIZE } from "@/lib/core/concurrency-pool";
+
+// Feed the global concurrency pool the live configured size (app-config), re-read
+// on every dispatch so a config-page edit takes effect without restart.
+__setSizeSource(() => readAppConfig().concurrencyPool ?? DEFAULT_POOL_SIZE);
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -140,28 +145,25 @@ export async function POST(req: Request) {
   };
   const persists = kind === "evaluate";
   const reportsBefore = persists ? reportEntries() : [];
-  // Tracker-mutating runs hold a write token so a row delete can't race their merge
-  // (tracker.mjs delete doesn't yet share a lock with merge-tracker — see run-registry).
-  const writeToken = kind === "evaluate" || kind === "pdf" ? acquireTrackerWrite() : null;
 
-  // stdin must reach EOF or the CLI waits on piped input that never comes: Codex's
-  // `exec` blocks reading stdin for additional context, hangs until the kill timer,
-  // and then reports a generic "installed and authenticated?" error that reads as an
-  // auth failure even though the CLI is fully signed in. #1973 fixed that here with
-  // an inline `stdio: ["ignore", …]`; spawnHeadlessCli generalizes the same fix to
-  // every CLI-invoking route (assistant, explore/ai, cv/ingest, the apply planners),
-  // which had the identical bug, and puts it behind one tested helper so it cannot
-  // drift back in on any single call site.
-  const child = spawnHeadlessCli(binPath, args, { cwd: careerOpsRoot(), env: process.env });
-  // Decode once on the stream, not per chunk. Buffer#toString() decodes each chunk
-  // independently, so a chunk boundary falling inside a multi-byte UTF-8 sequence
-  // yields a replacement character and mis-decodes the bytes after it. Those bytes
-  // are the CV now (#2185) — the agent's HTML flows through cvFilter to
-  // writeCvHtml and on to the renderer — and no structural check would catch it,
-  // because the envelope markers and </html> are ASCII and still match. Setting
-  // the encoding makes Node hold partial sequences across chunks.
-  child.stdout.setEncoding("utf8");
-  child.stderr.setEncoding("utf8");
+  // Global concurrency: queue for a slot in the global CLI-concurrency pool
+  // BEFORE touching the write token or spawning. A full pool keeps the task
+  // queued (visible as 排队中) instead of spawning another heavyweight agent
+  // CLI — ADR-0014 Q1/Q4.
+  const poolHandle = acquire({ url: input, title: input, source: "run" });
+
+  // Spawned/guarded only AFTER the pool grants a slot. `child`/`writeToken` are
+  // outer lets so cancel()/close() can reach them whether the run is queued
+  // (null → cancel just dequeues and closes the stream) or running (→ terminate
+  // the child + release both the token and the pool slot).
+  let child: ReturnType<typeof spawnHeadlessCli> | null = null;
+  let writeToken: number | null = null;
+  let poolReleased = false;
+  const releasePoolOnce = () => {
+    if (poolReleased) return;
+    poolReleased = true;
+    release(poolHandle.id);
+  };
   const enc = new TextEncoder();
 
   // `closed` + kill timer in the OUTER scope so cancel() (client disconnect) can
@@ -183,7 +185,7 @@ export async function POST(req: Request) {
     }
   };
   const stream = new ReadableStream<Uint8Array>({
-    start(controller) {
+    async start(controller) {
       let buf = "";
       let emittedText = false; // any assistant text delta → the CLI actually ran
       let sawError = false;
@@ -219,9 +221,8 @@ export async function POST(req: Request) {
       // the honesty gate reported "didn't save a report". Evaluate has no
       // render phase to reserve headroom for, so give it the full 600s too.
       const killMs = 600_000;
-      killer = setTimeout(() => {
-        terminateCli(child);
-      }, killMs);
+      // `killer` is armed AFTER spawn below (the CLI child is null while queued,
+      // so there is nothing to kill and terminateCli(null) would throw).
       // Declared before send() so send() can clear it the moment it sees the
       // client disconnect; assigned just below, once close() exists.
       let heartbeat: ReturnType<typeof setInterval> | undefined;
@@ -254,6 +255,7 @@ export async function POST(req: Request) {
           if (heartbeat) clearInterval(heartbeat);
           if (killer) clearTimeout(killer);
           releaseWriteTokenOnce();
+          releasePoolOnce();
           try { controller.close(); } catch { /* */ }
         }
       };
@@ -313,6 +315,38 @@ export async function POST(req: Request) {
           send({ type: "error", msg: ev.error.slice(0, 200) });
         }
       };
+
+      // Wait for a global-pool slot before spawning. While queued the stream
+      // stays open (keepalive keeps the tab warm) and the task shows as 排队中
+      // in the worker list. If the user cancels it mid-queue, ready resolves
+      // false and we close with an explicit cancelled signal — the CLI never
+      // spawned and the pool slot is never claimed.
+      const started = await poolHandle.ready;
+      if (!started) {
+        send({ type: "error", msg: "Cancelled while queued — this run was not started." });
+        releasePoolOnce();
+        close();
+        return;
+      }
+      // Only NOW, with a slot in hand, hold the tracker-write token (ADR-0014
+      // Q4 — a long queue must not keep n write tokens held) and spawn the CLI.
+      // Tracker-mutating runs guard the row-delete race (tracker.mjs delete
+      // doesn't share merge-tracker's lock — see run-registry).
+      writeToken = kind === "evaluate" || kind === "pdf" ? acquireTrackerWrite() : null;
+      // stdin must reach EOF or the CLI waits on piped input that never comes:
+      // Codex's `exec` blocks reading stdin, hangs until the kill timer, then
+      // reports a generic auth-flavoured error (#1973 fixed it via an inline
+      // stdio:["ignore",…], generalized into spawnHeadlessCli).
+      child = spawnHeadlessCli(binPath, args, { cwd: careerOpsRoot(), env: process.env });
+      // Decode once on the stream, not per chunk: Buffer#toString() decodes each
+      // chunk independently, so a boundary inside a multi-byte UTF-8 sequence
+      // yields a replacement character and mis-decodes the bytes after it — the
+      // CV now flows through here (#2185).
+      child.stdout.setEncoding("utf8");
+      child.stderr.setEncoding("utf8");
+      killer = setTimeout(() => {
+        if (child) terminateCli(child);
+      }, killMs);
 
       child.stdout.on("data", (chunk: string) => {
         if (closed) return;
@@ -474,17 +508,29 @@ export async function POST(req: Request) {
     cancel() {
       closed = true;
       if (killer) clearTimeout(killer);
-      // 客户端断开必须按进程树终止：单杀 CLI 主进程会让它派生的子进程
-      // （如 Git find.exe）残留成孤儿，持续空转占 CPU。
-      terminateCli(child);
-      if (pdfRenderPromise) {
-        // Render/mark keeps running after this client disconnects — wait for
-        // it to settle before releasing the guard, so a concurrent tracker
-        // delete can't race mark-pdf-ready.mjs's still-in-flight write.
-        pdfRenderPromise.finally(releaseWriteTokenOnce);
-      } else {
-        releaseWriteTokenOnce();
+      if (child) {
+        // 客户端断开必须按进程树终止：单杀 CLI 主进程会让它派生的子进程
+        // （如 Git find.exe）残留成孤儿，持续空转占 CPU。
+        terminateCli(child);
+        if (pdfRenderPromise) {
+          // Render/mark keeps running after this client disconnects — wait for
+          // it to settle before releasing the guard, so a concurrent tracker
+          // delete can't race mark-pdf-ready.mjs's still-in-flight write.
+          pdfRenderPromise.finally(() => {
+            releaseWriteTokenOnce();
+            releasePoolOnce();
+          });
+        } else {
+          releaseWriteTokenOnce();
+          releasePoolOnce();
+        }
+        return;
       }
+      // Still queued (no child spawned) — dequeue from the pool so IT never
+      // grants the slot after we've closed; the awaiting start() sees `ready`
+      // resolve false and closes the stream itself (with our error already sent).
+      poolHandle.cancel();
+      releasePoolOnce();
     },
   });
 

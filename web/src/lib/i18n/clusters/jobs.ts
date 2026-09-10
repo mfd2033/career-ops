@@ -56,6 +56,10 @@ export const en: Dict = {
   "jobs.fixPortalSubtitle": "repair portal slug",
   "jobs.scoreTitle": "Score · {company}",
   "jobs.scanTitle": "Evaluating · batch",
+  "jobs.queued": "Queued",
+  "jobs.queuedPos": "waiting #{n}",
+  "jobs.cancelQueued": "Cancel queue item",
+  "jobs.queuedHint": "Pool is full — will run when a slot frees up.",
 };
 
 // Simplified Chinese strings. Every key in en must have a matching key here.
@@ -111,4 +115,8 @@ export const zh: Dict = {
   "jobs.fixPortalSubtitle": "修复门户 slug",
   "jobs.scoreTitle": "评分 · {company}",
   "jobs.scanTitle": "评估中 · 批量",
+  "jobs.queued": "排队中",
+  "jobs.queuedPos": "等待 # {n}",
+  "jobs.cancelQueued": "取消排队项",
+  "jobs.queuedHint": "并发已满，空出名额后自动运行。",
 };

@@ -14,11 +14,11 @@ export { pillTone, TONE };
 // Collapsed "worker" pills in the sidebar — each the shared <WorkerCard> wrapped
 // in a Link to its detail. Same component the assistant chat renders inline.
 export function WorkerPills() {
-  const { jobs, removeJob, clearFinished } = useJobs();
+  const { jobs, cancelJob, clearFinished } = useJobs();
   const pathname = usePathname();
   const { t } = useI18n();
   if (jobs.length === 0) return null;
-  const running = jobs.filter((j) => j.status === "running").length;
+  const running = jobs.filter((j) => j.status === "running" || j.status === "queued").length;
   const finished = jobs.length - running;
 
   return (
@@ -54,10 +54,11 @@ export function WorkerPills() {
                     <button
                       onClick={(e) => {
                         e.preventDefault();
-                        removeJob(j.id);
+                        cancelJob(j.id);
                       }}
                       className="text-faint opacity-0 transition-opacity hover:text-foreground group-hover:opacity-100"
-                      aria-label={t("jobs.dismissJob")}
+                      title={j.status === "queued" || j.status === "running" ? t("jobs.cancelQueued") : t("jobs.dismissJob")}
+                      aria-label={j.status === "queued" || j.status === "running" ? t("jobs.cancelQueued") : t("jobs.dismissJob")}
                     >
                       <X className="size-3" />
                     </button>

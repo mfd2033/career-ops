@@ -8,7 +8,7 @@ import { readAppConfig, writeAppConfig, UNKNOWN_EMPLOYER_OPTIONS, type AppConfig
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const SAFE_KEYS = ["cliId", "model", "unknownEmployer"] as const;
+const SAFE_KEYS = ["cliId", "model", "unknownEmployer", "concurrencyPool"] as const;
 
 export async function GET() {
   return Response.json(readAppConfig());
@@ -34,6 +34,13 @@ export async function POST(req: Request) {
       } else {
         delete next.unknownEmployer;
       }
+      continue;
+    }
+    if (key === "concurrencyPool") {
+      // 并发上限必须是 >=1 的整数；脏值删除（池回落到默认 4）。
+      const v = rec.concurrencyPool;
+      if (typeof v === "number" && Number.isInteger(v) && v >= 1) next.concurrencyPool = v;
+      else delete next.concurrencyPool;
       continue;
     }
     const v = rec[key];
