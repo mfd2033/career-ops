@@ -169,6 +169,8 @@ playwright-report/
 plan/
 # Ticket/work-order scratch (development working notes — never commit)
 .scratch/
+# Personal todo store (user-layer data, never commit)
+todo-list/
 
 # Web — runtime cache/history the dashboard writes locally; nothing here is tracked.
 .career-ops-web/
