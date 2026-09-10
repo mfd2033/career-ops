@@ -246,30 +246,32 @@ export function InboxTriage({ inbox, scoredUrls }: { inbox: InboxJob[]; scoredUr
   if (inbox.length === 0) return null;
 
   return (
-    <div className={cn("mx-auto mt-4 max-w-3xl", shortlist.length > 0 && "pb-28 sm:pb-24")}>
-      <FacetChips
-        within={within}
-        setWithin={setWithin}
-        sources={sources}
-        toggleSource={(s) => setSources((set) => { const n = new Set(set); n.has(s) ? n.delete(s) : n.add(s); return n; })}
-        seniorities={seniorities}
-        toggleSeniority={(s) => setSeniorities((set) => { const n = new Set(set); n.has(s) ? n.delete(s) : n.add(s); return n; })}
-        unscoredOnly={unscoredOnly}
-        onToggleUnscoredOnly={() => setUnscoredOnly((v) => !v)}
-        locQ={locQ}
-        setLocQ={setLocQ}
-        kw={kw}
-        setKw={setKw}
-        availSources={availSources}
-        availSeniorities={availSeniorities}
-        resultCount={filtered.length}
-        totalCount={enriched.length - hiddenCount}
-        anyActive={anyFacet}
-        onClear={() => { setWithin(null); setSources(new Set()); setSeniorities(new Set()); setLocQ(""); setKw(""); setUnscoredOnly(false); }}
-      />
+    <div className={cn("mx-auto mt-4 max-w-3xl md:flex md:flex-1 md:min-h-0 md:flex-col", shortlist.length > 0 && "pb-28 sm:pb-24")}>
+      <div className="md:shrink-0">
+        <FacetChips
+          within={within}
+          setWithin={setWithin}
+          sources={sources}
+          toggleSource={(s) => setSources((set) => { const n = new Set(set); n.has(s) ? n.delete(s) : n.add(s); return n; })}
+          seniorities={seniorities}
+          toggleSeniority={(s) => setSeniorities((set) => { const n = new Set(set); n.has(s) ? n.delete(s) : n.add(s); return n; })}
+          unscoredOnly={unscoredOnly}
+          onToggleUnscoredOnly={() => setUnscoredOnly((v) => !v)}
+          locQ={locQ}
+          setLocQ={setLocQ}
+          kw={kw}
+          setKw={setKw}
+          availSources={availSources}
+          availSeniorities={availSeniorities}
+          resultCount={filtered.length}
+          totalCount={enriched.length - hiddenCount}
+          anyActive={anyFacet}
+          onClear={() => { setWithin(null); setSources(new Set()); setSeniorities(new Set()); setLocQ(""); setKw(""); setUnscoredOnly(false); }}
+        />
+      </div>
 
       {/* batch header: fresh slice by default, or the full filtered set */}
-      <div className="mt-4 flex items-baseline justify-between gap-3">
+      <div className="mt-4 flex items-baseline justify-between gap-3 md:shrink-0">
         <p className="text-sm font-medium text-foreground">
           {capped
             ? t("inbox.freshWorthLook")
@@ -298,7 +300,7 @@ export function InboxTriage({ inbox, scoredUrls }: { inbox: InboxJob[]; scoredUr
 
       {/* multi-select action bar */}
       {selected.size > 0 && (
-        <div className="mt-2 flex items-center gap-3 rounded-lg border border-brand/30 bg-brand-soft px-3 py-2 text-sm">
+        <div className="mt-2 flex items-center gap-3 rounded-lg border border-brand/30 bg-brand-soft px-3 py-2 text-sm md:shrink-0">
           <span className="font-medium text-brand tabular-nums">{t("inbox.selected", { n: selected.size })}</span>
           <button type="button" onClick={saveSelected} className="rounded-md bg-brand px-2.5 py-1 text-xs font-medium text-brand-foreground max-sm:min-h-[44px]">
             {t("inbox.saveToShortlist")}
@@ -313,7 +315,7 @@ export function InboxTriage({ inbox, scoredUrls }: { inbox: InboxJob[]; scoredUr
       )}
 
       {visible.length > 0 ? (
-        <ul className="mt-3 divide-y divide-border overflow-hidden rounded-2xl border border-border bg-surface/40">
+        <ul className="mt-3 divide-y divide-border overflow-hidden rounded-2xl border border-border bg-surface/40 md:min-h-0 md:flex-1 md:overflow-y-auto">
           {visible.map((e) => (
             <TriageRow
               key={e.urlKey}
@@ -341,7 +343,7 @@ export function InboxTriage({ inbox, scoredUrls }: { inbox: InboxJob[]; scoredUr
         <button
           type="button"
           onClick={() => setShowAll(true)}
-          className="mt-3 inline-flex w-full items-center justify-center gap-1 rounded-xl border border-border bg-surface/40 py-2.5 text-sm font-medium text-muted transition-colors hover:border-brand/40 hover:text-brand max-sm:min-h-[44px]"
+          className="mt-3 inline-flex w-full items-center justify-center gap-1 rounded-xl border border-border bg-surface/40 py-2.5 text-sm font-medium text-muted transition-colors hover:border-brand/40 hover:text-brand max-sm:min-h-[44px] md:shrink-0"
         >
           {t("inbox.seeAll", { n: ordered.length })}
         </button>
