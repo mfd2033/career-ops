@@ -83,3 +83,17 @@ _Avoid_: 问号、保密
 **代招（agency posting）**:
 通过招聘/人力中介发布的职位，终端雇主未命名。策略为 `agency` 时用发帖中介名作 company。
 _Avoid_: 中介岗（口语，写文档用「代招」）
+
+## 评估性能
+
+**评估墙钟（eval wall-clock）**:
+一次完整评估从贴 JD/URL 到产出报告+PDF+tracker 的实测总时长。主成分是 LLM turn 数 × 每 turn 延迟（引擎不变则每 turn 延迟固定），PDF 定制是独立的二次 LLM 大活。优化手段只减 turn 不减内容（ADR-0009）。
+_Avoid_: 评估速度、评估耗时（口语）
+
+**耗时埋点（eval timing）**:
+每次评估用 `log-eval-timing.mjs` 按固定步骤集（extract/liveness/eval/report/pdf/answers/tracker）记录墙钟耗时到 `data/eval-timings.tsv`，供前后对比。属用户层数据。
+_Avoid_: 计时、性能日志
+
+**PDF 延后（PDF on demand）**:
+完整评估默认不自动生成 PDF/申请答案，先交付报告，用户确认后才生成（覆盖 auto-pipeline 自动默认）。低分岗不推荐投递，自动 PDF 常属浪费。
+_Avoid_: PDF 延迟、PDF 选项
