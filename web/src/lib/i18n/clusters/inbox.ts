@@ -1,4 +1,4 @@
-﻿import type { Dict } from "../types";
+import type { Dict } from "../types";
 
 // Cluster: inbox
 // English (source) strings. Each key is dotted and namespaced by cluster, e.g.
@@ -42,6 +42,11 @@ export const en: Dict = {
   "inbox.saved": "Saved",
   "inbox.save": "Save",
   "inbox.skipTitle": "Skip — hide from the inbox",
+  "inbox.unscoredOnly": "Unscored",
+  "inbox.selectAll": "Select all",
+  "inbox.selectNone": "Clear selection",
+  "inbox.skipSelected": "Skip selected",
+  "inbox.skippedN": "Skipped {n}",
 };
 
 // Simplified Chinese strings. Every key in en must have a matching key here.
@@ -84,4 +89,9 @@ export const zh: Dict = {
   "inbox.saved": "已保存",
   "inbox.save": "保存",
   "inbox.skipTitle": "跳过 —— 从收件箱隐藏",
+  "inbox.unscoredOnly": "未评分",
+  "inbox.selectAll": "全选",
+  "inbox.selectNone": "取消全选",
+  "inbox.skipSelected": "跳过选中",
+  "inbox.skippedN": "已跳过 {n} 个",
 };
