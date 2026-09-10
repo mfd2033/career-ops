@@ -38,6 +38,20 @@ Examples:
 
 ---
 
+## Performance & Timing (all batch workers)
+
+Wall-clock matters — this worker runs in a batch. Follow these rules while keeping the output identical:
+
+1. **Timing instrumentation:** when the batch ID gives you a report number, mark step boundaries with `node log-eval-timing.mjs <REPORT_NUM> <step> start|end`. Steps: `extract` / `liveness` / `eval` / `report` / `pdf` / `answers` / `tracker`. Data lands in `data/eval-timings.tsv`. Never let the timing call fail the run — on error, continue.
+2. **Parallel reads:** read the source files (`cv.md`, `modes/_profile.md`, `config/profile.yml`, `article-digest.md`, `llms.txt`) in ONE parallel turn — never one-by-one serially.
+3. **Parallel WebSearch:** Block D + Block G company queries fire in one parallel turn (still bounded, ≤5 total).
+4. **Jurisdiction skip in Block G:** check whether the candidate's jurisdiction has a row in the relevant `templates/*.yml` table; no row → skip that signal entirely (no table read, no reasoning, no output line). Pay-transparency range-width and minimum-wage lawyer checks are table-independent — run them as usual.
+5. **Multi-block turns:** emit Block A+B in one response, C+D in one, E+F+G+Risk+Summary in one. Identical content to per-block turns, just fewer round trips.
+6. **Single-pass PDF payload:** in Step 4, produce the complete tailored-CV JSON payload in ONE response, then run `build-cv-html.mjs` → `verify-cv-facts.mjs` → `generate-pdf.mjs`. No piecemeal back-and-forth.
+7. **No re-reads, one-shot report write:** never re-read a file already in context; write the whole report in one `Write` call.
+
+---
+
 ## Sources of Truth (read before evaluating)
 
 | File | Path | When |
