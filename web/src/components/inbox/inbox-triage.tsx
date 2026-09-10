@@ -41,6 +41,7 @@ export function InboxTriage({ inbox, scoredUrls }: { inbox: InboxJob[]; scoredUr
   const [seniorities, setSeniorities] = useState<Set<Seniority>>(() => new Set());
   const [locQ, setLocQ] = useState("");
   const [kw, setKw] = useState("");
+  const [unscoredOnly, setUnscoredOnly] = useState(false);
   const [showAll, setShowAll] = useState(false);
 
   // persisted triage state + ephemeral selection/undo
@@ -141,6 +142,11 @@ export function InboxTriage({ inbox, scoredUrls }: { inbox: InboxJob[]; scoredUr
     return SENIORITY_ORDER.filter((s) => set.has(s));
   }, [enriched, hidden]);
 
+  // A row counts as "evaluated" when an effective score exists (live verdict, live
+  // spinner, or a persisted tracker score). Used by the unchecked-only filter; mirrors
+  // the row's own evaluated flag in TriageRow so the two can never disagree.
+  const isEvaluatedRow = (s: RowScore | undefined) => !!s && (s.running || s.score != null);
+
   const filtered = useMemo(
     () =>
       enriched.filter((e) => {
@@ -150,9 +156,10 @@ export function InboxTriage({ inbox, scoredUrls }: { inbox: InboxJob[]; scoredUr
         if (seniorities.size && (!e.seniority || !seniorities.has(e.seniority))) return false;
         if (locQ.trim() && !(e.job.location || "").toLowerCase().includes(locQ.trim().toLowerCase())) return false;
         if (kw.trim() && !`${e.job.company} ${e.job.role}`.toLowerCase().includes(kw.trim().toLowerCase())) return false;
+        if (unscoredOnly && isEvaluatedRow(resolveRowScore(liveScores.get(e.urlKey), persistedScores.get(e.urlKey)))) return false;
         return true;
       }),
-    [enriched, hidden, within, sources, seniorities, locQ, kw],
+    [enriched, hidden, within, sources, seniorities, locQ, kw, unscoredOnly, liveScores, persistedScores],
   );
 
   // 🔴 SINGLE ORDER PLUG POINT — freshness only (newest first_seen first; unknown last).
@@ -160,7 +167,7 @@ export function InboxTriage({ inbox, scoredUrls }: { inbox: InboxJob[]; scoredUr
   // touch relevance. This is the whole firewall in one line.
   const ordered = useMemo(() => [...filtered].sort((a, b) => (a.age ?? Infinity) - (b.age ?? Infinity)), [filtered]);
 
-  const anyFacet = within != null || sources.size > 0 || seniorities.size > 0 || locQ.trim() !== "" || kw.trim() !== "";
+  const anyFacet = within != null || sources.size > 0 || seniorities.size > 0 || locQ.trim() !== "" || kw.trim() !== "" || unscoredOnly;
   const capped = !showAll && !anyFacet;
   const visible = capped ? ordered.slice(0, BATCH) : ordered;
   const hiddenCount = hidden.length;
@@ -187,6 +194,26 @@ export function InboxTriage({ inbox, scoredUrls }: { inbox: InboxJob[]; scoredUr
       .filter((e) => selected.has(e.job.url) && !isShortlisted(e.job.url))
       .map((e) => ({ url: e.job.url, company: e.job.company, role: e.job.role }));
     if (add.length) setShortlist((s) => [...s, ...add]);
+    setSelected(new Set());
+  };
+
+  // Select-all operates on the FULL filtered set (not the capped first slice), so the
+  // "只看未评分 → 全选 → 批量跳过/保存" flow covers every match in one pass. The header
+  // button toggles: already-everything-selected turns it into a clear-all.
+  const allFilteredSelected = filtered.length > 0 && filtered.every((e) => selected.has(e.job.url));
+  const toggleSelectAll = () => {
+    if (allFilteredSelected) setSelected(new Set());
+    else setSelected(new Set(filtered.map((e) => e.job.url)));
+  };
+  // Batch skip hides every selected url at once; the aggregated undo restores them all.
+  const skipSelected = () => {
+    const urls = [...selected];
+    if (!urls.length) return;
+    setHidden((h) => Array.from(new Set([...h, ...urls])));
+    setUndo({
+      label: t("inbox.skippedN", { n: urls.length }),
+      fn: () => setHidden((h) => h.filter((u) => !urls.includes(u))),
+    });
     setSelected(new Set());
   };
 
@@ -220,6 +247,8 @@ export function InboxTriage({ inbox, scoredUrls }: { inbox: InboxJob[]; scoredUr
         toggleSource={(s) => setSources((set) => { const n = new Set(set); n.has(s) ? n.delete(s) : n.add(s); return n; })}
         seniorities={seniorities}
         toggleSeniority={(s) => setSeniorities((set) => { const n = new Set(set); n.has(s) ? n.delete(s) : n.add(s); return n; })}
+        unscoredOnly={unscoredOnly}
+        onToggleUnscoredOnly={() => setUnscoredOnly((v) => !v)}
         locQ={locQ}
         setLocQ={setLocQ}
         kw={kw}
@@ -229,7 +258,7 @@ export function InboxTriage({ inbox, scoredUrls }: { inbox: InboxJob[]; scoredUr
         resultCount={filtered.length}
         totalCount={enriched.length - hiddenCount}
         anyActive={anyFacet}
-        onClear={() => { setWithin(null); setSources(new Set()); setSeniorities(new Set()); setLocQ(""); setKw(""); }}
+        onClear={() => { setWithin(null); setSources(new Set()); setSeniorities(new Set()); setLocQ(""); setKw(""); setUnscoredOnly(false); }}
       />
 
       {/* batch header: fresh slice by default, or the full filtered set */}
@@ -243,6 +272,16 @@ export function InboxTriage({ inbox, scoredUrls }: { inbox: InboxJob[]; scoredUr
                 : t("inbox.matches", { n: filtered.length })
               : t("inbox.allRoles")}
         </p>
+        {filtered.length > 0 && (
+          <button
+            type="button"
+            onClick={toggleSelectAll}
+            className="text-xs text-faint transition-colors hover:text-foreground"
+            aria-pressed={allFilteredSelected}
+          >
+            {allFilteredSelected ? t("inbox.selectNone") : t("inbox.selectAll")}
+          </button>
+        )}
         {hiddenCount > 0 && (
           <button type="button" onClick={() => setHidden([])} className="text-xs text-faint transition-colors hover:text-foreground">
             {t("inbox.hiddenRestore", { n: hiddenCount })}
@@ -256,6 +295,9 @@ export function InboxTriage({ inbox, scoredUrls }: { inbox: InboxJob[]; scoredUr
           <span className="font-medium text-brand tabular-nums">{t("inbox.selected", { n: selected.size })}</span>
           <button type="button" onClick={saveSelected} className="rounded-md bg-brand px-2.5 py-1 text-xs font-medium text-brand-foreground max-sm:min-h-[44px]">
             {t("inbox.saveToShortlist")}
+          </button>
+          <button type="button" onClick={skipSelected} className="text-xs text-muted hover:text-foreground max-sm:min-h-[44px]">
+            {t("inbox.skipSelected")}
           </button>
           <button type="button" onClick={() => setSelected(new Set())} className="text-xs text-muted hover:text-foreground max-sm:min-h-[44px]">
             {t("inbox.clear")}

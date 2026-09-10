@@ -18,6 +18,8 @@ export function FacetChips({
   toggleSource,
   seniorities,
   toggleSeniority,
+  unscoredOnly,
+  onToggleUnscoredOnly,
   locQ,
   setLocQ,
   kw,
@@ -35,6 +37,8 @@ export function FacetChips({
   toggleSource: (s: AtsSource) => void;
   seniorities: Set<Seniority>;
   toggleSeniority: (s: Seniority) => void;
+  unscoredOnly: boolean;
+  onToggleUnscoredOnly: () => void;
   locQ: string;
   setLocQ: (v: string) => void;
   kw: string;
@@ -84,6 +88,11 @@ export function FacetChips({
             </button>
           ))}
         </div>
+
+        {/* unscored-only toggle — the cheap "what's left to evaluate" filter */}
+        <Pill on={unscoredOnly} onClick={onToggleUnscoredOnly}>
+          {t("inbox.unscoredOnly")}
+        </Pill>
 
         {availSources.map((s) => (
           <Pill key={s} on={sources.has(s)} onClick={() => toggleSource(s)}>
