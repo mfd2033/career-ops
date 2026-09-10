@@ -223,6 +223,10 @@ update-apply*.err
 
 # Archived evaluation reports (PII — keep out of VCS)
 reports/archive/
+# Archived evaluation reports (older underscore-prefixed dir — same PII class,
+# same rule; a plain `reports/*.md` above only covers the top level, so this
+# directory's ~70 reports would otherwise surface as untracked.)
+reports/_archive/
 
 # Web dev-server scratch logs (local dev noise, never commit)
 web/dev-server*.log*
