@@ -4,7 +4,7 @@ import { use } from "react";
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { ArrowLeft, Loader2, Wrench, CircleDot, Check, X } from "lucide-react";
+import { ArrowLeft, Loader2, Wrench, CircleDot, Check, X, Clock } from "lucide-react";
 import { useJobs } from "@/components/jobs/job-store";
 import { HeroGlow } from "@/components/hero-glow";
 import { Badge } from "@/components/ui/badge";
@@ -41,6 +41,8 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
           <p className="flex items-center gap-2 font-mono text-xs uppercase tracking-[0.18em] text-faint">
             {job.status === "running" ? (
               <><Loader2 className="size-3 animate-spin text-brand" /> {t("jobs.statusWorking")}</>
+            ) : job.status === "queued" ? (
+              <><Clock className="size-3 text-zinc-400" /> {t("jobs.queued")}{job.queuedPos != null ? ` · ${t("jobs.queuedPos", { n: job.queuedPos })}` : ""}</>
             ) : job.status === "done" ? (
               <><Check className="size-3 text-emerald-500" /> {t("jobs.statusDone")}</>
             ) : (
@@ -74,6 +76,11 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
         {job.status === "running" && (
           <li className="flex items-center gap-2.5 text-sm text-muted">
             <Loader2 className="size-3.5 animate-spin text-brand" /> {t("jobs.thinking")}
+          </li>
+        )}
+        {job.status === "queued" && (
+          <li className="flex items-center gap-2.5 text-sm text-faint">
+            <Clock className="size-3.5" /> {t("jobs.queuedHint")}
           </li>
         )}
       </ol>

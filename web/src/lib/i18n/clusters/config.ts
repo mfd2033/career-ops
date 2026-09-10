@@ -60,6 +60,10 @@ export const en: Dict = {
   "config.scanMaxTitle": "Per-site scan cap",
   "config.scanMaxDesc": "Max postings collected per Chinese board in the Explorer browser scan. Liepin (paged) defaults to 1200 so large keywords aren't truncated at the 400 cap; BOSS/Zhaopin (lazy-load) keep 400.",
 
+  "config.concurrencyTitle": "Global concurrency limit",
+  "config.concurrencyDesc": "How many evaluation CLI processes may run at the SAME time across the web single-card, web batch, and browser extension. Extra tasks queue and show as 排队中.",
+  "config.concurrencyNote": "Takes effect immediately on save — running scheduling reads the new value; no restart needed.",
+
   "config.unknownEmployerTitle": "Unknown employer",
   "config.unknownEmployerDesc": "How an offer shows the company when the employer is hidden (job agency posting). Applies to evaluation reports, the pipeline, and quick evaluation.",
   "config.unknownEmployerPlaceholder": "Show \"?\"",
@@ -154,6 +158,10 @@ export const zh: Dict = {
 
   "config.scanMaxTitle": "每站采集上限",
   "config.scanMaxDesc": "探索页浏览器扫描时，每个国内平台最多采集的职位条数。猎聘（分页型）默认 1200，避免大关键词被 400 上限截掉末页；BOSS/智联（懒加载）保持 400。",
+
+  "config.concurrencyTitle": "全局并发上限",
+  "config.concurrencyDesc": "web 单卡、web 批量、浏览器扩展同时运行的评估 CLI 子进程数量上限。超出部分自动排队（显示为“排队中”）。",
+  "config.concurrencyNote": "保存后立即生效——运行中的调度会读取新值，无需重启。",
 
   "config.unknownEmployerTitle": "未知雇主",
   "config.unknownEmployerDesc": "当招聘信息隐藏终端雇主（代招/猎头代发）时，offer 中公司名如何显示。应用于评估报告、管道与快评。",

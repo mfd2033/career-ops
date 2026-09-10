@@ -8,8 +8,19 @@ import { useI18n } from "@/lib/i18n/context";
 export type JobStep = { kind: "tool" | "status"; label: string; ts: number };
 export type JobResult = { score: number | null; summary: string; tone: "good" | "warn" | "bad" | "muted" };
 
-// Server snapshot shape — see /api/active-runs and lib/core/active-runs.ts.
-type ActiveRunApi = { url: string; startedAt: number; reportNum?: number; id: string };
+// Server snapshot shape — see /api/active-runs and lib/core/concurrency-pool.ts.
+// The pool is the single authority on what's running vs queued, for EVERY source
+// (web single-run = source "run", web/extension batch = source "batch").
+type PoolEntry = {
+  id: string;
+  url: string;
+  title: string;
+  reportNum?: number;
+  source: "run" | "batch";
+};
+type PoolRunning = PoolEntry & { startedAt: number };
+type PoolQueued = PoolEntry & { enqueuedAt: number; position: number };
+type ActiveRunApi = { running: PoolRunning[]; queued: PoolQueued[] };
 
 export type Job = {
   id: string;
@@ -19,7 +30,11 @@ export type Job = {
   input?: string; // the URL/posting it processed (links inbox rows to their worker)
   kind?: string;
   batchId?: string; // groups jobs fired together (e.g. "evaluate all Anthropic")
-  status: "running" | "done" | "error";
+  status: "running" | "queued" | "done" | "error";
+  // For a server-sourced (pool) card: its pool id + whether it was queued, so the
+  // dismiss action can route to the right cancel path (dequeue via API).
+  active?: boolean;
+  queuedPos?: number; // 1-based FIFO position while waiting for a pool slot
   steps: JobStep[];
   text: string;
   result?: JobResult;
@@ -34,6 +49,7 @@ type Ctx = {
   jobs: Job[];
   startJob: (opts: StartOpts) => string | null;
   removeJob: (id: string) => void;
+  cancelJob: (id: string) => void;
   clearFinished: () => void;
 };
 
@@ -62,25 +78,29 @@ function parseVerdict(text: string): JobResult {
 
 export function JobsProvider({ children }: { children: React.ReactNode }) {
   const [jobs, setJobs] = useState<Job[]>([]);
-  const [activeRuns, setActiveRuns] = useState<ActiveRunApi[]>([]);
+  const [activeRuns, setActiveRuns] = useState<ActiveRunApi>({ running: [], queued: [] });
+  const controllers = useRef(new Map<string, AbortController>());
   const seq = useRef(0);
   const loaded = useRef(false);
   const { t } = useI18n();
 
-  // Poll the server-wide in-flight batch-evaluations snapshot. Evaluations
-  // started from the BOSS直聘 EXTENSION never touch this process's job-store,
-  // so this is the only channel that surfaces them in the worker list. Cleaned
-  // up on unmount; entries vanish from activeRuns as soon as the server
-  // unregisters them (the batch worker closed), so a poll that stops seeing one
-  // drops its ephemeral worker card.
+  // Poll the server-wide global concurrency-pool snapshot. Evaluations started
+  // from the BOSS直聘 EXTENSION never touch this process's job-store, so this is
+  // the only channel that surfaces them in the worker list; it also reports which
+  // tasks are still QUEUED behind a full pool (so a worker shows 排队中, not a lie
+  // that it's running). Cleaned up on unmount; entries vanish as the server
+  // unregisters/settles them.
   useEffect(() => {
     let live = true;
     const poll = async () => {
       try {
         const res = await fetch("/api/active-runs");
         if (!res.ok) return;
-        const data = (await res.json()) as { runs?: ActiveRunApi[] };
-        if (live) setActiveRuns(Array.isArray(data.runs) ? data.runs : []);
+        const data = (await res.json()) as ActiveRunApi;
+        if (live) setActiveRuns({
+          running: Array.isArray(data.running) ? data.running : [],
+          queued: Array.isArray(data.queued) ? data.queued : [],
+        });
       } catch {
         /* transient — leave the last good snapshot */
       }
@@ -93,24 +113,58 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  // Merge ephemeral extension runs into the visible job list. Keyed by a stable
-  // "active-{n}" id (NOT the URL, which could collide with an in-app job's
-  // input), status locked to "running", never persisted to localStorage.
-  const visibleJobs: Job[] = [
-    ...activeRuns.map((r): Job => ({
-      id: `active-${r.id}`,
-      title: t("jobs.scanTitle"),
-      subtitle: r.reportNum != null ? `#${r.reportNum}` : undefined,
-      page: "/jobs",
-      input: r.url,
-      kind: "batch-evaluate",
-      status: "running",
-      steps: [{ kind: "status", label: t("jobs.working"), ts: r.startedAt }],
-      text: "",
-      startedAt: r.startedAt,
-    })),
-    ...jobs,
+  // Merge server pool entries into the visible job list.
+  //
+  //   * source "batch" (in-app batch + BOSS extension) becomes its own ephemeral
+  //     worker card — each batch URL is a separate worker, queued or running.
+  //   * source "run" (single-card evaluate/pdf) is started by THIS process's
+  //     job-store, so it already has a local card; we DO NOT add a duplicate, we
+  //     only OVERTIDE that card to "排队中" while the pool reports it queued.
+  //
+  // Cards are keyed by a stable `active-{id}` id (NOT the URL, which could
+  // collide with an in-app job's input); active cards are never persisted.
+  const queuePosByRunInput = new Map<string, number>();
+  for (const q of activeRuns.queued) if (q.source === "run") queuePosByRunInput.set(q.url, q.position);
+  const activeCards: Job[] = [
+    ...activeRuns.running
+      .filter((r) => !(r.source === "run" && jobs.some((j) => j.input === r.url)))
+      .map((r): Job => ({
+        id: `active-${r.id}`,
+        title: r.title,
+        subtitle: r.reportNum != null ? `#${r.reportNum}` : undefined,
+        page: "/jobs",
+        input: r.url,
+        kind: "batch-evaluate",
+        status: "running",
+        active: true,
+        steps: [{ kind: "status", label: t("jobs.working"), ts: r.startedAt }],
+        text: "",
+        startedAt: r.startedAt,
+      })),
+    ...activeRuns.queued
+      .filter((q) => !(q.source === "run" && jobs.some((j) => j.input === q.url)))
+      .map((q): Job => ({
+        id: `active-${q.id}`,
+        title: q.title,
+        subtitle: q.reportNum != null ? `#${q.reportNum}` : undefined,
+        page: "/jobs",
+        input: q.url,
+        kind: "batch-evaluate",
+        status: "queued",
+        active: true,
+        queuedPos: q.position,
+        steps: [{ kind: "status", label: t("jobs.queued"), ts: q.enqueuedAt }],
+        text: "",
+        startedAt: q.enqueuedAt,
+      })),
   ];
+  // Local single-run jobs flip to 排队中 when the pool reports them queued
+  // (their live stream sits in the background until a slot frees up).
+  const localDisplay = jobs.map((j) => {
+    const pos = j.input ? queuePosByRunInput.get(j.input) : undefined;
+    return pos != null ? { ...j, status: "queued" as const, queuedPos: pos } : j;
+  });
+  const visibleJobs: Job[] = [...activeCards, ...localDisplay];
 
   // restore history
   useEffect(() => {
@@ -158,6 +212,10 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
         startedAt: Date.now(),
       };
       setJobs((js) => [job, ...js]);
+      // AbortController so a local card can be truly cancelled (dequeue + stop the
+      // stream → the /api/run stream's cancel() dequeues from the pool's queue).
+      const controller = new AbortController();
+      controllers.current.set(id, controller);
 
       (async () => {
         const cliId = readSavedCliId() || (await resolveCliId());
@@ -211,6 +269,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(opts.urls ? { urls: opts.urls, cliId, model } : { kind: opts.kind, input: opts.input, cliId, model }),
+            signal: controller.signal,
           });
           if (!res.ok || !res.body) {
             const e = await res.json().catch(() => ({}));
@@ -257,7 +316,11 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
             }
           }
           finish("done", t("jobs.stepDone"));
-        } catch {
+        } catch (e) {
+          // A user-cancelled job surfaces as AbortError once the controller.abort()
+          // drops the stream — the card is already removed, so don't repaint an
+          // error state for a deliberate cancel.
+          if ((e as Error)?.name === "AbortError") return;
           finish("error", t("jobs.stepConnectionError"));
         }
       })();
@@ -267,8 +330,35 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
     [patch, t],
   );
 
-  const removeJob = useCallback((id: string) => setJobs((js) => js.filter((j) => j.id !== id)), []);
-  const clearFinished = useCallback(() => setJobs((js) => js.filter((j) => j.status === "running")), []);
+  const removeJob = useCallback((id: string) => {
+    // Local job → abort its stream so the server dequeues (a queued local card
+    // truly stops) / terminates (a running local card truly stops).
+    controllers.current.get(id)?.abort();
+    controllers.current.delete(id);
+    setJobs((js) => js.filter((j) => j.id !== id));
+    // Server-sourced (pool) card → dequeue on the server by its pool id; the
+    // next poll then no longer reports it (a running batch worker is left to the
+    // batch's own whole-stream cancel, matching the existing running-cancel path).
+    if (id.startsWith("active-")) {
+      const poolId = id.slice("active-".length);
+      fetch("/api/active-runs/cancel", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: poolId }),
+      }).catch(() => {});
+      setActiveRuns((s) => ({
+        running: s.running.filter((r) => r.id !== poolId),
+        queued: s.queued.filter((q) => q.id !== poolId),
+      }));
+    }
+  }, []);
 
-  return <JobsContext.Provider value={{ jobs: visibleJobs, startJob, removeJob, clearFinished }}>{children}</JobsContext.Provider>;
+  const cancelJob = useCallback((id: string) => {
+    removeJob(id);
+    // Also clear finished for queued? no-op: remove handles both paths above.
+  }, [removeJob]);
+
+  const clearFinished = useCallback(() => setJobs((js) => js.filter((j) => j.status === "running" || j.status === "queued")), []);
+
+  return <JobsContext.Provider value={{ jobs: visibleJobs, startJob, removeJob, cancelJob, clearFinished }}>{children}</JobsContext.Provider>;
 }

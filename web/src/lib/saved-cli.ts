@@ -84,6 +84,40 @@ export function persistUnknownEmployer(policy: UnknownEmployerPolicy) {
   }
 }
 
+export const CONCURRENCY_POOL_DEFAULT = 4;
+
+/**
+ * 全局并发上限（服务端持真值）：写入 /api/config（~/.career-ops-web/config.json），
+ * 由 global 并发池每次 dispatch 时读取、即时生效。CLI 评估引擎不读 localStorage，
+ * 只读服务端配置，所以这里不写 localStorage（与 cliId/model 不同路）。
+ */
+export async function persistConcurrencyPool(n: number): Promise<boolean> {
+  const value = Number.isInteger(n) && n >= 1 ? n : CONCURRENCY_POOL_DEFAULT;
+  try {
+    const res = await fetch("/api/config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ concurrencyPool: value }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+/** 从服务端读取当前全局并发上限；失败回落默认 4。 */
+export async function readSavedConcurrencyPool(): Promise<number> {
+  try {
+    const r = await fetch("/api/config");
+    if (!r.ok) return CONCURRENCY_POOL_DEFAULT;
+    const d = (await r.json()) as { concurrencyPool?: unknown };
+    const v = d.concurrencyPool;
+    return typeof v === "number" && Number.isInteger(v) && v >= 1 ? v : CONCURRENCY_POOL_DEFAULT;
+  } catch {
+    return CONCURRENCY_POOL_DEFAULT;
+  }
+}
+
 export function pickSoleInstalled(
   clis: { id: string; installed?: boolean }[] | undefined,
 ): string | null {

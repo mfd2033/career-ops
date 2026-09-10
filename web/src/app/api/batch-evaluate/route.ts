@@ -31,7 +31,11 @@ import { careerOpsRoot, readMemory, readInbox, readScanDates } from "@/lib/caree
 import { readAppConfig } from "@/lib/app-config";
 import { buildBatchPrompt } from "@/lib/run-prompts.mjs";
 import { acquireTrackerWrite, releaseTrackerWrite } from "@/lib/core/run-registry";
-import { registerActiveRun, unregisterActiveRun } from "@/lib/core/active-runs";
+import { acquire, release, __setSizeSource, DEFAULT_POOL_SIZE, type PoolHandle } from "@/lib/core/concurrency-pool";
+
+// Feed the global concurrency pool the live configured size (app-config), re-read
+// on every dispatch so a config-page edit takes effect without restart.
+__setSizeSource(() => readAppConfig().concurrencyPool ?? DEFAULT_POOL_SIZE);
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -156,6 +160,9 @@ export async function POST(req: Request) {
 
   let cancelled = false;
   const children = new Set<ReturnType<typeof spawnHeadlessCli>>();
+  // Every dispatched worker holds a global-pool handle; on batch cancel we
+  // dequeue the ones still waiting for a slot so they never spawn.
+  const poolHandles = new Set<PoolHandle>();
   const stream = new ReadableStream({
     async start(controller) {
       const enc = new TextEncoder();
@@ -186,15 +193,18 @@ export async function POST(req: Request) {
         await reserveRange();
 
         // Evaluate one URL with a pre-reserved, exclusively-owned report number.
+        // Each batch worker needs its OWN global-pool slot before it spawns, so
+        // batch-internal MAX_PARALLEL converges into the global cap (ADR-0014
+        // Q1/Q7): report numbers are still handed out in array order regardless
+        // of which worker grabs a slot first. A worker dequeued while queued is
+        // counted `cancelled` and never spawns.
         const evaluateOne = (i: number, num: number) =>
-          new Promise<{ cleanExit: boolean; sawError: boolean; verdict: string | null }>((resolve) => {
+          new Promise<{ cleanExit: boolean; sawError: boolean; verdict: string | null; cancelled: boolean }>((resolve) => {
             let sawError = false;
             let verdict: string | null = null;
             const url = urls[i];
-            // Surface this URL in the server-wide active-runs snapshot the worker
-            // list polls — so a batch started from the BOSS extension is visible
-            // to the web UI even though it never touched this process's job-store.
-            registerActiveRun(url, num);
+            const poolHandle = acquire({ url, title: url, reportNum: num, source: "batch" });
+            poolHandles.add(poolHandle);
             const postedAt = inboxPostedAt.get(url) ?? scanDates.get(url);
             // 内联 JD/雇主名只对唯一 URL(扩展详情页单评估)有意义;多 URL 时
             // 上面的 400 已拦截,这里无需按 i 区分。
@@ -211,47 +221,59 @@ export async function POST(req: Request) {
             // the agent's output as text and extracts the VERDICT line — per-event
             // parsing is /api/run's single-run concern.
             const args = withModelFlag(spec.args(prompt), spec.model, model);
-            const child = spawnHeadlessCli(binPath, args, { cwd: root, env: process.env });
-            children.add(child);
-            child.stdout?.setEncoding("utf-8");
-            child.stderr?.setEncoding("utf-8");
-            child.stdout?.on("data", (chunk: string) => {
-              const vm = chunk.match(/VERDICT:[^\n]*/i);
-              if (vm) verdict = vm[0];
-            });
-            // 逐行分类 stderr,而非裸嗅探 "error|fatal":openCode/Claude 会把进度
-            // 遥测(横幅、模型行、MCP 透传)写到 stderr,裸词会误判干净运行为失败 —
-            // 与 /api/run 同一套 per-CLI 分类器(spec.stderrIsFatal,回退 generic)。
-            // 分块可能切在词中间,先按行缓冲再分类;关闭时冲刷残留行。
-            const isFatalStderr = spec.stderrIsFatal ?? isFatalGenericStderr;
-            let stderrBuf = "";
-            const flagStderrLine = (line: string) => {
-              if (line.trim() && isFatalStderr(line)) sawError = true;
+            const finish = (outcome: { cleanExit: boolean; sawError: boolean; verdict: string | null; cancelled?: boolean }) => {
+              poolHandles.delete(poolHandle);
+              release(poolHandle.id);
+              resolve(outcome as { cleanExit: boolean; sawError: boolean; verdict: string | null; cancelled: boolean });
             };
-            child.stderr?.on("data", (chunk: string) => {
-              stderrBuf += chunk;
-              let nl;
-              while ((nl = stderrBuf.indexOf("\n")) !== -1) {
-                const line = stderrBuf.slice(0, nl);
-                stderrBuf = stderrBuf.slice(nl + 1);
-                flagStderrLine(line);
+            // Queue in the global pool; spawn only once a slot is granted. If the
+            // task is dequeued (queued-cancel) while waiting, grant=false → skip.
+            void (async () => {
+              const started = await poolHandle.ready;
+              if (!started) {
+                finish({ cleanExit: false, sawError: true, verdict: null, cancelled: true });
+                return;
               }
-            });
-            child.on("error", (err) => {
-              unregisterActiveRun(url);
-              sawError = true;
-              send({ type: "text", text: `\u274C ${url}: ${err.message}\n` });
-              resolve({ cleanExit: false, sawError: true, verdict: null });
-            });
-            child.on("close", (code) => {
-              unregisterActiveRun(url);
-              if (stderrBuf) {
-                flagStderrLine(stderrBuf);
-                stderrBuf = "";
-              }
-              resolve({ cleanExit: code === 0, sawError, verdict });
-              children.delete(child);
-            });
+              const child = spawnHeadlessCli(binPath, args, { cwd: root, env: process.env });
+              children.add(child);
+              child.stdout?.setEncoding("utf-8");
+              child.stderr?.setEncoding("utf-8");
+              child.stdout?.on("data", (chunk: string) => {
+                const vm = chunk.match(/VERDICT:[^\n]*/i);
+                if (vm) verdict = vm[0];
+              });
+              // 逐行分类 stderr,而非裸嗅探 "error|fatal":openCode/Claude 会把进度
+              // 遥测(横幅、模型行、MCP 透传)写到 stderr,裸词会误判干净运行为失败 —
+              // 与 /api/run 同一套 per-CLI 分类器(spec.stderrIsFatal,回退 generic)。
+              // 分块可能切在词中间,先按行缓冲再分类;关闭时冲刷残留行。
+              const isFatalStderr = spec.stderrIsFatal ?? isFatalGenericStderr;
+              let stderrBuf = "";
+              const flagStderrLine = (line: string) => {
+                if (line.trim() && isFatalStderr(line)) sawError = true;
+              };
+              child.stderr?.on("data", (chunk: string) => {
+                stderrBuf += chunk;
+                let nl;
+                while ((nl = stderrBuf.indexOf("\n")) !== -1) {
+                  const line = stderrBuf.slice(0, nl);
+                  stderrBuf = stderrBuf.slice(nl + 1);
+                  flagStderrLine(line);
+                }
+              });
+              child.on("error", (err) => {
+                sawError = true;
+                send({ type: "text", text: `\u274C ${url}: ${err.message}\n` });
+                finish({ cleanExit: false, sawError: true, verdict: null });
+              });
+              child.on("close", (code) => {
+                if (stderrBuf) {
+                  flagStderrLine(stderrBuf);
+                  stderrBuf = "";
+                }
+                finish({ cleanExit: code === 0, sawError, verdict });
+                children.delete(child);
+              });
+            })();
           });
         // Bounded parallel pool. Each worker owns its number and its own report +
         // TSV files, so there is no shared state to serialize on — the pool just
@@ -285,15 +307,19 @@ export async function POST(req: Request) {
                         : null,
                     reason: itemOk
                       ? undefined
-                      : !outcome.cleanExit || outcome.sawError
-                        ? "the run hit an error before finishing — re-run it to verify"
-                        : "the worker ran but never saved a report/tracker row",
+                      : outcome.cancelled
+                        ? "cancelled"
+                        : !outcome.cleanExit || outcome.sawError
+                          ? "the run hit an error before finishing — re-run it to verify"
+                          : "the worker ran but never saved a report/tracker row",
                   });
                   send({
                     type: "text",
                     text: itemOk
                       ? `\u2705 [${i + 1}/${urls.length}] done: ${urls[i]}${outcome.verdict ? ` — ${outcome.verdict}` : ""}\n`
-                      : `\u26A0\uFE0F [${i + 1}/${urls.length}] NOT recorded: ${urls[i]}\n`,
+                      : outcome.cancelled
+                        ? `\u2391 [${i + 1}/${urls.length}] cancelled: ${urls[i]}\n`
+                        : `\u26A0\uFE0F [${i + 1}/${urls.length}] NOT recorded: ${urls[i]}\n`,
                   });
                 })
                 .catch(() => failed++)
@@ -358,6 +384,12 @@ export async function POST(req: Request) {
         terminateCli(child);
       }
       children.clear();
+      // 排队中的 worker 还未 spawn——dequeue 它们，让各自的 pool-ready 以 false
+      // resolve，从而永不 spawn（ADR-0014 Q5 的 dequeue 路径）。
+      for (const h of poolHandles) {
+        h.cancel();
+      }
+      poolHandles.clear();
     },
   });
 

@@ -17,6 +17,7 @@ import { CadenceSettings } from "@/components/followups/cadence-settings";
 import { JdRulesSettings } from "@/components/jd-rules-settings";
 import { JobTargetSettings } from "@/components/job-target-settings";
 import { persistCliId, persistModel, readSavedCliId, readSavedModel, readSavedUnknownEmployer, persistUnknownEmployer, type UnknownEmployerPolicy } from "@/lib/saved-cli";
+import { readSavedConcurrencyPool, persistConcurrencyPool, CONCURRENCY_POOL_DEFAULT } from "@/lib/saved-cli";
 import { resolveModelPicker } from "@/lib/model-picker.mjs";
 import {
   readApplyBehavior,
@@ -93,6 +94,7 @@ export function ConfigForm() {
   const [scanSource, setScanSource] = useState<ScanSource[]>([...SCAN_SOURCE_DEFAULT]);
   const [scanMax, setScanMax] = useState<Record<BrowserSourceId, number>>({ ...SCAN_MAX_DEFAULT });
   const [unknownEmployer, setUnknownEmployer] = useState<UnknownEmployerPolicy>("placeholder");
+  const [concurrencyPool, setConcurrencyPool] = useState(CONCURRENCY_POOL_DEFAULT);
   const [saved, setSaved] = useState(false);
 
   // Load saved prefs
@@ -132,6 +134,8 @@ export function ConfigForm() {
     setScanSource(readScanSources());
     setScanMax(readScanMax() as Record<BrowserSourceId, number>);
     setUnknownEmployer(readSavedUnknownEmployer());
+    // 全局并发上限是服务端持真值，异步读回回显。
+    readSavedConcurrencyPool().then(setConcurrencyPool);
   }, []);
 
   // Detect installed CLIs
@@ -159,6 +163,8 @@ export function ConfigForm() {
     persistUnknownEmployer(unknownEmployer);
     // 浏览器扫描每站采集上限同样独立于评估引擎，任何模式保存都生效。
     persistScanMax(scanMax);
+    // 全局并发上限也是服务端配置，任何模式保存都生效（引擎每次 dispatch 时读取）。
+    void persistConcurrencyPool(concurrencyPool);
     // 快评（key 模式）：密钥 PUT 到服务端 gitignore 文件，只在前端存非密钥字段。
     if (mode === "key") {
       const savedProvider = provider;
@@ -661,6 +667,24 @@ export function ConfigForm() {
           );
         })}
       </div>
+
+      {/* 全局并发上限：web 端(web 单卡/批量/浏览器扩展)同时运行的评估 CLI 子进程总数上限 */}
+      <label className="mt-8 mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-muted">
+        {t("config.concurrencyTitle")}
+      </label>
+      <p className="mb-3 text-xs text-faint">{t("config.concurrencyDesc")}</p>
+      <input
+        type="number"
+        min={1}
+        step={1}
+        value={concurrencyPool}
+        onChange={(e) => {
+          const n = parseInt(e.target.value, 10);
+          setConcurrencyPool(Number.isFinite(n) && n >= 1 ? n : CONCURRENCY_POOL_DEFAULT);
+        }}
+        className="w-full rounded-xl border border-border bg-surface/60 px-4 py-2.5 text-sm text-foreground outline-none transition-colors focus:border-brand/50 focus-visible:ring-2 focus-visible:ring-brand/40"
+      />
+      <p className="mt-2 text-xs text-faint">{t("config.concurrencyNote")}</p>
 
       {/* 未知雇主处理策略：offer 隐藏终端雇主时代招方如何显示 */}
       <label className="mt-8 mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-muted">
