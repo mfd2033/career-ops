@@ -316,6 +316,10 @@ test("buildPrompt: has BLOCKED BOARDS instruction for headless evaluation", () =
   assert.match(p, /BLOCKED BOARDS/);
   assert.match(p, /zhipin\.com.*zhaopin\.com.*liepin\.com/);
   assert.match(p, /ERROR: cannot extract JD/);
+  // 提取器命令本身跑不起来(node 不在 PATH)也是硬失败:禁止自我安装/改 PATH/WebFetch
+  assert.match(p, /command-not-found/);
+  assert.match(p, /do NOT install node/);
+  assert.match(p, /do NOT fall back to WebFetch/);
 });
 
 test("buildBatchPrompt: BLOCKED BOARDS instruction preserved when jdText is present", () => {
