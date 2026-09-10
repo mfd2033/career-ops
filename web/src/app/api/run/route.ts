@@ -7,7 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { resolveCli } from "@/lib/clis";
 import { accumulateTokens, hasNewCompletedReport, isFatalGenericStderr, withModelFlag } from "@/lib/run-cli-support.mjs";
-import { spawnHeadlessCli } from "@/lib/spawn-cli.mjs";
+import { spawnHeadlessCli, terminateCli } from "@/lib/spawn-cli.mjs";
 import { careerOpsRoot, readMemory, findReportFile, readInbox, readScanDates } from "@/lib/career-ops";
 import { readAppConfig } from "@/lib/app-config";
 import { resolvePdfPaths, type PdfPaths } from "@/lib/pdf-paths.mjs";
@@ -220,7 +220,7 @@ export async function POST(req: Request) {
       // render phase to reserve headroom for, so give it the full 600s too.
       const killMs = 600_000;
       killer = setTimeout(() => {
-        try { child.kill("SIGTERM"); } catch { /* ignore */ }
+        terminateCli(child);
       }, killMs);
       // Declared before send() so send() can clear it the moment it sees the
       // client disconnect; assigned just below, once close() exists.
@@ -474,7 +474,9 @@ export async function POST(req: Request) {
     cancel() {
       closed = true;
       if (killer) clearTimeout(killer);
-      try { child.kill("SIGTERM"); } catch { /* ignore */ }
+      // 客户端断开必须按进程树终止：单杀 CLI 主进程会让它派生的子进程
+      // （如 Git find.exe）残留成孤儿，持续空转占 CPU。
+      terminateCli(child);
       if (pdfRenderPromise) {
         // Render/mark keeps running after this client disconnects — wait for
         // it to settle before releasing the guard, so a concurrent tracker
