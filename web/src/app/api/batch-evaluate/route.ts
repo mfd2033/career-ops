@@ -26,7 +26,7 @@ import { promisify } from "node:util";
 import { resolveCli } from "@/lib/clis";
 import { withModelFlag, isFatalGenericStderr } from "@/lib/run-cli-support.mjs";
 import { isReservedReportFile } from "@/lib/report-files.mjs";
-import { spawnHeadlessCli } from "@/lib/spawn-cli.mjs";
+import { spawnHeadlessCli, terminateCli } from "@/lib/spawn-cli.mjs";
 import { careerOpsRoot, readMemory, readInbox, readScanDates } from "@/lib/career-ops";
 import { readAppConfig } from "@/lib/app-config";
 import { buildBatchPrompt } from "@/lib/run-prompts.mjs";
@@ -351,14 +351,11 @@ export async function POST(req: Request) {
     },
     cancel() {
       cancelled = true;
-      // SIGTERM every in-flight worker; the pool pump checks `cancelled` and
-      // stops before dispatching more.
+      // SIGTERM 每个 in-flight worker；pool pump 检查 `cancelled` 并停止
+      // 分发更多。必须按进程树终止（terminateCli），否则 CLI 派生的子进程
+      // 残留成孤儿。
       for (const child of children) {
-        try {
-          child.kill("SIGTERM");
-        } catch {
-          /* ignore */
-        }
+        terminateCli(child);
       }
       children.clear();
     },
