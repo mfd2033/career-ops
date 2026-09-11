@@ -1,7 +1,8 @@
 import { notFound } from "next/navigation";
-import { readReport, findApplication, readApplications, trackerCanDelete } from "@/lib/career-ops";
+import { readReport, findApplication, readApplications, trackerCanDelete, readEvalTimings } from "@/lib/career-ops";
 import { orderApplications, buildContextQuery, DEFAULT_ORDER } from "@/lib/pipeline-order.mjs";
 import { ReportView } from "@/components/report-view";
+import { EvalTimingPanel } from "@/components/eval-timing-panel";
 
 export const dynamic = "force-dynamic";
 
@@ -72,19 +73,27 @@ export default async function ReportPage({
   const position = index >= 0 ? index + 1 : null;
   const total = ordered.length;
   const contextQuery = buildContextQuery(effectiveCtx);
+  // 评估用时 breakdown (ADR-0016): latest eval session for THIS report number,
+  // straight from data/eval-timings.tsv — no report body required.
+  const timing = readEvalTimings()[id] ?? null;
 
   return (
-    <ReportView
-      id={id}
-      app={app}
-      report={report?.content ?? null}
-      file={report?.file ?? null}
-      canDelete={trackerCanDelete()}
-      prev={prev}
-      next={next}
-      position={position}
-      total={total}
-      contextQuery={contextQuery}
-    />
+    <>
+      <ReportView
+        id={id}
+        app={app}
+        report={report?.content ?? null}
+        file={report?.file ?? null}
+        canDelete={trackerCanDelete()}
+        prev={prev}
+        next={next}
+        position={position}
+        total={total}
+        contextQuery={contextQuery}
+      />
+      <div className="mx-auto max-w-3xl px-6 pb-10">
+        <EvalTimingPanel entry={timing} />
+      </div>
+    </>
   );
 }

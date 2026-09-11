@@ -60,6 +60,8 @@ export const en: Dict = {
   "jobs.queuedPos": "waiting #{n}",
   "jobs.cancelQueued": "Cancel queue item",
   "jobs.queuedHint": "Pool is full — will run when a slot frees up.",
+  "jobs.evalDuration": "Eval duration",
+  "jobs.viewReport": "View report",
 };
 
 // Simplified Chinese strings. Every key in en must have a matching key here.
@@ -119,4 +121,6 @@ export const zh: Dict = {
   "jobs.queuedPos": "等待 # {n}",
   "jobs.cancelQueued": "取消排队项",
   "jobs.queuedHint": "并发已满，空出名额后自动运行。",
+  "jobs.evalDuration": "评估用时",
+  "jobs.viewReport": "查看报告",
 };

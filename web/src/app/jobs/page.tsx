@@ -6,6 +6,10 @@ import { useJobs } from "@/components/jobs/job-store";
 import { pillTone } from "@/components/jobs/worker-pills";
 import { useI18n } from "@/lib/i18n/context";
 import { cn } from "@/lib/cn";
+import { fmtDuration } from "@/lib/format";
+import { doneDurationSeconds, useJobTiming } from "@/lib/eval-duration-client";
+import { ReportNumLink } from "@/components/report-num-link";
+import type { Job } from "@/components/jobs/job-store";
 
 const TONE_CHIP = {
   good: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400",
@@ -50,42 +54,71 @@ export default function JobsHistory() {
         </div>
       ) : (
         <ul className="mt-6 divide-y divide-border overflow-hidden rounded-2xl border border-border bg-surface/40">
-          {jobs.map((j) => {
-            const tone = pillTone(j);
-            return (
-              <li key={j.id}>
-                <Link href={`/jobs/${j.id}`} className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-surface-hover">
-                  <span className="hidden shrink-0 text-xs capitalize text-faint sm:block">{t(STATUS_LABEL[j.status] ?? j.status)}</span>
-                  {j.status === "queued" && j.queuedPos != null && (
-                    <span className="shrink-0 text-xs tabular-nums text-faint">#{j.queuedPos}</span>
-                  )}
-                  {j.status === "queued" ? (
-                    <Clock className="size-4 shrink-0 text-zinc-400" />
-                  ) : j.status === "running" ? (
-                    <Loader2 className="size-4 shrink-0 animate-spin text-brand" />
-                  ) : j.status === "error" ? (
-                    <AlertTriangle className="size-4 shrink-0 text-red-400" />
-                  ) : (
-                    <Check className="size-4 shrink-0 text-emerald-500" />
-                  )}
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-medium">{j.title}</div>
-                    {(j.subtitle || j.result?.summary) && (
-                      <div className="truncate text-xs text-muted">{j.result?.summary || j.subtitle}</div>
-                    )}
-                  </div>
-                  {j.result?.score != null && (
-                    <span className={cn("shrink-0 rounded-md px-1.5 py-0.5 text-xs font-semibold tabular-nums", TONE_CHIP[tone])}>
-                      {j.result.score}/5
-                    </span>
-                  )}
-                  <span className="hidden shrink-0 text-xs capitalize text-faint sm:block">{t(STATUS_LABEL[j.status] ?? j.status)}</span>
-                </Link>
-              </li>
-            );
-          })}
+          {jobs.map((j) => (
+            <JobsRow key={j.id} job={j} />
+          ))}
         </ul>
       )}
     </div>
+  );
+}
+
+// One history row as its own component: the 评估用时 + report-number resolution
+// needs hooks (useJobTiming), which can't be called inside the map callback.
+function JobsRow({ job: j }: { job: Job }) {
+  const { t } = useI18n();
+  const tone = pillTone(j);
+  const { reportNum, entry } = useJobTiming(j);
+  const secs = j.status === "done" ? doneDurationSeconds(entry, j) : null;
+  // The pool cards carry "#N" as their subtitle — render it as the report jump
+  // instead of duplicating it beside the title.
+  const subtitleIsNum = !!j.subtitle && /^#\d+$/.test(j.subtitle);
+  return (
+    <li>
+      <Link href={`/jobs/${j.id}`} className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-surface-hover">
+        <span className="hidden shrink-0 text-xs capitalize text-faint sm:block">{t(STATUS_LABEL[j.status] ?? j.status)}</span>
+        {j.status === "queued" && j.queuedPos != null && (
+          <span className="shrink-0 text-xs tabular-nums text-faint">#{j.queuedPos}</span>
+        )}
+        {j.status === "queued" ? (
+          <Clock className="size-4 shrink-0 text-zinc-400" />
+        ) : j.status === "running" ? (
+          <Loader2 className="size-4 shrink-0 animate-spin text-brand" />
+        ) : j.status === "error" ? (
+          <AlertTriangle className="size-4 shrink-0 text-red-400" />
+        ) : (
+          <Check className="size-4 shrink-0 text-emerald-500" />
+        )}
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-sm font-medium">
+            {j.title}
+            {reportNum && !subtitleIsNum && (
+              <>
+                {" "}
+                <ReportNumLink n={reportNum} className="text-xs font-normal text-faint transition-colors hover:text-brand" />
+              </>
+            )}
+          </div>
+          {subtitleIsNum ? (
+            <div className="truncate text-xs text-muted">
+              <ReportNumLink n={reportNum!} className="text-xs text-muted transition-colors hover:text-brand" />
+            </div>
+          ) : (
+            (j.subtitle || j.result?.summary) && <div className="truncate text-xs text-muted">{j.result?.summary || j.subtitle}</div>
+          )}
+        </div>
+        {secs != null && (
+          <span className="hidden shrink-0 items-center gap-1 text-xs tabular-nums text-faint sm:flex" title={t("jobs.evalDuration")}>
+            <Clock className="size-3" /> {fmtDuration(secs)}
+          </span>
+        )}
+        {j.result?.score != null && (
+          <span className={cn("shrink-0 rounded-md px-1.5 py-0.5 text-xs font-semibold tabular-nums", TONE_CHIP[tone])}>
+            {j.result.score}/5
+          </span>
+        )}
+        <span className="hidden shrink-0 text-xs capitalize text-faint sm:block">{t(STATUS_LABEL[j.status] ?? j.status)}</span>
+      </Link>
+    </li>
   );
 }

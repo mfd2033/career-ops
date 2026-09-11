@@ -28,16 +28,16 @@ export const DEFAULT_ORDER = {
   dir: -1,
 };
 
-const SORT_KEYS = ["company", "role", "score", "status", "date"];
+const SORT_KEYS = ["company", "role", "score", "status", "date", "duration"];
 
 /**
  * Filter + sort applications under the pipeline view's URL context.
- * @param {Array} applications - Application rows ({ n, company, role, score, status, date, ... }).
+ * @param {Array} applications - Application rows ({ n, company, role, score, status, date, evalDuration, ... }).
  * @param {{tab?: string, min?: number|null, q?: string, sortKey?: string, dir?: 1|-1}} ctx
  *   - tab: uppercase canonical tab (INBOX / ALL / EVALUATED / …). Default ALL.
  *   - min: numeric score floor; null/undefined disables.
  *   - q: company+role search needle.
- *   - sortKey: company | role | score | status | date. Default score.
+ *   - sortKey: company | role | score | status | date | duration. Default score.
  *   - dir: 1 ascending, -1 descending. Default -1.
  * @returns {Array} A NEW array (the view used `[...rows].sort`, callers must
  *   not mutate the input).
@@ -67,6 +67,13 @@ export function orderApplications(applications, ctx = {}) {
       const bn = scoreNum(b.score);
       const av = Number.isNaN(an) ? -Infinity : an;
       const bv = Number.isNaN(bn) ? -Infinity : bn;
+      return (av - bv) * dir;
+    }
+    if (sortKey === "duration") {
+      // Numeric like score: no-record rows (-Infinity) sink to the bottom on
+      // the default descending sort (slowest first), same convention as NaN scores.
+      const av = typeof a.evalDuration === "number" ? a.evalDuration : -Infinity;
+      const bv = typeof b.evalDuration === "number" ? b.evalDuration : -Infinity;
       return (av - bv) * dir;
     }
     return (a[sortKey] || "").localeCompare(b[sortKey] || "") * dir;

@@ -11,6 +11,10 @@ import { parseReport } from "@/lib/format";
 // Durable inbox score map (URL → tracker score) — pure + client-importable, so
 // the triage view can show already-evaluated postings after a refresh.
 import { buildScoreByUrl } from "@/lib/inbox-score.mjs";
+// Eval timing summary (评估用时) — pure parser in .mjs (node --test locked),
+// file read here like every other user-layer data file.
+import { evalTimingSummary } from "@/lib/eval-timings.mjs";
+import type { EvalTimingEntry } from "@/lib/eval-timing";
 
 /**
  * Resolve the career-ops "home" — the directory holding the user's sibling
@@ -184,6 +188,10 @@ export type Application = {
   notes: string;
   /** Posting URL from the tracker's URL column, "" when the tracker has none. */
   url: string;
+  /** 评估用时 (ADR-0016): seconds of the latest eval session up to report
+   *  delivery, joined from data/eval-timings.tsv by the pipeline page; null
+   *  when no timing was recorded. Attached at page level, not by the parser. */
+  evalDuration?: number | null;
 };
 
 /**
@@ -197,6 +205,15 @@ export function readApplications(): Application[] {
   const md = read("data/applications.md");
   if (!md) return [];
   return parseApplications(md, careerOpsRoot());
+}
+
+/**
+ * 评估用时 map (report number → latest eval session summary), from the user's
+ * data/eval-timings.tsv — see CONTEXT.md「评估用时」and ADR-0016 for the
+ * report-delivery-only scope. Missing file / empty data → {} (the UI shows "—").
+ */
+export function readEvalTimings(): Record<string, EvalTimingEntry> {
+  return evalTimingSummary(read("data/eval-timings.tsv") ?? "");
 }
 
 /**

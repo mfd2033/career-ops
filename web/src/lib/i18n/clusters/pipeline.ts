@@ -38,9 +38,23 @@ export const en: Dict = {
   "pipeline.col.company": "company",
   "pipeline.col.role": "role",
   "pipeline.col.score": "score",
+  "pipeline.col.duration": "duration",
   "pipeline.col.status": "status",
   "pipeline.col.date": "date",
   "pipeline.col.source": "source",
+
+  // Eval timing breakdown (评估用时, ADR-0016) — pipeline/[id] + jobs/[id]
+  "pipeline.timing.title": "Eval duration",
+  "pipeline.timing.scopeHint": "latest evaluation, up to report delivery (excludes delayed PDF/answers)",
+  "pipeline.timing.finishedAt": "finished {date}",
+  "pipeline.timing.deferredHint": "Deferred steps (not counted in the total):",
+  "pipeline.timing.step.extract": "JD extraction",
+  "pipeline.timing.step.liveness": "Liveness check",
+  "pipeline.timing.step.eval": "Evaluation",
+  "pipeline.timing.step.report": "Report writing",
+  "pipeline.timing.step.pdf": "PDF generation",
+  "pipeline.timing.step.answers": "Application answers",
+  "pipeline.timing.step.tracker": "Tracker write",
 
   // Canonical status names (display labels; option value stays canonical English)
   "pipeline.status.evaluated": "Evaluated",
@@ -244,9 +258,23 @@ export const zh: Dict = {
   "pipeline.col.company": "公司",
   "pipeline.col.role": "职位",
   "pipeline.col.score": "分数",
+  "pipeline.col.duration": "用时",
   "pipeline.col.status": "状态",
   "pipeline.col.date": "日期",
   "pipeline.col.source": "来源",
+
+  // 评估用时分步明细 (ADR-0016) — pipeline/[id] + jobs/[id]
+  "pipeline.timing.title": "评估用时",
+  "pipeline.timing.scopeHint": "最近一次评估，计至报告交付（不含延后的 PDF/申请答案）",
+  "pipeline.timing.finishedAt": "完成于 {date}",
+  "pipeline.timing.deferredHint": "延后步骤（不计入总计）：",
+  "pipeline.timing.step.extract": "JD 提取",
+  "pipeline.timing.step.liveness": "职位验活",
+  "pipeline.timing.step.eval": "评估打分",
+  "pipeline.timing.step.report": "报告撰写",
+  "pipeline.timing.step.pdf": "PDF 生成",
+  "pipeline.timing.step.answers": "申请答案",
+  "pipeline.timing.step.tracker": "写跟踪表",
 
   // Canonical status names
   "pipeline.status.evaluated": "已评估",

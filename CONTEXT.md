@@ -118,11 +118,19 @@ _Avoid_: 中介岗（口语，写文档用「代招」）
 
 **评估墙钟（eval wall-clock）**:
 一次完整评估从贴 JD/URL 到产出报告+PDF+tracker 的实测总时长。主成分是 LLM turn 数 × 每 turn 延迟（引擎不变则每 turn 延迟固定），PDF 定制是独立的二次 LLM 大活。优化手段只减 turn 不减内容（ADR-0009）。
-_Avoid_: 评估速度、评估耗时（口语）
+_Avoid_: 评估速度、评估耗时（口语）、评估用时（现为独立词条，指列表展示口径）
 
 **耗时埋点（eval timing）**:
 每次评估用 `log-eval-timing.mjs` 按固定步骤集（extract/liveness/eval/report/pdf/answers/tracker）记录墙钟耗时到 `data/eval-timings.tsv`，供前后对比。属用户层数据。
 _Avoid_: 计时、性能日志
+
+**评估会话（eval session）**:
+同一报告号在耗时埋点 TSV 中由 `extract` 行开启的一组连续步骤行；复评开启新会话（`liveness` 总是跟随 extract，不开启会话）。无起点的残缺行（旧数据/中断）自成一节；孤立的 pdf/answers 行（PDF 延后补跑且无原会话可归）不构成会话。
+_Avoid_: 评估轮次、计时会话
+
+**评估用时（eval duration）**:
+某报告号最近一次评估会话中、至报告交付（extract/liveness/eval/report 步）为止的各步墙钟之和，是 `/jobs` 工作器卡片与 `/pipeline` 用时列的展示口径。不含延后补跑的 pdf/answers/tracker 步——它们属后续动作，但在 `/pipeline/{n}` 分步明细中可见。与评估墙钟的区别：墙钟是性能优化语境的全过程实测（ADR-0009），评估用时是面向展示的口径化指标。
+_Avoid_: 评估耗时（口语）、总用时（未定义口径）
 
 **PDF 延后（PDF on demand）**:
 一次完整评估默认不自动生成 PDF/申请答案，先交付报告，用户确认后才生成（覆盖 auto-pipeline 自动默认）。低分岗不推荐投递，自动 PDF 常属浪费。
