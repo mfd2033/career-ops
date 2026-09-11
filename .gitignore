@@ -232,3 +232,13 @@ reports/_archive/
 web/dev-server*.log*
 # Root-level dev server stdout/stderr captures (e.g. dev-out.log / dev-err.log).
 /dev-*.log
+
+# Local build log scratch (package-build.log)
+package-build.log
+
+# Local session memory (workbuddy)
+.workbuddy/
+
+# Session-scoped working docs (handoff / pack run logs, ephemeral)
+docs/handoff-*.md
+docs/pack-*.md
