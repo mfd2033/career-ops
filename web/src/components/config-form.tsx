@@ -1,15 +1,15 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import {
   Check,
   KeyRound,
   TerminalSquare,
   Terminal,
   Loader2,
-  CircleDashed,
   ExternalLink,
   ChevronDown,
+  ChevronRight,
   Sparkles,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
@@ -96,6 +96,10 @@ export function ConfigForm() {
   const [unknownEmployer, setUnknownEmployer] = useState<UnknownEmployerPolicy>("placeholder");
   const [concurrencyPool, setConcurrencyPool] = useState(CONCURRENCY_POOL_DEFAULT);
   const [saved, setSaved] = useState(false);
+  // 未安装工具的安装链接默认收起：默认视觉只留下拉，需要时再展开 6 个外链。
+  const [showInstallLinks, setShowInstallLinks] = useState(false);
+  // 「当前使用」回执读取的是已保存的工具，与 savedModel 同一原则 —— 保存前不跳。
+  const [savedCliId, setSavedCliId] = useState("");
 
   // Load saved prefs
   useEffect(() => {
@@ -111,6 +115,8 @@ export function ConfigForm() {
         // "Current model" reflects the last-saved (persisted) pick, not the
         // in-flight dropdown value.
         setSavedModel(v.model ?? "");
+        // 「当前使用」回执同样是「最后一次保存的值」，不是下拉里的在途选择。
+        setSavedCliId(v.cliId ?? "");
         // Legacy configs predate modelCliId — infer that the saved model
         // belongs to the CLI saved alongside it, so it is never dropped.
         if (v.modelCliId) setModelCliId(v.modelCliId);
@@ -212,12 +218,20 @@ export function ConfigForm() {
     );
     // The persisted value is now the "current model" — only after Save.
     setSavedModel(nextModel);
+    // 同理：保存后下拉选中的工具才成为「当前使用」。
+    setSavedCliId(cliId);
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   }
 
   const installed = clis?.filter((c) => c.installed) ?? [];
+  // 未安装的工具只作为「还能用什么」的知情信息出现在禁用分组里，不进可选集合。
+  const missing = clis?.filter((c) => !c.installed) ?? [];
   const selectedCli = clis?.find((c) => c.id === cliId) ?? null;
+  // The tool the app is actually running on: the last-saved pick, falling back
+  // to the current detection before anything was ever saved (mirrors
+  // `currentModel` falling back to the CLI's own default).
+  const currentCli = clis?.find((c) => c.id === (savedCliId || cliId)) ?? null;
   // The model the CLI runs with: the last-saved pick (always preserved — even
   // when the dynamic option list doesn't list it, it's injected back into the
   // dropdown so it renders as the selected value), else the CLI's own default.
@@ -295,65 +309,73 @@ export function ConfigForm() {
               </div>
             ) : (
               <div className="space-y-2">
-                {clis.map((c) => {
-                  const selected = c.id === cliId;
-                  return (
-                    <div
-                      key={c.id}
-                      className={cn(
-                        "flex items-center gap-3 rounded-xl border px-4 py-3 text-sm transition-colors",
-                        selected
-                          ? "border-brand/50 bg-brand-soft"
-                          : c.installed
-                            ? "border-border bg-surface/50"
-                            : "border-border/60 bg-surface/20",
-                      )}
-                    >
-                      {c.installed ? (
-                        <Check className="size-4 shrink-0 text-emerald-400" />
-                      ) : (
-                        <CircleDashed className="size-4 shrink-0 text-faint" />
-                      )}
-                      <button
-                        type="button"
-                        disabled={!c.installed}
-                        onClick={() => setCliId(c.id)}
-                        className={cn(
-                          "flex flex-1 items-center gap-2 text-left max-sm:min-h-[44px]",
-                          c.installed ? "" : "cursor-default",
-                        )}
-                      >
-                        <span
-                          className={cn(
-                            "font-medium",
-                            selected ? "text-foreground" : c.installed ? "" : "text-muted",
-                          )}
-                        >
+                <SelectField
+                  label={t("config.aiTool")}
+                  desc={t("config.aiToolDesc")}
+                  size="md"
+                  value={cliId}
+                  onChange={setCliId}
+                >
+                  <optgroup label={t("config.aiToolGroupInstalled")}>
+                    {installed.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                  {missing.length > 0 && (
+                    // 未安装的工具整组禁用：保留「还能用什么」的知情权，但不可选中。
+                    <optgroup label={t("config.aiToolGroupMissing")} disabled>
+                      {missing.map((c) => (
+                        <option key={c.id} value={c.id}>
                           {c.name}
-                        </span>
-                        <span className="font-mono text-xs text-faint">{c.run}</span>
-                      </button>
-                      {c.installed ? (
-                        <span className="hidden max-w-[40%] shrink-0 truncate text-xs text-faint sm:block">
-                          {c.path}
-                        </span>
-                      ) : (
-                        <a
-                          href={c.url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="inline-flex shrink-0 items-center justify-center gap-1 text-xs text-brand hover:underline max-sm:min-h-[44px]"
-                        >
-                          Install <ExternalLink className="size-3" />
-                        </a>
-                      )}
-                    </div>
-                  );
-                })}
-                {installed.length === 0 && (
-                  <p className="rounded-xl border border-dashed border-border bg-surface/30 p-4 text-xs text-muted">
-                    {t("config.noCliPath")}
-                  </p>
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
+                </SelectField>
+
+                {currentCli && (
+                  <div className="mt-3 flex items-center gap-2 rounded-lg border border-brand/30 bg-brand-soft/40 px-3 py-2 text-sm">
+                    <Sparkles className="size-4 shrink-0 text-brand" />
+                    <span className="text-muted">{t("config.currentTool")}</span>
+                    <span className="min-w-0 truncate font-medium text-foreground">{currentCli.name}</span>
+                  </div>
+                )}
+
+                {missing.length > 0 && (
+                  <div className="mt-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowInstallLinks((v) => !v)}
+                      aria-expanded={showInstallLinks}
+                      className="flex items-center gap-1.5 text-xs text-faint transition-colors hover:text-foreground max-sm:min-h-[44px]"
+                    >
+                      <ChevronRight
+                        className={cn("size-3.5 transition-transform", showInstallLinks && "rotate-90")}
+                      />
+                      {t("config.aiToolMissingCount", { count: missing.length })}
+                      {" · "}
+                      {showInstallLinks ? t("config.aiToolHideInstall") : t("config.aiToolShowInstall")}
+                    </button>
+                    {showInstallLinks && (
+                      <ul className="mt-2 grid gap-1.5 sm:grid-cols-2">
+                        {missing.map((c) => (
+                          <li key={c.id}>
+                            <a
+                              href={c.url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="flex items-center justify-between gap-2 rounded-lg border border-border/60 bg-surface/30 px-3 py-2 text-xs text-muted transition-colors hover:bg-surface-hover hover:text-foreground"
+                            >
+                              <span className="truncate">{c.name}</span>
+                              <ExternalLink className="size-3 shrink-0 text-brand" />
+                            </a>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
                 )}
                 <p className="mt-2 text-[11px] leading-relaxed text-faint">
                   {t("config.bestOn1")} <span className="text-muted">Claude Code</span> {t("config.bestOn2")}
@@ -361,30 +383,25 @@ export function ConfigForm() {
 
                 {selectedCli && selectedCli.model?.options.length > 0 && (
                   <div className="mt-4 rounded-xl border border-border bg-surface/50 p-4">
-                    <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-muted">
-                      {t("config.model")}
-                    </label>
-                    <p className="mb-2 text-xs text-faint">{t("config.modelDesc")}</p>
-                    <div className="relative">
-                      <select
-                        value={picker?.model ?? model}
-                        onChange={(e) => {
-                          setModel(e.target.value);
-                          setModelCliId(cliId);
-                        }}
-                        className="w-full appearance-none rounded-lg border border-border bg-surface/60 px-3 py-2 pr-9 text-sm text-foreground outline-none transition-colors focus:border-brand/50 focus-visible:ring-2 focus-visible:ring-brand/40"
-                      >
-                        <option value="">
-                          {t("config.modelDefault", { model: selectedCli.model.default || t("config.modelAuto") })}
+                    <SelectField
+                      label={t("config.model")}
+                      desc={t("config.modelDesc")}
+                      size="sm"
+                      value={picker?.model ?? model}
+                      onChange={(v) => {
+                        setModel(v);
+                        setModelCliId(cliId);
+                      }}
+                    >
+                      <option value="">
+                        {t("config.modelDefault", { model: selectedCli.model.default || t("config.modelAuto") })}
+                      </option>
+                      {(picker?.options ?? selectedCli.model.options).map((o) => (
+                        <option key={o.id} value={o.id}>
+                          {o.label}
                         </option>
-                        {(picker?.options ?? selectedCli.model.options).map((o) => (
-                          <option key={o.id} value={o.id}>
-                            {o.label}
-                          </option>
-                        ))}
-                      </select>
-                      <ChevronDown className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-faint" />
-                    </div>
+                      ))}
+                    </SelectField>
                     {selectedCli.model.flag && (
                       <p className="mt-2 inline-flex items-center gap-1 text-[11px] text-faint">
                         <Sparkles className="size-3" />
@@ -687,21 +704,17 @@ export function ConfigForm() {
       <p className="mt-2 text-xs text-faint">{t("config.concurrencyNote")}</p>
 
       {/* 未知雇主处理策略：offer 隐藏终端雇主时代招方如何显示 */}
-      <label className="mt-8 mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-muted">
-        {t("config.unknownEmployerTitle")}
-      </label>
-      <p className="mb-3 text-xs text-faint">{t("config.unknownEmployerDesc")}</p>
-      <div className="relative">
-        <select
-          value={unknownEmployer}
-          onChange={(e) => setUnknownEmployer(e.target.value as UnknownEmployerPolicy)}
-          className="w-full appearance-none rounded-xl border border-border bg-surface/60 px-4 py-3 pr-9 text-sm text-foreground outline-none transition-colors focus:border-brand/50 focus-visible:ring-2 focus-visible:ring-brand/40"
-        >
-          <option value="placeholder">{t("config.unknownEmployerPlaceholder")}</option>
-          <option value="agency">{t("config.unknownEmployerAgency")}</option>
-        </select>
-        <ChevronDown className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-faint" />
-      </div>
+      <SelectField
+        className="mt-8"
+        label={t("config.unknownEmployerTitle")}
+        desc={t("config.unknownEmployerDesc")}
+        size="md"
+        value={unknownEmployer}
+        onChange={(v) => setUnknownEmployer(v as UnknownEmployerPolicy)}
+      >
+        <option value="placeholder">{t("config.unknownEmployerPlaceholder")}</option>
+        <option value="agency">{t("config.unknownEmployerAgency")}</option>
+      </SelectField>
       <p className="mt-2 text-xs text-faint">
         {unknownEmployer === "placeholder"
           ? t("config.unknownEmployerPlaceholderDesc")
@@ -762,5 +775,53 @@ function ModeCard({
       <span className="text-sm font-medium text-foreground">{title}</span>
       <span className="text-xs text-faint">{hint}</span>
     </button>
+  );
+}
+
+/** 本页所有下拉的统一实现：原生 <select> + 自绘箭头。用原生控件（而非自绘
+ *  combobox）是因为它自带键盘/读屏支持与移动端原生选择器，本项目不需要原生
+ *  控件给不了的能力。`size` 只区分页内两种既有的视觉档位，不引入第三套。 */
+function SelectField({
+  label,
+  desc,
+  size = "md",
+  value,
+  onChange,
+  className,
+  children,
+}: {
+  label: string;
+  desc?: string;
+  size?: "sm" | "md";
+  value: string;
+  onChange: (value: string) => void;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  const id = useId();
+  return (
+    <div className={className}>
+      <label
+        htmlFor={id}
+        className="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-muted"
+      >
+        {label}
+      </label>
+      {desc ? <p className="mb-2 text-xs text-faint">{desc}</p> : null}
+      <div className="relative">
+        <select
+          id={id}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className={cn(
+            "w-full appearance-none border border-border bg-surface/60 pr-9 text-sm text-foreground outline-none transition-colors focus:border-brand/50 focus-visible:ring-2 focus-visible:ring-brand/40",
+            size === "sm" ? "rounded-lg px-3 py-2" : "rounded-xl px-4 py-3",
+          )}
+        >
+          {children}
+        </select>
+        <ChevronDown className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-faint" />
+      </div>
+    </div>
   );
 }
