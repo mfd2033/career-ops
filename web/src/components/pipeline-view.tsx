@@ -7,7 +7,7 @@ import { Search, ChevronsUpDown, X, Compass, ArrowRight, RotateCcw, Loader2 } fr
 import type { Application, InboxJob } from "@/lib/career-ops";
 import { Badge } from "@/components/ui/badge";
 import { CompanyLogo } from "@/components/company-logo";
-import { canonStatus, scoreTone, statusDot } from "@/lib/format";
+import { canonStatus, fmtDuration, scoreTone, statusDot } from "@/lib/format";
 import { orderApplications, buildContextQuery } from "@/lib/pipeline-order.mjs";
 import { normalizeUrl } from "@/lib/core/url-key.mjs";
 import { sourceLabel } from "@/lib/source-label.mjs";
@@ -32,7 +32,7 @@ const TABS = [
 ] as const;
 type Tab = (typeof TABS)[number];
 
-const SORT_KEYS = ["company", "role", "score", "status", "date"] as const;
+const SORT_KEYS = ["company", "role", "score", "duration", "status", "date"] as const;
 type SortKey = (typeof SORT_KEYS)[number];
 
 export function PipelineView({
@@ -68,6 +68,7 @@ export function PipelineView({
     company: t("pipeline.col.company"),
     role: t("pipeline.col.role"),
     score: t("pipeline.col.score"),
+    duration: t("pipeline.col.duration"),
     status: t("pipeline.col.status"),
     date: t("pipeline.col.date"),
   };
@@ -399,7 +400,14 @@ export function PipelineView({
                     <Link href={`/pipeline/${r.n}${contextQuery}`}>{r.role}</Link>
                   </td>
                   <td className="px-4 py-3">
-                    <Badge tone={scoreTone(r.score)}>{r.score || "—"}</Badge>
+                    {/* score badge → /report/{n}: the direct report jump (Q4b);
+                        the row itself still navigates to the full detail page. */}
+                    <Link href={`/report/${r.n}`} className="inline-flex transition-opacity hover:opacity-80">
+                      <Badge tone={scoreTone(r.score)}>{r.score || "—"}</Badge>
+                    </Link>
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3 text-muted tabular-nums">
+                    {fmtDuration(r.evalDuration ?? null)}
                   </td>
                   <td className="whitespace-nowrap px-4 py-3 text-muted">
                     <span className="inline-flex items-center gap-1.5">

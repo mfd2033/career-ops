@@ -69,6 +69,16 @@ export function legitimacyTone(l: string): "good" | "warn" | "bad" | "muted" {
   return "muted";
 }
 
+/** Humanize seconds → "45.8s" / "4m03s" / "1h12m"; null/invalid → "—" (the
+ *  no-record placeholder the 用时 column and worker cards share). */
+export function fmtDuration(seconds: number | null | undefined): string {
+  if (seconds == null || !Number.isFinite(seconds) || seconds < 0) return "—";
+  if (seconds < 60) return `${Math.round(seconds * 10) / 10}s`;
+  const s = Math.round(seconds);
+  if (s < 3600) return `${Math.floor(s / 60)}m${String(s % 60).padStart(2, "0")}s`;
+  return `${Math.floor(s / 3600)}h${String(Math.floor((s % 3600) / 60)).padStart(2, "0")}m`;
+}
+
 export type ReportMeta = {
   title: string | null;
   fields: { label: string; value: string }[];

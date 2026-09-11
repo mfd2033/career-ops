@@ -5,6 +5,9 @@ import { Check, X, Loader2, AlertTriangle, Clock } from "lucide-react";
 import type { Job } from "@/components/jobs/job-store";
 import { useI18n } from "@/lib/i18n/context";
 import { cn } from "@/lib/cn";
+import { fmtDuration } from "@/lib/format";
+import { doneDurationSeconds, useJobTiming } from "@/lib/eval-duration-client";
+import { ReportNumLink } from "@/components/report-num-link";
 
 // Humanize raw agent tool names into what the user actually cares about, so a
 // multi-minute evaluation reads as progress instead of a cryptic tool dump (#8).
@@ -94,6 +97,11 @@ export function WorkerCard({
   const hasScore = job.result?.score != null;
   const authError = isAuthError(job);
   const tokens = job.status === "done" ? job.cost?.tokens ?? 0 : 0;
+  // 评估用时 (ADR-0016): running keeps the live tick above; DONE prefers the
+  // TSV-sourced duration (resolving the report via /api/report-status), falling
+  // back to the local startedAt→endedAt wall time when no report is resolvable.
+  const { reportNum, entry } = useJobTiming(job);
+  const doneSecs = job.status === "done" ? doneDurationSeconds(entry, job) : null;
 
   return (
     <div className={cn(inline && "rounded-xl border border-border bg-surface/60 p-2.5")}>
@@ -108,6 +116,7 @@ export function WorkerCard({
           <Check className={cn("size-3 shrink-0", tone.icon)} />
         )}
         <span className={cn("truncate font-medium", inline ? "text-sm" : "text-xs")}>{job.title}</span>
+        {reportNum && <ReportNumLink n={reportNum} className={cn("shrink-0 cursor-pointer tabular-nums text-faint transition-colors hover:text-brand", inline ? "text-xs" : "text-[10px]")} />}
         {hasScore && (
           <span
             className={cn(
@@ -144,6 +153,11 @@ export function WorkerCard({
       {authError && (
         <div className={cn("mt-1 text-amber-700 dark:text-amber-400", inline ? "text-xs" : "text-[10px]")}>
           {t("jobs.authErrorHint")}
+        </div>
+      )}
+      {doneSecs != null && (
+        <div className={cn("mt-1 flex items-center gap-1 text-faint tabular-nums", inline ? "text-xs" : "text-[10px]")} title={t("jobs.evalDuration")}>
+          <Clock className="size-3 shrink-0" /> {fmtDuration(doneSecs)}
         </div>
       )}
       {tokens > 0 && (

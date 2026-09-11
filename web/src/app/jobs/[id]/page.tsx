@@ -9,12 +9,17 @@ import { useJobs } from "@/components/jobs/job-store";
 import { HeroGlow } from "@/components/hero-glow";
 import { Badge } from "@/components/ui/badge";
 import { useI18n } from "@/lib/i18n/context";
+import { useJobTiming } from "@/lib/eval-duration-client";
+import { EvalTimingPanel } from "@/components/eval-timing-panel";
 
 export default function JobPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const { jobs } = useJobs();
   const { t } = useI18n();
   const job = jobs.find((j) => j.id === id);
+  // Hooks before the not-found early return; an unknown id just yields nulls.
+  const { reportNum, entry } = useJobTiming(job ?? {});
+  const subtitleIsNum = !!job?.subtitle && /^#\d+$/.test(job.subtitle);
 
   if (!job) {
     return (
@@ -50,7 +55,15 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
             )}
           </p>
           <h1 className="mt-2 font-display text-2xl tracking-tight text-landing">{job.title}</h1>
-          {job.subtitle && <p className="mt-1 text-sm text-muted">{job.subtitle}</p>}
+          {subtitleIsNum && reportNum ? (
+            <p className="mt-1 text-sm text-muted">
+              <Link href={`/report/${reportNum}`} className="transition-colors hover:text-brand">
+                {job.subtitle}
+              </Link>
+            </p>
+          ) : (
+            job.subtitle && <p className="mt-1 text-sm text-muted">{job.subtitle}</p>
+          )}
           {job.result?.score != null && (
             <div className="mt-3 flex flex-wrap items-center gap-2.5">
               <Badge tone={job.result.tone}>{job.result.score}/5</Badge>
@@ -84,6 +97,8 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
           </li>
         )}
       </ol>
+
+      <EvalTimingPanel entry={entry} />
 
       {job.text && (
         <div className="mt-8">
