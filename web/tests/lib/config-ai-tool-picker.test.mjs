@@ -39,6 +39,9 @@ const NEW_KEYS = [
   "config.aiToolShowInstall",
   "config.aiToolHideInstall",
   "config.currentTool",
+  "config.lastChecked",
+  "config.recheck",
+  "config.rechecking",
 ];
 
 // Both dictionaries live in one file: everything after `export const zh` is the

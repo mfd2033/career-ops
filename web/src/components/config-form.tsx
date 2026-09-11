@@ -34,6 +34,7 @@ import {
   type ScanSource,
 } from "@/lib/scan-mode";
 import { readScanMax, persistScanMax, SCAN_MAX_DEFAULT } from "@/lib/scan-max.mjs";
+import { readClisCache, writeClisCache } from "@/lib/clis-cache.mjs";
 import { useI18n } from "@/lib/i18n/context";
 
 type ModelOption = { id: string; label: string };
@@ -100,6 +101,9 @@ export function ConfigForm() {
   const [showInstallLinks, setShowInstallLinks] = useState(false);
   // 「当前使用」回执读取的是已保存的工具，与 savedModel 同一原则 —— 保存前不跳。
   const [savedCliId, setSavedCliId] = useState("");
+  // ADR-0015：检测结果的时间戳（null = 本浏览器还没成功检测过）与手动重检进行态。
+  const [checkedAt, setCheckedAt] = useState<number | null>(null);
+  const [rechecking, setRechecking] = useState(false);
 
   // Load saved prefs
   useEffect(() => {
@@ -144,25 +148,63 @@ export function ConfigForm() {
     readSavedConcurrencyPool().then(setConcurrencyPool);
   }, []);
 
-  // Detect installed CLIs
+  // 缓存渲染与真查渲染共用同一条落地路径（ADR-0015）：下拉选中/自动保存逻辑
+  // 幂等，两条路径的下拉行为必须完全一致。
+  function applyClis(list: Cli[]) {
+    setClis(list);
+    // Highlight + persist the only installed CLI when Config was never saved.
+    // Highlight-only used to look configured while jobs still read empty localStorage.
+    setCliId((prev) => {
+      if (prev) return prev;
+      const only = list.filter((c) => c.installed);
+      if (only.length !== 1) return list.find((c) => c.installed)?.id || "";
+      if (!readSavedCliId()) persistCliId(only[0].id);
+      return only[0].id;
+    });
+  }
+
+  // ADR-0015: the runtime list is detected ONCE per browser. A usable
+  // localStorage cache renders directly — no request, so reopening the page is
+  // instant and never auto-rechecks. Only the first open (no cache yet — and a
+  // failed check never writes one) hits /api/clis. The sole refresh path is
+  // recheck().
   useEffect(() => {
+    const cached = readClisCache();
+    if (cached) {
+      applyClis(cached.clis as Cli[]);
+      setCheckedAt(cached.checkedAt);
+      return;
+    }
     fetch("/api/clis")
       .then((r) => r.json())
       .then((d) => {
         const list: Cli[] = d.clis ?? [];
-        setClis(list);
-        // Highlight + persist the only installed CLI when Config was never saved.
-        // Highlight-only used to look configured while jobs still read empty localStorage.
-        setCliId((prev) => {
-          if (prev) return prev;
-          const only = list.filter((c) => c.installed);
-          if (only.length !== 1) return list.find((c) => c.installed)?.id || "";
-          if (!readSavedCliId()) persistCliId(only[0].id);
-          return only[0].id;
-        });
+        applyClis(list);
+        writeClisCache(list);
+        setCheckedAt(Date.now());
       })
-      .catch(() => setClis([]));
+      .catch(() => setClis([])); // 失败不落「已检查」标记：下次打开仍自动检测。
   }, []);
+
+  // 手动重检：检测缓存的唯一失效途径（ADR-0015）。服务端 ?refresh=1 真查并
+  // 回填进程内缓存（含 opencode 模型列表），成功后回写浏览器侧缓存；失败时
+  // 保留旧结果，不打断用户。
+  function recheck() {
+    if (rechecking) return;
+    setRechecking(true);
+    fetch("/api/clis?refresh=1")
+      .then((r) => r.json())
+      .then((d) => {
+        const list: Cli[] = d.clis ?? [];
+        applyClis(list);
+        writeClisCache(list);
+        setCheckedAt(Date.now());
+      })
+      .catch(() => {
+        /* 保留旧缓存与旧下拉 */
+      })
+      .finally(() => setRechecking(false));
+  }
 
   function save() {
     // 未知雇主策略独立于评估引擎，任何模式保存都生效（快评跟随走 /api/config）。
@@ -417,6 +459,31 @@ export function ConfigForm() {
                     )}
                   </div>
                 )}
+              </div>
+            )}
+            {/* 检测状态行：cli 模式三态（检测中/空/列表）都渲染——空态（一个都没
+                装）恰恰是最需要手动重检入口的场景，刚装好工具后从这里刷新。 */}
+            {clis !== null && (
+              <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-faint">
+                {checkedAt !== null && (
+                  <span>
+                    {t("config.lastChecked", {
+                      time: new Intl.DateTimeFormat(lang === "zh" ? "zh-CN" : "en-US", {
+                        dateStyle: "short",
+                        timeStyle: "short",
+                      }).format(checkedAt),
+                    })}
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={recheck}
+                  disabled={rechecking}
+                  className="flex items-center gap-1 transition-colors hover:text-foreground disabled:opacity-50 max-sm:min-h-[44px]"
+                >
+                  {rechecking && <Loader2 className="size-3.5 animate-spin" />}
+                  {rechecking ? t("config.rechecking") : t("config.recheck")}
+                </button>
               </div>
             )}
           </div>
