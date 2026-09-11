@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { codexStreamArgs, isFatalClaudeStderr, isFatalCodexStderr, isFatalOpenCodeStderr, parseClaudeEvent, parseCodexEvent } from "./run-cli-support.mjs";
-import { loadOpencodeModels } from "./opencode-models.mjs";
+import { loadOpencodeModels, resetOpencodeModelCache } from "./opencode-models.mjs";
 
 // Server-only (node imports). The agnostic runtimes career-ops can delegate to
 // in headless mode (AGENTS.md). Install URLs from career-ops-docs.
@@ -348,6 +348,23 @@ export function detectClis(): DetectedCli[] {
     }
     return { id: c.id, name: c.name, run: c.run, url: c.url, installed: !!found, path: found, model };
   });
+}
+
+// ADR-0015: a real detection is a synchronous sweep of PATH + candidate dirs
+// (on Windows including npm's global node_modules), possibly spawning the
+// `opencode models` subprocess. It answers a near-static question ("what is
+// installed on this machine"), so the result is cached for the process
+// lifetime: the FIRST caller — the config page's one auto-check or
+// resolveCliId()'s fallback — pays the scan, every later caller reads memory.
+// Only the config page's manual re-check passes refresh: true, which is the
+// cache's sole invalidation path (and also re-spawns the opencode model list).
+let cachedDetection: DetectedCli[] | null = null;
+
+export function detectClisCached({ refresh = false }: { refresh?: boolean } = {}): DetectedCli[] {
+  if (cachedDetection && !refresh) return cachedDetection;
+  if (refresh) resetOpencodeModelCache();
+  cachedDetection = detectClis();
+  return cachedDetection;
 }
 
 export function resolveCli(id: string): { spec: CliSpec; binPath: string } | null {

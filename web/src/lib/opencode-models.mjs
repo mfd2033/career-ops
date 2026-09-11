@@ -127,6 +127,17 @@ let commandCacheAt = 0;
 const COMMAND_CACHE_TTL_MS = 60_000;
 
 /**
+ * Drop the `opencode models` command cache so the next loadOpencodeModels()
+ * spawns the subprocess again. Called by detectClisCached({ refresh: true }) —
+ * a manual re-check must mean "really query", not "reuse a result younger than
+ * the TTL" (ADR-0015).
+ */
+export function resetOpencodeModelCache() {
+  commandCache = null;
+  commandCacheAt = 0;
+}
+
+/**
  * The complete model list opencode actually exposes: the `opencode models`
  * command output (built-in free models like opencode/hy3-free + every
  * configured provider, disabled_providers already excluded by opencode itself).
