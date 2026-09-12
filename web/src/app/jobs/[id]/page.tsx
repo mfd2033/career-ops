@@ -2,6 +2,7 @@
 
 import { use } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ArrowLeft, Loader2, Wrench, CircleDot, Check, X, Clock } from "lucide-react";
@@ -12,11 +13,13 @@ import { useI18n } from "@/lib/i18n/context";
 import { useJobTiming } from "@/lib/eval-duration-client";
 import { EvalTimingPanel } from "@/components/eval-timing-panel";
 import { ReportNumLink } from "@/components/report-num-link";
+import { goBackOr } from "@/lib/nav-history";
 
 export default function JobPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const { jobs } = useJobs();
   const { t } = useI18n();
+  const router = useRouter();
   const job = jobs.find((j) => j.id === id);
   // Hooks before the not-found early return; an unknown id just yields nulls.
   const { reportNum, entry } = useJobTiming(job ?? {});
@@ -25,9 +28,13 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
   if (!job) {
     return (
       <div className="mx-auto max-w-3xl px-6 py-10">
-        <Link href="/pipeline" className="inline-flex items-center gap-1.5 text-sm text-muted transition-colors hover:text-brand">
-          <ArrowLeft className="size-4" /> {t("jobs.pipeline")}
-        </Link>
+        <button
+          type="button"
+          onClick={() => goBackOr(router, "/jobs")}
+          className="inline-flex items-center gap-1.5 text-sm text-muted transition-colors hover:text-brand"
+        >
+          <ArrowLeft className="size-4" /> {t("shared.back")}
+        </button>
         <p className="mt-8 text-sm text-muted">
           {t("jobs.notInMemory")}
         </p>
@@ -37,9 +44,15 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
 
   return (
     <div className="mx-auto max-w-3xl px-6 py-8">
-      <Link href="/pipeline" className="inline-flex items-center gap-1.5 text-sm text-muted transition-colors hover:text-brand">
-        <ArrowLeft className="size-4" /> {t("jobs.pipeline")}
-      </Link>
+      {/* 返回跟随会话历史（ADR-0019）；无应用内前一页时兜底回工作器列表——
+          工作器详情页不是管道页，不固定回 /pipeline。 */}
+      <button
+        type="button"
+        onClick={() => goBackOr(router, "/jobs")}
+        className="inline-flex items-center gap-1.5 text-sm text-muted transition-colors hover:text-brand"
+      >
+        <ArrowLeft className="size-4" /> {t("shared.back")}
+      </button>
 
       <section className="dot-bg relative mt-5 overflow-hidden rounded-2xl border border-border bg-surface/40 px-6 py-7">
         {job.status === "running" && <HeroGlow />}

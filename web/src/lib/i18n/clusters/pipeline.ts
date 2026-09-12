@@ -141,7 +141,6 @@ export const en: Dict = {
   "pipeline.copyTitle": "Copy",
 
   // ── Report view (report-view.tsx) ──
-  "pipeline.report.backToPipeline": "Back",
   "pipeline.report.navigation": "Report navigation",
   "pipeline.report.previous": "Previous · {company}",
   "pipeline.report.next": "Next · {company}",
@@ -361,7 +360,6 @@ export const zh: Dict = {
   "pipeline.copyTitle": "复制",
 
   // ── Report view (report-view.tsx) ──
-  "pipeline.report.backToPipeline": "返回",
   "pipeline.report.navigation": "报告导航",
   "pipeline.report.previous": "上一个 · {company}",
   "pipeline.report.next": "下一个 · {company}",

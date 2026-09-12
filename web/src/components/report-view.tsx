@@ -6,7 +6,7 @@ import { ArrowLeft, FileText, ExternalLink, ChevronDown, ChevronLeft, ChevronRig
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useEffect, useState } from "react";
-import { prevNavHistory } from "@/lib/nav-history";
+import { goBackOr } from "@/lib/nav-history";
 import { readApplyBehavior, APPLY_BEHAVIOR_DEFAULT, type ApplyBehavior } from "@/lib/apply-behavior";
 import { readSavedUnknownEmployer } from "@/lib/saved-cli";
 import type { Application } from "@/lib/career-ops";
@@ -418,15 +418,13 @@ export function ReportView({
           type="button"
           onClick={() => {
             // 回到进入本详情页之前的那个页面（首页/探索/职位列表…），而不是固定回管道列表。
-            // 依据会话历史栈判断：有应用内前一页则用浏览器 back（保留其精确状态），
-            // 直接打开/新标签进入（无前一页）时退化为回管道列表并保留列表上下文。
-            const prev = prevNavHistory();
-            if (prev) router.back();
-            else router.replace(`/pipeline${contextQuery}`, { scroll: false });
+            // goBackOr（ADR-0019）：有应用内前一页且浏览器历史有后退项 → back（保留其精确状态）；
+            // 否则 replace 到前一页，无前一页时兜底回管道列表并保留列表上下文。
+            goBackOr(router, `/pipeline${contextQuery}`);
           }}
           className="inline-flex items-center gap-1.5 text-sm text-muted transition-colors hover:text-brand"
         >
-          <ArrowLeft className="size-4" /> {t("pipeline.report.backToPipeline")}
+          <ArrowLeft className="size-4" /> {t("shared.back")}
         </button>
 
         {position != null && (
