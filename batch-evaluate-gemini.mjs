@@ -19,6 +19,7 @@ import { chromium } from 'playwright';
 import { execFileSync, execFile } from 'child_process';
 import { promisify } from 'util';
 import { rejectPrivateOrInvalid } from './liveness-browser.mjs';
+import { withPipelineLock } from './pipeline-lock.mjs';
 const execFileAsync = promisify(execFile);
 try {
   const { config } = await import('dotenv');
@@ -349,7 +350,11 @@ async function main() {
     return;
   }
 
-  const pipelineLines = readFileSync(PATHS.pipeline, 'utf-8').split('\n');
+  // Snapshot read under the pipeline lock: scan.mjs's appendToPipeline is a
+  // lock-guarded read-modify-write of this same file, so an unlocked read can
+  // catch a half-written state.
+  const pipelineLines = await withPipelineLock(PATHS.pipeline, () =>
+    readFileSync(PATHS.pipeline, 'utf-8').split('\n'));
   const pendingIndices = pipelineLines
     .map((l, i) => l.trim().startsWith('- [ ]') ? i : -1)
     .filter(i => i !== -1);
@@ -370,13 +375,44 @@ async function main() {
 
   await browser.close();
 
-  // Rewrite pipeline.md inline
-  for (const [lineIdx, res] of results.entries()) {
-    if (res.processed) {
-      pipelineLines[lineIdx] = res.line;
+  // Rewrite pipeline.md inline — under the pipeline lock, and against a FRESH
+  // read: the batch above ran for minutes with the browser open, and a scan
+  // appending offers in that window shifts line indices. An index-only rewrite
+  // of the stale snapshot would both lose the scan's new rows and stamp the
+  // processed rows onto the wrong lines (the "checked rows snapped back to
+  // `- [ ]`" failure). When the file grew, relocate each processed row by its
+  // URL cell instead of by index.
+  await withPipelineLock(PATHS.pipeline, () => {
+    const fresh = readFileSync(PATHS.pipeline, 'utf-8').split('\n');
+    const urlCellOf = (line) => {
+      const bare = line.replace(/^\s*-\s*\[ \]\s*/, '').replace(/^\s*-\s*\[x\]\s*/i, '');
+      const cell = (bare.split(' |')[0] || '').trim();
+      return cell.startsWith('<') && cell.endsWith('>') ? cell.slice(1, -1) : cell;
+    };
+    const urlFor = (lineIdx) => urlCellOf(pipelineLines[lineIdx]);
+    if (fresh.length === pipelineLines.length && pipelineLines.every((l, i) => l === fresh[i])) {
+      // Unchanged since the snapshot — the simple index rewrite is exact.
+      for (const [lineIdx, res] of results.entries()) {
+        if (res.processed) fresh[lineIdx] = res.line;
+      }
+    } else {
+      // File changed underneath us: relocate by URL. A URL that no longer
+      // appears as a pending row (removed or already checked by another
+      // process) is left alone — never guessed at.
+      for (const [lineIdx, res] of results.entries()) {
+        if (!res.processed) continue;
+        const url = urlFor(lineIdx);
+        if (!url) continue;
+        const target = fresh.findIndex((l) => /^\s*-\s*\[ \]/.test(l) && urlCellOf(l) === url);
+        if (target === -1) {
+          console.warn(`⚠️  pipeline row for ${url} changed during the batch — left untouched`);
+          continue;
+        }
+        fresh[target] = res.line;
+      }
     }
-  }
-  writeFileSync(PATHS.pipeline, pipelineLines.join('\n'), 'utf-8');
+    writeFileSync(PATHS.pipeline, fresh.join('\n'), 'utf-8');
+  });
 
   console.log(`\n🎉 Batch processing complete! Merging tracker additions...`);
   try {

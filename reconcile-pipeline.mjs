@@ -19,19 +19,32 @@
  * second copy. Safe to run after every batch.
  *
  * Run: node reconcile-pipeline.mjs [--dry-run] [--state <path>] [--pipeline <path>]
+ *                              [--reports <path>] [--entry <num>|<url>]...
+ *
+ * DIRECT-ENTRY MODE (--entry num|url, repeatable): callers that never write
+ * batch-state.tsv — the web batch-evaluate route (/api/batch-evaluate) — pass
+ * their successfully-evaluated (report number, URL) pairs directly. Without
+ * this, the web path folded tracker rows but never touched pipeline.md, so
+ * every JD evaluated from the web inbox re-surfaced in Pendientes after a
+ * refresh. Entries are matched against pipeline lines through the same
+ * normalizeUrl identity merge-tracker uses, so an http/https, tracking-param
+ * or angle-bracket spelling difference cannot strand a row in Pendientes.
  */
 
 import { readFileSync, writeFileSync, existsSync, readdirSync, copyFileSync, realpathSync, statSync } from 'fs';
 import { join, dirname, resolve, relative, isAbsolute } from 'path';
 import { fileURLToPath } from 'url';
 import { normalizeReportLink } from './tracker-links.mjs';
+import { normalizeUrl } from './url-key.mjs';
+import { withPipelineLock } from './pipeline-lock.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 const DRY_RUN = process.argv.includes('--dry-run');
 
 if (process.argv.includes('-h') || process.argv.includes('--help')) {
-  console.log('Usage: node reconcile-pipeline.mjs [--dry-run] [--state <path>] [--pipeline <path>]');
+  console.log('Usage: node reconcile-pipeline.mjs [--dry-run] [--state <path>] [--pipeline <path>] [--reports <path>] [--entry <num>|<url>]...');
   console.log('  Moves batch-processed offers out of pipeline.md "Pendientes" into "Procesadas".');
+  console.log('  With --entry num|url (repeatable), reconciles those pairs directly instead of batch-state.tsv.');
   process.exit(0);
 }
 
@@ -63,7 +76,9 @@ function resolveInsideRepo(inputPath, fallbackPath, flag) {
   }
   // Reject a directory target early — otherwise readFileSync/copyFileSync would
   // throw an unhandled EISDIR later instead of failing with a clear message.
-  if (existsSync(abs) && statSync(abs).isDirectory()) {
+  // --reports is the one flag that legitimately points at a directory, so the
+  // guard is file-flags-only.
+  if (flag !== '--reports' && existsSync(abs) && statSync(abs).isDirectory()) {
     console.error(`Invalid ${flag}: expected a file, not a directory (${abs})`);
     process.exit(1);
   }
@@ -75,10 +90,19 @@ const defaultPipeline = existsSync(join(CAREER_OPS, 'data/pipeline.md'))
   : join(CAREER_OPS, 'pipeline.md');
 const PIPELINE_FILE = resolveInsideRepo(argValue('--pipeline'), defaultPipeline, '--pipeline');
 const STATE_FILE = resolveInsideRepo(argValue('--state'), join(CAREER_OPS, 'batch/batch-state.tsv'), '--state');
-const REPORTS_DIR = join(CAREER_OPS, 'reports');
+const REPORTS_DIR = resolveInsideRepo(argValue('--reports'), join(CAREER_OPS, 'reports'), '--reports');
+
+// ---- direct entries: --entry "<num>|<url>" (repeatable) ----------------------
+const ENTRIES = [];
+for (let i = 0; i < process.argv.length; i++) {
+  if (process.argv[i] === '--entry' && i + 1 < process.argv.length) ENTRIES.push(process.argv[++i]);
+}
+const ENTRY_MODE = ENTRIES.length > 0;
 
 // ---- guards ----
-if (!existsSync(STATE_FILE)) {
+// Entry mode has no state file to read; the default path (no --entry) keeps the
+// old behaviour, including its friendly no-op when batch-state.tsv is absent.
+if (!ENTRY_MODE && !existsSync(STATE_FILE)) {
   console.log('No batch-state.tsv found — nothing to reconcile.');
   process.exit(0);
 }
@@ -87,22 +111,62 @@ if (!existsSync(PIPELINE_FILE)) {
   process.exit(0);
 }
 
-// ---- parse batch-state.tsv ----
+// ---- build the done-set: state file (default) or --entry pairs ---------------
 // columns: id  url  status  started_at  completed_at  report_num  score  error  retries
-const DONE = new Map(); // url -> { reportNum, score }
-for (const line of readFileSync(STATE_FILE, 'utf-8').split(/\r?\n/)) {
-  if (!line.trim() || line.startsWith('id\t')) continue;
-  const c = line.split('\t');
-  if (c.length < 7) continue;
-  const [, url, status, , , reportNum, score] = c;
-  // "completed" and "skipped" (below --min-score) both produced a report.
-  if (status !== 'completed' && status !== 'skipped') continue;
-  if (!url || !url.trim()) continue;
-  DONE.set(url.trim(), { reportNum: (reportNum || '').trim(), score: (score || '').trim() });
+// Keyed BOTH by the raw URL and its normalizeUrl key, so a caller (the web
+// shortlist) sending a canonical/spelled-differently URL still matches the
+// pipeline line, which is the same identity merge-tracker dedups on.
+const DONE_RAW = new Map();   // raw url -> { reportNum, score }
+const DONE_KEYED = new Map(); // normalizeUrl(url) -> { reportNum, score }
+
+function addDone(url, entry) {
+  const u = String(url).trim();
+  if (!u) return;
+  if (!DONE_RAW.has(u)) DONE_RAW.set(u, entry);
+  const k = normalizeUrl(u);
+  if (k && !DONE_KEYED.has(k)) DONE_KEYED.set(k, entry);
 }
 
-if (DONE.size === 0) {
-  console.log('No completed batch entries in batch-state.tsv — nothing to reconcile.');
+// Pipeline/report cells are commonly written with Markdown auto-link angle
+// brackets (`<https://…>`); strip them exactly the way the web readInbox does,
+// then fall back to the canonical key.
+function lookupDone(url) {
+  const u = String(url ?? '').trim();
+  const bare = u.startsWith('<') && u.endsWith('>') ? u.slice(1, -1) : u;
+  return DONE_RAW.get(bare) ?? DONE_KEYED.get(normalizeUrl(bare)) ?? null;
+}
+
+if (ENTRY_MODE) {
+  for (const raw of ENTRIES) {
+    const bar = raw.indexOf('|');
+    if (bar < 0) {
+      console.error(`Invalid --entry (expected "<num>|<url>"): ${raw}`);
+      process.exit(1);
+    }
+    const num = raw.slice(0, bar).trim();
+    const url = raw.slice(bar + 1).trim();
+    if (!/^\d+$/.test(num) || !url) {
+      console.error(`Invalid --entry (expected "<num>|<url>" with a numeric report number): ${raw}`);
+      process.exit(1);
+    }
+    addDone(url, { reportNum: num, score: '' });
+  }
+} else {
+  for (const line of readFileSync(STATE_FILE, 'utf-8').split(/\r?\n/)) {
+    if (!line.trim() || line.startsWith('id\t')) continue;
+    const c = line.split('\t');
+    if (c.length < 7) continue;
+    const [, url, status, , , reportNum, score] = c;
+    // "completed" and "skipped" (below --min-score) both produced a report.
+    if (status !== 'completed' && status !== 'skipped') continue;
+    addDone(url, { reportNum: (reportNum || '').trim(), score: (score || '').trim() });
+  }
+}
+
+if (DONE_RAW.size === 0) {
+  console.log(ENTRY_MODE
+    ? 'All --entry pairs were empty — nothing to reconcile.'
+    : 'No completed batch entries in batch-state.tsv — nothing to reconcile.');
   process.exit(0);
 }
 
@@ -147,6 +211,14 @@ function resolvePdf(reportFile) {
   return /not generated/i.test(rep) ? '❌' : '✅';
 }
 
+// The read-modify-write below races scan.mjs's appendToPipeline (the same
+// whole-file rewrite) unless it holds the same cross-process advisory lock —
+// batch-evaluate-gemini.mjs's unlocked whole-file rewrite was exactly how a
+// checked-off row could snap back to `- [ ]`. So the entire parse → decide →
+// write section runs under withPipelineLock. Body indentation is unchanged to
+// keep the diff reviewable.
+try {
+await withPipelineLock(PIPELINE_FILE, () => {
 // ---- parse pipeline.md ----
 const lines = readFileSync(PIPELINE_FILE, 'utf-8').split(/\r?\n/);
 
@@ -182,14 +254,20 @@ const pendEnd = sectionEnd(pendStart);
 const procEnd = procStart >= 0 ? sectionEnd(procStart) : -1;
 
 // URLs already in Procesadas — guards against a double copy on re-runs.
+// Matched by raw URL AND canonical key, mirroring the Pendientes lookup.
 const procUrls = new Set();
+const procKeys = new Set();
 if (procStart >= 0) {
   for (let i = procStart + 1; i < procEnd; i++) {
     const m = lines[i].match(/^- \[x\]\s+(.+)$/i);
     if (!m) continue;
     // "[num](path) | url | company | role | score | PDF x" — url is field 2
     const parts = m[1].split('|').map(s => s.trim());
-    if (parts[1]) procUrls.add(parts[1]);
+    if (parts[1]) {
+      procUrls.add(parts[1]);
+      const k = normalizeUrl(parts[1]);
+      if (k) procKeys.add(k);
+    }
   }
 }
 
@@ -203,10 +281,10 @@ for (let i = pendStart + 1; i < pendEnd; i++) {
   if (!PENDING_ITEM_RE.test(lines[i])) continue; // blank lines, "- [!]" errors → keep
   const body = lines[i].replace(PENDING_ITEM_RE, '');
   const url = lineUrl(body);
-  const done = DONE.get(url);
+  const done = lookupDone(url);
   if (!done) continue; // not processed → keep in Pendientes
 
-  if (procUrls.has(url)) {
+  if (procUrls.has(url) || procKeys.has(normalizeUrl(url))) {
     // Already recorded in Procesadas — just drop the stale Pendientes copy.
     removeIdx.add(i);
     moved.push({ url, role: '(already in Procesadas)', dup: true });
@@ -227,7 +305,11 @@ for (let i = pendStart + 1; i < pendEnd; i++) {
   const pdf = resolvePdf(reportFile);
   const num = parseInt(done.reportNum, 10);
 
-  const reportLink = normalizeReportLink(`[${num}](reports/${reportFile})`, dirname(PIPELINE_FILE), CAREER_OPS);
+  // Report links resolve against the reports dir actually in use — dirname of
+  // REPORTS_DIR is the repo root in the default layout, so behaviour is
+  // unchanged there, while an overridden --reports (tests, sandboxes) stays
+  // self-consistent instead of pointing back at the real repo's reports/.
+  const reportLink = normalizeReportLink(`[${num}](reports/${reportFile})`, dirname(PIPELINE_FILE), dirname(REPORTS_DIR));
   movedProcLines.push(`- [x] ${reportLink} | ${url} | ${company} | ${role} | ${score} | PDF ${pdf}`);
   moved.push({ url, company, role, num, score });
   procUrls.add(url);
@@ -295,3 +377,8 @@ if (DRY_RUN) {
 copyFileSync(PIPELINE_FILE, `${PIPELINE_FILE}.pre-reconcile.bak`);
 writeFileSync(PIPELINE_FILE, newContent);
 console.log(`✅ pipeline.md updated (backup: ${PIPELINE_FILE}.pre-reconcile.bak)`);
+});
+} catch (err) {
+  console.error(`reconcile-pipeline: ${err.message}`);
+  process.exit(1);
+}

@@ -188,6 +188,13 @@ export async function POST(req: Request) {
       const writeToken = acquireTrackerWrite();
       let ok = 0;
       let failed = 0;
+      // Successfully-evaluated (report number, URL) pairs, folded into the
+      // tracker by mergeTrackerRows below AND moved out of pipeline.md's
+      // Pendientes by reconcilePipelineRows — without the latter, every JD
+      // evaluated from the web inbox kept its `- [ ]` row and re-surfaced in
+      // Pendientes on the next refresh (the "evaluated JDs came back to the
+      // inbox" bug: the web path never wrote pipeline.md at all).
+      const okEntries: { num: number; url: string }[] = [];
 
       try {
         await reserveRange();
@@ -301,7 +308,10 @@ export async function POST(req: Request) {
               evaluateOne(i, num)
                 .then((outcome) => {
                   const itemOk = outcome.cleanExit && !outcome.sawError && wroteReportForNum(num);
-                  if (itemOk) ok++;
+                  if (itemOk) {
+                    ok++;
+                    okEntries.push({ num, url: urls[i] });
+                  }
                   else failed++;
                   send({
                     type: "item",
@@ -357,15 +367,34 @@ export async function POST(req: Request) {
             send({ type: "text", text: `\u26A0\uFE0F merge-tracker: ${(err as Error).message}\n` });
           }
         };
+        // Move the batch's successfully-evaluated rows out of pipeline.md's
+        // Pendientes (into Procesadas, with their report links). Best-effort:
+        // a failure only means those rows stay in the inbox for a later pass —
+        // the tracker merge above has already recorded them, so this must
+        // never fail the batch or misreport a finished evaluation.
+        const reconcilePipelineRows = async () => {
+          if (okEntries.length === 0) return;
+          send({ type: "status", label: "Reconciling pipeline.md..." });
+          try {
+            const stdout = runNodeText(
+              await runNode("reconcile-pipeline.mjs", okEntries.flatMap((e) => ["--entry", `${e.num}|${e.url}`])),
+            );
+            if (stdout.trim()) send({ type: "text", text: `${stdout.trim()}\n` });
+          } catch (err) {
+            send({ type: "text", text: `\u26A0\uFE0F reconcile-pipeline: ${(err as Error).message}\n` });
+          }
+        };
         if (cancelled) {
           // Client dropped the connection mid-batch: still fold whatever the
           // workers finished, then release the reserved range so the numbers
           // are not held hostage until the stale GC.
           await mergeTrackerRows();
+          await reconcilePipelineRows();
           await releaseReserved();
           send({ type: "error", msg: "Batch cancelled." });
         } else {
           await mergeTrackerRows();
+          await reconcilePipelineRows();
           // Clean up reservation sentinels — completed slots already hold real
           // reports, so releasing the range only removes leftover placeholders.
           await releaseReserved();
