@@ -37,19 +37,15 @@ export function isShellSafeCompanyName(name) {
 
 const SAFE_COMPANY_NAME = /^[\p{L}\p{N} .,&'()+/-]+$/u;
 
-/**
- * The exact prompt each worker kind is sent.
- *
- * Lives in a plain .mjs so it can be asserted on as a VALUE: the pdf prompt is
- * the load-bearing half of #2185 (it is what tells the agent to emit the CV
- * inline instead of writing it), and a guard that greps route.ts for the marker
- * text matched the route's own comments instead. See test-all.mjs §55.6.
- *
- * @param {{kind: string, input: string, memory: string, today: string}} args
- * @returns {string}
- */
 /** ISO calendar date, the only form the dashboard's POSTED column parses. */
 const ISO_DATE_RE = /^20\d{2}-\d{2}-\d{2}$/;
+
+/**
+ * Shared eval-timing fault-tolerance clause (ADR-0016/0017): timing is
+ * decoration — a failed call must never fail the run. One spelling, reused by
+ * every timing block here and quoted verbatim in the modes docs.
+ */
+const TIMING_NEVER_FAIL = "NEVER let a timing call fail the run — on any error, just continue";
 
 /**
  * 评估耗时埋点 (ADR-0016/0017) — the timing block in the evaluate prompt.
@@ -61,7 +57,7 @@ const ISO_DATE_RE = /^20\d{2}-\d{2}-\d{2}$/;
  * string replace instead of a regex that drifts. `{num}` stays literal here —
  * buildBatchPrompt pins it along with every other occurrence.
  */
-const EVAL_TIMING_SINGLE = `   ⏱ EVAL-TIMING INSTRUMENTATION (appends to data/eval-timings.tsv; NEVER let a timing call fail the run — on any error, just continue):
+const EVAL_TIMING_SINGLE = `   ⏱ EVAL-TIMING INSTRUMENTATION (appends to data/eval-timings.tsv; ${TIMING_NEVER_FAIL}):
    - right after 2a: \`node log-eval-timing.mjs {num} report start\`; right after 2b: \`node log-eval-timing.mjs {num} report end\`
    - right before 2d: \`node log-eval-timing.mjs {num} tracker start\`; right after 2d: \`node log-eval-timing.mjs {num} tracker end\`
    - extract/eval happened BEFORE you had the number — leave them unlogged (ADR-0017)`;
@@ -82,6 +78,17 @@ function employerDirective(policy) {
   );
 }
 
+/**
+ * The exact prompt each worker kind is sent.
+ *
+ * Lives in a plain .mjs so it can be asserted on as a VALUE: the pdf prompt is
+ * the load-bearing half of #2185 (it is what tells the agent to emit the CV
+ * inline instead of writing it), and a guard that greps route.ts for the marker
+ * text matched the route's own comments instead. See test-all.mjs §55.6.
+ *
+ * @param {{kind: string, input: string, memory: string, today: string, postedAt?: string, unknownEmployer?: string}} args
+ * @returns {string}
+ */
 export function buildPrompt({ kind, input, memory, today, postedAt, unknownEmployer }) {
   const mem = memory.trim() ? `\n\nDurable notes about the user (from their profile):\n${memory.trim()}\n` : "";
   if (kind === "research") {
@@ -230,7 +237,7 @@ export function buildBatchPrompt(reportNum, { input, memory, today, postedAt, un
   // the real number directly.
   p = p.replace(
     EVAL_TIMING_SINGLE,
-    `   ⏱ EVAL-TIMING INSTRUMENTATION (appends to data/eval-timings.tsv; NEVER let a timing call fail the run — on any error, just continue): your report number ${reportNum} was assigned up front, so time every step you actually perform:
+    `   ⏱ EVAL-TIMING INSTRUMENTATION (appends to data/eval-timings.tsv; ${TIMING_NEVER_FAIL}): your report number ${reportNum} was assigned up front, so time every step you actually perform:
    - if you fetch the JD yourself (no inline posting text below): \`node log-eval-timing.mjs ${reportNum} extract start\` before the fetch, \`node log-eval-timing.mjs ${reportNum} extract end\` after
    - \`node log-eval-timing.mjs ${reportNum} eval start\` before scoring begins, \`node log-eval-timing.mjs ${reportNum} eval end\` when the score is settled
    - \`node log-eval-timing.mjs ${reportNum} report start\` right before writing the report file (2b), \`node log-eval-timing.mjs ${reportNum} report end\` right after
