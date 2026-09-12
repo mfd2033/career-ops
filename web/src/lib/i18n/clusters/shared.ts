@@ -42,6 +42,9 @@ export const en: Dict = {
   "shared.assistant.ask": "Ask",
   "shared.close": "Close",
 
+  // detail-page back button — follows session history (ADR-0019)
+  "shared.back": "Back",
+
   // suggestion chips
   "shared.suggest.whyScore": "Why this score?",
   "shared.suggest.whyScoreSend": "Walk me through why this offer scored the way it did — strengths and red flags.",
@@ -137,6 +140,7 @@ export const zh: Dict = {
   "shared.assistant.cancelled": "已取消",
   "shared.assistant.ask": "提问",
   "shared.close": "关闭",
+  "shared.back": "返回",
 
   // suggestion chips
   "shared.suggest.whyScore": "为什么是这个分数？",

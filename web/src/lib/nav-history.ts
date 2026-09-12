@@ -4,6 +4,8 @@
 //
 // 只在客户端执行（读写 sessionStorage），无 SSR 影响。
 
+import { backNavPlan } from "./nav-back.mjs";
+
 const KEY = "co-nav-history";
 const MAX = 12;
 
@@ -36,4 +38,18 @@ export function pushNavHistory(route: string): void {
 export function prevNavHistory(): string | null {
   const stack = readStack();
   return stack.length >= 2 ? stack[stack.length - 2] : null;
+}
+
+/** 详情页「返回」的统一实现（ADR-0019）：有应用内前一页且浏览器历史有后退项 →
+ *  back()（保留上一页的滚动/筛选状态）；否则 replace 到前一页，无前一页时到兜底
+ *  路由。决策逻辑在纯 .mjs（nav-back.mjs）里被 node --test 锁住。 */
+type BackNav = {
+  back: () => void;
+  replace: (url: string, options?: { scroll?: boolean }) => void;
+};
+
+export function goBackOr(nav: BackNav, fallback: string): void {
+  const plan = backNavPlan(prevNavHistory(), window.history.length, fallback);
+  if (plan.kind === "back") nav.back();
+  else nav.replace(plan.url, { scroll: false });
 }
