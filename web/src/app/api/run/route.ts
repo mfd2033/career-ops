@@ -2,7 +2,7 @@
 // through spawnHeadlessCli (which closes stdin so `codex exec` can't hang waiting
 // on it, #2085), while the PDF render is a plain Node child process with no CLI
 // sandbox in the way (#2172) and so passes `spawn` itself to renderAndMarkPdf.
-import { spawn } from "node:child_process";
+import { spawn, execFile } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { resolveCli } from "@/lib/clis";
@@ -21,6 +21,20 @@ import { acquire, release, __setSizeSource, DEFAULT_POOL_SIZE } from "@/lib/core
 // Feed the global concurrency pool the live configured size (app-config), re-read
 // on every dispatch so a config-page edit takes effect without restart.
 __setSizeSource(() => readAppConfig().concurrencyPool ?? DEFAULT_POOL_SIZE);
+
+// 评估耗时埋点 (ADR-0016/0017): the pdf kind is READ-ONLY on the Claude path —
+// #2172 denied it Bash and it must never regain that — so the agent cannot time
+// itself. The backend owns the pdf step's boundaries instead (spawn → confirmed
+// render) and logs through log-eval-timing.mjs so the TSV keeps a single
+// writer. Fire-and-forget: a failed timing call never fails the run.
+function logEvalTiming(reportNum: string, phase: "start" | "end") {
+  execFile(
+    process.execPath,
+    [path.join(careerOpsRoot(), "log-eval-timing.mjs"), reportNum, "pdf", phase],
+    { cwd: careerOpsRoot() },
+    () => {},
+  );
+}
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -338,6 +352,7 @@ export async function POST(req: Request) {
       // reports a generic auth-flavoured error (#1973 fixed it via an inline
       // stdio:["ignore",…], generalized into spawnHeadlessCli).
       child = spawnHeadlessCli(binPath, args, { cwd: careerOpsRoot(), env: process.env });
+      if (kind === "pdf") logEvalTiming(String(input), "start");
       // Decode once on the stream, not per chunk: Buffer#toString() decodes each
       // chunk independently, so a boundary inside a multi-byte UTF-8 sequence
       // yields a replacement character and mis-decodes the bytes after it — the
@@ -409,6 +424,8 @@ export async function POST(req: Request) {
           // Non-fatal issues (a defaulted page format, a tracker row not marked) still
           // surface here rather than only in a server log nobody sees.
           sendWarnings(result.warnings);
+          // Confirmed successful render → close the pdf step's timing (评估耗时埋点).
+          logEvalTiming(String(input), "end");
           send({ type: "done", tokens: lastTokens, costUsd: lastCostUsd });
         } catch (e) {
           send({ type: "error", msg: `PDF rendering crashed unexpectedly: ${e instanceof Error ? e.message : String(e)}`.slice(0, 200) });

@@ -665,3 +665,14 @@ If — and only if — the user **explicitly stated a role-specific desired numb
 ```
 
 Never infer a desired number from the JD, the score, or past conversations. The profile default (`config/profile.yml` → `compensation.target_range`) needs no line — `salary-gap.mjs` reads it as the fallback. The advertised figure also needs no line: the report's `advertised_comp` **is** the advertised observation.
+
+### 4. Eval-timing instrumentation (评估耗时埋点)
+
+Whenever the run has (or reserves) a report number, record wall-clock step timings to `data/eval-timings.tsv` so the dashboard can show 评估用时 (ADR-0016/0017). Mark step boundaries with:
+
+```text
+node log-eval-timing.mjs <report#> <step> start
+node log-eval-timing.mjs <report#> <step> end
+```
+
+Steps in run order: `extract` (JD fetch — only when it happens AFTER the number is known), `eval` (scoring), `report` (writing the report file), `tracker` (writing or merging the tracker row). Log only the steps this run actually performs: an interactive run that scores BEFORE reserving its number logs `report`/`tracker` only (ADR-0017 keeps reserve after the fetch — do not reorder it for timing's sake); a batch run with a pre-assigned number logs `extract`/`eval` too. NEVER let a timing call fail the run — on any error, just continue.

@@ -121,12 +121,16 @@ _Avoid_: 中介岗（口语，写文档用「代招」）
 _Avoid_: 评估速度、评估耗时（口语）、评估用时（现为独立词条，指列表展示口径）
 
 **耗时埋点（eval timing）**:
-每次评估用 `log-eval-timing.mjs` 按固定步骤集（extract/liveness/eval/report/pdf/answers/tracker）记录墙钟耗时到 `data/eval-timings.tsv`，供前后对比。属用户层数据。
+每次评估用 `log-eval-timing.mjs` 按固定步骤集（extract/liveness/eval/report/pdf/answers/tracker）记录墙钟耗时到 `data/eval-timings.tsv`，供前后对比。三条评估路径（web 单条、web 批量、CLI 交互式）均打点（ADR-0017）；pdf 步在 CLI 由 agent 打、在 web 由平台后端打（pdf 类工作器无 Bash，#2172）。属用户层数据。
 _Avoid_: 计时、性能日志
 
 **评估会话（eval session）**:
 同一报告号在耗时埋点 TSV 中由 `extract` 行开启的一组连续步骤行；复评开启新会话（`liveness` 总是跟随 extract，不开启会话）。无起点的残缺行（旧数据/中断）自成一节；孤立的 pdf/answers 行（PDF 延后补跑且无原会话可归）不构成会话。
 _Avoid_: 评估轮次、计时会话
+
+**残缺会话（partial session）**:
+没有 `extract` 起点行的评估会话——web 单条评估的常态：agent 打分在前、经 reserve 拿到报告号在后，故只打 report/tracker 行（ADR-0017）。解析器按既有行照常求和，不是缺陷。
+_Avoid_: 不完整数据、缺步 bug
 
 **评估用时（eval duration）**:
 某报告号最近一次评估会话中、至报告交付（extract/liveness/eval/report 步）为止的各步墙钟之和，是 `/jobs` 工作器卡片与 `/pipeline` 用时列的展示口径。不含延后补跑的 pdf/answers/tracker 步——它们属后续动作，但在 `/pipeline/{n}` 分步明细中可见。与评估墙钟的区别：墙钟是性能优化语境的全过程实测（ADR-0009），评估用时是面向展示的口径化指标。

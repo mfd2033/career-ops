@@ -334,3 +334,31 @@ test("buildBatchPrompt: BLOCKED BOARDS instruction preserved when jdText is pres
   assert.match(p, /BLOCKED BOARDS/);
   assert.match(p, /ERROR: cannot extract JD/);
 });
+
+// ── 评估耗时埋点 (ADR-0016/0017) ─────────────────────────────────────────────
+//
+// The batch variant swaps the single-run timing block by EXACT STRING REPLACE on
+// EVAL_TIMING_SINGLE — a rewrite of that block would silently no-op the swap.
+// These assertions pin both spellings so the replace cannot rot unnoticed.
+
+test("buildPrompt: the evaluate prompt carries the single-run timing block", () => {
+  const prompt = buildPrompt({ kind: "evaluate", input: "https://acme.com/jobs/7", memory: "", today: "2026-08-04" });
+  assert.match(prompt, /EVAL-TIMING INSTRUMENTATION/);
+  assert.match(prompt, /log-eval-timing\.mjs \{num\} report start/);
+  assert.match(prompt, /log-eval-timing\.mjs \{num\} tracker end/);
+  // Single runs learn the number at 2a — the block must say so, not pretend otherwise.
+  assert.match(prompt, /leave them unlogged \(ADR-0017\)/);
+});
+
+test("buildBatchPrompt: swaps in the pre-assigned-number timing block", () => {
+  const p = buildBatchPrompt("812", { input: "https://acme.com/jobs/7", memory: "", today: "2026-08-04" });
+  // A batch worker owns its number from the start, so it times extract/eval too.
+  assert.match(p, /log-eval-timing\.mjs 812 extract start/);
+  assert.match(p, /log-eval-timing\.mjs 812 eval start/);
+  assert.match(p, /log-eval-timing\.mjs 812 report end/);
+  assert.match(p, /log-eval-timing\.mjs 812 tracker start/);
+  // Every placeholder pinned, and the single-run note gone — a no-op replace
+  // would leave both behind.
+  assert.ok(!/log-eval-timing\.mjs \{num\}/.test(p), "unpinned {num} in the timing block");
+  assert.ok(!p.includes("leave them unlogged"), "single-run timing note must not survive the swap");
+});

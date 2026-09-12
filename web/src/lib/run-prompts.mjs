@@ -52,6 +52,21 @@ const SAFE_COMPANY_NAME = /^[\p{L}\p{N} .,&'()+/-]+$/u;
 const ISO_DATE_RE = /^20\d{2}-\d{2}-\d{2}$/;
 
 /**
+ * 评估耗时埋点 (ADR-0016/0017) — the timing block in the evaluate prompt.
+ *
+ * A single web run learns its report number only at step 2a, so it can time
+ * report/tracker only — extract/eval happen before the number exists (kept
+ * unlogged; ADR-0017 records why reserve is not moved earlier). Kept as a VALUE
+ * so buildBatchPrompt can swap in the pre-assigned-number variant with an exact
+ * string replace instead of a regex that drifts. `{num}` stays literal here —
+ * buildBatchPrompt pins it along with every other occurrence.
+ */
+const EVAL_TIMING_SINGLE = `   ⏱ EVAL-TIMING INSTRUMENTATION (appends to data/eval-timings.tsv; NEVER let a timing call fail the run — on any error, just continue):
+   - right after 2a: \`node log-eval-timing.mjs {num} report start\`; right after 2b: \`node log-eval-timing.mjs {num} report end\`
+   - right before 2d: \`node log-eval-timing.mjs {num} tracker start\`; right after 2d: \`node log-eval-timing.mjs {num} tracker end\`
+   - extract/eval happened BEFORE you had the number — leave them unlogged (ADR-0017)`;
+
+/**
  * Unknown-employer override for the evaluate prompt. Default ("placeholder",
  * the "?" sentinel) injects nothing — the worker follows modes/oferta.md. The
  * "agency" policy tells the worker to name the posting agency instead of "?"
@@ -151,6 +166,7 @@ End with EXACTLY one final line: VERDICT: {5 if now live, else 1}/5 — {what yo
    c. Append ONE row of 10 TAB-separated columns to batch/tracker-additions/{num}-{company-slug}.tsv, in THIS exact order (real \\t tabs, status BEFORE score). ALWAYS write all 10 fields — leave the last one EMPTY if there is no posting URL, never "N/A" or "-":
       {num}\t${today}\t{Company}\t{Role}\t{CanonicalStatus e.g. Evaluated}\t{score}/5\t❌\t[{num}](reports/{num}-{company-slug}-${today}.md)\t{one-line note}${postedSegment}\t{posting URL, or empty}
    d. Merge into the tracker: run \`node merge-tracker.mjs\` (it dedupes by company+role+report-num, validates the status, and writes data/applications.md — NEVER edit applications.md by hand).
+${EVAL_TIMING_SINGLE}
 
 3. NEVER submit an application, fill no forms, contact no one. This is evaluation + persistence ONLY.${mem}${employerDirective(unknownEmployer)}
 
@@ -205,6 +221,20 @@ export function buildBatchPrompt(reportNum, { input, memory, today, postedAt, un
   p = p.replace(
     /[^\n]*d\. Merge into the tracker:.*\n/,
     `   d. Do NOT run \`node merge-tracker.mjs\` — the batch orchestrator merges every row AFTER the whole batch finishes. Just leave the TSV row in batch/tracker-additions/.\n`,
+  );
+  // 评估耗时埋点 (ADR-0016/0017): a single run learns its number at 2a, so its
+  // timing block covers report/tracker only. A batch worker owns its number
+  // from the start, so it also times extract (when it fetches the JD itself —
+  // inline-JD workers have nothing to fetch) and eval. Exact string replace on
+  // the const, before the {num} pinning below — the batch variant interpolates
+  // the real number directly.
+  p = p.replace(
+    EVAL_TIMING_SINGLE,
+    `   ⏱ EVAL-TIMING INSTRUMENTATION (appends to data/eval-timings.tsv; NEVER let a timing call fail the run — on any error, just continue): your report number ${reportNum} was assigned up front, so time every step you actually perform:
+   - if you fetch the JD yourself (no inline posting text below): \`node log-eval-timing.mjs ${reportNum} extract start\` before the fetch, \`node log-eval-timing.mjs ${reportNum} extract end\` after
+   - \`node log-eval-timing.mjs ${reportNum} eval start\` before scoring begins, \`node log-eval-timing.mjs ${reportNum} eval end\` when the score is settled
+   - \`node log-eval-timing.mjs ${reportNum} report start\` right before writing the report file (2b), \`node log-eval-timing.mjs ${reportNum} report end\` right after
+   - \`node log-eval-timing.mjs ${reportNum} tracker start\` right before appending your TSV row (2c), \`node log-eval-timing.mjs ${reportNum} tracker end\` right after`,
   );
   // Pin every `{num}` (report filename, TSV first field, report link) to the
   // number the orchestrator actually reserved, so all N workers write
