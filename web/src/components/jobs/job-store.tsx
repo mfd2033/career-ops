@@ -29,6 +29,10 @@ export type Job = {
   page?: string; // route the job was launched from / refers to
   input?: string; // the URL/posting it processed (links inbox rows to their worker)
   kind?: string;
+  // The report this worker references, when it is known at LAUNCH (pdf). Not
+  // every kind can know one: an evaluate worker's number is reserved by the
+  // agent mid-run, so that kind resolves via the posting URL instead (ADR-0018).
+  reportNum?: string;
   batchId?: string; // groups jobs fired together (e.g. "evaluate all Anthropic")
   status: "running" | "queued" | "done" | "error";
   // For a server-sourced (pool) card: its pool id + whether it was queued, so the
@@ -43,7 +47,7 @@ export type Job = {
   endedAt?: number;
 };
 
-type StartOpts = { title: string; subtitle?: string; kind: string; input: string; page?: string; batchId?: string; urls?: string[] };
+type StartOpts = { title: string; subtitle?: string; kind: string; input: string; page?: string; batchId?: string; urls?: string[]; reportNum?: string };
 
 type Ctx = {
   jobs: Job[];
@@ -205,6 +209,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
         page: opts.page,
         input: opts.input,
         kind: opts.kind,
+        reportNum: opts.reportNum,
         batchId: opts.batchId,
         status: "running",
         steps: [{ kind: "status", label: t("jobs.stepStarting"), ts: Date.now() }],

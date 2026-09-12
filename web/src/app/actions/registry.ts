@@ -28,6 +28,9 @@ export type StartJobInput = {
   subtitle?: string;
   kind: string;
   input: string;
+  /** The report this worker references, when known at launch (pdf) — the
+   *  assistant-side twin of job-store's StartOpts.reportNum (ADR-0018). */
+  reportNum?: string;
   page?: string;
   batchId?: string;
 };
@@ -255,7 +258,7 @@ const ACTIONS: Record<string, ActionDef> = {
       if (!n) return { status: "ignored", note: "need an application #" };
       const app = ctx.applications.find((a) => a.n === n);
       const t = ctx.t ?? ((k: string) => k);
-      const id = ctx.startJob({ title: t("jobs.cvPdfTitle", { company: app?.company ?? `#${n}` }), subtitle: t("jobs.pdfSubtitleShort"), kind: "pdf", input: n, page: `/pipeline/${n}` });
+      const id = ctx.startJob({ title: t("jobs.cvPdfTitle", { company: app?.company ?? `#${n}` }), subtitle: t("jobs.pdfSubtitleShort"), kind: "pdf", input: n, reportNum: n, page: `/pipeline/${n}` });
       return { status: "done", jobIds: id ? [id] : [] };
     },
   },

@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { useI18n } from "@/lib/i18n/context";
 import { useJobTiming } from "@/lib/eval-duration-client";
 import { EvalTimingPanel } from "@/components/eval-timing-panel";
+import { ReportNumLink } from "@/components/report-num-link";
 
 export default function JobPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -54,7 +55,21 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
               <><X className="size-3 text-red-400" /> {t("jobs.statusError")}</>
             )}
           </p>
-          <h1 className="mt-2 font-display text-2xl tracking-tight text-landing">{job.title}</h1>
+          <h1 className="mt-2 font-display text-2xl tracking-tight text-landing">
+            {job.title}
+            {/* The report jump, exactly once: the /jobs rows carry it beside the
+                title, and pool cards carry it AS the "#N" subtitle below — never
+                both (ADR-0018). */}
+            {reportNum && !subtitleIsNum && (
+              <>
+                {" "}
+                <ReportNumLink
+                  n={reportNum}
+                  className="align-middle text-sm font-normal text-faint transition-colors hover:text-brand"
+                />
+              </>
+            )}
+          </h1>
           {subtitleIsNum && reportNum ? (
             <p className="mt-1 text-sm text-muted">
               <Link href={`/report/${reportNum}`} className="transition-colors hover:text-brand">

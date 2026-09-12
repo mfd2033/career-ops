@@ -74,7 +74,7 @@ export const zh: Dict = {
   "jobs.statusRunning": "进行中",
   "jobs.statusDone": "已完成",
   "jobs.statusError": "出错",
-  "jobs.pipeline": "流水线",
+  "jobs.pipeline": "求职管道",
   "jobs.notInMemory": "这个工作器已不在内存中（它之前已结束，或页面被重新加载）。",
   "jobs.statusWorking": "进行中",
   "jobs.output": "输出",
