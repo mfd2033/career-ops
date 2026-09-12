@@ -47,6 +47,7 @@ export const en: Dict = {
   "inbox.selectNone": "Clear selection",
   "inbox.skipSelected": "Skip selected",
   "inbox.skippedN": "Skipped {n}",
+  "inbox.openPosting": "Open original posting",
 };
 
 // Simplified Chinese strings. Every key in en must have a matching key here.
@@ -94,4 +95,5 @@ export const zh: Dict = {
   "inbox.selectNone": "取消全选",
   "inbox.skipSelected": "跳过选中",
   "inbox.skippedN": "已跳过 {n} 个",
+  "inbox.openPosting": "打开原始职位网页",
 };

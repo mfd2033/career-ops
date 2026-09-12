@@ -182,7 +182,7 @@ export function InboxTriage({ inbox, scoredUrls }: { inbox: InboxJob[]; scoredUr
   const save = (job: InboxJob) => {
     const urlKey = normalizeUrl(job.url);
     if (isShortlisted(urlKey)) return;
-    setShortlist((s) => [...s, { url: urlKey, company: job.company, role: job.role }]);
+    setShortlist((s) => [...s, { url: urlKey, href: job.url, company: job.company, role: job.role }]);
   };
   const skip = (job: InboxJob) => {
     const urlKey = normalizeUrl(job.url);
@@ -199,7 +199,7 @@ export function InboxTriage({ inbox, scoredUrls }: { inbox: InboxJob[]; scoredUr
   const saveSelected = () => {
     const add = enriched
       .filter((e) => selected.has(e.urlKey) && !isShortlisted(e.urlKey))
-      .map((e) => ({ url: e.urlKey, company: e.job.company, role: e.job.role }));
+      .map((e) => ({ url: e.urlKey, href: e.job.url, company: e.job.company, role: e.job.role }));
     if (add.length) setShortlist((s) => [...s, ...add]);
     setSelected(new Set());
   };

@@ -52,6 +52,10 @@ _Avoid_: 重新扫描、刷新页面（那是绕过而非机制）
 把职位 URL 降为稳定比较键（strip 跟踪/反爬参数）的算法。`web/src/lib/core/url-key.mjs` 是根 `url-key.mjs` 的镜像，必须逐字节对齐（parity 测试守卫）；扩展 core 内联副本与 web 镜像同规则。BOSS 专属参数 `securityId`/`ka`，猎聘 `pgRef`/`skId`/`fkId`/`ckId`/`d_*`/`sfrom`，智联 `refcode`/`srccode`/`preactionid`（智联职位详情 URL 本身无参数）。作用是判定「已评估」与去重的 key，不是展示用 URL。
 _Avoid_: 规范化 URL、标准 URL
 
+**原始职位 URL（raw posting URL）**:
+数据文件里职位行的原样链接，用于导航：收件箱 triage 行与候选清单的标题据此新标签页打开原始职位网页。原样打开（不做 https 强转、不剥离参数）——归一 URL 只服务身份比较，其变换不外溢到浏览器行为。无法解析为 http(s) 时降级为纯文本，不渲染死链。
+_Avoid_: 跳转链接（口语）、规范 URL（与归一 URL 混淆）
+
 **报告号（reportNum）**:
 tracker 应用行的 `n`，也是报告文件/报告页路由编号。报告文件 `reports/{NNN}-*.md`，报告页 `/report/{num}`。两个独立来源，互不覆盖：URL 归一 join（`/api/report-status`，问"这个职位被评估成哪份报告"，跟随后续复评换新）与工作器启动时捕获（问"这个工作器引用了哪份报告"，不随后续复评改变，ADR-0018）。
 _Avoid_: 报告 ID

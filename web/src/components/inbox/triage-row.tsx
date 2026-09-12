@@ -1,10 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { Bookmark, BookmarkCheck, Loader2, X } from "lucide-react";
+import { Bookmark, BookmarkCheck, ExternalLink, Loader2, X } from "lucide-react";
 import type { InboxJob } from "@/lib/career-ops";
 import type { AtsSource } from "@/lib/explore";
 import { ATS_LABEL } from "@/lib/explore";
+import { openableUrl } from "@/lib/inbox-url.mjs";
 import { Badge } from "@/components/ui/badge";
 import { CompanyLogo } from "@/components/company-logo";
 import { useI18n } from "@/lib/i18n/context";
@@ -73,8 +74,28 @@ export function TriageRow({
 
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm">
-          <span className="font-medium text-foreground">{job.company}</span>
-          <span className="text-muted"> · {job.role}</span>
+          {openableUrl(job.url) ? (
+            // Title IS the link to the original posting — largest hit area, new
+            // tab, raw url verbatim (openableUrl deliberately does no https
+            // upgrade: normalizeUrl's identity transform stays out of navigation).
+            // The score badge's internal /jobs link coexists beside it.
+            <a
+              href={openableUrl(job.url)!}
+              target="_blank"
+              rel="noopener noreferrer"
+              title={t("inbox.openPosting")}
+              className="group text-foreground transition-colors hover:text-brand"
+            >
+              <span className="font-medium">{job.company}</span>
+              <span className="text-muted group-hover:text-brand"> · {job.role}</span>
+              <ExternalLink className="ml-1 inline size-3 align-[-1px] text-faint opacity-0 transition-opacity group-hover:opacity-100" />
+            </a>
+          ) : (
+            <>
+              <span className="font-medium text-foreground">{job.company}</span>
+              <span className="text-muted"> · {job.role}</span>
+            </>
+          )}
         </p>
         <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-faint">
           {job.location && <span className="truncate">{job.location}</span>}
