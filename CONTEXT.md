@@ -53,7 +53,7 @@ _Avoid_: 重新扫描、刷新页面（那是绕过而非机制）
 _Avoid_: 规范化 URL、标准 URL
 
 **报告号（reportNum）**:
-tracker 应用行的 `n`，也是报告文件/报告页路由编号。报告文件 `reports/{NNN}-*.md`，报告页 `/report/{num}`。
+tracker 应用行的 `n`，也是报告文件/报告页路由编号。报告文件 `reports/{NNN}-*.md`，报告页 `/report/{num}`。两个独立来源，互不覆盖：URL 归一 join（`/api/report-status`，问"这个职位被评估成哪份报告"，跟随后续复评换新）与工作器启动时捕获（问"这个工作器引用了哪份报告"，不随后续复评改变，ADR-0018）。
 _Avoid_: 报告 ID
 
 **scoredUrls**:
@@ -133,7 +133,7 @@ _Avoid_: 评估轮次、计时会话
 _Avoid_: 不完整数据、缺步 bug
 
 **评估用时（eval duration）**:
-某报告号最近一次评估会话中、至报告交付（extract/liveness/eval/report 步）为止的各步墙钟之和，是 `/jobs` 工作器卡片与 `/pipeline` 用时列的展示口径。不含延后补跑的 pdf/answers/tracker 步——它们属后续动作，但在 `/pipeline/{n}` 分步明细中可见。与评估墙钟的区别：墙钟是性能优化语境的全过程实测（ADR-0009），评估用时是面向展示的口径化指标。
+某报告号最近一次评估会话中、至报告交付（extract/liveness/eval/report 步）为止的各步墙钟之和，是 `/jobs` 工作器卡片与 `/pipeline` 用时列的展示口径。不含延后补跑的 pdf/answers/tracker 步——它们属后续动作，但在 `/pipeline/{n}` 分步明细中可见。与评估墙钟的区别：墙钟是性能优化语境的全过程实测（ADR-0009），评估用时是面向展示的口径化指标。它是**评估**的指标，只归评估类工作器（evaluate/batch-evaluate）；工作器解析出报告号不等于展示该报告的用时——pdf 工作器显示自身墙钟（ADR-0018）。
 _Avoid_: 评估耗时（口语）、总用时（未定义口径）
 
 **PDF 延后（PDF on demand）**:
@@ -141,6 +141,10 @@ _Avoid_: 评估耗时（口语）、总用时（未定义口径）
 _Avoid_: PDF 延迟、PDF 选项
 
 ## 并发执行
+
+**工作器(worker)**:
+web 端一次可观测的后台任务，一条记录对应一次 CLI 子进程运行（或一次排队等待），在 `/jobs` 历史、侧栏工作器卡片与 `/jobs/{id}` 详情页呈现。种类（kind）有 evaluate / pdf / batch-evaluate / research / fix-portal，各自解释 `input` 的含义（职位 URL、报告号、公司名、target 或多行 URL），并可选携带它引用的报告号（ADR-0018）。
+_Avoid_: 任务、作业、进程（口语）；流水线（那是 `/pipeline` 的旧称，曾因此把工作器详情页误当成流水线页面）
 
 **全局并发池(global concurrency pool)**:
 web 端调度所有 CLI 工作器子进程的 module-level 调度器，用一个并发数字限制同时运行的上限(默认 4，config 页可调)。覆盖全部入口——web 单卡、web 批量、BOSS 扩展——统一共享同一池。粒度按 CLI 子进程计，不按批次(ADR-0014)。

@@ -1,15 +1,15 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { normalizeUrl } from "@/lib/core/url-key.mjs";
+import { resolveJobReportNum, showsEvalDuration } from "@/lib/report-num.mjs";
 import type { EvalTimingEntry } from "@/lib/eval-timing";
 
 // Client-side access to the 评估用时 map + report-number resolution for job
-// records. A persisted job (localStorage) carries no report number, so a DONE
-// worker resolves its report via /api/report-status (normalized posting URL →
-// reportNum — the same durable map the extension badges use); the "#N"
-// subtitle of server-sourced pool cards is the fallback. Module-level promise
-// cache: N cards, ONE fetch each per page load.
+// records. Module-level promise cache: N cards, ONE fetch each per page load.
+// The number itself comes from report-num.mjs (captured field → posting URL →
+// pool "#N" subtitle → pdf fallback, ADR-0018); this module only wires it to
+// the two server indexes and keeps 评估用时 scoped to evaluation workers — a
+// number resolved for navigation is not a duration claim.
 
 type ReportIndex = Record<string, { score: string; reportNum: string }>;
 type DurationIndex = Record<string, EvalTimingEntry>;
@@ -49,26 +49,25 @@ export function useEvalDurations(): DurationIndex | null {
   return useCachedJson<DurationIndex>("/api/eval-durations");
 }
 
-/** Resolve a job's report number (URL → /api/report-status, then the "#N"
- *  subtitle the pool cards carry) and its 评估用时 entry. Both indexes arrive
- *  async → nulls until loaded; callers must degrade to the local elapsed. */
-export function useJobTiming(job: { input?: string; subtitle?: string }): {
+/** Resolve a job's report number (captured `reportNum` → posting URL → the "#N"
+ *  pool subtitle → the pdf fallback; see report-num.mjs) and its 评估用时 entry.
+ *  Both indexes arrive async → nulls until loaded; callers must degrade to the
+ *  local elapsed. 评估用时 stays scoped to evaluation workers: a number resolved
+ *  for navigation must not put an evaluation's duration on a CV-generation card
+ *  (ADR-0018). */
+export function useJobTiming(job: {
+  input?: string;
+  subtitle?: string;
+  kind?: string;
+  reportNum?: string;
+}): {
   reportNum: string | null;
   entry: EvalTimingEntry | null;
 } {
   const reports = useReportIndex();
   const durations = useEvalDurations();
-  let reportNum: string | null = null;
-  const input = job.input;
-  if (input && /^https?:\/\//i.test(input) && reports) {
-    const key = normalizeUrl(input);
-    reportNum = (key && reports[key]?.reportNum) || null;
-  }
-  if (!reportNum && job.subtitle) {
-    const m = job.subtitle.match(/^#(\d+)$/);
-    if (m) reportNum = m[1];
-  }
-  const entry = reportNum && durations ? durations[reportNum] ?? null : null;
+  const reportNum = resolveJobReportNum(job, reports);
+  const entry = reportNum && durations && showsEvalDuration(job) ? durations[reportNum] ?? null : null;
   return { reportNum, entry };
 }
 
