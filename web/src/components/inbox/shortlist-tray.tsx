@@ -7,8 +7,12 @@ import { CompanyLogo } from "@/components/company-logo";
 import { CostBadge } from "@/components/cost/cost-badge";
 import { useI18n } from "@/lib/i18n/context";
 import { cn } from "@/lib/cn";
+import { openableUrl } from "@/lib/inbox-url.mjs";
 
-export type ShortItem = { url: string; company: string; role: string };
+// `url` is the normalized dedup key (identity). `href`, when present, is the RAW
+// posting URL the title links to; entries saved before the link existed have no
+// href and fall back to the key itself (https-upgraded — close enough to open).
+export type ShortItem = { url: string; company: string; role: string; href?: string };
 
 function fmtTokens(t: number): string {
   if (t >= 1_000_000) return `${(t / 1_000_000).toFixed(1)}M`;
@@ -51,22 +55,37 @@ export function ShortlistTray({
           {/* expandable saved-items list */}
           {open && (
             <ul className="max-h-64 divide-y divide-border overflow-y-auto px-3 py-1">
-              {items.map((it) => (
-                <li key={it.url} className="flex items-center gap-2.5 py-2">
-                  <CompanyLogo name={it.company} size={18} />
-                  <span className="min-w-0 flex-1 truncate text-sm">
-                    <span className="font-medium">{it.company}</span> <span className="text-muted">· {it.role}</span>
-                  </span>
-                  <button
+              {items.map((it) => {
+                const link = openableUrl(it.href ?? it.url);
+                return (
+                  <li key={it.url} className="flex items-center gap-2.5 py-2">
+                    <CompanyLogo name={it.company} size={18} />
+                    {link ? (
+                      <a
+                        href={link}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title={t("inbox.openPosting")}
+                        className="group min-w-0 flex-1 truncate text-sm transition-colors hover:text-brand"
+                      >
+                        <span className="font-medium">{it.company}</span> <span className="text-muted">· {it.role}</span>
+                      </a>
+                    ) : (
+                      <span className="min-w-0 flex-1 truncate text-sm">
+                        <span className="font-medium">{it.company}</span> <span className="text-muted">· {it.role}</span>
+                      </span>
+                    )}
+                    <button
                     type="button"
                     onClick={() => onRemove(it.url)}
                     aria-label={`Remove ${it.company}`}
                     className="inline-flex items-center justify-center rounded-md p-1 text-faint transition-colors hover:text-foreground max-sm:min-h-[44px] max-sm:min-w-[44px]"
                   >
                     <X className="size-4" />
-                  </button>
-                </li>
-              ))}
+                    </button>
+                    </li>
+                    );
+                    })}
             </ul>
           )}
 
