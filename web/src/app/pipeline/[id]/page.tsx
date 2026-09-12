@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { readReport, findApplication, readApplications, trackerCanDelete, readEvalTimings } from "@/lib/career-ops";
+import { evalTimingKey } from "@/lib/eval-timing-key.mjs";
 import { orderApplications, buildContextQuery, DEFAULT_ORDER } from "@/lib/pipeline-order.mjs";
 import { ReportView } from "@/components/report-view";
 import { EvalTimingPanel } from "@/components/eval-timing-panel";
@@ -73,9 +74,13 @@ export default async function ReportPage({
   const position = index >= 0 ? index + 1 : null;
   const total = ordered.length;
   const contextQuery = buildContextQuery(effectiveCtx);
-  // 评估用时 breakdown (ADR-0016): latest eval session for THIS report number,
-  // straight from data/eval-timings.tsv — no report body required.
-  const timing = readEvalTimings()[id] ?? null;
+  // 评估用时 breakdown (ADR-0016/0017): latest eval session, straight from
+  // data/eval-timings.tsv — no report body required. The join key follows the
+  // row's CURRENT report link (a re-evaluation reserves a new number while the
+  // row keeps its id), falling back to the id for legacy/unlinked rows — and
+  // to the id outright when the row itself is gone (deleted tracker row, live
+  // report file), preserving the pre-ADR-0017 behaviour there.
+  const timing = readEvalTimings()[app ? evalTimingKey(app) : id] ?? null;
 
   return (
     <>

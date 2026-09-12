@@ -11,6 +11,8 @@ When a CV is reused or lightly tailored for an existing application, initialize 
 
 Run `npm run jd:similarity -- {bundle-root}/jd/current.md {bundle-root}/jd/previous.md` when both comparison sources exist. Record the visible decision (`reuse`, `reuse-with-edits`, or `regenerate`), score, source CV/JD paths, and changed sections in `decision/reuse.json`. Strongly discourage applications scoring below 4.0/5 and proceed only when the user explicitly overrides that recommendation. Reuse only after a visible `reuse` result or an explicit user override; never silently reuse when a source is missing. The PDF manifest supports these nested paths and continues to link them to the report. Flat `output/` paths remain valid for one-off PDFs.
 
+**Eval-timing instrumentation (评估耗时埋点, ADR-0016/0017):** when this run has a report number, wrap the tailoring+render in `node log-eval-timing.mjs {report#} pdf start` (before Step 1) and `node log-eval-timing.mjs {report#} pdf end` (after Step 21's render succeeds). Skip this on headless web runs — the platform records the pdf step itself. NEVER let a timing call fail the run — on any error, just continue.
+
 1. Read `cv.md` as the source of truth
 2. Ask the user for the JD if it is not in context (text or URL)
 3. Extract 15-20 keywords from the JD
