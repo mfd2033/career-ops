@@ -70,20 +70,38 @@
   }
 
   /**
+   * 卡片文本级薪资提取（纯函数,node 单测直测）。猎聘卡片容器哈希 class 多变,
+   * `[class*="salary"]` 在改版后会落空（实证 2026-09: cardMeta.salary 抓到空串,
+   * 门控只能按「薪资未知」放行）——兜底从卡片全文按 bsk 路径同款 ASCII 薪资
+   * 形态正则提取（与 bsk-extract.mjs 的 extractSalaryFromText 同规则,两处同改）。
+   * 经验年限「5-10年」/「13薪」单独出现不构成命中。
+   */
+  function extractSalaryFromCardText(text) {
+    const t = String(text ?? "");
+    if (!t) return "";
+    const m = t.match(
+      /\d+(?:\.\d+)?\s*[-–~]\s*\d+(?:\.\d+)?\s*(?:千|[kK]|万)(?:\s*·\s*\d+\s*薪)?|\d+(?:\.\d+)?\s*(?:千|[kK]|万)(?:\s*·\s*\d+\s*薪)?/,
+    );
+    return m ? m[0].trim() : "";
+  }
+
+  /**
    * 列表卡片全量元字段（URL 复用 cardUrl）。猎聘卡片容器哈希 class 多变，内容选择器
-   * 取宽、尽力而为，抓不到即空串。city 不在此定点（无稳定卡片城市 class，城市过滤
-   * 走 web 侧 matchesBrowserCity 以 title 兜底，ADR-0007 E4）。
+   * 取宽、尽力而为，抓不到即空串。salary 选择器落空时回退卡片文本级提取。
+   * city 不在此定点（无稳定卡片城市 class，城市过滤走 web 侧 matchesBrowserCity
+   * 以 title 兜底，ADR-0007 E4）。
    */
   function cardMeta(card) {
     const text = (sel) => {
       const el = card.querySelector(sel);
       return el ? (el.innerText || el.textContent || "").trim() : "";
     };
+    const salary = text('[class*="salary"],[class*="item-salary"],[class*="price"]') || extractSalaryFromCardText(card.innerText || "");
     return {
       url: cardUrl(card),
       title: text(LINK_SELECTOR),
       company: text('[class*="company"].job-company, .item-company, [class*="company-name"], [class*="company"] .name'),
-      salary: text('[class*="salary"],[class*="item-salary"],[class*="price"]'),
+      salary,
       city: undefined, // 猎聘无卡片城市 class —— 城市过滤走 web 侧 title 匹配
     };
   }
@@ -200,7 +218,7 @@
   // 不引用 window/document/location。
   if (typeof window === "undefined" || !window.__careerExtCore) {
     if (typeof module !== "undefined" && module.exports) {
-      module.exports = { LIEPIN_SITE, isDetailPath, cardIsList, cardUrl, cardMeta, extractDetailJd, extractPosterName, findNextPageBtn };
+      module.exports = { LIEPIN_SITE, isDetailPath, cardIsList, cardUrl, cardMeta, extractDetailJd, extractPosterName, findNextPageBtn, extractSalaryFromCardText };
     }
     return;
   }

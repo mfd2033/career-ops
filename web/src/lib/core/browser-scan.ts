@@ -2,7 +2,7 @@ import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { careerOpsRoot, rootScript } from "@/lib/career-ops";
-import { cleanBrowserSources, expandSearchTargets, matchesBrowserCity, applyBrowserSalaryGate } from "../browser-search.mjs";
+import { cleanBrowserSources, expandSearchTargets, matchesBrowserCity, applyBrowserSalaryGate, cleanSalaryText } from "../browser-search.mjs";
 import { type BrowserSource, type DiscoveredOffer, type ExploreFilters, type ScanEvent } from "@/lib/explore";
 
 export type { DiscoveredOffer, ScanEvent } from "@/lib/explore";
@@ -163,7 +163,10 @@ export function runBrowserDiscovery(
             if (!matchesBrowserCity(j, city)) continue;
             if (seen.has(link)) continue;
             seen.add(link);
-            const salaryText = String(j.salary ?? "").trim();
+            // 清洗字形反爬 PUA（智联 positionList 薪资字段同样可能携带）；清洗后
+            // 无数字（如只剩 "-K"）则不带 salaryText，走「薪资未知」打标。
+            const cleanedSalary = cleanSalaryText(j.salary);
+            const salaryText = cleanedSalary && /\d/.test(cleanedSalary) ? cleanedSalary : "";
             const offer: DiscoveredOffer = {
               url: link,
               company: "",

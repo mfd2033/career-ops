@@ -196,11 +196,27 @@ export function parseSalaryText(text, source) {
   return { minK, maxK };
 }
 
+/**
+ * Strip font-obfuscation private-use codepoints from a raw salary string. BOSS
+ * renders salary DIGITS as PUA glyphs (anti-scrape font mapping — 实证
+ * data/pipeline.md: `\uE032\uE036-\uE034\uE031K`), so the DOM text carries
+ * unrenderable/unparseable codepoints where digits should be. After stripping,
+ * a salary with no ASCII digits left parses to null downstream → the offer rides
+ * the 薪资未知 path instead of showing a garbled badge. Pure — exported for tests.
+ * @param {string} [text]
+ * @returns {string}
+ */
+export function cleanSalaryText(text) {
+  return String(text ?? "")
+    .replace(/[\uE000-\uF8FF\u{F0000}-\u{FFFFD}\u{100000}-\u{10FFFD}]/gu, "")
+    .trim();
+}
+
 /** The raw salary text carried by a listing job / DiscoveredOffer, from either
- *  field name (bsk listing uses `salary`, the offer contract uses `salaryText`). */
+ *  field name (bsk listing uses `salary`, the offer contract uses `salaryText`),
+ *  PUA-stripped so font-obfuscated cards ride the 薪资未知 path. */
 function salaryTextOf(job) {
-  const raw = job?.salaryText ?? job?.salary;
-  return String(typeof raw === "string" ? raw : "").trim();
+  return cleanSalaryText(job?.salaryText ?? job?.salary);
 }
 
 /** The board id a salary text should be parsed under, accepting both the bare

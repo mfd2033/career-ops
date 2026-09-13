@@ -17,6 +17,12 @@
   const SCAN_MAX = 400;
   const SCAN_BATCH_SIZE = 50;
 
+  // PUA 字形混淆清洗(BOSS 把薪资数字渲染为私用区码点,DOM 文本不可见/不可解析,
+  // 实证 data/pipeline.md 的 "\uE032\uE036-\uE034\uE031K")。与 web 侧
+  // web/src/lib/browser-search.mjs 的 cleanSalaryText 同规则;本文件是经典脚本、
+  // 无 ESM 导入能力,故按仓库 inline-copy 惯例内联,两处必须同改。
+  const PUA_GLYPH_RE = /[\uE000-\uF8FF\u{F0000}-\u{FFFFD}\u{100000}-\u{10FFFD}]/gu;
+
   /**
    * 回退去重键:注入 normalizeKey 前的轻量归一。core 传入其站点级 normalizeUrl
    * (带 extraTrackingParams 全量 strip);node 单测直接用本回退。
@@ -91,7 +97,10 @@
   function toDiscoveredOffer(meta, platform) {
     const p = typeof platform === "string" && platform ? platform : "browser";
     const city = meta && typeof meta.city === "string" && meta.city.trim() ? meta.city.trim() : "";
-    const salary = meta && typeof meta.salary === "string" && meta.salary.trim() ? meta.salary.trim() : "";
+    // 薪资先剥 PUA 再判数字:清洗后无任何数字(纯字形混淆,如 "-K")→ 不带
+    // salaryText,走「薪资未知」,绝不把乱码透传成展示徽章。
+    const salaryRaw = meta && typeof meta.salary === "string" ? meta.salary.replace(PUA_GLYPH_RE, "").trim() : "";
+    const salary = salaryRaw && /\d/.test(salaryRaw) ? salaryRaw : "";
     return {
       url: meta && typeof meta.url === "string" ? meta.url : "",
       company: (meta && meta.company) || "",

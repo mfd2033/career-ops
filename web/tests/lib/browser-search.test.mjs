@@ -6,7 +6,17 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { extractBrowserQuery, buildSearchUrls, expandSearchTargets, parseSalaryText, matchesBrowserSalary, isSalaryUnknown, browserToParams, applyBrowserSalaryGate } from "../../src/lib/browser-search.mjs";
+import { extractBrowserQuery, buildSearchUrls, expandSearchTargets, parseSalaryText, matchesBrowserSalary, isSalaryUnknown, browserToParams, applyBrowserSalaryGate, cleanSalaryText } from "../../src/lib/browser-search.mjs";
+
+// ── cleanSalaryText —— 字形反爬清洗（工单 03 缺陷修复）──
+
+test("cleanSalaryText: 剥离 PUA 码点（BOSS 数字字体混淆），保留可读文本", () => {
+  assert.equal(cleanSalaryText("\uE032\uE036-\uE034\uE031K"), "-K");
+  assert.equal(cleanSalaryText("15-\uE0325K·14薪"), "15-5K·14薪");
+  assert.equal(cleanSalaryText("20-35K·14薪"), "20-35K·14薪");
+  assert.equal(cleanSalaryText("\uE032\uE036"), "");
+  assert.equal(cleanSalaryText(undefined), "");
+});
 
 // ── browserToParams —— smin 编码（工单 02）──
 
