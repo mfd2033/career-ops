@@ -145,6 +145,119 @@ export function matchesBrowserCity(job, cityName) {
   return String(job?.title ?? "").includes(city);
 }
 
+// ── 薪资条件（探索页 browser 模式「最低月薪」，工单 01）──────────────────
+//
+// 口径约定（CONTEXT.md「薪资文本」词条）：内部统一为月薪 K（千元/月）。
+//   • K/千    → 月薪直取
+//   • 智联「万」→ 月薪 ×10
+//   • 猎聘裸「万」（无 /年 标记）→ 年薪 ÷12
+//   • 显式「/年」「年薪」→ 年薪 ÷12，与站点无关
+//   • 「·N薪」年度系数在比较中忽略（输入与展示同为月薪口径）
+//   • 「元/天」等非月薪口径、乱文本、无薪资 → 解析失败（薪资未知）
+// 比较语义沿用 scan.mjs salary_filter 的「区间重叠、不误删」取向。
+
+/**
+ * Parse a raw card salary string into a monthly-K range, or null when the text
+ * carries no monthly-salary value (面议 / 元/天 / garbage). Pure — exported for
+ * tests. `source` is the board id ("zhipin"/"liepin"/"zhaopin"); DiscoveredOffer's
+ * "browser-{source}" form is accepted too. An unknown source treats a bare 万
+ * as monthly (智联's usage — the only board where 万 is the DEFAULT form).
+ * @param {string} [text]
+ * @param {string} [source]
+ * @returns {{ minK: number, maxK: number } | null}
+ */
+export function parseSalaryText(text, source) {
+  const t = String(text ?? "")
+    .replace(/\s+/g, "")
+    .replace(/[–—~～]/g, "-");
+  if (!t) return null;
+  // 非月薪口径（日/时/周薪等）一律解析失败 → 薪资未知，绝不硬折算。
+  if (/元?\/(天|日|时|周|小时)/.test(t)) return null;
+  // 区间优先（首值单位可省可带：20-35K / 20K-35K / 2万-3万），再退单值（30K / 2.5万）。
+  // 具名捕获组：两条正则的组数不同，按名取值避免解构错位；首值单位独立捕获，
+  // 混合单位区间（8千-1.2万）各按自身单位折算，不沿用尾值单位。
+  const m =
+    t.match(/(?<lo>\d+(?:\.\d+)?)(?<lounit>千|k|K|万)?-(?<hi>\d+(?:\.\d+)?)(?<unit>千|k|K|万)(?![a-zA-Z])/) ||
+    t.match(/(?<lo>\d+(?:\.\d+)?)(?<unit>千|k|K|万)(?![a-zA-Z])/);
+  if (!m) return null;
+  const { lo, hi, lounit, unit } = m.groups;
+  // 显式年薪标记优先于站点口径。
+  const annual =
+    /\/年|年薪/.test(t) ||
+    ((unit === "万" || lounit === "万") && String(source ?? "").replace(/^browser-/, "") === "liepin");
+  const toK = (v, u) => {
+    const base = u === "万" ? v * 10 : v;
+    return Math.round((annual ? base / 12 : base) * 10) / 10;
+  };
+  // 校验放在折算后：混合单位区间的原始值不可比（8千-1.2万 折算前是 8 vs 1.2）。
+  const minK = toK(Number(lo), lounit || unit);
+  const maxK = toK(Number(hi ?? lo), unit);
+  if (!Number.isFinite(minK) || !Number.isFinite(maxK) || minK <= 0 || maxK < minK) return null;
+  return { minK, maxK };
+}
+
+/** The raw salary text carried by a listing job / DiscoveredOffer, from either
+ *  field name (bsk listing uses `salary`, the offer contract uses `salaryText`). */
+function salaryTextOf(job) {
+  const raw = job?.salaryText ?? job?.salary;
+  return String(typeof raw === "string" ? raw : "").trim();
+}
+
+/** The board id a salary text should be parsed under, accepting both the bare
+ *  source ("liepin") and the DiscoveredOffer form ("browser-liepin"). */
+function salarySourceOf(job) {
+  return String(job?.source ?? "").replace(/^browser-/, "");
+}
+
+/**
+ * Browser-mode salary gate, sibling of matchesBrowserCity: keep a job when its
+ * salary range OVERLAPS the requested floor (range max ≥ floor — the salary_filter
+ * "never drop on a technicality" stance; a 15-25K posting can genuinely pay 25).
+ * Missing/unparseable salary → KEEP (薪资未知放行, never silently dropped) —
+ * pair with isSalaryUnknown to surface the "薪资未知" marker. floor falsy/0 →
+ * the gate is off, everything passes. Pure — exported for tests.
+ * @param {{ salary?: string, salaryText?: string, source?: string } | undefined} job
+ * @param {number} [salaryMinK] monthly floor in K (e.g. 20 = ≥20K/月)
+ * @returns {boolean}
+ */
+export function matchesBrowserSalary(job, salaryMinK) {
+  const floor = Number(salaryMinK) || 0;
+  if (floor <= 0) return true;
+  const parsed = parseSalaryText(salaryTextOf(job), salarySourceOf(job));
+  if (!parsed) return true; // 薪资未知 → 放行（与 salary_filter「无数据不误删」一致）
+  return parsed.maxK >= floor;
+}
+
+/**
+ * Does this job's salary text fail to yield a monthly value? Used to tag kept
+ * unknowns with the「薪资未知」marker whenever a floor gate is active. Pure —
+ * exported for tests.
+ * @param {{ salary?: string, salaryText?: string, source?: string } | undefined} job
+ * @returns {boolean}
+ */
+export function isSalaryUnknown(job) {
+  return parseSalaryText(salaryTextOf(job), salarySourceOf(job)) === null;
+}
+
+/**
+ * Apply the salary floor gate to a LIST of jobs/offers — the single shared
+ * implementation behind both drivers (工单 03/04): bsk's server gate
+ * (browser-scan.ts) and the extension path's page-side gate (explore-provider)
+ * consume this so their keep/drop/未知-tag semantics can never drift. Jobs
+ * failing matchesBrowserSalary drop; kept jobs whose salary text parses to no
+ * monthly value get `salaryUnknown: true`. floor falsy/0 → returned unchanged
+ * (gate off). Pure — exported for tests.
+ * @param {Array<{ salary?: string, salaryText?: string, source?: string }>} [jobs]
+ * @param {number} [salaryMinK] monthly floor in K
+ * @returns {Array<*>}
+ */
+export function applyBrowserSalaryGate(jobs, salaryMinK) {
+  const floor = Number(salaryMinK) || 0;
+  const list = Array.isArray(jobs) ? jobs : [];
+  if (floor <= 0) return list;
+  return list.filter((j) => matchesBrowserSalary(j, floor)).map((j) => (isSalaryUnknown(j) ? { ...j, salaryUnknown: true } : j));
+}
+
 /**
  * Extract the position-keyword-only seed from a portals.yml `search_queries[].query`
  * string (the CLI scan's WebSearch syntax), so the Explorer's browser mode can fill
@@ -253,16 +366,17 @@ export function parseBrowserSources(s) {
 
 /**
  * Browser-mode URL codec (shareable/restorable hunt), mirroring aiToParams's
- * contract: ?mode=browser&zh=<query>&sources=<csv>[&city=<name>]. The mode token
- * is how a restored URL knows to land in the browser surface; the optional
- * `city` param carries the logical Chinese city name so a city-filtered hunt
- * restores with its filter intact.
+ * contract: ?mode=browser&zh=<query>&sources=<csv>[&city=<name>][&smin=<K>]. The
+ * mode token is how a restored URL knows to land in the browser surface; the
+ * optional `city` param carries the logical Chinese city name so a city-filtered
+ * hunt restores with its filter intact; `smin` carries the 薪资下限 (monthly K).
  * @param {string} zhQuery
  * @param {string[]} sources
  * @param {string} [cityName] logical Chinese city, e.g. "郑州"; omitted = national
+ * @param {number} [salaryMinK] salary floor in monthly K (e.g. 20); 0/omitted = off
  * @returns {string}
  */
-export function browserToParams(zhQuery, sources, cityName) {
+export function browserToParams(zhQuery, sources, cityName, salaryMinK) {
   const sp = new URLSearchParams();
   sp.set("mode", "browser");
   if (String(zhQuery ?? "").trim()) sp.set("zh", String(zhQuery).trim());
@@ -270,5 +384,7 @@ export function browserToParams(zhQuery, sources, cityName) {
   if (clean.length) sp.set("sources", clean.join(","));
   const city = String(cityName ?? "").trim();
   if (city) sp.set("city", city);
+  const smin = Number(salaryMinK);
+  if (Number.isFinite(smin) && smin > 0) sp.set("smin", String(Math.round(smin * 10) / 10));
   return sp.toString();
 }

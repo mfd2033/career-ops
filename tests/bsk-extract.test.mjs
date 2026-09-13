@@ -24,7 +24,7 @@ import { tmpdir } from 'node:os';
 
 import { pass, fail, ROOT } from './helpers.mjs';
 import { pickExtractor } from '../browser-extract.mjs';
-import { extractWithBsk, parseSessionId, zhListingAnchors, listingWithCities, extractCityFromText, shouldReloadListing } from '../bsk-extract.mjs';
+import { extractWithBsk, parseSessionId, zhListingAnchors, listingWithCities, extractCityFromText, extractSalaryFromText, shouldReloadListing } from '../bsk-extract.mjs';
 import { isZhJobDetailUrl } from '../lib/zh-jobs.mjs';
 
 const NODE = process.execPath;
@@ -308,5 +308,55 @@ for (const [desc, args, expected] of reloadCases) {
     pass(`shouldReloadListing(${desc}) -> ${expected}`);
   } else {
     fail(`shouldReloadListing(${desc}) -> ${got}, expected ${expected}`);
+  }
+}
+
+// ── S9: extractSalaryFromText（工单 03：bsk 卡片薪资原文提取）───────────────
+// BOSS/猎聘 anchors carry no structured salary field; the extraction scans the
+// card text for the first salary-looking token (title→company→salary order).
+// Must NOT confuse experience years ("5-10年") or "13薪" standalone with salary.
+{
+  const cases = [
+    // [text, expected]
+    ['土建项目经理 10-18K 5-10年 大专 南阳力源 郑州·金水区·经五路', '10-18K'],
+    ['项目经理（GA方向）【 郑州-金水区 】 18-25k·13薪 3年以上 统招本科', '18-25k·13薪'],
+    ['技术经理 1.5-2.5万·13薪 本科 郑州', '1.5-2.5万·13薪'],
+    ['高级项目经理 20-35万 五年以上经验', '20-35万'],
+    ['项目经理 30K以上 经验不限', '30K'],
+    ['项目经理 5-10年 大专', ''],
+    ['项目经理', ''],
+    ['', ''],
+    [undefined, ''],
+    [null, ''],
+  ];
+  for (const [text, expected] of cases) {
+    const got = extractSalaryFromText(text);
+    if (got === expected) {
+      pass(`extractSalaryFromText(${JSON.stringify(String(text ?? '').slice(0, 20))}...) -> ${JSON.stringify(expected)}`);
+    } else {
+      fail(`extractSalaryFromText(${JSON.stringify(String(text ?? ''))}) -> ${JSON.stringify(got)}, expected ${JSON.stringify(expected)}`);
+    }
+  }
+}
+
+// ── S10: listingWithCities 透传 salary（工单 03）───────────────────────────
+// Salary text rides the same re-attach mechanism as city: normalizeListing
+// drops unknown anchor fields, so the salary is re-attached by resolved URL.
+{
+  const base = 'https://www.zhaopin.com/jobs?kw=x';
+  const raw = {
+    url: base,
+    anchors: [
+      { href: 'http://www.zhaopin.com/jobdetail/CC634185820J40852229109.htm', label: '项目经理', city: '郑州', salary: '1.5-2.5万·13薪' },
+      { href: 'http://www.zhaopin.com/jobdetail/CC634185820J40852229110.htm', label: '技术经理', city: '郑州' },
+    ],
+  };
+  const listing = listingWithCities(raw, base, 200);
+  const j1 = listing.jobs.find((j) => j.title === '项目经理');
+  const j2 = listing.jobs.find((j) => j.title === '技术经理');
+  if (j1 && j1.salary === '1.5-2.5万·13薪' && j2 && !Object.prototype.hasOwnProperty.call(j2, 'salary')) {
+    pass('listingWithCities re-attaches salary where present, omits where absent');
+  } else {
+    fail(`listingWithCities(salary) => ${JSON.stringify(listing)}`);
   }
 }

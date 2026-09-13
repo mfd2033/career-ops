@@ -85,10 +85,13 @@
   /**
    * cardMeta → DiscoveredOffer(web /api/explore/add 入参契约)。缺省字段空串;
    * city 进 location,note 按是否带城市拼"browser · {platform} · {city}"。
+   * 工单 04: cardMeta.salary(cardMeta 一直在采集、此前被丢弃的字段,ADR-0007 E8)
+   * 以 salaryText 透传,让扩展驱动扫描与 bsk 兜底走同一道薪酬门控与展示面。
    */
   function toDiscoveredOffer(meta, platform) {
     const p = typeof platform === "string" && platform ? platform : "browser";
     const city = meta && typeof meta.city === "string" && meta.city.trim() ? meta.city.trim() : "";
+    const salary = meta && typeof meta.salary === "string" && meta.salary.trim() ? meta.salary.trim() : "";
     return {
       url: meta && typeof meta.url === "string" ? meta.url : "",
       company: (meta && meta.company) || "",
@@ -98,6 +101,7 @@
       ats: "browser",
       source: `browser-${p}`,
       note: city ? `browser · ${p} · ${city}` : `browser · ${p}`,
+      ...(salary ? { salaryText: salary } : {}),
     };
   }
 

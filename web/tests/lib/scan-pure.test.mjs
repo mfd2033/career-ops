@@ -82,6 +82,7 @@ test("toDiscoveredOffer maps cardMeta to the /api/explore/add contract", () => {
   assert.equal(offer.ats, "browser");
   assert.equal(offer.source, "browser-zhaopin");
   assert.equal(offer.note, "browser · zhaopin · 上海");
+  assert.equal(offer.salaryText, "30K"); // 工单 04: salary 原文透传,不再丢弃
 });
 
 test("toDiscoveredOffer without a city leaves location empty and drops city from note", () => {
@@ -89,6 +90,11 @@ test("toDiscoveredOffer without a city leaves location empty and drops city from
   assert.equal(offer.location, "");
   assert.equal(offer.note, "browser · zhipin");
   assert.equal(offer.company, "");
+});
+
+test("toDiscoveredOffer: missing salary text omits salaryText entirely (contract stays lean)", () => {
+  const offer = toDiscoveredOffer({ url: "https://www.zhipin.com/job_detail/2.html", title: "AI", salary: "" }, "zhipin");
+  assert.equal(Object.prototype.hasOwnProperty.call(offer, "salaryText"), false);
 });
 
 test("toDiscoveredOffer tolerates a missing platform by falling back to browser", () => {

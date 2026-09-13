@@ -6,7 +6,18 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { extractBrowserQuery, buildSearchUrls, expandSearchTargets } from "../../src/lib/browser-search.mjs";
+import { extractBrowserQuery, buildSearchUrls, expandSearchTargets, parseSalaryText, matchesBrowserSalary, isSalaryUnknown, browserToParams, applyBrowserSalaryGate } from "../../src/lib/browser-search.mjs";
+
+// ── browserToParams —— smin 编码（工单 02）──
+
+test("browserToParams: 薪资下限编码为 smin，0/缺省省略", () => {
+  assert.ok(browserToParams("项目经理", ["zhipin"], "郑州", 20).includes("smin=20"));
+  assert.ok(!browserToParams("项目经理", ["zhipin"], "郑州", 0).includes("smin"));
+  assert.ok(!browserToParams("项目经理", ["zhipin"], "郑州", undefined).includes("smin"));
+  assert.ok(!browserToParams("项目经理", ["zhipin"], "郑州", -5).includes("smin"));
+  // 小数保留 1 位
+  assert.ok(browserToParams("项目经理", ["zhipin"], "", 22.25).includes("smin=22.3"));
+});
 
 test("drops site:/OR/city tokens and keeps every position keyword across OR groups", () => {
   assert.equal(
@@ -94,4 +105,108 @@ test("expandSearchTargets empty liepin query degrades to a single national searc
   const targets = expandSearchTargets(["liepin"], "  ", "郑州");
   assert.equal(targets.length, 1);
   assert.ok(targets[0].url.startsWith("https://www.liepin.com/zhaopin/?key="));
+});
+
+// ── parseSalaryText —— 薪资文本 → 月薪 K 区间（工单 01）──
+
+test("parseSalaryText: BOSS K 区间按月薪直取，忽略「·14薪」系数", () => {
+  assert.deepEqual(parseSalaryText("20-35K·14薪", "zhipin"), { minK: 20, maxK: 35 });
+  assert.deepEqual(parseSalaryText("20-35K", "zhipin"), { minK: 20, maxK: 35 });
+  assert.deepEqual(parseSalaryText("20K-35K", "zhipin"), { minK: 20, maxK: 35 });
+});
+
+test("parseSalaryText: 智联「万」按月薪 ×10 折算", () => {
+  assert.deepEqual(parseSalaryText("1.5-2.5万·13薪", "zhaopin"), { minK: 15, maxK: 25 });
+  assert.deepEqual(parseSalaryText("2万-3万", "zhaopin"), { minK: 20, maxK: 30 });
+});
+
+test("parseSalaryText: 猎聘裸「万」按年薪 ÷12 折算", () => {
+  const r = parseSalaryText("20-35万", "liepin");
+  assert.equal(r.minK, Math.round((200 / 12) * 10) / 10);
+  assert.equal(r.maxK, Math.round((350 / 12) * 10) / 10);
+  // 猎聘的 K 形态仍是月薪，不受万口径影响
+  assert.deepEqual(parseSalaryText("15-25K·14薪", "liepin"), { minK: 15, maxK: 25 });
+});
+
+test("parseSalaryText: 显式「/年」「年薪」标记一律按年薪 ÷12，与站点无关", () => {
+  const r = parseSalaryText("24-36万/年", "zhaopin");
+  assert.equal(r.minK, 20);
+  assert.equal(r.maxK, 30);
+});
+
+test("parseSalaryText: 单值形态取同值区间", () => {
+  assert.deepEqual(parseSalaryText("30K", "zhipin"), { minK: 30, maxK: 30 });
+  assert.deepEqual(parseSalaryText("2.5万", "zhaopin"), { minK: 25, maxK: 25 });
+});
+
+test("parseSalaryText: 非月薪口径与乱文本 → null（归入薪资未知）", () => {
+  assert.equal(parseSalaryText("200-350元/天", "zhipin"), null);
+  assert.equal(parseSalaryText("面议", "zhaopin"), null);
+  assert.equal(parseSalaryText("", "liepin"), null);
+  assert.equal(parseSalaryText(undefined, "zhaopin"), null);
+  assert.equal(parseSalaryText("3个月", "zhipin"), null);
+  assert.equal(parseSalaryText("100人", "zhaopin"), null);
+});
+
+test("parseSalaryText: 未知站点来源的裸「万」按月薪保守处理", () => {
+  assert.deepEqual(parseSalaryText("2-3万", ""), { minK: 20, maxK: 30 });
+});
+
+test("parseSalaryText: 混合单位区间各按自身单位折算（8千-1.2万）", () => {
+  assert.deepEqual(parseSalaryText("8千-1.2万", "zhaopin"), { minK: 8, maxK: 12 });
+  assert.deepEqual(parseSalaryText("20K-3.5万", "zhaopin"), { minK: 20, maxK: 35 });
+});
+
+// ── applyBrowserSalaryGate —— 两条驱动路径共享的门控组合（工单 03/04）──
+
+test("applyBrowserSalaryGate: 丢弃不达标、保留达标、未知打标、门关时原样返回", () => {
+  const jobs = [
+    { salary: "10-18K", source: "zhipin" },
+    { salary: "20-35K", source: "zhipin" },
+    { salary: "", source: "zhaopin" },
+    { salary: "面议", source: "liepin" },
+  ];
+  const gated = applyBrowserSalaryGate(jobs, 20);
+  assert.equal(gated.length, 3); // 10-18K 丢弃，其余保留
+  assert.equal(gated[0].salary, "20-35K");
+  assert.equal(gated[0].salaryUnknown, undefined);
+  assert.equal(gated[1].salaryUnknown, true); // 无薪资 → 打标
+  assert.equal(gated[2].salaryUnknown, true);
+  // 门关（0/缺省）→ 原数组原样返回（含不达标者）
+  assert.equal(applyBrowserSalaryGate(jobs, 0).length, 4);
+  assert.equal(applyBrowserSalaryGate(undefined, 20).length, 0);
+});
+
+// ── matchesBrowserSalary —— 重叠判定门控（工单 01）──
+
+test("matchesBrowserSalary: 区间上限 ≥ 薪资下限即保留（重叠判定）", () => {
+  assert.equal(matchesBrowserSalary({ salary: "15-25K", source: "zhipin" }, 20), true);
+  assert.equal(matchesBrowserSalary({ salary: "20-35K", source: "zhipin" }, 20), true);
+  assert.equal(matchesBrowserSalary({ salary: "10-18K", source: "zhipin" }, 20), false);
+});
+
+test("matchesBrowserSalary: 无薪资/解析失败放行（薪资未知，不误删）", () => {
+  assert.equal(matchesBrowserSalary({ salary: "", source: "zhipin" }, 20), true);
+  assert.equal(matchesBrowserSalary({ salary: "面议", source: "zhaopin" }, 20), true);
+  assert.equal(matchesBrowserSalary({}, 20), true);
+  assert.equal(matchesBrowserSalary(undefined, 20), true);
+});
+
+test("matchesBrowserSalary: 薪资下限为 0/缺省时全放行（门未启用）", () => {
+  assert.equal(matchesBrowserSalary({ salary: "10-18K", source: "zhipin" }, 0), true);
+  assert.equal(matchesBrowserSalary({ salary: "10-18K", source: "zhipin" }, undefined), true);
+});
+
+test("matchesBrowserSalary: source 兼容 browser- 前缀（DiscoveredOffer.source 形态）", () => {
+  // 猎聘裸万按年薪：20-35万 → ≈16.7-29.2K，上限 ≥ 20 保留
+  assert.equal(matchesBrowserSalary({ salary: "20-35万", source: "browser-liepin" }, 20), true);
+  // 12-18万（年薪）→ 10-15K，上限 < 20 丢弃
+  assert.equal(matchesBrowserSalary({ salary: "12-18万", source: "browser-liepin" }, 20), false);
+});
+
+test("isSalaryUnknown: 无薪资或解析不出数值即未知（与门是否启用无关）", () => {
+  assert.equal(isSalaryUnknown({ salary: "", source: "zhipin" }), true);
+  assert.equal(isSalaryUnknown({ salary: "面议", source: "zhaopin" }), true);
+  assert.equal(isSalaryUnknown({ salary: "200-350元/天", source: "zhipin" }), true);
+  assert.equal(isSalaryUnknown({ salary: "20-35K", source: "zhipin" }), false);
 });

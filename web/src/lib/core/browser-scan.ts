@@ -2,7 +2,7 @@ import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { careerOpsRoot, rootScript } from "@/lib/career-ops";
-import { cleanBrowserSources, expandSearchTargets, matchesBrowserCity } from "../browser-search.mjs";
+import { cleanBrowserSources, expandSearchTargets, matchesBrowserCity, applyBrowserSalaryGate } from "../browser-search.mjs";
 import { type BrowserSource, type DiscoveredOffer, type ExploreFilters, type ScanEvent } from "@/lib/explore";
 
 export type { DiscoveredOffer, ScanEvent } from "@/lib/explore";
@@ -42,7 +42,7 @@ export function browserCollectorReady(): boolean {
   }
 }
 
-type BskListing = { url?: string; jobs?: Array<{ title?: string; url?: string; city?: string }> };
+type BskListing = { url?: string; jobs?: Array<{ title?: string; url?: string; city?: string; salary?: string; salaryUnknown?: boolean }> };
 
 export function runBrowserDiscovery(
   filters: ExploreFilters,
@@ -148,7 +148,10 @@ export function runBrowserDiscovery(
         }
         try {
           const parsed = JSON.parse(out) as BskListing;
-          const jobs = Array.isArray(parsed.jobs) ? parsed.jobs : [];
+          // 薪酬门控（工单 03）：与扩展路径共用 applyBrowserSalaryGate——区间重叠
+          // 判定（上限 ≥ zhSalaryMin），无薪资/解析失败放行并打「薪资未知」标记，
+          // 与 salary_filter「不误删」一致。过滤在循环前列表级完成。
+          const jobs = applyBrowserSalaryGate(Array.isArray(parsed.jobs) ? parsed.jobs : [], filters.zhSalaryMin);
           for (const j of jobs) {
             const link = String(j.url ?? "").trim();
             const title = String(j.title ?? "").trim();
@@ -160,6 +163,7 @@ export function runBrowserDiscovery(
             if (!matchesBrowserCity(j, city)) continue;
             if (seen.has(link)) continue;
             seen.add(link);
+            const salaryText = String(j.salary ?? "").trim();
             const offer: DiscoveredOffer = {
               url: link,
               company: "",
@@ -169,6 +173,8 @@ export function runBrowserDiscovery(
               ats: "browser",
               source: `browser-${platform}`,
               note: city ? `browser · ${platform} · ${city}` : `browser · ${platform}`,
+              ...(salaryText ? { salaryText } : {}),
+              ...(j.salaryUnknown ? { salaryUnknown: true as const } : {}),
             };
             offers.push(offer);
             onEvent({ kind: "offer", offer });

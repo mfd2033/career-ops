@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { X, Ban, Clock, MapPin, ChevronDown, SlidersHorizontal, Search } from "lucide-react";
+import { X, Ban, Clock, MapPin, ChevronDown, SlidersHorizontal, Search, Banknote } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { ATS_LABEL, ATS_SOURCES, BROWSER_LABEL, BROWSER_SOURCES, cleanChips, type AtsSource, type BrowserSource, type ExploreFilters, type ExploreMode } from "@/lib/explore";
 import { useI18n } from "@/lib/i18n/context";
@@ -161,6 +161,28 @@ export function FilterBuilder({
                 if (e.key === "Enter") e.currentTarget.blur();
               }}
               placeholder={t("explore.filter.zhCityPlaceholder")}
+              className="min-w-0 flex-1 bg-transparent outline-none"
+            />
+          </div>
+        </div>
+        <div>
+          <Label hint={t("explore.filter.zhSalaryMinHint")}>{t("explore.filter.zhSalaryMin")}</Label>
+          <div className="co-fb__field border border-border bg-surface/40 focus-within:border-brand/40 transition-colors">
+            <Banknote className="size-3.5 shrink-0 text-muted" />
+            <input
+              type="number"
+              min={0}
+              step={0.5}
+              value={filters.zhSalaryMin ?? ""}
+              onChange={(e) => {
+                const v = e.target.value.trim();
+                const n = v === "" ? undefined : Number(v);
+                set({ zhSalaryMin: n !== undefined && Number.isFinite(n) && n > 0 ? n : undefined });
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") e.currentTarget.blur();
+              }}
+              placeholder={t("explore.filter.zhSalaryMinPlaceholder")}
               className="min-w-0 flex-1 bg-transparent outline-none"
             />
           </div>

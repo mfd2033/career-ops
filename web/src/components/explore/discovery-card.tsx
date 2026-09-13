@@ -97,6 +97,21 @@ export function DiscoveryCard({ offer, inPipeline, evaluatedN }: { offer: Discov
           <span className="rounded border border-border px-1.5 py-0.5 font-medium text-muted">{ATS_LABEL[offer.ats as AtsSource] ?? offer.ats}</span>
         )}
         {fresh && <span className="text-faint">{fresh}</span>}
+        {/* 薪资展示（工单 03）：原文直出；门控激活但解析不出数值 → 「薪资未知」打标 */}
+        {offer.salaryText ? (
+          <span className="inline-flex items-center gap-1 rounded border border-emerald-500/25 bg-emerald-500/10 px-1.5 py-0.5 font-medium text-emerald-600 dark:text-emerald-300">
+            <Coins className="size-3" /> {offer.salaryText}
+          </span>
+        ) : (
+          offer.salaryUnknown && (
+            <span
+              className="inline-flex items-center gap-1 rounded border border-border px-1.5 py-0.5 font-medium text-faint"
+              title={t("explore.card.salaryUnknownTitle")}
+            >
+              <Coins className="size-3" /> {t("explore.card.salaryUnknown")}
+            </span>
+          )
+        )}
         {unverified && (
           <span
             className="inline-flex items-center gap-1 rounded border border-amber-500/25 bg-amber-500/10 px-1.5 py-0.5 font-medium text-amber-600 dark:text-amber-300"
