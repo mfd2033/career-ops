@@ -8,7 +8,8 @@ import remarkGfm from "remark-gfm";
 import { useEffect, useState } from "react";
 import { goBackOr } from "@/lib/nav-history";
 import { readApplyBehavior, APPLY_BEHAVIOR_DEFAULT, type ApplyBehavior } from "@/lib/apply-behavior";
-import { readSavedUnknownEmployer } from "@/lib/saved-cli";
+import { useUnknownEmployerPolicy } from "@/lib/use-unknown-employer";
+import { UNKNOWN_EMPLOYER_SENTINEL, resolveCompanyLabel } from "@/lib/unknown-employer.mjs";
 import type { Application } from "@/lib/career-ops";
 import { Badge } from "@/components/ui/badge";
 import { scoreTone, scoreNum, legitimacyTone, parseReport } from "@/lib/format";
@@ -89,6 +90,8 @@ export function ReportView({
 }) {
   const { t } = useI18n();
   const router = useRouter();
+  // 未知雇主策略（挂载后读取，避免 SSR/hydration 不一致）。
+  const employerPolicy = useUnknownEmployerPolicy();
   // 打开职位链接模式下 Apply 按钮即是跳转入口，隐藏下方独立的「职位链接」，避免重复。
   const [behavior, setBehavior] = useState<ApplyBehavior>(APPLY_BEHAVIOR_DEFAULT);
   useEffect(() => {
@@ -390,13 +393,13 @@ export function ReportView({
   };
   const meta = report ? parseReport(report) : null;
   const field = (label: string) => meta?.fields.find((f) => f.label === label)?.value;
-  // 未知雇主策略：历史 `?` 行 + 启用了「显示代招名」时，回退用报告 Via 的发帖方名
-  // 实时显示，不改底层数据（默认 `?` 保持现状）。
-  const viaValue = field("Via") ?? "";
+  // 未知雇主策略：历史 `?` 行 + 启用了「显示代招方」时，用报告里 Via 的发帖方名 +
+  // 「（代招）」实时显示，不改底层数据（默认 `?` 保持现状）。规则与列表页共用
+  // resolveCompanyLabel，两处口径不会再分叉；`Via: —`（直招）在那里被剔掉。
   const companyLabel = (() => {
     const raw: string | number = app?.company ?? meta?.title ?? id;
-    if (raw === "?" && readSavedUnknownEmployer() === "agency" && viaValue) return viaValue;
-    return raw;
+    if (raw !== UNKNOWN_EMPLOYER_SENTINEL) return raw;
+    return resolveCompanyLabel({ company: raw, agency: field("Via"), policy: employerPolicy });
   })();
   const score = app?.score || field("Score");
   // The tracker Date column keeps the INITIAL evaluation date (#2808, 方向 A);

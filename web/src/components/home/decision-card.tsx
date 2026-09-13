@@ -8,12 +8,17 @@ import { CompanyLogo } from "@/components/company-logo";
 import { scoreNum, scoreTone } from "@/lib/format";
 import type { Application } from "@/lib/career-ops";
 import { useI18n } from "@/lib/i18n/context";
+import { useUnknownEmployerPolicy } from "@/lib/use-unknown-employer";
+import { resolveCompanyLabel } from "@/lib/unknown-employer.mjs";
 
 // Awaiting-decision row: a scored role with no terminal status. Primary action
 // opens the report (PDF + Apply live there). Skip / Applied still write status.
 export function DecisionCard({ app }: { app: Application }) {
   const router = useRouter();
   const { t } = useI18n();
+  // 未知雇主（代招）行与列表页同一口径：显示「{代招方}（代招）」而不是一个问号。
+  const employerPolicy = useUnknownEmployerPolicy();
+  const companyLabel = resolveCompanyLabel({ company: app.company, agency: app.reportVia, policy: employerPolicy });
   const [busy, setBusy] = useState<"" | "Applied" | "Discarded">("");
   const [done, setDone] = useState<string | null>(null);
   const score = scoreNum(app.score);
@@ -37,9 +42,9 @@ export function DecisionCard({ app }: { app: Application }) {
   return (
     <div className="flex min-w-0 flex-col gap-2.5 rounded-xl border border-border bg-surface/40 p-3.5 transition hover:border-brand/30">
       <div className="flex items-start gap-2.5">
-        <CompanyLogo name={app.company} size={24} />
+        <CompanyLogo name={companyLabel} size={24} />
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-medium text-foreground">{app.company}</p>
+          <p className="truncate text-sm font-medium text-foreground">{companyLabel}</p>
           <p className="truncate text-[13px] text-muted">{app.role}</p>
         </div>
         {Number.isFinite(score) && score > 0 && (

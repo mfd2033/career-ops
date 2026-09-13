@@ -1,17 +1,25 @@
 // Tolerant report header parser — the single source of truth for extracting the
-// bold key/value header fields (Date/URL/Archetype/Score/Legitimacy/PDF) plus
-// the title and the body-without-header. format.ts re-exports it with a type.
+// bold key/value header fields (Date/URL/Via/Archetype/Score/Legitimacy/PDF)
+// plus the title and the body-without-header. format.ts re-exports it with a type.
 //
 // Maintainer rule: "adapt the render, don't migrate the old data" — the parser
 // must keep reading every header shape reporters actually write. The `>` stem
 // matches the blockquote-prefixed header writers (`> **URL:** …`) that some
 // batch/locale writers emit; without it those lines were silently dropped and
 // the posting URL never reached /api/report-status or the apply button (#132).
+//
+// `Via` is not decoration: it is the ONLY place the posting agency's name lives
+// for an agency-mediated posting whose end employer is hidden — those rows carry
+// the `?` sentinel in the tracker's Company cell (modes/oferta.md §2), so the
+// report page's "显示代招方" fallback has nothing else to read. Omitting the key
+// made `field("Via")` undefined for every report, which silently disabled that
+// policy (the `&& viaValue` guard short-circuited) instead of erroring.
 
 const FIELD_KEYS = {
   date: "Date",
   fecha: "Date",
   url: "URL",
+  via: "Via",
   archetype: "Archetype",
   arquetipo: "Archetype",
   score: "Score",

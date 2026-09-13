@@ -192,6 +192,10 @@ export type Application = {
    *  delivery, joined from data/eval-timings.tsv by the pipeline page; null
    *  when no timing was recorded. Attached at page level, not by the parser. */
   evalDuration?: number | null;
+  /** 报告头 `**Via:**` 的发帖/代招方名。仅对 Company 为 `?`（未知终端雇主）的行读取 ——
+   * 那是代招方名字唯一的落点（tracker 没有 Via 列），列表页按未知雇主策略回退显示
+   * （ADR-0004 D1）。同 evalDuration，页面级附加，解析器不管。 */
+  reportVia?: string;
 };
 
 /**
@@ -285,11 +289,26 @@ export function pipelineSummary(): PipelineSummary {
     // join the freshness date (first_seen) onto each raw posting — the inbox's
     // triage view orders/faceted-filters on it entirely client-side.
     inbox: readInbox().map((j) => ({ ...j, postedAt: j.postedAt ?? scanDates.get(j.url) })),
-    applications,
+    // `?` (unknown-employer) rows additionally carry their report's Via header, so
+    // the list can show 「{代招方}（代招）」under the agency policy without the
+    // client reading report files. Bounded to those rows (~25 today) — the whole
+    // tracker's reports are already read once below for the score map.
+    applications: applications.map((a) => (a.company.trim() === "?" ? { ...a, reportVia: readReportVia(a) } : a)),
     // one full read of the report URL headers per page load — bounded by the
     // tracker size, same cost the batch re-evaluate flow already pays on demand.
     scoredUrls: buildScoreByUrl(applications, readApplicationUrl),
   };
+}
+
+/** 报告头 `**Via:**`（发帖/代招方）。读不到报告 → ""，调用方保持 `?`。 */
+function readReportVia(app: Application): string {
+  const file = resolveReportPathFor(app);
+  if (!file) return "";
+  try {
+    return parseReport(fs.readFileSync(file, "utf8")).fields.find((f) => f.label === "Via")?.value ?? "";
+  } catch {
+    return "";
+  }
 }
 
 export type ReportData = { content: string; file: string };
