@@ -500,7 +500,18 @@ export function ReportView({
           })()}
           {meta?.legitimacy && <Badge tone={legitimacyTone(meta.legitimacy)}>{translateLegitimacy(meta.legitimacy)}</Badge>}
           {app && <StatusSelect n={id} current={app.status} />}
-          {app && app.status !== "Discarded" && <SkipFromTracker n={id} />}
+          {/* 跳过 = 写盘 Discarded 后前进：落点由 SkipFromTracker 内的
+              skipDestination 决定。next 链接与无下一份时的列表兜底都带上本页的
+              列表上下文（contextQuery）；深链页（position == null）没有列表
+              上下文，落点在其内部退回首页。 */}
+          {app && app.status !== "Discarded" && (
+            <SkipFromTracker
+              n={id}
+              nextHref={next ? `/pipeline/${next.n}${contextQuery}` : null}
+              fallbackHref={`/pipeline${contextQuery}`}
+              hasListContext={position != null}
+            />
+          )}
           <GeneratePdfButton n={id} company={companyLabel} pdfReady={pdfReady} />
           <ReevaluateButton id={id} url={url && url.startsWith("http") ? url : undefined} company={companyLabel} />
           {pdfReady && <OpenCvFolderButton company={typeof companyLabel === "string" ? companyLabel : id} />}
