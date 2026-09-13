@@ -97,6 +97,20 @@ test("toDiscoveredOffer: missing salary text omits salaryText entirely (contract
   assert.equal(Object.prototype.hasOwnProperty.call(offer, "salaryText"), false);
 });
 
+test("toDiscoveredOffer: BOSS PUA 字形混淆薪资清洗后无数字 → 不携带 salaryText（乱码徽章回归锁）", () => {
+  // 真实取证（data/pipeline.md）：BOSS 薪资数字为 PUA 码点，ASCII 只剩 "-K"。
+  const offer = toDiscoveredOffer(
+    { url: "https://www.zhipin.com/job_detail/12b516d2077e1d8b0nN709S8FFBY.html", title: "AI", salary: "\uE032\uE036-\uE034\uE031K" },
+    "zhipin",
+  );
+  assert.equal(Object.prototype.hasOwnProperty.call(offer, "salaryText"), false);
+});
+
+test("toDiscoveredOffer: PUA 混杂但含 ASCII 数字的薪资保留可读部分", () => {
+  const offer = toDiscoveredOffer({ url: "https://x.com/1", title: "AI", salary: "15-\uE0325K" }, "zhipin");
+  assert.equal(offer.salaryText, "15-5K");
+});
+
 test("toDiscoveredOffer tolerates a missing platform by falling back to browser", () => {
   const offer = toDiscoveredOffer({ url: "https://x.com/1", title: "AI" });
   assert.equal(offer.source, "browser-browser"); // source 根缺省 browser

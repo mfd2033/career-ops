@@ -37,12 +37,25 @@
    * 抓不到即空串，绝不因某字段缺失抛错。city 不在此定点（BOSS 卡片无稳定城市 class，
    * 城市过滤交由 web 侧 matchesBrowserCity 以 title 兜底，ADR-0007 E4）。
    */
+  /** 卡片文本级薪资兜底提取（纯函数）。BOSS 薪资数字多为 PUA 字形混淆（清洗后无
+   *  ASCII 数字 → 归「薪资未知」）；未混淆卡片经此兜底在 class 选择器落空时仍可
+   *  带出薪资。规则与 bsk-extract.mjs 的 extractSalaryFromText / site-liepin 的
+   *  extractSalaryFromCardText 同款，三处同改。 */
+  function extractSalaryFromCardText(text) {
+    const t = String(text ?? "");
+    if (!t) return "";
+    const m = t.match(
+      /\d+(?:\.\d+)?\s*[-–~]\s*\d+(?:\.\d+)?\s*(?:千|[kK]|万)(?:\s*·\s*\d+\s*薪)?|\d+(?:\.\d+)?\s*(?:千|[kK]|万)(?:\s*·\s*\d+\s*薪)?/,
+    );
+    return m ? m[0].trim() : "";
+  }
+
   function cardMeta(card) {
     const text = (sel) => {
       const el = card.querySelector(sel);
       return el ? (el.innerText || el.textContent || "").trim() : "";
     };
-    const salary = text('[class*="salary"],[class*="job-price"],[class*="price"],.job-area');
+    const salary = text('[class*="salary"],[class*="job-price"],[class*="price"],.job-area') || extractSalaryFromCardText(card.innerText || "");
     const company = text('[class*="company-name"],[class*="company"] .name,.company-info .name,[class*="brand"]');
     return {
       url: cardUrl(card),

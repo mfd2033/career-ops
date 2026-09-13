@@ -18,7 +18,19 @@ import { fileURLToPath } from "node:url";
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 const mod = await import(pathToFileURL(join(ROOT, "extension", "site-liepin.js")).href);
 // CJS 互操作: module.exports 对象即 default; 具名导出走 cjs-module-lexer 也能拿到。
-const { LIEPIN_SITE, isDetailPath } = mod.default ?? mod;
+const { LIEPIN_SITE, isDetailPath, extractSalaryFromCardText } = mod.default ?? mod;
+
+test("extractSalaryFromCardText: 猎聘卡片文本级薪资提取（class 选择器落空时的兜底）", () => {
+  // 真实卡片文本形态（data/pipeline.md 取证的 title 即 anchor label 全文）
+  assert.equal(extractSalaryFromCardText("服务端开发（Java · 全栈） 【 郑州-郑东新区 】 8-13k 3-5年 本科"), "8-13k");
+  assert.equal(extractSalaryFromCardText("电解铝厂设备安装项目经理 【 郑州 】 20-30k·13薪 5-10年 大专"), "20-30k·13薪");
+  assert.equal(extractSalaryFromCardText("高级项目经理 20-35万 五年以上经验"), "20-35万");
+  // 经验年限（5-10年）与「13薪」单独出现不得误判为薪资
+  assert.equal(extractSalaryFromCardText("项目经理 5-10年 大专"), "");
+  assert.equal(extractSalaryFromCardText("项目经理"), "");
+  assert.equal(extractSalaryFromCardText(""), "");
+  assert.equal(extractSalaryFromCardText(undefined), "");
+});
 
 test("isDetailPath: /job/{id}.shtml and /a/{id}.shtml are detail pages", () => {
   assert.equal(isDetailPath("/job/1985305711.shtml"), true);
