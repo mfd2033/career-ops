@@ -61,6 +61,28 @@ export function extractCityFromText(text, cityNames = CITY_NAMES) {
   return '';
 }
 
+/**
+ * Find the first salary-looking token inside a job-card text blob (工单 03:
+ * BOSS/猎聘 cards carry no structured salary field, so we scan the card text
+ * for the first salary form — card text reads title→company→salary, so the
+ * first hit is the job's salary, not experience years ("5-10年") or "13薪"
+ * standalone). Range-first (10-18K / 1.5-2.5万·13薪), then single (30K).
+ * 元/天 etc. are NOT captured — they parse to no monthly value downstream and
+ * ride the 薪资未知 path. Pure — exported for tests AND inlined into
+ * READ_DOM_JS via extractSalaryFromText.toString() so the injected page script
+ * and the Node-side tests share ONE implementation.
+ * @param {string} [text]
+ * @returns {string} matched salary text, or "" when none found
+ */
+export function extractSalaryFromText(text) {
+  const t = String(text ?? '');
+  if (!t) return '';
+  const m = t.match(
+    /\d+(?:\.\d+)?\s*[-–~]\s*\d+(?:\.\d+)?\s*(?:千|[kK]|万)(?:\s*·\s*\d+\s*薪)?|\d+(?:\.\d+)?\s*(?:千|[kK]|万)(?:\s*·\s*\d+\s*薪)?/,
+  );
+  return m ? m[0].trim() : '';
+}
+
 // SPA listing pages (zhipin search, liepin search) render their rows
 // asynchronously: domcontentloaded fires on an empty body, and a single
 // immediate read returns zero anchors. Poll until the page has content.
@@ -73,6 +95,7 @@ const DOM_READY_TIMEOUT_MS = 15_000;
 const READ_DOM_JS = `(() => {
   const CITY_NAMES = ${JSON.stringify(CITY_NAMES)};
   ${extractCityFromText.toString()}
+  ${extractSalaryFromText.toString()}
   const title = (document.querySelector('h1')?.innerText || document.title || '').trim();
   // Prefer a semantic container, then a Chinese board's job-body class, then body.
   const root =
@@ -106,24 +129,30 @@ const READ_DOM_JS = `(() => {
   // 这里向上遍历卡片父链(≤4层)用 extractCityFromText 匹配已知城市名
   // (BOSS "郑州·金水区·经五路" / 猎聘 "【 郑州-金水区 】") 写入 anchor.city,
   // matchesBrowserCity 优先信任 job.city 字段 → 门控不再误杀。
+  // 工单 03: 同一趟父链遍历顺带用 extractSalaryFromText 提取薪资原文写入
+  // anchor.salary（卡片文本 title→company→salary 序，首个命中即薪资）——
+  // 两个条件都凑齐或深度用尽才停，避免重复遍历。
   for (const a of anchors) {
     if (!a.label) continue;
     let el = a.el;
     let city = '';
+    let salary = '';
     let depth = 0;
-    while (el && el !== document.body && depth < 4) {
-      city = extractCityFromText(el.innerText || '', CITY_NAMES);
-      if (city) break;
+    while (el && el !== document.body && depth < 4 && !(city && salary)) {
+      if (!city) city = extractCityFromText(el.innerText || '', CITY_NAMES);
+      if (!salary) salary = extractSalaryFromText(el.innerText || '');
       el = el.parentElement;
       depth += 1;
     }
     a.city = city;
+    a.salary = salary;
     delete a.el;
   }
   // 智联招聘 (zhaopin.com/jobs) 的职位卡片是 DIV.job-card 而非 <a href>，上面的
   // a[href] 抓不到任何职位（"结果很少"的根因）。真实数据在
   // window.__INITIAL_STATE__.positionList，每项含 positionUrl/name/workCity。
-  // 合成 anchor（附 city）追加，让 zhListingAnchors 按 isZhJobDetailUrl 统一过滤。
+  // 合成 anchor（附 city/salary——薪资取结构化 salary60 展示串，兜底 salary）追加，
+  // 让 zhListingAnchors 按 isZhJobDetailUrl 统一过滤。
   // 绝不读 positionCount（实测 =0，不可信）；positionList 才是真数据。
   let synth = [];
   try {
@@ -135,6 +164,7 @@ const READ_DOM_JS = `(() => {
           href: String(p.positionUrl),
           label: String(p.name || '').trim(),
           city: String(p.workCity || '').trim(),
+          salary: String(p.salary60 || p.salary || '').trim(),
         }))
         .filter((a) => a.label && a.href);
     }
@@ -446,34 +476,41 @@ export function zhListingAnchors(anchors, baseUrl) {
 
 /**
  * Shape a listing result and carry each job's explicit city (智联 positionList
- * `workCity`) onto its `{ title, url }` entry. normalizeListing is shared with
- * the Playwright path and intentionally drops unknown anchor fields, so the
- * city is re-attached here by resolved URL — bsk-extract is the only caller
- * whose anchors may carry a `city`. Jobs without a city keep none (their
- * platform relies on the search URL's own city parameter; the browser-scan
- * post-gate falls back to the title). Pure — exported for tests.
- * @param {{ anchors?: Array<{ href?: string, label?: string, city?: string }>, url?: string }} raw
+ * `workCity`) and salary text (工单 03) onto its `{ title, url }` entry.
+ * normalizeListing is shared with the Playwright path and intentionally drops
+ * unknown anchor fields, so city/salary are re-attached here by resolved URL —
+ * bsk-extract is the only caller whose anchors may carry them. Jobs without a
+ * city/salary keep none (their platform relies on the search URL's own city
+ * parameter; the browser-scan post-gate falls back to the title). Pure —
+ * exported for tests.
+ * @param {{ anchors?: Array<{ href?: string, label?: string, city?: string, salary?: string }>, url?: string }} raw
  * @param {string} baseUrl
  * @param {number} [max]
- * @returns {{ url: string, jobs: Array<{ title: string, url: string, city?: string }> }}
+ * @returns {{ url: string, jobs: Array<{ title: string, url: string, city?: string, salary?: string }> }}
  */
 export function listingWithCities(raw, baseUrl, max = 200) {
   const base = String(raw?.url || baseUrl || '');
   const listing = normalizeListing(zhListingAnchors(raw?.anchors, base), base, max);
   const cityByHref = new Map();
+  const salaryByHref = new Map();
   for (const a of Array.isArray(raw?.anchors) ? raw.anchors : []) {
-    const c = String(a?.city ?? '').trim();
-    if (!c) continue;
+    let resolved = '';
     try {
-      cityByHref.set(new URL(String(a.href ?? ''), base).href, c);
+      resolved = new URL(String(a.href ?? ''), base).href;
     } catch {
-      /* unparseable href — nothing to attach */
+      continue; /* unparseable href — nothing to attach */
     }
+    const c = String(a?.city ?? '').trim();
+    if (c) cityByHref.set(resolved, c);
+    const s = String(a?.salary ?? '').trim();
+    if (s) salaryByHref.set(resolved, s);
   }
-  if (cityByHref.size > 0) {
+  if (cityByHref.size > 0 || salaryByHref.size > 0) {
     for (const j of listing.jobs) {
       const c = cityByHref.get(j.url);
       if (c) j.city = c;
+      const s = salaryByHref.get(j.url);
+      if (s) j.salary = s;
     }
   }
   return listing;

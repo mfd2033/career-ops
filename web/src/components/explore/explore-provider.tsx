@@ -12,6 +12,7 @@ import {
   isBroadSearch,
   parseExplorePatch,
   browserToParams,
+  applyBrowserSalaryGate,
   type AtsSource,
   type BrowserSource,
   type DiscoveredOffer,
@@ -379,7 +380,7 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     setSources(init);
     setStatus(t("explore.disc.castingBrowser"));
     if (typeof window !== "undefined") {
-      window.history.replaceState(null, "", `/explore?${browserToParams(query, platforms as unknown as string[], f.zhCity)}`);
+      window.history.replaceState(null, "", `/explore?${browserToParams(query, platforms as unknown as string[], f.zhCity, f.zhSalaryMin)}`);
     }
 
     // 扩展驱动的探索页采集(ADR-0007 E2/E5/E6 seam):逐平台查/开 tab 驱动 content
@@ -459,12 +460,16 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
       });
       const offersRes = await extRequest({ type: "scan-offers", scanId });
       const found = Array.isArray(offersRes.offers) ? (offersRes.offers as DiscoveredOffer[]) : [];
-      setOffers(found);
-      if (found.length > 0) {
-        setMatchCount(found.length);
-        setCompaniesScanned(found.length);
+      // 薪酬门控（工单 04，页面侧）：扩展路径的 offer 不经过 browser-scan 服务端
+      // 门，在取回处套用同一 applyBrowserSalaryGate（区间重叠、薪资未知放行并打
+      // 标），保证扩展驱动与 bsk 兜底两条路径行为一致。
+      const gated = applyBrowserSalaryGate(found, f.zhSalaryMin);
+      setOffers(gated);
+      if (gated.length > 0) {
+        setMatchCount(gated.length);
+        setCompaniesScanned(gated.length);
         setPhase("revealing");
-        setStatus(t(found.length === 1 ? "explore.disc.browserFoundOne" : "explore.disc.browserFoundMany", { n: found.length }));
+        setStatus(t(gated.length === 1 ? "explore.disc.browserFoundOne" : "explore.disc.browserFoundMany", { n: gated.length }));
         window.setTimeout(() => setPhase("results"), 850);
       } else if (failed.length) {
         setPhase("degraded");

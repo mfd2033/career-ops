@@ -30,7 +30,10 @@ export function addOffersToPipeline(offers: DiscoveredOffer[]): Promise<AddResul
       source: o.source || o.ats || "explorer",
       // Preserve the optional per-offer signal so it survives to pipeline.md.
       // The core writer treats an empty note as absent (byte-identical output).
-      note: o.note || "",
+      // Browser-mode salary rides the note (工单 03) — the canonical writer has
+      // no dedicated salary column; the raw text (or a 「薪资未知」 marker when
+      // a floor gate was active but the text parsed to nothing) is appended.
+      note: [o.note, o.salaryText || (o.salaryUnknown ? "薪资未知" : "")].filter(Boolean).join(" · "),
     }));
   if (clean.length === 0) return Promise.resolve({ added: 0 });
 

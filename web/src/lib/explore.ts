@@ -23,11 +23,12 @@ export const cleanBrowserSources = ((v: unknown) => rawCleanBrowserSources(v)) a
 export const parseBrowserSources = ((s: string | null | undefined) =>
   rawParseBrowserSources(s ?? undefined)) as (s: string | null | undefined) => BrowserSource[];
 /** Browser-mode URL codec (serializer). Restore side: paramsToBrowser below. */
-export const browserToParams = ((q: string, sources: BrowserSource[] | string[], city?: string) =>
-  rawBrowserToParams(q, sources, city)) as (
+export const browserToParams = ((q: string, sources: BrowserSource[] | string[], city?: string, salaryMinK?: number) =>
+  rawBrowserToParams(q, sources, city, salaryMinK)) as (
   q: string,
   sources: BrowserSource[] | string[],
   city?: string,
+  salaryMinK?: number,
 ) => string;
 export const BROWSER_LABEL: Record<BrowserSource, string> = {
   zhipin: "BOSS直聘",
@@ -59,6 +60,9 @@ export type ExploreFilters = {
   /** Optional logical Chinese city to filter the browser hunt by (e.g. "郑州").
    *  Empty = national search. Only the three browser boards honor it. */
   zhCity?: string;
+  /** 薪资下限（月薪 K，如 20 = ≥20K/月）。区间重叠判定；0/缺省 = 不过滤。
+   *  无薪资文本或解析失败的岗位放行并打「薪资未知」。 */
+  zhSalaryMin?: number;
 };
 
 export const DEFAULT_FILTERS: ExploreFilters = {
@@ -91,6 +95,13 @@ export type DiscoveredOffer = {
    *  writer (scan.mjs formatPipelineOffer). Generic and source-agnostic — an
    *  importer can attach a note; the deterministic scan omits it. */
   note?: string;
+  // ── browser-mode salary additions (工单 03；scan/ai offers omit both) ──
+  /** raw salary display text from the listing card (e.g. "20-35K·14薪").
+   *  Empty/absent = the card carried no salary the collector could read. */
+  salaryText?: string;
+  /** set ONLY when a salary floor gate was active and this offer's salary text
+   *  yielded no monthly value (无薪资/元/天/乱文本) → 「薪资未知」打标放行. */
+  salaryUnknown?: true;
   // ── AI-search (modes/discover.md) additions — all optional, so the
   //    deterministic scan offer is unaffected (fields simply absent). ──
   /** present ONLY on AI offers → drives the "unverified" badge. AI finds can't be
@@ -142,6 +153,9 @@ import {
   parseBrowserSources as rawParseBrowserSources,
   browserToParams as rawBrowserToParams,
 } from "./browser-search.mjs";
+// 薪资解析与门控（工单 01/03）的客户端再导出：探索页扩展路径（工单 04）在
+// scan-offers 取回处套用与服务端 browser-scan 相同的过滤语义。
+export { matchesBrowserSalary, isSalaryUnknown, applyBrowserSalaryGate } from "./browser-search.mjs";
 
 function clampNum(v: unknown, lo: number, hi: number, fallback: number): number {
   const n = Number(v);
@@ -195,6 +209,11 @@ export function parseExplorePatch(
   }
   if (raw.zhQuery !== undefined) next.zhQuery = String(raw.zhQuery).slice(0, 200);
   if (raw.zhCity !== undefined) next.zhCity = String(raw.zhCity).trim().slice(0, 50);
+  if (raw.zhSalaryMin !== undefined) {
+    const n = Number(raw.zhSalaryMin);
+    // 正数保留（1 位小数封顶）；0/负数/非数字 = 清除条件。
+    next.zhSalaryMin = Number.isFinite(n) && n > 0 ? Math.round(n * 10) / 10 : undefined;
+  }
   return next;
 }
 
@@ -250,11 +269,13 @@ export function paramsToAi(sp: URLSearchParams): string | null {
 export function paramsToBrowser(sp: URLSearchParams, base: ExploreFilters = DEFAULT_FILTERS): ExploreFilters | null {
   if (sp.get("mode") !== "browser") return null;
   const parsed = parseBrowserSources(sp.get("sources") ?? undefined);
+  const smin = Number(sp.get("smin"));
   return {
     ...base,
     browserSources: parsed.length ? (parsed as BrowserSource[]) : [...BROWSER_SOURCES],
     zhQuery: sp.get("zh") ?? "",
     zhCity: (sp.get("city") ?? "").trim(),
+    zhSalaryMin: Number.isFinite(smin) && smin > 0 ? smin : undefined,
     mode: "browser",
   };
 }
