@@ -176,9 +176,10 @@ export function parseSalaryText(text, source) {
   // 区间优先（首值单位可省可带：20-35K / 20K-35K / 2万-3万），再退单值（30K / 2.5万）。
   // 具名捕获组：两条正则的组数不同，按名取值避免解构错位；首值单位独立捕获，
   // 混合单位区间（8千-1.2万）各按自身单位折算，不沿用尾值单位。
+  // 「元」= 智联的元/月薪形态（7000-8000元），÷1000 折算 K。
   const m =
-    t.match(/(?<lo>\d+(?:\.\d+)?)(?<lounit>千|k|K|万)?-(?<hi>\d+(?:\.\d+)?)(?<unit>千|k|K|万)(?![a-zA-Z])/) ||
-    t.match(/(?<lo>\d+(?:\.\d+)?)(?<unit>千|k|K|万)(?![a-zA-Z])/);
+    t.match(/(?<lo>\d+(?:\.\d+)?)(?<lounit>千|k|K|万|元)?-(?<hi>\d+(?:\.\d+)?)(?<unit>千|k|K|万|元)(?![a-zA-Z])/) ||
+    t.match(/(?<lo>\d+(?:\.\d+)?)(?<unit>千|k|K|万|元)(?![a-zA-Z])/);
   if (!m) return null;
   const { lo, hi, lounit, unit } = m.groups;
   // 显式年薪标记优先于站点口径。
@@ -186,7 +187,9 @@ export function parseSalaryText(text, source) {
     /\/年|年薪/.test(t) ||
     ((unit === "万" || lounit === "万") && String(source ?? "").replace(/^browser-/, "") === "liepin");
   const toK = (v, u) => {
-    const base = u === "万" ? v * 10 : v;
+    let base = v;
+    if (u === "万") base = v * 10;
+    else if (u === "元") base = v / 1000;
     return Math.round((annual ? base / 12 : base) * 10) / 10;
   };
   // 校验放在折算后：混合单位区间的原始值不可比（8千-1.2万 折算前是 8 vs 1.2）。

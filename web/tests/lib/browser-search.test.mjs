@@ -158,6 +158,14 @@ test("parseSalaryText: 非月薪口径与乱文本 → null（归入薪资未知
   assert.equal(parseSalaryText("100人", "zhaopin"), null);
 });
 
+test("parseSalaryText: 智联「元」月薪形态 ÷1000 折算（7000-8000元 → 7-8K）", () => {
+  assert.deepEqual(parseSalaryText("7000-8000元", "zhaopin"), { minK: 7, maxK: 8 });
+  assert.deepEqual(parseSalaryText("8000-14000元", "zhaopin"), { minK: 8, maxK: 14 });
+  assert.deepEqual(parseSalaryText("8000元", "zhaopin"), { minK: 8, maxK: 8 });
+  // 元/天等非月薪口径仍归未知，不受元月薪支持影响
+  assert.equal(parseSalaryText("200-350元/天", "zhaopin"), null);
+});
+
 test("parseSalaryText: 未知站点来源的裸「万」按月薪保守处理", () => {
   assert.deepEqual(parseSalaryText("2-3万", ""), { minK: 20, maxK: 30 });
 });
