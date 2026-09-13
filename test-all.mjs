@@ -374,6 +374,14 @@ const scripts = [
 ];
 
 const scriptTmp = mkdtempSync(join(ROOT, '.tmp-script-test-'));
+// The finally below only runs on normal unwinding. A Ctrl+C (SIGINT) skips it
+// and leaves the near-whole-repo fixture behind — the root cause of the stale
+// `.tmp-script-test-*` pile. Handle the interrupt signals explicitly: remove
+// the fixture, then exit with the conventional signal status.
+const cleanupScriptTmp = () => { try { rmSync(scriptTmp, { recursive: true, force: true }); } catch {} };
+for (const signal of ['SIGINT', 'SIGTERM']) {
+  process.on(signal, () => { cleanupScriptTmp(); process.exit(signal === 'SIGINT' ? 130 : 143); });
+}
 try {
   // Never copied, at any depth: dependency trees and git metadata. Nothing run
   // from the throwaway copy reads them (module resolution walks up into the
@@ -388,7 +396,12 @@ try {
     // Everything else is a top-level workspace dir (data/, reports/, …) and is
     // matched by basename ONLY at the repo root, so nested fixture subdirs such
     // as test-fixtures/upgrade/state-*/data and .../reports still get copied.
-    if (dirname(src) === ROOT && exclude.includes(name)) return;
+    // A stale `.tmp-script-test-*` from a killed run must never be copied into
+    // the next fixture: the copy is near-whole-repo, so nesting one leftover
+    // inside the next fixture compounds on every kill (a 98 GB pile was traced
+    // to exactly this). Prefix-match covers prior runs' leftovers too —
+    // `basename(scriptTmp)` alone only ever excluded the current one.
+    if (dirname(src) === ROOT && (exclude.includes(name) || name.startsWith('.tmp-script-test-'))) return;
     const stat = statSync(src);
     if (stat.isDirectory()) {
       mkdirSync(dest, { recursive: true });
