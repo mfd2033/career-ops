@@ -97,18 +97,30 @@ test("toDiscoveredOffer: missing salary text omits salaryText entirely (contract
   assert.equal(Object.prototype.hasOwnProperty.call(offer, "salaryText"), false);
 });
 
-test("toDiscoveredOffer: BOSS PUA 字形混淆薪资清洗后无数字 → 不携带 salaryText（乱码徽章回归锁）", () => {
-  // 真实取证（data/pipeline.md）：BOSS 薪资数字为 PUA 码点，ASCII 只剩 "-K"。
+test("toDiscoveredOffer: BOSS PUA 数字按实证映射解码（E031+n = 数字 n，用户对照 2026-09-14）", () => {
+  // 真实取证（data/pipeline.md + 用户在 BOSS 页面人工对照）：
+  // {E032}{E036}-{E034}{E031}K = 15-30K
   const offer = toDiscoveredOffer(
     { url: "https://www.zhipin.com/job_detail/12b516d2077e1d8b0nN709S8FFBY.html", title: "AI", salary: "\uE032\uE036-\uE034\uE031K" },
     "zhipin",
   );
-  assert.equal(Object.prototype.hasOwnProperty.call(offer, "salaryText"), false);
+  assert.equal(offer.salaryText, "15-30K");
+  const offer2 = toDiscoveredOffer({ url: "https://x.com/2", title: "AI", salary: "\uE033\uE031-\uE034\uE031K·\uE032\uE034薪" }, "zhipin");
+  assert.equal(offer2.salaryText, "20-30K·13薪");
 });
 
-test("toDiscoveredOffer: PUA 混杂但含 ASCII 数字的薪资保留可读部分", () => {
-  const offer = toDiscoveredOffer({ url: "https://x.com/1", title: "AI", salary: "15-\uE0325K" }, "zhipin");
-  assert.equal(offer.salaryText, "15-5K");
+test("toDiscoveredOffer: 未映射 PUA 码点（9 的候选码点）→ 不携带 salaryText", () => {
+  // E030/E03A 是 9 的候选码点，未经实证不猜——含未映射码点的薪资归「薪资未知」。
+  const offer = toDiscoveredOffer({ url: "https://x.com/3", title: "AI", salary: "1\uE03A-15K" }, "zhipin");
+  assert.equal(Object.prototype.hasOwnProperty.call(offer, "salaryText"), false);
+  // 纯 PUA 无 ASCII 数字（旧乱码场景）同样不带
+  const offer2 = toDiscoveredOffer({ url: "https://x.com/4", title: "AI", salary: "\uE030\uE030" }, "zhipin");
+  assert.equal(Object.prototype.hasOwnProperty.call(offer2, "salaryText"), false);
+});
+
+test("toDiscoveredOffer: 混有未映射 PUA 的 ASCII 薪资 → 部分解码失真，整体归「薪资未知」", () => {
+  const offer = toDiscoveredOffer({ url: "https://x.com/1", title: "AI", salary: "15-\uE0305K" }, "zhipin");
+  assert.equal(Object.prototype.hasOwnProperty.call(offer, "salaryText"), false);
 });
 
 test("toDiscoveredOffer tolerates a missing platform by falling back to browser", () => {

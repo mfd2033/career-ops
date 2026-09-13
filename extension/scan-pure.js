@@ -23,6 +23,21 @@
   // 无 ESM 导入能力,故按仓库 inline-copy 惯例内联,两处必须同改。
   const PUA_GLYPH_RE = /[\uE000-\uF8FF\u{F0000}-\u{FFFFD}\u{100000}-\u{10FFFD}]/gu;
 
+  // BOSS PUA 数字实证映射(2026-09-14 用户在 BOSS 页面人工对照 A/B/C 三个独立样本
+  // 交叉验证,与 data/pipeline.md 其余样本全量回验一致): PUA \uE031+n → 数字 n,
+  // 即 E031=0、E032=1 … E039=8。9 的码点未实证(E030/E03A 候选),保持未映射——
+  // 含未映射码点的薪资清洗后无完整数字 → 归「薪资未知」,不猜(错数字会错误放行,
+  // 比「未知」危害大)。若站点轮换字体导致映射漂移,症状是解码出成片不合常理的
+  // 薪资,届时用同样的人工对照法重测本表。
+  const BOSS_PUA_DIGIT_RE = /[\uE031-\uE039]/g;
+
+  /** Decode the empirically-verified BOSS PUA digit glyphs to ASCII digits. Pure. */
+  function decodeBossPuaDigits(s) {
+    return String(s ?? "").replace(BOSS_PUA_DIGIT_RE, (c) =>
+      String.fromCharCode(0x30 + (c.charCodeAt(0) - 0xE031)),
+    );
+  }
+
   /**
    * 回退去重键:注入 normalizeKey 前的轻量归一。core 传入其站点级 normalizeUrl
    * (带 extraTrackingParams 全量 strip);node 单测直接用本回退。
@@ -97,10 +112,14 @@
   function toDiscoveredOffer(meta, platform) {
     const p = typeof platform === "string" && platform ? platform : "browser";
     const city = meta && typeof meta.city === "string" && meta.city.trim() ? meta.city.trim() : "";
-    // 薪资先剥 PUA 再判数字:清洗后无任何数字(纯字形混淆,如 "-K")→ 不带
-    // salaryText,走「薪资未知」,绝不把乱码透传成展示徽章。
-    const salaryRaw = meta && typeof meta.salary === "string" ? meta.salary.replace(PUA_GLYPH_RE, "").trim() : "";
-    const salary = salaryRaw && /\d/.test(salaryRaw) ? salaryRaw : "";
+    // 薪资先解码 PUA 数字、再判未映射残留:混有未映射码点(如 9 的候选 E030/E03A)
+    // 时部分解码会失真(1?-15K 变 1-15K)→ 整体归「薪资未知」;纯 ASCII/全映射解码
+    // 且含数字才携带 salaryText。
+    const rawSalary = meta && typeof meta.salary === "string" ? meta.salary : "";
+    const decoded = decodeBossPuaDigits(rawSalary);
+    const hasUnmappedPua = /[\uE000-\uF8FF\u{F0000}-\u{FFFFD}\u{100000}-\u{10FFFD}]/u.test(decoded);
+    const stripped = decoded.replace(PUA_GLYPH_RE, "").trim();
+    const salary = !hasUnmappedPua && stripped && /\d/.test(stripped) ? stripped : "";
     return {
       url: meta && typeof meta.url === "string" ? meta.url : "",
       company: (meta && meta.company) || "",
