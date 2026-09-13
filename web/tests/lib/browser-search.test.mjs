@@ -12,10 +12,16 @@ import { extractBrowserQuery, buildSearchUrls, expandSearchTargets, parseSalaryT
 
 test("cleanSalaryText: 剥离 PUA 码点（BOSS 数字字体混淆），保留可读文本", () => {
   assert.equal(cleanSalaryText("\uE032\uE036-\uE034\uE031K"), "-K");
-  assert.equal(cleanSalaryText("15-\uE0325K·14薪"), "15-5K·14薪");
+  assert.equal(cleanSalaryText("15-\uE0305K·14薪"), "15-5K·14薪");
   assert.equal(cleanSalaryText("20-35K·14薪"), "20-35K·14薪");
   assert.equal(cleanSalaryText("\uE032\uE036"), "");
   assert.equal(cleanSalaryText(undefined), "");
+});
+
+test("parseSalaryText: BOSS PUA 数字已在采集侧解码为 ASCII，web 侧直接可解析", () => {
+  // 采集侧解码后的形态（15-30K / 20-30K·13薪）走正常解析路径
+  assert.deepEqual(parseSalaryText("15-30K", "zhipin"), { minK: 15, maxK: 30 });
+  assert.deepEqual(parseSalaryText("20-30K·13薪", "zhipin"), { minK: 20, maxK: 30 });
 });
 
 // ── browserToParams —— smin 编码（工单 02）──

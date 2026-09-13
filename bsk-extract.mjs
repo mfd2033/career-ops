@@ -75,9 +75,17 @@ export function extractCityFromText(text, cityNames = CITY_NAMES) {
  * @returns {string} matched salary text, or "" when none found
  */
 export function extractSalaryFromText(text) {
-  const t = String(text ?? '');
-  if (!t) return '';
-  const m = t.match(
+  // BOSS PUA 数字实证映射(2026-09-14 用户人工对照交叉验证): \uE031+n → 数字 n
+  // (E031=0 … E039=8)。9 的码点未实证,保持未映射;混有未映射码点的薪资部分解码
+  // 会失真 → 整体不提取,归「薪资未知」。规则与 extension/scan-pure.js 的
+  // decodeBossPuaDigits 同步,两处同改。
+  const decoded = String(text ?? '').replace(
+    /[\uE031-\uE039]/g,
+    (c) => String.fromCharCode(0x30 + (c.charCodeAt(0) - 0xE031)),
+  );
+  if (!decoded) return '';
+  if (/[\uE000-\uF8FF\u{F0000}-\u{FFFFD}\u{100000}-\u{10FFFD}]/u.test(decoded)) return '';
+  const m = decoded.match(
     /\d+(?:\.\d+)?\s*[-–~]\s*\d+(?:\.\d+)?\s*(?:千|[kK]|万)(?:\s*·\s*\d+\s*薪)?|\d+(?:\.\d+)?\s*(?:千|[kK]|万)(?:\s*·\s*\d+\s*薪)?/,
   );
   return m ? m[0].trim() : '';
