@@ -10,6 +10,12 @@ import type { EvalTimingEntry } from "@/lib/eval-timing";
 // pool "#N" subtitle → pdf fallback, ADR-0018); this module only wires it to
 // the two server indexes and keeps 评估用时 scoped to evaluation workers — a
 // number resolved for navigation is not a duration claim.
+//
+// The cache is dropped whenever a worker settles (the `co-job-done` event): both
+// indexes summarise files the finished run just wrote (data/eval-timings.tsv, the
+// tracker), and the mount-time fetch necessarily predates them — a card's first
+// render happens while the CLI is still running. Without the revalidation a worker
+// that settles in this session keeps showing the local fallback until a reload.
 
 type ReportIndex = Record<string, { score: string; reportNum: string }>;
 type DurationIndex = Record<string, EvalTimingEntry>;
@@ -29,6 +35,9 @@ function fetchCached<T>(url: string): Promise<T> {
 
 function useCachedJson<T>(url: string): T | null {
   const [data, setData] = useState<T | null>(null);
+  // Bumped to force a re-read; the cache entry is dropped first so the re-run lands
+  // on a fresh fetch instead of the settled worker's stale snapshot.
+  const [revision, setRevision] = useState(0);
   useEffect(() => {
     let live = true;
     fetchCached<T>(url).then((d) => {
@@ -37,6 +46,17 @@ function useCachedJson<T>(url: string): T | null {
     return () => {
       live = false;
     };
+  }, [url, revision]);
+  // A finished worker rewrote the indexes' source files (see the header): re-read
+  // them so its card / history row stops showing the local fallback. Every mounted
+  // card reacts, but they share ONE refetch per url via the promise cache.
+  useEffect(() => {
+    const onSettled = () => {
+      cache.delete(url);
+      setRevision((r) => r + 1);
+    };
+    window.addEventListener("co-job-done", onSettled);
+    return () => window.removeEventListener("co-job-done", onSettled);
   }, [url]);
   return data;
 }
