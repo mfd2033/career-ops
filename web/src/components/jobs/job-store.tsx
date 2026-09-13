@@ -80,10 +80,26 @@ function parseVerdict(text: string): JobResult {
   return { score: null, summary: "", tone: "muted" };
 }
 
+// Per-job accumulation for a single-run worker whose events arrive on the
+// /api/events multiplexed channel (ADR-0020) — the old transport kept these as
+// closure locals of the per-task stream reader.
+type RunAcc = {
+  opts: StartOpts;
+  text: string;
+  verdictLine: string; // latched separately so the 8000-char tail can't drop it
+  doneTokens: number; // per-run token cost, forwarded on the done event (#6)
+  doneCostUsd: number | null;
+  steps: JobStep[];
+  lastSeq: number; // bus replay dedup: skip events already applied before a reconnect
+};
+
 export function JobsProvider({ children }: { children: React.ReactNode }) {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [activeRuns, setActiveRuns] = useState<ActiveRunApi>({ running: [], queued: [] });
-  const controllers = useRef(new Map<string, AbortController>());
+  const batchControllers = useRef(new Map<string, AbortController>()); // batch jobs only — they still hold their own NDJSON stream
+  const runIds = useRef(new Map<string, string>()); // server runId -> local jobId (single-run workers, ADR-0020)
+  const accs = useRef(new Map<string, RunAcc>());
+  const removed = useRef(new Set<string>()); // cards removed before their POST /api/run even returned
   const seq = useRef(0);
   const loaded = useRef(false);
   const { t } = useI18n();
@@ -115,6 +131,126 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
       live = false;
       clearInterval(timer);
     };
+  }, []);
+
+  // The ONE worker-event channel (ADR-0020): every single-run worker publishes
+  // its tool/status/text/done/error events to /api/events tagged with its
+  // runId, and this effect holds ONE connection for all of them (with
+  // reconnect + buffer replay; per-event `seq` dedups the replay). Before
+  // ADR-0020 each task held its own streaming response, and ~6 concurrent
+  // tasks exhausted the browser's 6 sockets per HTTP/1.1 host — every click
+  // on the page stalled until tasks finished.
+  useEffect(() => {
+    let live = true;
+    const controller = new AbortController();
+
+    const finishJob = (id: string, status: "done" | "error", lastLabel?: string) => {
+      const acc = accs.current.get(id);
+      if (!acc) return;
+      const result = status === "done" ? parseVerdict(acc.verdictLine || acc.text) : undefined;
+      const cost = status === "done" && acc.doneTokens > 0 ? { tokens: acc.doneTokens, usd: acc.doneCostUsd ?? undefined } : undefined;
+      setJobs((js) =>
+        js.map((j) =>
+          j.id === id
+            ? { ...j, status, result, cost, endedAt: Date.now(), steps: lastLabel ? [...j.steps, { kind: "status", label: lastLabel, ts: Date.now() }] : j.steps }
+            : j,
+        ),
+      );
+      // persist a readable log file so the CLI/assistant can read past runs
+      if (status === "done") {
+        fetch("/api/runs/save", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id, title: acc.opts.title, subtitle: acc.opts.subtitle, page: acc.opts.page, input: acc.opts.input, result, cost, steps: acc.steps, output: acc.text }),
+        }).catch(() => {});
+        // Tell server-snapshot surfaces (Today, pipeline) to refetch — the
+        // worker just wrote a real tracker row / report they don't yet see.
+        if (typeof window !== "undefined" && ["evaluate", "pdf", "batch-evaluate"].includes(acc.opts.kind)) {
+          window.dispatchEvent(new CustomEvent("co-job-done", { detail: { kind: acc.opts.kind, input: acc.opts.input } }));
+        }
+      }
+      accs.current.delete(id);
+      for (const [runId, jid] of runIds.current) if (jid === id) runIds.current.delete(runId);
+    };
+
+    const handleEvent = (jobId: string, ev: { type: string; [key: string]: unknown }) => {
+      const acc = accs.current.get(jobId);
+      if (!acc) return;
+      // Replay dedup: after a channel reconnect /api/events replays each run's
+      // buffer — skip anything this job already applied.
+      if (typeof ev.seq === "number") {
+        if (ev.seq <= acc.lastSeq) return;
+        acc.lastSeq = ev.seq;
+      }
+      if (ev.type === "tool") {
+        acc.steps.push({ kind: "tool", label: ev.name as string, ts: Date.now() });
+        setJobs((js) => js.map((j) => (j.id === jobId ? { ...j, steps: [...j.steps, { kind: "tool", label: ev.name as string, ts: Date.now() }] } : j)));
+      } else if (ev.type === "status") {
+        acc.steps.push({ kind: "status", label: ev.label as string, ts: Date.now() });
+        setJobs((js) => js.map((j) => (j.id === jobId ? { ...j, steps: [...j.steps, { kind: "status", label: ev.label as string, ts: Date.now() }] } : j)));
+      } else if (ev.type === "text") {
+        const full = acc.text + (ev.text as string);
+        const vm = full.match(/VERDICT:[^\n]*/i);
+        if (vm) acc.verdictLine = vm[0];
+        acc.text = full.slice(-8000);
+        const tail = acc.text;
+        setJobs((js) => js.map((j) => (j.id === jobId ? { ...j, text: tail } : j)));
+      } else if (ev.type === "done") {
+        if (typeof ev.tokens === "number") acc.doneTokens = ev.tokens;
+        if (typeof ev.costUsd === "number") acc.doneCostUsd = ev.costUsd;
+        finishJob(jobId, "done", t("jobs.stepDone"));
+      } else if (ev.type === "error") {
+        finishJob(jobId, "error", (ev.msg as string) || t("jobs.stepError"));
+      }
+      // keepalive / unknown event types: ignored.
+    };
+
+    const connect = async () => {
+      // Reconnect loop: on a dropped channel, re-subscribe (the server replays
+      // live runs' buffers so no worker output is lost across the gap).
+      for (;;) {
+        if (!live) return;
+        try {
+          const res = await fetch("/api/events", { signal: controller.signal, cache: "no-store" });
+          if (!res.ok || !res.body) throw new Error("events channel unavailable");
+          const reader = res.body.getReader();
+          const dec = new TextDecoder();
+          let buf = "";
+          for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buf += dec.decode(value, { stream: true });
+            let nl: number;
+            while ((nl = buf.indexOf("\n")) !== -1) {
+              const line = buf.slice(0, nl).trim();
+              buf = buf.slice(nl + 1);
+              if (!line) continue;
+              try {
+                const frame = JSON.parse(line) as { runId?: string; type?: string; [key: string]: unknown };
+                if (frame.type === "keepalive") continue;
+                if (!frame.runId) continue;
+                const jobId = runIds.current.get(frame.runId);
+                if (!jobId) continue; // another tab's / extension's run — surfaced via the active-runs poll instead
+                handleEvent(jobId, frame as { type: string; [key: string]: unknown });
+              } catch {
+                /* skip malformed frame */
+              }
+            }
+          }
+        } catch {
+          /* dropped — fall through to the backoff */
+        }
+        if (!live) return;
+        await new Promise((r) => setTimeout(r, 2000));
+      }
+    };
+    connect();
+    return () => {
+      live = false;
+      controller.abort();
+    };
+    // finishJob/handleEvent close over `t` (stable per locale) and refs only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Merge server pool entries into the visible job list.
@@ -163,7 +299,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
       })),
   ];
   // Local single-run jobs flip to 排队中 when the pool reports them queued
-  // (their live stream sits in the background until a slot frees up).
+  // (their events keep flowing on the channel in the background, ADR-0020).
   const localDisplay = jobs.map((j) => {
     const pos = j.input ? queuePosByRunInput.get(j.input) : undefined;
     return pos != null ? { ...j, status: "queued" as const, queuedPos: pos } : j;
@@ -217,15 +353,94 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
         startedAt: Date.now(),
       };
       setJobs((js) => [job, ...js]);
-      // AbortController so a local card can be truly cancelled (dequeue + stop the
-      // stream → the /api/run stream's cancel() dequeues from the pool's queue).
+      removed.current.delete(id);
+
+      if (!opts.urls) {
+        // Single-run worker (evaluate/pdf/fix-portal): POST returns {runId}
+        // immediately (ADR-0020) and the worker's events arrive on the shared
+        // /api/events channel — this tab holds NO per-task connection.
+        (async () => {
+          const cliId = readSavedCliId() || (await resolveCliId());
+          const model = readSavedModel() || undefined;
+          if (!cliId) {
+            patch(id, (j) => ({
+              ...j,
+              status: "error",
+              endedAt: Date.now(),
+              steps: [...j.steps, { kind: "status", label: t("jobs.stepNoCli"), ts: Date.now() }],
+            }));
+            return;
+          }
+          accs.current.set(id, { opts, text: "", verdictLine: "", doneTokens: 0, doneCostUsd: null, steps: [], lastSeq: 0 });
+          try {
+            const res = await fetch("/api/run", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ kind: opts.kind, input: opts.input, cliId, model }),
+            });
+            if (!res.ok) {
+              const e = await res.json().catch(() => ({}));
+              accs.current.delete(id);
+              patch(id, (j) => ({
+                ...j,
+                status: "error",
+                endedAt: Date.now(),
+                steps: [...j.steps, { kind: "status", label: e.error || t("jobs.stepFailedToStart"), ts: Date.now() }],
+              }));
+              return;
+            }
+            const { runId, error } = (await res.json()) as { runId?: string; error?: string };
+            if (!runId) {
+              accs.current.delete(id);
+              patch(id, (j) => ({
+                ...j,
+                status: "error",
+                endedAt: Date.now(),
+                steps: [...j.steps, { kind: "status", label: error || t("jobs.stepFailedToStart"), ts: Date.now() }],
+              }));
+              return;
+            }
+            if (removed.current.has(id)) {
+              // The card was dismissed while the POST was in flight — cancel the
+              // just-registered run instead of letting it work headless unowned.
+              fetch("/api/run/cancel", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ runId }) }).catch(() => {});
+              accs.current.delete(id);
+              return;
+            }
+            runIds.current.set(runId, id);
+            // Events (including the tail of anything published between the
+            // server registering the run and this map write) are recovered by
+            // the channel's buffer replay; `seq` dedup keeps it exactly-once.
+          } catch {
+            accs.current.delete(id);
+            patch(id, (j) => ({
+              ...j,
+              status: "error",
+              endedAt: Date.now(),
+              steps: [...j.steps, { kind: "status", label: t("jobs.stepConnectionError"), ts: Date.now() }],
+            }));
+          }
+        })();
+        return id;
+      }
+
+      // Batch mode (opts.urls) goes to the dedicated batch-evaluate endpoint
+      // — one bounded-concurrency evaluator run for all URLs instead of N
+      // single-evaluate agent runs. It STILL streams NDJSON on its own
+      // response (the BOSS直聘 extension parses this endpoint too, and one
+      // batch = one held connection, well inside the 6-socket budget).
+      const acc: RunAcc = { opts, text: "", verdictLine: "", doneTokens: 0, doneCostUsd: null, steps: [], lastSeq: 0 };
+      accs.current.set(id, acc);
+      // AbortController so a batch card can be truly cancelled (the stream's
+      // server-side cancel() terminates the whole batch run).
       const controller = new AbortController();
-      controllers.current.set(id, controller);
+      batchControllers.current.set(id, controller);
 
       (async () => {
         const cliId = readSavedCliId() || (await resolveCliId());
         const model = readSavedModel() || undefined;
         if (!cliId) {
+          accs.current.delete(id);
           patch(id, (j) => ({
             ...j,
             status: "error",
@@ -234,14 +449,9 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
           }));
           return;
         }
-        let text = "";
-        let verdictLine = ""; // latched separately so the 8000-char tail can't drop it
-        let doneTokens = 0; // per-run token cost, forwarded on the done event (#6)
-        let doneCostUsd: number | null = null;
-        const steps: JobStep[] = [];
         const finish = (status: "done" | "error", lastLabel?: string) => {
-          const result = status === "done" ? parseVerdict(verdictLine || text) : undefined;
-          const cost = status === "done" && doneTokens > 0 ? { tokens: doneTokens, usd: doneCostUsd ?? undefined } : undefined;
+          const result = status === "done" ? parseVerdict(acc.verdictLine || acc.text) : undefined;
+          const cost = status === "done" && acc.doneTokens > 0 ? { tokens: acc.doneTokens, usd: acc.doneCostUsd ?? undefined } : undefined;
           patch(id, (j) => ({
             ...j,
             status,
@@ -250,30 +460,24 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
             endedAt: Date.now(),
             steps: lastLabel ? [...j.steps, { kind: "status", label: lastLabel, ts: Date.now() }] : j.steps,
           }));
-          // persist a readable log file so the CLI/assistant can read past runs
           if (status === "done") {
             fetch("/api/runs/save", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ id, title: opts.title, subtitle: opts.subtitle, page: opts.page, input: opts.input, result, cost, steps, output: text }),
+              body: JSON.stringify({ id, title: opts.title, subtitle: opts.subtitle, page: opts.page, input: opts.input, result, cost, steps: acc.steps, output: acc.text }),
             }).catch(() => {});
-            // Tell server-snapshot surfaces (Today, pipeline) to refetch — the
-            // worker just wrote a real tracker row / report they don't yet see.
-            // batch-evaluate writes many rows/reports in one run, same refresh need.
-            if (typeof window !== "undefined" && ["evaluate", "pdf", "batch-evaluate"].includes(opts.kind)) {
+            if (typeof window !== "undefined") {
               window.dispatchEvent(new CustomEvent("co-job-done", { detail: { kind: opts.kind, input: opts.input } }));
             }
           }
+          accs.current.delete(id);
         };
 
         try {
-          // Batch mode (opts.urls) goes to the dedicated batch-evaluate endpoint
-          // — one bounded-concurrency evaluator run for all URLs instead of N
-          // single-evaluate agent runs. Everything else stays on /api/run.
-          const res = await fetch(opts.urls ? "/api/batch-evaluate" : "/api/run", {
+          const res = await fetch("/api/batch-evaluate", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(opts.urls ? { urls: opts.urls, cliId, model } : { kind: opts.kind, input: opts.input, cliId, model }),
+            body: JSON.stringify({ urls: opts.urls, cliId, model }),
             signal: controller.signal,
           });
           if (!res.ok || !res.body) {
@@ -296,23 +500,23 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
               try {
                 const ev = JSON.parse(line);
                 if (ev.type === "tool") {
-                  steps.push({ kind: "tool", label: ev.name, ts: Date.now() });
+                  acc.steps.push({ kind: "tool", label: ev.name, ts: Date.now() });
                   patch(id, (j) => ({ ...j, steps: [...j.steps, { kind: "tool", label: ev.name, ts: Date.now() }] }));
                 } else if (ev.type === "status") {
-                  steps.push({ kind: "status", label: ev.label, ts: Date.now() });
+                  acc.steps.push({ kind: "status", label: ev.label, ts: Date.now() });
                   patch(id, (j) => ({ ...j, steps: [...j.steps, { kind: "status", label: ev.label, ts: Date.now() }] }));
                 } else if (ev.type === "text") {
-                  const full = text + ev.text;
+                  const full = acc.text + ev.text;
                   const vm = full.match(/VERDICT:[^\n]*/i);
-                  if (vm) verdictLine = vm[0];
-                  text = full.slice(-8000);
-                  patch(id, (j) => ({ ...j, text }));
+                  if (vm) acc.verdictLine = vm[0];
+                  acc.text = full.slice(-8000);
+                  const tail = acc.text;
+                  patch(id, (j) => ({ ...j, text: tail }));
                 } else if (ev.type === "done") {
-                  // finish happens on stream-close; capture the per-run cost it carries
-                  if (typeof ev.tokens === "number") doneTokens = ev.tokens;
-                  if (typeof ev.costUsd === "number") doneCostUsd = ev.costUsd;
+                  if (typeof ev.tokens === "number") acc.doneTokens = ev.tokens;
+                  if (typeof ev.costUsd === "number") acc.doneCostUsd = ev.costUsd;
                 } else if (ev.type === "error") {
-                   finish("error", ev.msg || t("jobs.stepError"));
+                  finish("error", ev.msg || t("jobs.stepError"));
                   return;
                 }
               } catch {
@@ -322,7 +526,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
           }
           finish("done", t("jobs.stepDone"));
         } catch (e) {
-          // A user-cancelled job surfaces as AbortError once the controller.abort()
+          // A user-cancelled batch surfaces as AbortError once the controller.abort()
           // drops the stream — the card is already removed, so don't repaint an
           // error state for a deliberate cancel.
           if ((e as Error)?.name === "AbortError") return;
@@ -336,10 +540,23 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
   );
 
   const removeJob = useCallback((id: string) => {
-    // Local job → abort its stream so the server dequeues (a queued local card
-    // truly stops) / terminates (a running local card truly stops).
-    controllers.current.get(id)?.abort();
-    controllers.current.delete(id);
+    removed.current.add(id);
+    // Batch job → abort its NDJSON stream (the server-side stream cancel
+    // terminates the whole batch run).
+    batchControllers.current.get(id)?.abort();
+    batchControllers.current.delete(id);
+    // Single-run job (ADR-0020) → explicit cancel by runId: queued runs are
+    // dequeued before spawning, running ones get their CLI tree terminated.
+    for (const [runId, jid] of runIds.current) {
+      if (jid !== id) continue;
+      runIds.current.delete(runId);
+      fetch("/api/run/cancel", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ runId }),
+      }).catch(() => {});
+    }
+    accs.current.delete(id);
     setJobs((js) => js.filter((j) => j.id !== id));
     // Server-sourced (pool) card → dequeue on the server by its pool id; the
     // next poll then no longer reports it (a running batch worker is left to the
