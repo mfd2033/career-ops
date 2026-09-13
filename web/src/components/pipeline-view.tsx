@@ -15,6 +15,8 @@ import { InboxTriage } from "@/components/inbox/inbox-triage";
 import { useJobs } from "@/components/jobs/job-store";
 import { cn } from "@/lib/cn";
 import { useI18n } from "@/lib/i18n/context";
+import { useUnknownEmployerPolicy } from "@/lib/use-unknown-employer";
+import { resolveCompanyLabel } from "@/lib/unknown-employer.mjs";
 
 // INBOX (the triage queue) is the default tab; the rest filter the tracker.
 const TABS = [
@@ -48,6 +50,11 @@ export function PipelineView({
   const router = useRouter();
   const pathname = usePathname();
   const { t } = useI18n();
+  // 未知雇主策略（挂载后读取，避免 SSR/hydration 不一致）。与详情页共用同一条显示规则，
+  // 所以 `?` 行在列表里也会显示成「{代招方}（代招）」而不是一个孤零零的问号。
+  const employerPolicy = useUnknownEmployerPolicy();
+  const companyLabel = (r: Application) =>
+    resolveCompanyLabel({ company: r.company, agency: r.reportVia, policy: employerPolicy });
 
   // Display labels for tabs/sort keys/statuses. The URL param values stay the
   // canonical English strings; only the visible text is localized.
@@ -387,13 +394,13 @@ export function PipelineView({
                         setSelected(next);
                       }}
                       className="size-4 cursor-pointer rounded border-border text-brand accent-brand align-middle"
-                      aria-label={r.company}
+                      aria-label={companyLabel(r)}
                     />
                   </td>
                   <td className="px-4 py-3 font-medium">
                     <Link href={`/pipeline/${r.n}${contextQuery}`} className="flex items-center gap-2.5 transition-colors group-hover:text-brand">
-                      <CompanyLogo name={r.company} size={20} />
-                      {r.company}
+                      <CompanyLogo name={companyLabel(r)} size={20} />
+                      {companyLabel(r)}
                     </Link>
                   </td>
                   <td className="px-4 py-3 text-muted">

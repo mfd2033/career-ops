@@ -81,6 +81,7 @@ export const en: Dict = {
   "config.unknownEmployerPlaceholderDesc": "Display a neutral \"?\" — no employer named.",
   "config.unknownEmployerAgency": "Show agency",
   "config.unknownEmployerAgencyDesc": "Display the agency that posted the offer instead.",
+  "config.unknownEmployerSyncFailed": "Not saved to the server — evaluations would still use the previous setting. Check that the dashboard is running, then pick the option again.",
 
   "config.defaultLangTitle": "Default display language",
   "config.defaultLangDesc": "Choose the language shown on first load. You can still switch anytime.",
@@ -191,6 +192,7 @@ export const zh: Dict = {
   "config.unknownEmployerPlaceholderDesc": "显示中立占位符 \"?\" — 不透露雇主名。",
   "config.unknownEmployerAgency": "显示代招方",
   "config.unknownEmployerAgencyDesc": "改为显示发布该职位的代招方（agency）名称。",
+  "config.unknownEmployerSyncFailed": "未能写入服务端——评估仍会按上一档策略执行。请确认面板在运行，然后重新选择一次。",
 
   "config.defaultLangTitle": "默认显示语言",
   "config.defaultLangDesc": "选择首次加载时显示的语言。你随时可以切换。",

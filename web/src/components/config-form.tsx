@@ -16,7 +16,7 @@ import { cn } from "@/lib/cn";
 import { CadenceSettings } from "@/components/followups/cadence-settings";
 import { JdRulesSettings } from "@/components/jd-rules-settings";
 import { JobTargetSettings } from "@/components/job-target-settings";
-import { persistCliId, persistModel, readSavedCliId, readSavedModel, readSavedUnknownEmployer, persistUnknownEmployer, type UnknownEmployerPolicy } from "@/lib/saved-cli";
+import { persistCliId, persistModel, readSavedCliId, readSavedModel, readSavedUnknownEmployer, persistUnknownEmployer, readServerUnknownEmployer, mirrorUnknownEmployer, type UnknownEmployerPolicy } from "@/lib/saved-cli";
 import { readSavedConcurrencyPool, persistConcurrencyPool, CONCURRENCY_POOL_DEFAULT } from "@/lib/saved-cli";
 import { resolveModelPicker } from "@/lib/model-picker.mjs";
 import {
@@ -95,6 +95,8 @@ export function ConfigForm() {
   const [scanSource, setScanSource] = useState<ScanSource[]>([...SCAN_SOURCE_DEFAULT]);
   const [scanMax, setScanMax] = useState<Record<BrowserSourceId, number>>({ ...SCAN_MAX_DEFAULT });
   const [unknownEmployer, setUnknownEmployer] = useState<UnknownEmployerPolicy>("placeholder");
+  // 服务端没收到策略写入时为 true：必须显示出来——丢写是静默的，而评估读的正是服务端。
+  const [policySyncFailed, setPolicySyncFailed] = useState(false);
   const [concurrencyPool, setConcurrencyPool] = useState(CONCURRENCY_POOL_DEFAULT);
   const [saved, setSaved] = useState(false);
   // 未安装工具的安装链接默认收起：默认视觉只留下拉，需要时再展开 6 个外链。
@@ -144,6 +146,15 @@ export function ConfigForm() {
     setScanSource(readScanSources());
     setScanMax(readScanMax() as Record<BrowserSourceId, number>);
     setUnknownEmployer(readSavedUnknownEmployer());
+    // 未知雇主策略同样「服务端持真值」：完整评估读的是 /api/config（worker 是 headless
+    // CLI，读不到 localStorage —— ADR-0004 D3），本地镜像只负责首屏绘制与报告页回退显示。
+    // 两侧不一致时必须显示服务端那一档，否则配置页会显示一个评估根本不会用的策略
+    // （报告 #836 就是这么来的：本地 agency、服务端 placeholder，评估按 placeholder 写了 `?`）。
+    readServerUnknownEmployer().then((server) => {
+      if (!server) return; // 服务端没值/不可达：保留本地镜像，不清空
+      setUnknownEmployer(server);
+      mirrorUnknownEmployer(server); // 让报告页回退显示与评估口径一致
+    });
     // 全局并发上限是服务端持真值，异步读回回显。
     readSavedConcurrencyPool().then(setConcurrencyPool);
   }, []);
@@ -208,7 +219,7 @@ export function ConfigForm() {
 
   function save() {
     // 未知雇主策略独立于评估引擎，任何模式保存都生效（快评跟随走 /api/config）。
-    persistUnknownEmployer(unknownEmployer);
+    void persistUnknownEmployer(unknownEmployer).then((ok) => setPolicySyncFailed(!ok));
     // 浏览器扫描每站采集上限同样独立于评估引擎，任何模式保存都生效。
     persistScanMax(scanMax);
     // 全局并发上限也是服务端配置，任何模式保存都生效（引擎每次 dispatch 时读取）。
@@ -777,7 +788,13 @@ export function ConfigForm() {
         desc={t("config.unknownEmployerDesc")}
         size="md"
         value={unknownEmployer}
-        onChange={(v) => setUnknownEmployer(v as UnknownEmployerPolicy)}
+        onChange={(v) => {
+          const policy = v as UnknownEmployerPolicy;
+          setUnknownEmployer(policy);
+          // 选中即落库，不等「保存」按钮：只改下拉的话本地镜像与服务端会分叉，
+          // 而分叉是静默的——配置页显示新档位，每次评估却仍按服务端旧值走（#836）。
+          void persistUnknownEmployer(policy).then((ok) => setPolicySyncFailed(!ok));
+        }}
       >
         <option value="placeholder">{t("config.unknownEmployerPlaceholder")}</option>
         <option value="agency">{t("config.unknownEmployerAgency")}</option>
@@ -787,6 +804,11 @@ export function ConfigForm() {
           ? t("config.unknownEmployerPlaceholderDesc")
           : t("config.unknownEmployerAgencyDesc")}
       </p>
+      {policySyncFailed && (
+        <p className="mt-1 text-xs text-amber-600 dark:text-amber-400" role="alert">
+          {t("config.unknownEmployerSyncFailed")}
+        </p>
+      )}
 
       <JobTargetSettings />
 
