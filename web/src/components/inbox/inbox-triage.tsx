@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Undo2 } from "lucide-react";
 import { useJobs } from "@/components/jobs/job-store";
 import type { InboxJob } from "@/lib/career-ops";
@@ -21,6 +22,8 @@ const SHORTLIST_KEY = "career-ops:shortlist";
 const HIDDEN_KEY = "career-ops:hidden";
 const CONFIG_KEY = "career-ops:config";
 const BATCH = 20;
+// /api/batch-evaluate's own MAX_URLS. A longer shortlist is sent as chunks.
+const SCORE_BATCH_MAX = 20;
 
 // The inbox as a TRIAGE surface: Abundance → Triage → Shortlist → Opt-in Score.
 // Default is a small fresh batch (never the full wall); free facets + Save/Skip narrow
@@ -34,6 +37,7 @@ const BATCH = 20;
 export function InboxTriage({ inbox, scoredUrls }: { inbox: InboxJob[]; scoredUrls?: Record<string, { score: string }> }) {
   const { jobs, startJob } = useJobs();
   const { t } = useI18n();
+  const router = useRouter();
 
   // facets
   const [within, setWithin] = useState<number | null>(null);
@@ -51,6 +55,8 @@ export function InboxTriage({ inbox, scoredUrls }: { inbox: InboxJob[]; scoredUr
   const [undo, setUndo] = useState<{ label: string; fn: () => void } | null>(null);
   const [hasCli, setHasCli] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  // Set when the shortlist is dispatched; arms the post-batch server refresh.
+  const [scoredBatchId, setScoredBatchId] = useState<string | null>(null);
 
   useEffect(() => {
     try {
@@ -77,6 +83,20 @@ export function InboxTriage({ inbox, scoredUrls }: { inbox: InboxJob[]; scoredUr
     const t = setTimeout(() => setUndo(null), 5000);
     return () => clearTimeout(t);
   }, [undo]);
+  // After a scoring batch finishes, re-read the server snapshot: the batch
+  // merged the tracker rows AND moved those postings out of data/pipeline.md,
+  // so both the score map and the row set have changed. Mirrors the tracker's
+  // batch re-evaluate refresh (pipeline-view.tsx) — without it the rows would
+  // sit there looking unscored until a manual reload.
+  useEffect(() => {
+    if (!scoredBatchId) return;
+    const onDone = (e: Event) => {
+      const detail = (e as CustomEvent).detail as { kind?: string } | undefined;
+      if (detail?.kind === "batch-evaluate") router.refresh();
+    };
+    window.addEventListener("co-job-done", onDone);
+    return () => window.removeEventListener("co-job-done", onDone);
+  }, [scoredBatchId, router]);
 
   // stable "now" for freshness (per mount)
   const now = useMemo(() => Date.now(), []);
@@ -224,8 +244,14 @@ export function InboxTriage({ inbox, scoredUrls }: { inbox: InboxJob[]; scoredUr
     setSelected(new Set());
   };
 
+  // Estimate from BOTH scoring kinds: batch-evaluate is what this tray now
+  // dispatches, evaluate is what earlier sessions left in the job history (and
+  // what a previous build dispatched) — a sample from either keeps the cost
+  // disclosure populated instead of silently degrading to "uses your tokens".
   const estimate = useMemo(() => {
-    const samples = jobs.filter((j) => j.kind === "evaluate" && j.status === "done" && j.cost?.tokens).map((j) => j.cost!);
+    const samples = jobs
+      .filter((j) => (j.kind === "evaluate" || j.kind === "batch-evaluate") && j.status === "done" && j.cost?.tokens)
+      .map((j) => j.cost!);
     if (!samples.length || shortlist.length === 0) return {};
     const avgT = samples.reduce((a, c) => a + c.tokens, 0) / samples.length;
     const usds = samples.filter((s) => s.usd != null).map((s) => s.usd!);
@@ -233,12 +259,33 @@ export function InboxTriage({ inbox, scoredUrls }: { inbox: InboxJob[]; scoredUr
     return { tokens: Math.round(avgT * shortlist.length), usd: avgUsd != null ? +(avgUsd * shortlist.length).toFixed(2) : undefined };
   }, [jobs, shortlist.length]);
 
+  // Scoring goes through /api/batch-evaluate — the SAME path the tracker's
+  // "re-evaluate selected" uses — instead of N single `evaluate` jobs. The
+  // single-evaluate path is the one that never marked the posting done: it wrote
+  // a tracker row but left the `- [ ]` row in data/pipeline.md, so triaging the
+  // inbox never actually shrank it (the file only grew; 9161 pending rows for
+  // 2500 real postings on 2026-09-14). Batch evaluate folds the tracker AND runs
+  // reconcile-pipeline.mjs --entry, the completion marker the house rules
+  // require of anything readInbox() displays; it also runs one bounded pool
+  // under one tracker-write token instead of N agents racing the same files.
   const scoreShortlist = () => {
+    const urls = shortlist.map((it) => it.url);
+    if (urls.length === 0) return;
     const batchId = `shortlist-${Date.now()}`;
-    for (const it of shortlist) {
-      startJob({ title: t("jobs.scoreTitle", { company: it.company }), subtitle: it.role, kind: "evaluate", input: it.url, page: "/pipeline", batchId });
+    for (let i = 0; i < urls.length; i += SCORE_BATCH_MAX) {
+      const chunk = urls.slice(i, i + SCORE_BATCH_MAX);
+      startJob({
+        title: t("inbox.scoringN", { n: chunk.length }),
+        subtitle: t("inbox.shortlist"),
+        kind: "batch-evaluate",
+        input: chunk.join("\n"),
+        urls: chunk,
+        page: "/pipeline",
+        batchId,
+      });
     }
-    setShortlist([]); // sent — the rows flip to Scoring… → badge via scoreByUrl
+    setScoredBatchId(batchId);
+    setShortlist([]); // sent — the rows leave the inbox once the batch reconciles pipeline.md
   };
 
   // The parent (PipelineView) renders the rich empty-inbox card; here we always
