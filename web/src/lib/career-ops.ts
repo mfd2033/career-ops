@@ -11,6 +11,9 @@ import { parseReport } from "@/lib/format";
 // Durable inbox score map (URL → tracker score) — pure + client-importable, so
 // the triage view can show already-evaluated postings after a refresh.
 import { buildScoreByUrl } from "@/lib/inbox-score.mjs";
+// Pending-chapter reader for pipeline.md — pure parser in .mjs (node --test
+// locked), keeps the inbox from reading user scratch chapters as offers.
+import { pendingSectionLines } from "@/lib/pipeline-sections.mjs";
 // Eval timing summary (评估用时) — pure parser in .mjs (node --test locked),
 // file read here like every other user-layer data file.
 import { evalTimingSummary } from "@/lib/eval-timings.mjs";
@@ -109,7 +112,10 @@ export function readInbox(): InboxJob[] {
   const md = read("data/pipeline.md");
   if (!md) return [];
   const jobs: InboxJob[] = [];
-  for (const line of md.split("\n")) {
+  // Section-scoped (pipeline-sections.mjs): the inbox is the Pending chapter
+  // only. A whole-file checkbox scan dragged user scratch chapters (`## 非郑州`,
+  // `## 暂存`) into the triage view — 49 rows on 2026-09-14, 25 already scored.
+  for (const line of pendingSectionLines(md)) {
     const m = line.match(/^\s*-\s*\[([ xX])\]\s*(.+)$/);
     if (!m) continue;
     const all = m[2].split("|").map((s) => s.trim());
