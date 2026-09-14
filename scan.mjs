@@ -56,6 +56,9 @@ import { compileKeyword, compilePositiveKeyword, buildTitleFilter } from './titl
 import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 import { withPortalHealthLock } from './portal-health-lock.mjs';
 import { localToday } from './lib/local-today.mjs';
+// The canonical posting-key denylist. Imported, never re-typed: see
+// DEDUP_STRIP_PARAMS below for the duplicate that grew when it was re-typed.
+import { TRACKING_PARAMS } from './url-key.mjs';
 
 try {
   const { config } = await import('dotenv');
@@ -1016,12 +1019,38 @@ function scanHistoryPolicy(config = {}) {
 // strip when computing the dedup key. Deliberately an allowlist rather than
 // "strip everything": several ATSes key the posting off a query param (e.g.
 // Greenhouse's `gh_jid`), so a blanket strip would collapse distinct roles.
-const DEDUP_STRIP_PARAMS = new Set([
+//
+// The shared half of this allowlist is NOT repeated here — it lives in
+// url-key.mjs's TRACKING_PARAMS, the canonical posting key that merge-tracker
+// and the web inbox already agree on, and is imported so the two can never
+// drift. They did drift: the CN-board anti-bot params (BOSS securityId/ka,
+// 猎聘 pgRef/skId/fkId/ckId/…, 智联 refcode/srccode/preactionid) landed in
+// url-key.mjs on 2026-09-05…09-07 for the browser extension while this copy —
+// a THIRD implementation of the same idea — never learned them. A browser-board
+// sweep therefore re-keyed the same posting as "new" on every run and appended
+// it again: 9161 pending rows in data/pipeline.md for 2500 real postings, one
+// liepin card stored 20 times (found 2026-09-14).
+//
+// The entries below stay local because the canonical denylist deliberately does
+// NOT strip them (see its RFC-3986 note: generic names like `ref`/`source` are
+// functional on some boards and are only ever stripped by the scanner).
+const SCAN_ONLY_STRIP_PARAMS = new Set([
   'language', 'lang', 'locale',
-  'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',
-  'ref', 'src', 'source', 'gh_src', 'lever-origin', 'lever-source',
+  'ref', 'src', 'source', 'lever-origin', 'lever-source',
   'rltr', // StepStone: regenerated per request, so one posting returns as new every scan
 ]);
+
+/**
+ * Whether a query parameter never identifies a posting (so the dedup key may
+ * drop it): the scan-local list above, or the canonical denylist.
+ *
+ * @param {string} name - A raw query-parameter name.
+ * @returns {boolean}
+ */
+function isTrackingParam(name) {
+  const lower = name.toLowerCase();
+  return SCAN_ONLY_STRIP_PARAMS.has(lower) || TRACKING_PARAMS.some((re) => re.test(lower));
+}
 
 /**
  * Normalize a job posting URL into a stable dedup key.
@@ -1059,7 +1088,7 @@ export function normalizeUrlForDedup(url) {
     return url;
   }
   for (const param of Array.from(parsed.searchParams.keys())) {
-    if (DEDUP_STRIP_PARAMS.has(param.toLowerCase())) {
+    if (isTrackingParam(param)) {
       parsed.searchParams.delete(param);
     }
   }

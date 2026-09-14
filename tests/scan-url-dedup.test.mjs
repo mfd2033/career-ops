@@ -22,10 +22,11 @@
 // stored under three URLs across three scans, HDI and Lloyds under four each, and
 // every re-add flowed into pipeline.md as a fresh offer to evaluate).
 //
-// DEDUP_STRIP_PARAMS is an allowlist rather than a blanket strip because the risk
-// is asymmetric: an unstripped param leaves a visible duplicate, while stripping an
-// identity-bearing one (Greenhouse's `gh_jid`) silently hides a real job. These
-// tests pin both sides of that line.
+// The strip list is an allowlist rather than a blanket strip because the risk
+// is asymmetric: an unstripped param leaves a visible duplicate, while stripping
+// an identity-bearing one (Greenhouse's `gh_jid`) silently hides a real job.
+// These tests pin both sides of that line — including the board-specific params
+// that had only ever been added to url-key.mjs's copy (see the CN cases below).
 import { pass, fail, ROOT } from './helpers.mjs';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
@@ -46,6 +47,61 @@ try {
   const utm = normalizeUrlForDedup('https://jobs.example.com/j/7?utm_source=x&utm_medium=y&utm_campaign=z');
   if (utm === 'https://jobs.example.com/j/7') pass('utm_* parameters are stripped');
   else fail(`utm = ${utm}`);
+
+  // ── CN browser boards (the 2026-09-14 regression) ───────────────────────────
+  // 猎聘/智联/BOSS list cards carry anti-bot params that are REGENERATED on every
+  // request. The canonical denylist (url-key.mjs) learned them on 2026-09-05…
+  // 09-07 for the browser extension, but this gate's own copy did not — so every
+  // sweep re-keyed the same posting as "new" and appended it again. One liepin
+  // card ended up in data/pipeline.md 20 times; the file held 9161 pending rows
+  // for 2500 real postings. Each case asserts BOTH directions: the gate drops
+  // the beacon params, AND it agrees with the canonical key the web inbox uses
+  // (a divergence in either direction is the bug).
+  const { normalizeUrl } = await import(pathToFileURL(join(ROOT, 'url-key.mjs')).href);
+  const CN_CASES = [
+    [
+      'https://www.liepin.com/job/1982729989.shtml',
+      'https://www.liepin.com/job/1982729989.shtml?pgRef=c_pc_search_page%3Aabc&d_sfrom=search_prime' +
+        '&d_ckId=null&d_curPage=0&d_pageSize=40&d_headId=null&d_posi=2&skId=aaa&fkId=aaa&ckId=bbb' +
+        '&sfrom=search_job_pc&curPage=0&pageSize=40&index=2',
+      '猎聘 sum-url card',
+    ],
+    [
+      'https://www.liepin.com/a/78667685.shtml',
+      'https://www.liepin.com/a/78667685.shtml?pgRef=&d_posi=39&skId=k4bomhmqrwsgxozov&fkId=k4bomhmqrwsgxozov&ckId=n4r1yi856zgn8kudoaihsyp5uiygm98b&index=39',
+      '猎聘 /a/ recommendation card',
+    ],
+    [
+      'https://www.zhaopin.com/jobdetail/CC468463280J40863197215.htm',
+      'https://www.zhaopin.com/jobdetail/CC468463280J40863197215.htm?refcode=4019&srccode=401901&preactionid=7c0a3b98-0000-1000-8000-000000000000',
+      '智联 detail URL with anchor params',
+    ],
+    [
+      'https://www.zhipin.com/job_detail/ee79f42632c37cf31Hx42dy8EFNQ.html',
+      'https://www.zhipin.com/job_detail/ee79f42632c37cf31Hx42dy8EFNQ.html?securityId=abc&ka=click_source',
+      'BOSS detail URL with anti-bot params',
+    ],
+  ];
+  for (const [bare, withParams, label] of CN_CASES) {
+    const got = normalizeUrlForDedup(withParams);
+    const canonical = normalizeUrl(withParams);
+    // The scanner also lowercases the PATH (it merges two processes' casing), so
+    // compare case-insensitively against the bare posting URL.
+    if (got.toLowerCase() === bare.toLowerCase() && !got.includes('?')) {
+      pass(`${label}: beacon params stripped → bare posting key`);
+    } else {
+      fail(`${label}: expected ${bare}, got ${got}`);
+    }
+    if (canonical === bare) pass(`${label}: canonical key agrees (one denylist, both callers)`);
+    else fail(`${label}: canonical key drifted — ${canonical}`);
+  }
+
+  // …and the strip must not go too far: two DIFFERENT postings on the same board
+  // path shape stay distinct, or a real job would be silently hidden.
+  const lieA = normalizeUrlForDedup('https://www.liepin.com/job/1982729989.shtml?skId=aaa');
+  const lieB = normalizeUrlForDedup('https://www.liepin.com/job/1977122141.shtml?skId=aaa');
+  if (lieA !== lieB) pass('liepin: two distinct posting ids stay distinct');
+  else fail(`collapsed distinct liepin postings onto ${lieA}`);
 
   // Identity-bearing params MUST survive: collapsing two real postings would
   // silently hide a job, which is worse than re-adding a duplicate.
