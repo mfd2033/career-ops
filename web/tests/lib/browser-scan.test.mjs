@@ -6,6 +6,9 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   SEARCH_TEMPLATES,
   BROWSER_SOURCES,
@@ -141,4 +144,22 @@ test("browserToParams carries an optional city slot for restorability", () => {
   assert.equal(browserToParams("项目经理", ["zhipin"], "郑州"), "mode=browser&zh=%E9%A1%B9%E7%9B%AE%E7%BB%8F%E7%90%86&sources=zhipin&city=%E9%83%91%E5%B7%9E");
   assert.equal(browserToParams("项目经理", ["zhipin"], ""), "mode=browser&zh=%E9%A1%B9%E7%9B%AE%E7%BB%8F%E7%90%86&sources=zhipin");
   assert.equal(browserToParams("项目经理", ["zhipin"], undefined), "mode=browser&zh=%E9%A1%B9%E7%9B%AE%E7%BB%8F%E7%90%86&sources=zhipin");
+});
+
+// ── bsk 主路径的薪酬门控必须带上站点口径（工单 03 缺陷修复）──────────────
+// 门控按站点解析薪资（猎聘裸「万」= 年薪），而 bsk 列表行不带 source；
+// browser-scan.ts 正在采的 platform 就是唯一答案。这个调用点无法用单测跑到
+// （它在子进程 close 回调里），所以按 decision-card-cta.test.mjs 同口径做源码断言，
+// 让「又把它漏掉」直接挂门。
+
+test("browser-scan.ts passes the platform into the salary gate", () => {
+  const src = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "../../src/lib/core/browser-scan.ts"),
+    "utf8",
+  ).replace(/\s+/g, " ");
+  assert.match(
+    src,
+    /applyBrowserSalaryGate\(.*?filters\.zhSalaryMin, platform\)/,
+    "the bsk gate call must pass platform as the board fallback, or 猎聘's annual 万 parses as 智联's monthly ×10",
+  );
 });

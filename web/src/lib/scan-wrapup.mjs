@@ -10,6 +10,12 @@
 // 开关值持久化在 localStorage 的 career-ops:config（与 scanMax/scanSource/cliId 同处），
 // 探索页发起 drive-scan 时随消息传给扩展——扩展 content script / service worker 读不到
 // localStorage，只能由页面侧读出来带过去。
+//
+// 导出面刻意与 scan-max.mjs 对齐（同一套五件套：KEY / FIELD / clean / read / persist
+// + DEFAULT）——两个开关同住 career-ops:config、由同一批调用方按同一形状读写，形状一致
+// 才能一眼看出某个字段归哪个模块、也知道该抄哪个文件改。所以 KEY / FIELD /
+// cleanScanWrapUp 当前只有本模块内部使用也不收回导出：它们是这套形状的一部分，
+// 不是留着等人调用的预留接口（review 若按 Speculative Generality 报，答案在这里）。
 
 /** 未配置时的默认值：开启（用户点「开始扫描」时期待结果回来）。 */
 export const SCAN_WRAPUP_DEFAULT = true;

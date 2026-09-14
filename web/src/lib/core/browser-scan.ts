@@ -151,7 +151,11 @@ export function runBrowserDiscovery(
           // 薪酬门控（工单 03）：与扩展路径共用 applyBrowserSalaryGate——区间重叠
           // 判定（上限 ≥ zhSalaryMin），无薪资/解析失败放行并打「薪资未知」标记，
           // 与 salary_filter「不误删」一致。过滤在循环前列表级完成。
-          const jobs = applyBrowserSalaryGate(Array.isArray(parsed.jobs) ? parsed.jobs : [], filters.zhSalaryMin);
+          // 站点口径必须显式传入：bsk 列表行只有 `{title,url,city,salary}`，不带
+          // source，而薪资口径逐站不同（猎聘裸「万」是年薪，工单 01）。这里正在采
+          // 的 platform 就是答案——漏传会把 20-35万 当智联的月薪口径算成 200-350K，
+          // 猎聘的薪资下限静默失效。
+          const jobs = applyBrowserSalaryGate(Array.isArray(parsed.jobs) ? parsed.jobs : [], filters.zhSalaryMin, platform);
           for (const j of jobs) {
             const link = String(j.url ?? "").trim();
             const title = String(j.title ?? "").trim();

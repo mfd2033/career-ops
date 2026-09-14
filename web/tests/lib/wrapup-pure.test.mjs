@@ -2,6 +2,13 @@
 // 无 chrome / DOM 依赖，直接 import extension/wrapup-pure.js。
 //
 // Run:  node --test web/tests/lib/wrapup-pure.test.mjs
+//
+// 为什么在 web/tests/lib 而不是 tests/：CONTRIBUTING 的「web suites 镜像 web/src」以
+// 被测模块位于 web/src 下为前提，而扩展模块在 web/src 里没有对应路径，规则不适用。
+// 此处与同族的扩展侧测试 scan-pure / liepin-site / zhaopin-site 同级，三者都由
+// test-all.mjs 的 web/tests/lib 批次一并门住（必需检查），与既有先例保持一致优于
+// 同文档的空缺字面较真——按 docs/REVIEWING.md 规则 2，文档若缺该开 issue，不该由
+// review 注释去执行。
 
 import { test } from "node:test";
 import assert from "node:assert/strict";

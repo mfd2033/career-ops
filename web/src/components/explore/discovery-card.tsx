@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { ExternalLink, Plus, Check, Loader2, ShieldQuestion, Sparkles, Coins } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { instrumentSerif } from "@/lib/fonts";
-import { ATS_LABEL, type AtsSource, type DiscoveredOffer } from "@/lib/explore";
+import { ATS_LABEL, isSalaryUnknown, type AtsSource, type DiscoveredOffer } from "@/lib/explore";
 import { useJobs } from "@/components/jobs/job-store";
 import { useExplore } from "./explore-provider";
 import { useI18n } from "@/lib/i18n/context";
@@ -62,6 +62,12 @@ export function DiscoveryCard({ offer, inPipeline, evaluatedN }: { offer: Discov
   const isAdding = adding.has(offer.url);
   const unverified = offer.verification === "unconfirmed";
   const fresh = freshness(offer.postedAt) || offer.postedHint || "";
+  // 薪资未知（工单 03）：浏览器采集的卡片没带薪资文本、或文本解析不出月薪时打标。
+  // 判定与门控开关无关——门控关闭只是「不过滤」，不改变展示口径（工单 03「无薪资/
+  // 解析失败展示「薪资未知」标记」；CONTEXT.md「展示时打标提示」）。offer.salaryUnknown
+  // 是落库侧的门控打标（pipeline.md note 用），不能替代这里的判定：没有填薪资下限时
+  // 它一律不置位。只作用于浏览器卡片——AI 搜索的 offer 压根不带薪资字段，不该被误标。
+  const salaryUnknown = offer.ats === "browser" && isSalaryUnknown(offer);
 
   const evaluate = () => {
     addToPipeline([offer]); // evaluating implies it's in the pipeline — record it
@@ -97,20 +103,20 @@ export function DiscoveryCard({ offer, inPipeline, evaluatedN }: { offer: Discov
           <span className="rounded border border-border px-1.5 py-0.5 font-medium text-muted">{ATS_LABEL[offer.ats as AtsSource] ?? offer.ats}</span>
         )}
         {fresh && <span className="text-faint">{fresh}</span>}
-        {/* 薪资展示（工单 03）：原文直出；门控激活但解析不出数值 → 「薪资未知」打标 */}
-        {offer.salaryText ? (
+        {/* 薪资展示（工单 03）：原文直出；无薪资文本或解析不出月薪 → 并列追加
+            「薪资未知」标记（不是二选一：原文能拿到就照常直出，只是同时说明它不算数）。 */}
+        {offer.salaryText && (
           <span className="inline-flex items-center gap-1 rounded border border-emerald-500/25 bg-emerald-500/10 px-1.5 py-0.5 font-medium text-emerald-600 dark:text-emerald-300">
             <Coins className="size-3" /> {offer.salaryText}
           </span>
-        ) : (
-          offer.salaryUnknown && (
-            <span
-              className="inline-flex items-center gap-1 rounded border border-border px-1.5 py-0.5 font-medium text-faint"
-              title={t("explore.card.salaryUnknownTitle")}
-            >
-              <Coins className="size-3" /> {t("explore.card.salaryUnknown")}
-            </span>
-          )
+        )}
+        {salaryUnknown && (
+          <span
+            className="inline-flex items-center gap-1 rounded border border-border px-1.5 py-0.5 font-medium text-faint"
+            title={t("explore.card.salaryUnknownTitle")}
+          >
+            <Coins className="size-3" /> {t("explore.card.salaryUnknown")}
+          </span>
         )}
         {unverified && (
           <span
