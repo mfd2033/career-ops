@@ -96,6 +96,22 @@ _Avoid_: 端口发现、端口扫描
 探索页 browser 模式驱动中国招聘平台采集的方式。现已从 Playwright/CDP（ADR-0001）切换为职位评估扩展 content script（ADR-0007）：content script 跑在用户真实已登录浏览器，`MutationObserver` 捕获页面自身懒加载产生的 DOM 变化即获全量卡片，无需伪造滚轮事件。
 _Avoid_: 采集器、浏览器驱动（太泛）
 
+**探索页 tab（explore page tab）**:
+跑 `/explore` 的那个本地面板 tab，是扫描收尾的焦点落点。它的存活与"是否停留在 /explore 页面"无关——ExploreProvider 是 shell 级单例，跨软导航不重挂载，所以从侧栏跳去 `/pipeline` 再回来，扫描进度与结果都还在；只有硬刷新或关闭该 tab 才丢，届时仅能靠 per-tab 的 sessionStorage 捞回最近一次**已结算**的结果集。
+_Avoid_: 扫描页面（未区分 tab 与页面）、本地面板、host tab
+
+**采集 tab（drive tab）**:
+扫描期间扩展新开的招聘站 tab（BOSS/智联各一个，猎聘按关键词拆词可以是多个）。采集由该 tab 自己的 content script 驱动，不依赖探索页存活；收尾不关闭它。
+_Avoid_: 招聘站 tab、扫描 tab（与探索页 tab 混淆）
+
+**扫描收尾（scan wrap-up）**:
+一次扫描的各平台都采完后，由扩展后台执行的一次性动作：把浏览器焦点切回探索页 tab（配置页开关可关掉这件事）。按 scanId 幂等、也按 scanId 归口——判定"本次采完了没有"只看属于本次 scanId 的登记（猎聘拆词时同一次扫描有多条驱动）；探索页 tab 已不存在时退化为静默跳过。
+_Avoid_: 清理、善后、收尾（未限定对象）
+
+**中止采集（aborting a drive）**:
+探索页 tab 被用户关闭时，扩展后台向所有仍在采集的采集 tab 发停止指令的动作——接住"用户关页面"这个信号，别再采了。与**扫描收尾**是两件事：收尾是"采完了，把人送回结果页"（受收尾开关管辖），中止是"接结果的那个页面没了，停止浪费"（不受开关管辖）；两者都保留已采数据（照常落 `pipeline.md`）。
+_Avoid_: 取消扫描、停止收尾（都易与扫描收尾混淆）
+
 **卡片元数据（cardMeta）**:
 列表卡片上扩展采集的 `{url, title, company, salary, city?}` 字段。每站 site 适配对象提供 `cardMeta(card)`；智联 city 权威源是 `positionList[].workCity`（window 状态数据）非 DOM，BOSS/猎聘靠 title 兜底。供 `/api/explore/add` 落库与探索页扫描。
 _Avoid_: 卡片数据、卡片字段

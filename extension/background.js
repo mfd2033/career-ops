@@ -212,6 +212,15 @@ async function loadEvaluated(base) {
 //
 // 三站列表/详情 pathname 判定(与 site-*.js isDetailPath 保持一致,仅用于选既存
 // tab 时尽量避开详情页;content 侧 start-scan 仍会再拦,双保险)。
+// 扫描收尾判定(ADR-0007 E9)的纯逻辑层。manifest 未声明 "type":"module",本 SW 是
+// 经典脚本,故用 importScripts —— 必须顶层同步调用(SW 起不来就全废)。
+importScripts("wrapup-pure.js");
+// 同包加载,理论上不会缺;缺了说明扩展文件不完整 —— 在加载期就炸出来,而不是让每条
+// scan-done 静默失效。(与 core.js 对 SCAN 缺失的容忍口径不同:那里 content script 与
+// SW 的版本会在"扩展重载"窗口期真实错配,这里两个文件同属一个 SW,不会。)
+const WRAPUP = self.__careerWrapupPure;
+if (!WRAPUP) throw new Error("[bg] wrapup-pure.js 未加载:扩展文件不完整");
+
 const DRIVE_SOURCES = {
   zhipin: {
     hostRe: /^https?:\/\/([^/]*\.)?zhipin\.com\//i,
@@ -237,6 +246,110 @@ const driveKey = (source, url) => `${source}|${url}`;
 // scanId → DiscoveredOffer[];content script 分批上报的增量本地缓冲,供探索页在采集
 // 收尾后一次取回用于结果渲染(/api/explore/add 已落库为权威,此为前端展示镜像)。
 const scanOffers = new Map();
+
+// ---- 扫描收尾(ADR-0007 E9) ------------------------------------------------
+
+// 发起本次扫描的探索页 tab(由 localhost 桥的 sender.tab 给出)与收尾开关,随
+// drive-scan 一起进来。同一时刻只有一次探索页驱动的扫描(前端 runningRef 拦连点),
+// 故用单份模块状态而非按 scanId 存表。
+let exploreTabId = null;
+let wrapUpEnabled = true;
+
+// 已收尾过的 scanId:幂等,挡掉迟到的 scan-done 与事件竞态下的重复收尾。有条数上限 ——
+// SW 常驻期内扫描次数无上限,不设界就是慢性泄漏。
+const wrappedUpScans = new Set();
+const WRAPPED_SCANS_MAX = 20;
+
+/** 只切 active tab,**不动窗口焦点**:浏览器在后台时不该被拽到前台(E9)。 */
+function activateExploreTab(tabId) {
+  try {
+    const p = chrome.tabs.update(tabId, { active: true });
+    if (p && typeof p.catch === "function") p.catch(() => {});
+  } catch (e) {
+    console.log("[bg] wrap-up activate failed:", (e && e.message) || e);
+  }
+}
+
+/** 向采集 tab 发停止采集(content 侧 stop-scan 处理器已存在,收尾会把剩余批次上报)。 */
+function stopDriveTab(tabId) {
+  try {
+    const p = chrome.tabs.sendMessage(tabId, { type: "stop-scan" });
+    if (p && typeof p.catch === "function") p.catch(() => {});
+  } catch (e) {
+    /* tab 已关 / content 未注入 —— 无需处理 */
+  }
+}
+
+/** 收尾判定要的登记快照。判定自行按 scanId 归口(见 wrapup-pure 的 decideWrapUp)。 */
+function driveSnapshots() {
+  return [...activeDrives].map(([key, entry]) => ({ key, scanId: entry.scanId }));
+}
+
+/**
+ * 摘掉某个 tab 在登记表里的全部登记 —— 「采集结束(scan-done)」与「采集 tab 被关」两条
+ * 路径共用。tabId 优先,URL 后缀兜底(sender.tab 缺失时的老认领方式)。key 形状是
+ * `${source}|${url}`,故必须按 key 精确摘,不能按 source 一把清(猎聘拆词时同 source
+ * 有多条 URL 各自独立登记)。
+ * @returns {string|null} 被摘掉的登记所属的 scanId;无匹配时 null(登记必然带 scanId,
+ *   故 null 恒等于"没摘到东西")。
+ */
+function endDrivesForTab(tabId, url) {
+  const keys = [];
+  for (const [key, entry] of activeDrives) {
+    if ((tabId != null && entry.tabId === tabId) || (url && key.endsWith(`|${url}`))) keys.push(key);
+  }
+  let endedScanId = null;
+  for (const key of keys) {
+    const entry = activeDrives.get(key);
+    if (entry && entry.scanId) endedScanId = entry.scanId;
+    activeDrives.delete(key);
+  }
+  return endedScanId;
+}
+
+/** 收尾判定 → 动作。settle 为真则记 scanId(幂等);有 activateTabId 才切焦点。 */
+function runWrapUp(facts) {
+  const decision = WRAPUP.decideWrapUp({ ...facts, wrappedUpScans: [...wrappedUpScans] });
+  if (decision.settle) {
+    wrappedUpScans.add(decision.scanId);
+    while (wrappedUpScans.size > WRAPPED_SCANS_MAX) {
+      // Set 保持插入序,淘汰最老的:SW 常驻期内扫描次数无上限,不设界就是慢性泄漏。
+      wrappedUpScans.delete(wrappedUpScans.values().next().value);
+    }
+  }
+  console.log(
+    "[bg] scan wrap-up:",
+    decision.reason,
+    decision.activateTabId == null ? "(no tab switch)" : `→ tab ${decision.activateTabId}`,
+  );
+  if (decision.activateTabId != null) activateExploreTab(decision.activateTabId);
+  return decision;
+}
+
+/**
+ * tab 关闭的两条路径(E9):
+ *   ① 探索页被关 → 结果再也无处展示(结果只活在原 tab 的 state 与 per-tab
+ *      sessionStorage 里),停掉所有仍在跑的采集 —— 本动作**不受收尾开关管辖**,省的是
+ *      浪费而非「回到页面」。已采到的由内容脚本收尾时照常上报落库,不丢数据。
+ *   ② 采集 tab 被关 → 摘掉它的登记。残留登记会让 scan-status 永远报该平台 active
+ *      (探索页进度轮询固定空转到 180s 兜底才退出),并让下一次相同条件的扫描被
+ *      driveSource 判为「已在驱动中」而静默不打开任何 tab。
+ */
+chrome.tabs.onRemoved.addListener((tabId) => {
+  if (exploreTabId != null && tabId === exploreTabId) {
+    const drives = [...activeDrives].map(([key, entry]) => ({ key, tabId: entry.tabId }));
+    const abort = WRAPUP.decideAfterExploreGone({ drives });
+    for (const key of abort.clearKeys) activeDrives.delete(key);
+    for (const id of abort.stopTabIds) stopDriveTab(id);
+    exploreTabId = null; // 之后迟到的 scan-done 只会 settle,不再切焦点
+    console.log("[bg] explore tab closed → stopped", abort.stopTabIds.length, "drive(s)");
+    return;
+  }
+  const endedScanId = endDrivesForTab(tabId, null);
+  if (endedScanId) {
+    runWrapUp({ drives: driveSnapshots(), scanId: endedScanId, wrapUpEnabled, exploreTabId });
+  }
+});
 
 /** 向某 tab 的 content script 发 start-scan(tab 未注入/已关闭时返回 {ok:false})。
  *  maxCount:该站采集条数上限(来自 web 配置),透传给累积器覆盖硬编码 SCAN_MAX。 */
@@ -304,7 +417,7 @@ async function driveSource(source, url, scanId, maxCount) {
  * 收「驱动扫描」:遍历请求的平台,查/开 tab 并驱动。scanId 缺省时生成一次会话 id
  * 并随结果返回(web 侧后续重放同 id 走路由幂等)。返回每平台 task 状态。
  */
-async function driveScan(msg) {
+async function driveScan(msg, sender) {
   const scanId = typeof msg.scanId === "string" && msg.scanId.trim() ? msg.scanId.trim() : `ext-scan-${Date.now()}`;
   const requested = Array.isArray(msg.sources)
     ? msg.sources
@@ -312,11 +425,22 @@ async function driveScan(msg) {
         .filter((s) => s && typeof s.source === "string" && DRIVE_SOURCES[s.source] && typeof s.url === "string" && /^https?:\/\//i.test(s.url))
         .map((s) => ({ source: s.source, url: s.url, maxCount: typeof s.maxCount === "number" && s.maxCount > 0 ? s.maxCount : undefined }))
     : [];
+  // 收尾上下文:web-bridge 是注入在本地面板上的 content script,故 sender.tab 就是发起
+  // 本次扫描的探索页 tab —— 不用猜端口,也不用从页面 URL 反推。wrapUp 缺省按开启处理,
+  // 老版本前端(不带该字段)仍工作。
+  exploreTabId = sender && sender.tab && typeof sender.tab.id === "number" ? sender.tab.id : null;
+  wrapUpEnabled = msg.wrapUp !== false;
   if (requested.length === 0) return { ok: true, scanId, connected: true, tasks: [] };
   const tasks = [];
   for (const s of requested) {
     // 顺序驱动(每平台一次采集会话,避免同时弹多个搜索 tab)。每步失败不中断其它平台。
     tasks.push(await driveSource(s.source, s.url, scanId, s.maxCount));
+  }
+  // 全部平台一个都没起来:openAndDrive 是先开 tab 再握手,失败时 tab 留着(只摘登记),
+  // 用户已经被带到那个空 tab 上 —— 立即收尾把他送回探索页(E9)。部分失败不在此列,
+  // 仍等成功启动的平台跑完(它们各自的 scan-done 会触发收尾)。
+  if (!tasks.some((t) => t && (t.status === "created" || t.status === "active"))) {
+    runWrapUp({ drives: driveSnapshots(), scanId, wrapUpEnabled, exploreTabId });
   }
   return { ok: true, scanId, connected: true, tasks };
 }
@@ -513,7 +637,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       case "drive-scan": {
         // 探索页发起(经 localhost 桥转发)→ 查/开三站 tab 并驱动采集(E2)。异步
         // 完成,稍后 sendResponse,保持通道打开。失败不影响响应:错误落 tasks 内。
-        driveScan(msg).then((r) => sendResponse(r));
+        // sender 带过来是为了记住探索页 tab(收尾切回它,E9)。
+        driveScan(msg, sender).then((r) => sendResponse(r));
         break;
       }
       case "ext-ping": {
@@ -682,17 +807,23 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         break;
       }
       case "scan-done": {
-        // 平台采集收尾:清 activeDrives 对应此 tab URL 的登记(允许后续再驱动)。
-        // key 是 `${source}|${url}`,故按发送者 tab 的 URL 匹配清理 —— 拆词时同
-        // source 多条 URL 各自独立登记,不能按 source 一把清。进度由 web 侧轮询
-        // whats-new 呈现(E14),无需回传;仅响 ack。
-        const doneUrl = sender && sender.tab && sender.tab.url ? sender.tab.url : null;
-        if (doneUrl) {
-          for (const [key, entry] of activeDrives) {
-            if (entry.tabId === sender.tab.id || key.endsWith(`|${doneUrl}`)) activeDrives.delete(key);
-          }
-        }
+        // 平台采集收尾:先摘掉该 tab 的登记(允许后续再驱动),再按「登记表是否摘空」
+        // 判定本次扫描是否真的结束了 —— 结束就收尾(把焦点切回探索页,E9)。
+        // key 是 `${source}|${url}`,故按发送者 tab 的 tabId / URL 匹配清理 —— 拆词时
+        // 同 source 多条 URL 各自独立登记,不能按 source 一把清。进度由 web 侧轮询
+        // whats-new 呈现(E14),无需回传;仅响 ack(先响,收尾不阻塞采集端)。
         sendResponse({ ok: true });
+        const doneTabId = sender && sender.tab && typeof sender.tab.id === "number" ? sender.tab.id : null;
+        const doneUrl = sender && sender.tab && sender.tab.url ? sender.tab.url : null;
+        // 登记里记的 scanId 优先(它就是本次驱动的那个),content 回传的 scanId 兜底。
+        const endedScanId =
+          endDrivesForTab(doneTabId, doneUrl) ||
+          (typeof msg.scanId === "string" && msg.scanId.trim() ? msg.scanId.trim() : null);
+        // 登记已被整表清过(如探索页被关时)也走一次判定:幂等会挡掉重复,exploreTabId
+        // 为 null 时自然什么都不切。没有 scanId 就无从归口,交给 onRemoved 那条路径。
+        if (endedScanId) {
+          runWrapUp({ drives: driveSnapshots(), scanId: endedScanId, wrapUpEnabled, exploreTabId });
+        }
         break;
       }
       default:

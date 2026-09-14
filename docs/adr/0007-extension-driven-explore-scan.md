@@ -48,6 +48,29 @@ ADR-0001 用 Playwright + 独立求职 profile 采集 BOSS/猎聘/智联，解�
 
 `sitepx` 三站各新增 `cardMeta(card)` 返回 `{url, title, company, salary, city?}`（现 `cardUrl` 只给 url）。字段来源：卡片内稳定锚点抽 title/company/salary；city 走 E4。去重键用 `core.normalizeUrl`（复用，已处理跟踪参数）。
 
+### E9：扫描收尾 = 把焦点切回探索页 tab（可关），探索页被关则中止采集
+
+E2 只说了怎么开 tab，没说采完之后把用户放在哪——实际结果是用户停在扩展最后打开的那个招聘站 tab 上，而结果渲染在他已经离开的探索页里，等于"采完了但找不到结果"。E9 补这一段。
+
+**正常收尾**（本次扫描的 `scan-done` 到齐、属于本次 scanId 的登记都摘掉）：
+
+- **唯一动作是 `chrome.tabs.update(探索页 tabId, {active:true})`**，按 scanId 幂等一次。
+- **「本次采完了没有」按 scanId 归口**，不是看整张登记表空不空。两个方向都必要：拆词扫描（猎聘一个关键词一条搜索 URL）下同一次扫描有多条驱动，任何一条还在跑就都还没结束；反过来，别的 scanId 的残留登记（极端情况下 tab 消失得连 `onRemoved` 都没赶上）不能把本次扫描永远压住。
+- **不调 `windows.update({focused:true})`**：浏览器被放在后台时（用户在别的应用里工作）不该把窗口拽到前台，但 active tab 要切——用户主动切回浏览器时应该落在探索页看结果，而不是停在那几个招聘站 tab 上。
+- **不关闭采集 tab**：E2 的意图是复用用户既存的三站 tab（当前实现是无条件新开，复用尚未落地）。一旦落地复用，收尾关 tab 就从"清场"变成"删掉用户自己开着的页面"，这个动作不可逆，所以从一开始就不做。
+- **探索页 tab 已不存在（用户关了它）→ 静默跳过**：用户关掉页面等于放弃这次结果；替他重开一个 tab 属自作主张。失效 tabId 的 reject 必须被吞掉，不能炸进 `scan-done` 的响应路径。
+- **触发在 SW 侧，不由前端驱动**：前端那条 2s 轮询（`scan-status` + `/api/explore/scan-progress`）只负责展示进度。让前端在轮询到"active 为空"时通知 SW 会把收尾绑在页面存活的假设上（页面被刷新/关闭即永不触发）。
+- 收尾开关放配置页，默认开，只关"切焦点"这一件。
+
+**探索页 tab 被关闭（`tabs.onRemoved`）→ 中止采集**：探索页没了，结果就再也看不到（结果只活在原 tab 的 React state 与 per-tab sessionStorage 里；`relayScanBatch` 虽在 SW 侧、采集数据照常入库，但展示面已死），继续滚下去只是浪费。SW 向 `activeDrives` 里各采集 tab 发 `stop-scan`——这个消息处理器早已存在于 content script（`finishScan("stopped")`），此前无任何发送方。`finishScan` 会把池中剩余一次性上报，故**已采到的照常落 `pipeline.md`**：中止的是"继续采"，不是"丢掉已采"。本动作**不**受收尾开关管辖——它省的是浪费，与用户的展示偏好无关。
+
+**两条没有 `scan-done` 的结束路径**（否则收尾永不触发）：
+
+- **采集 tab 中途被关**：`tabs.onRemoved` 摘除该 key 登记。这同时修掉一个既有缺陷——残留登记会让 `scan-status` 永久报告该平台 active，前端轮询固定空转到 180s 兜底才退出；残留登记还会让下一次扫描对同一 `(source,url)` 直接返回 `active` 而静默不驱动任何东西。
+- **全部平台启动即失败**：`openAndDrive` 是先 `chrome.tabs.create` 再向 content 握手，启动失败时 tab 保留（只摘登记），用户已经被带到那个空 tab 上；`driveScan` 结束后若本次没有任何成功登记，立刻走同一个收尾函数。
+
+**被否掉的替代方案**：①关闭采集 tab（见上，不可逆）；②`windows.update({focused:true})` 无条件抢窗口（打断用户）；③探索页被关后重开 `/explore`（重开的页面看不到本次结果——结果不在服务端也不在 whats-new 里，已在 `pipeline.md` 的行会被 `/api/whats-new` 主动排除，所以那不是"恢复结果"而是"恢复一个空表单"）；④用 `scan-status` 轮询超时反推页面已死（MV3 无活动时 SW 会睡，停止时机退化到 `chrome.alarms` 的 30s 颗粒度）。
+
 ## 理由
 
 - 扩展 content script 的 `MutationObserver` 捕获的是页面自身 DOM 变化——数据完整性来自页面真实渲染而非伪造输入，比 Playwright 模拟滚轮更稳，天然拿满懒加载全量（对 ADR-0001 的「127 条」有底气续增）。

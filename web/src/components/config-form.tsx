@@ -34,6 +34,7 @@ import {
   type ScanSource,
 } from "@/lib/scan-mode";
 import { readScanMax, persistScanMax, SCAN_MAX_DEFAULT } from "@/lib/scan-max.mjs";
+import { readScanWrapUp, persistScanWrapUp, SCAN_WRAPUP_DEFAULT } from "@/lib/scan-wrapup.mjs";
 import { readClisCache, writeClisCache } from "@/lib/clis-cache.mjs";
 import { useI18n } from "@/lib/i18n/context";
 
@@ -94,6 +95,7 @@ export function ConfigForm() {
   const [applyBehavior, setApplyBehavior] = useState<ApplyBehavior>(APPLY_BEHAVIOR_DEFAULT);
   const [scanSource, setScanSource] = useState<ScanSource[]>([...SCAN_SOURCE_DEFAULT]);
   const [scanMax, setScanMax] = useState<Record<BrowserSourceId, number>>({ ...SCAN_MAX_DEFAULT });
+  const [scanWrapUp, setScanWrapUp] = useState<boolean>(SCAN_WRAPUP_DEFAULT);
   const [unknownEmployer, setUnknownEmployer] = useState<UnknownEmployerPolicy>("placeholder");
   // 服务端没收到策略写入时为 true：必须显示出来——丢写是静默的，而评估读的正是服务端。
   const [policySyncFailed, setPolicySyncFailed] = useState(false);
@@ -145,6 +147,7 @@ export function ConfigForm() {
     setApplyBehavior(readApplyBehavior());
     setScanSource(readScanSources());
     setScanMax(readScanMax() as Record<BrowserSourceId, number>);
+    setScanWrapUp(readScanWrapUp());
     setUnknownEmployer(readSavedUnknownEmployer());
     // 未知雇主策略同样「服务端持真值」：完整评估读的是 /api/config（worker 是 headless
     // CLI，读不到 localStorage —— ADR-0004 D3），本地镜像只负责首屏绘制与报告页回退显示。
@@ -222,6 +225,8 @@ export function ConfigForm() {
     void persistUnknownEmployer(unknownEmployer).then((ok) => setPolicySyncFailed(!ok));
     // 浏览器扫描每站采集上限同样独立于评估引擎，任何模式保存都生效。
     persistScanMax(scanMax);
+    // 扫描收尾开关同样独立于评估引擎，任何模式保存都生效。
+    persistScanWrapUp(scanWrapUp);
     // 全局并发上限也是服务端配置，任何模式保存都生效（引擎每次 dispatch 时读取）。
     void persistConcurrencyPool(concurrencyPool);
     // 快评（key 模式）：密钥 PUT 到服务端 gitignore 文件，只在前端存非密钥字段。
@@ -762,6 +767,22 @@ export function ConfigForm() {
           );
         })}
       </div>
+
+      {/* 扫描收尾开关（ADR-0007 E9）：扫描跑完把浏览器切回探索页 tab。只切 tab、
+          不抢窗口、不关闭招聘站 tab；关掉后停在原页面，「探索页被关则停采集」不受影响。*/}
+      <label className="mt-8 mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-muted">
+        {t("config.scanWrapUpTitle")}
+      </label>
+      <p className="mb-3 text-xs text-faint">{t("config.scanWrapUpDesc")}</p>
+      <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-border bg-surface/50 px-4 py-3">
+        <input
+          type="checkbox"
+          checked={scanWrapUp}
+          onChange={(e) => setScanWrapUp(e.target.checked)}
+          className="mt-0.5 size-4 shrink-0 accent-brand"
+        />
+        <span className="text-sm text-foreground">{t("config.scanWrapUpLabel")}</span>
+      </label>
 
       {/* 全局并发上限：web 端(web 单卡/批量/浏览器扩展)同时运行的评估 CLI 子进程总数上限 */}
       <label className="mt-8 mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-muted">
