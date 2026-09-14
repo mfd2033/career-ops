@@ -75,12 +75,13 @@ export function extractCityFromText(text, cityNames = CITY_NAMES) {
  * @returns {string} matched salary text, or "" when none found
  */
 export function extractSalaryFromText(text) {
-  // BOSS PUA 数字实证映射(2026-09-14 用户人工对照交叉验证): \uE031+n → 数字 n
-  // (E031=0 … E039=8)。9 的码点未实证,保持未映射;混有未映射码点的薪资部分解码
-  // 会失真 → 整体不提取,归「薪资未知」。规则与 extension/scan-pure.js 的
-  // decodeBossPuaDigits 同步,两处同改。
+  // BOSS PUA 数字实证映射: \uE031+n → 数字 n(E031=0 … E039=8、E03A=9)。E03A=9 由
+  // 2026-09-14 四个搜索列表页取证 + 详情页明文反查确认(卡片 {E039}-{E03A}K /
+  // {E037}-{E03A}K ↔ 详情页 8-9K / 6-9K);E030 零观测,保持未映射 —— 混有未映射码点
+  // 的薪资部分解码会失真 → 整体不提取,归「薪资未知」。规则与 extension/scan-pure.js
+  // 的 decodeBossPuaDigits 同步,两处同改。
   const decoded = String(text ?? '').replace(
-    /[\uE031-\uE039]/g,
+    /[\uE031-\uE03A]/g,
     (c) => String.fromCharCode(0x30 + (c.charCodeAt(0) - 0xE031)),
   );
   if (!decoded) return '';
