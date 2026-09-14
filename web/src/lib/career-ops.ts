@@ -14,6 +14,9 @@ import { buildScoreByUrl } from "@/lib/inbox-score.mjs";
 // Pending-chapter reader for pipeline.md — pure parser in .mjs (node --test
 // locked), keeps the inbox from reading user scratch chapters as offers.
 import { pendingSectionLines } from "@/lib/pipeline-sections.mjs";
+// 收件箱薪资（ADR-0023）：note 尾段 → salaryText / salaryUnknown。纯 .mjs
+// （node --test locked），解析口径复用探索页 parseSalaryText。
+import { inboxSalaryFromNote } from "@/lib/inbox-salary.mjs";
 // Eval timing summary (评估用时) — pure parser in .mjs (node --test locked),
 // file read here like every other user-layer data file.
 import { evalTimingSummary } from "@/lib/eval-timings.mjs";
@@ -92,7 +95,7 @@ function read(rel: string): string | null {
   }
 }
 
-export type InboxJob = { url: string; company: string; role: string; location?: string; compensation?: string; done: boolean; postedAt?: string };
+export type InboxJob = { url: string; company: string; role: string; location?: string; compensation?: string; done: boolean; postedAt?: string; salaryText?: string; salaryUnknown?: boolean };
 
 /** A pipeline-row segment like `posted: 2026-07-14`, `trust: 62 stale` or
  *  `note: …` — the core appends these LABELED segments after whatever
@@ -135,6 +138,9 @@ export function readInbox(): InboxJob[] {
     // inbox-url lookup both see the raw cell). Harmless no-op on plain URLs.
     const rawUrl = parts[0].trim();
     const url = rawUrl.startsWith("<") && rawUrl.endsWith(">") ? rawUrl.slice(1, -1) : rawUrl;
+    // 收件箱薪资（ADR-0023）：只认 note 尾段里确认入管写入的薪资形态；无尾段/
+    // 手写 note 的行一律 salaryUnknown（放行、打标、排序沉底——「不误删」取向）。
+    const salary = inboxSalaryFromNote(labels.get("note"), url);
     jobs.push({
       done: m[1].toLowerCase() === "x",
       url,
@@ -145,6 +151,8 @@ export function readInbox(): InboxJob[] {
       // the row's own posting date (scan.mjs `posted:` label) — a more direct
       // freshness signal than the scan-history join, which stays as fallback
       postedAt: posted && /^\d{4}-\d{2}-\d{2}$/.test(posted) ? posted : undefined,
+      salaryText: salary.salaryText,
+      salaryUnknown: salary.salaryUnknown,
     });
   }
   return jobs;

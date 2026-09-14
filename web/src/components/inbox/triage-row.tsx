@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Bookmark, BookmarkCheck, ExternalLink, Loader2, X } from "lucide-react";
+import { Bookmark, BookmarkCheck, Coins, ExternalLink, Loader2, X } from "lucide-react";
 import type { InboxJob } from "@/lib/career-ops";
 import type { AtsSource } from "@/lib/explore";
 import { ATS_LABEL } from "@/lib/explore";
@@ -101,6 +101,22 @@ export function TriageRow({
           {job.location && <span className="truncate">{job.location}</span>}
           {source && <span className="rounded bg-surface-hover px-1 py-px font-medium text-muted">{ATS_LABEL[source]}</span>}
           {ago && <span>{ago}</span>}
+          {/* 收件箱薪资（ADR-0023）：note 尾段原文直出；解析不出月薪 → 并列追加
+              「薪资未知」标记（与探索页卡片同口径：原文能拿到就直出，同时说明它
+              不算数）。二者可同时出现（面议 / 元·天口径）。 */}
+          {job.salaryText && (
+            <span className="inline-flex items-center gap-0.5 font-medium text-muted">
+              <Coins className="size-3" /> {job.salaryText}
+            </span>
+          )}
+          {job.salaryUnknown && (
+            <span
+              className="inline-flex items-center gap-0.5 italic"
+              title={t("explore.card.salaryUnknownTitle")}
+            >
+              <Coins className="size-3" /> {t("explore.card.salaryUnknown")}
+            </span>
+          )}
           {/* 🔴 CRUDA: honest "not scored" — no fabricated match%. */}
           {!evaluated && <span className="italic text-muted">{t("inbox.notScored")}</span>}
         </p>

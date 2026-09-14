@@ -1,6 +1,6 @@
 "use client";
 
-import { Search, X } from "lucide-react";
+import { Coins, Search, X } from "lucide-react";
 import type { AtsSource } from "@/lib/explore";
 import { ATS_LABEL } from "@/lib/explore";
 import { FRESHNESS_WINDOWS, SENIORITY_LABEL, type Seniority } from "@/lib/inbox";
@@ -24,6 +24,10 @@ export function FacetChips({
   setLocQ,
   kw,
   setKw,
+  salaryMin,
+  setSalaryMin,
+  sortBySalary,
+  onToggleSortBySalary,
   availSources,
   availSeniorities,
   resultCount,
@@ -43,6 +47,10 @@ export function FacetChips({
   setLocQ: (v: string) => void;
   kw: string;
   setKw: (v: string) => void;
+  salaryMin: number | null;
+  setSalaryMin: (v: number | null) => void;
+  sortBySalary: boolean;
+  onToggleSortBySalary: () => void;
   availSources: AtsSource[];
   availSeniorities: Seniority[];
   resultCount: number;
@@ -94,6 +102,13 @@ export function FacetChips({
           {t("inbox.unscoredOnly")}
         </Pill>
 
+        {/* 按薪资排序切换（ADR-0023 决定 4）：开 = 中位值降序、未知沉底；
+            关 = 默认新鲜度。与薪资下限同区摆放。 */}
+        <Pill on={sortBySalary} onClick={onToggleSortBySalary}>
+          <Coins className="mr-0.5 inline size-3" />
+          {t("inbox.sortBySalary")}
+        </Pill>
+
         {availSources.map((s) => (
           <Pill key={s} on={sources.has(s)} onClick={() => toggleSource(s)}>
             {ATS_LABEL[s]}
@@ -113,6 +128,26 @@ export function FacetChips({
           placeholder={t("inbox.locationPlaceholder")}
           className="w-28 shrink-0 rounded-full border border-border bg-surface/40 px-3 text-xs outline-none transition-colors placeholder:text-faint focus:border-brand/40 max-sm:min-h-[44px] py-1"
         />
+
+        {/* 薪资下限（月薪 K）——与探索页同一语义同一文案（ADR-0023）：区间重叠
+            判定，薪资未知行放行并保持打标。空 = 不过滤。 */}
+        <div className="relative shrink-0">
+          <Coins className="pointer-events-none absolute left-2.5 top-1/2 size-3 -translate-y-1/2 text-faint" />
+          <input
+            type="number"
+            min={1}
+            step="0.5"
+            value={salaryMin ?? ""}
+            onChange={(e) => {
+              const n = Number(e.target.value);
+              setSalaryMin(Number.isFinite(n) && n > 0 ? n : null);
+            }}
+            placeholder={t("explore.filter.zhSalaryMinPlaceholder")}
+            title={t("explore.filter.zhSalaryMin")}
+            aria-label={t("explore.filter.zhSalaryMin")}
+            className="w-28 shrink-0 rounded-full border border-border bg-surface/40 pl-7 pr-2 py-1 text-xs outline-none transition-colors placeholder:text-faint focus:border-brand/40 max-sm:min-h-[44px]"
+          />
+        </div>
 
         {anyActive && (
           <button
