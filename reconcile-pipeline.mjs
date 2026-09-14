@@ -29,6 +29,18 @@
  * refresh. Entries are matched against pipeline lines through the same
  * normalizeUrl identity merge-tracker uses, so an http/https, tracking-param
  * or angle-bracket spelling difference cannot strand a row in Pendientes.
+ *
+ * TRACKER-SWEEP MODE (--from-tracker): the structural guarantee. "This JD was
+ * evaluated" used to live in two implementations — batch-state.tsv (CLI batch)
+ * and --entry pairs (web) — so every new scoring entry point had to remember
+ * to write one of them, and the 2026-09-14 incident was exactly one that
+ * didn't (25 evaluated rows stranded in Pendientes). The tracker is where
+ * EVERY path must land a report to count as evaluated at all, so sweeping it
+ * is a catch-all: for each tracker row's report link, resolve the report file
+ * and read its `**URL:**` header, then reconcile as usual. Whatever produced
+ * the report — CLI, batch, web, a future entry point — the posting leaves the
+ * inbox on the next sweep. Run `node reconcile-pipeline.mjs --from-tracker`
+ * as the periodic self-heal; --tracker overrides the tracker path (tests).
  */
 
 import { readFileSync, writeFileSync, existsSync, readdirSync, copyFileSync, realpathSync, statSync } from 'fs';
@@ -45,6 +57,8 @@ if (process.argv.includes('-h') || process.argv.includes('--help')) {
   console.log('Usage: node reconcile-pipeline.mjs [--dry-run] [--state <path>] [--pipeline <path>] [--reports <path>] [--entry <num>|<url>]...');
   console.log('  Moves batch-processed offers out of pipeline.md "Pendientes" into "Procesadas".');
   console.log('  With --entry num|url (repeatable), reconciles those pairs directly instead of batch-state.tsv.');
+  console.log('  With --from-tracker [--tracker <path>], sweeps every report the tracker links (its **URL:**');
+  console.log('  header) instead of batch-state.tsv — rows evaluated by ANY entry point self-heal out of Pendientes.');
   process.exit(0);
 }
 
@@ -99,16 +113,46 @@ for (let i = 0; i < process.argv.length; i++) {
 }
 const ENTRY_MODE = ENTRIES.length > 0;
 
+// ---- tracker-sweep mode: --from-tracker (the self-heal catch-all) -----------
+const FROM_TRACKER = process.argv.includes('--from-tracker');
+const TRACKER_FILE = resolveInsideRepo(argValue('--tracker'), join(CAREER_OPS, 'data/applications.md'), '--tracker');
+
 // ---- guards ----
 // Entry mode has no state file to read; the default path (no --entry) keeps the
 // old behaviour, including its friendly no-op when batch-state.tsv is absent.
-if (!ENTRY_MODE && !existsSync(STATE_FILE)) {
+// Tracker-sweep mode likewise reads the tracker, not batch-state.tsv.
+if (!ENTRY_MODE && !FROM_TRACKER && !existsSync(STATE_FILE)) {
   console.log('No batch-state.tsv found — nothing to reconcile.');
   process.exit(0);
 }
 if (!existsSync(PIPELINE_FILE)) {
   console.log('No pipeline.md found — nothing to reconcile.');
   process.exit(0);
+}
+
+// ---- report lookup ----
+// (Defined BEFORE the done-set building: --from-tracker needs findReportFile /
+// readReportField to resolve each tracker row's report into a posting URL.)
+let reportFiles = [];
+try { reportFiles = readdirSync(REPORTS_DIR).filter(f => f.endsWith('.md')); } catch { /* no reports dir */ }
+
+function findReportFile(reportNum) {
+  if (!reportNum || reportNum === '-') return null;
+  const n = parseInt(reportNum, 10);
+  if (Number.isNaN(n)) return null;
+  return reportFiles.find(f => {
+    const m = f.match(/^(\d+)-/);
+    return m && parseInt(m[1], 10) === n;
+  }) || null;
+}
+
+function readReportField(reportFile, field) {
+  if (!reportFile) return null;
+  try {
+    const txt = readFileSync(join(REPORTS_DIR, reportFile), 'utf-8');
+    const m = txt.match(new RegExp(`^\\*\\*${field}:\\*\\*\\s*(.+)$`, 'm'));
+    return m ? m[1].trim() : null;
+  } catch { return null; }
 }
 
 // ---- build the done-set: state file (default) or --entry pairs ---------------
@@ -151,6 +195,33 @@ if (ENTRY_MODE) {
     }
     addDone(url, { reportNum: num, score: '' });
   }
+} else if (FROM_TRACKER) {
+  // Sweep every report the tracker links. Per row: the Report cell's
+  // `[N](../reports/N-*.md)` link → findReportFile → the report's `**URL:**`
+  // header. Read the URL from the REPORT, not the tracker's URL cell: several
+  // real rows leave that cell empty, and a `|` inside Notes shifts the column
+  // split — the report header is the canonical posting locator every entry
+  // path already writes. A row whose report file is missing (dead link) or
+  // whose report carries no URL simply skips: reconcile only ever moves a
+  // Pendientes row for evidence that exists on disk.
+  if (!existsSync(TRACKER_FILE)) {
+    console.log('No tracker file found — nothing to reconcile.');
+    process.exit(0);
+  }
+  const TRACKER_REPORT_LINK_RE = /\[\s*(\d+)\s*\]\([^)]*\breports?\//i;
+  let swept = 0;
+  for (const line of readFileSync(TRACKER_FILE, 'utf-8').split(/\r?\n/)) {
+    if (!line.startsWith('|')) continue; // markdown table rows only
+    const m = line.match(TRACKER_REPORT_LINK_RE);
+    if (!m) continue; // header/separator/rows without a report link
+    const reportFile = findReportFile(m[1]);
+    if (!reportFile) continue; // dead tracker link → skip, never write one
+    const url = readReportField(reportFile, 'URL');
+    if (!url) continue;
+    swept++;
+    addDone(url, { reportNum: m[1], score: '' }); // score resolves from the report
+  }
+  console.log(`Tracker sweep: ${swept} report link${swept === 1 ? '' : 's'} with a resolvable URL.`);
 } else {
   for (const line of readFileSync(STATE_FILE, 'utf-8').split(/\r?\n/)) {
     if (!line.trim() || line.startsWith('id\t')) continue;
@@ -166,31 +237,10 @@ if (ENTRY_MODE) {
 if (DONE_RAW.size === 0) {
   console.log(ENTRY_MODE
     ? 'All --entry pairs were empty — nothing to reconcile.'
-    : 'No completed batch entries in batch-state.tsv — nothing to reconcile.');
+    : FROM_TRACKER
+      ? 'No tracker reports with a resolvable URL — nothing to reconcile.'
+      : 'No completed batch entries in batch-state.tsv — nothing to reconcile.');
   process.exit(0);
-}
-
-// ---- report lookup ----
-let reportFiles = [];
-try { reportFiles = readdirSync(REPORTS_DIR).filter(f => f.endsWith('.md')); } catch { /* no reports dir */ }
-
-function findReportFile(reportNum) {
-  if (!reportNum || reportNum === '-') return null;
-  const n = parseInt(reportNum, 10);
-  if (Number.isNaN(n)) return null;
-  return reportFiles.find(f => {
-    const m = f.match(/^(\d+)-/);
-    return m && parseInt(m[1], 10) === n;
-  }) || null;
-}
-
-function readReportField(reportFile, field) {
-  if (!reportFile) return null;
-  try {
-    const txt = readFileSync(join(REPORTS_DIR, reportFile), 'utf-8');
-    const m = txt.match(new RegExp(`^\\*\\*${field}:\\*\\*\\s*(.+)$`, 'm'));
-    return m ? m[1].trim() : null;
-  } catch { return null; }
 }
 
 // State score is authoritative when numeric; otherwise fall back to the report.
