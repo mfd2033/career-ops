@@ -1,11 +1,12 @@
 // wrapup-pure.js — 扫描收尾的纯逻辑层（ADR-0007 E9）。
 //
-// 承载两类可脱离浏览器单测的判定，把「本次扫描结束了没有 / 要不要切焦点 / 要停哪些采集」
-// 从 background.js 的事件回调里剥出来：
+// 承载三类可脱离浏览器单测的判定，把「本次扫描结束了没有 / 要不要切焦点 / 要停哪些采集 /
+// 哪些采集已经死了」从 background.js 的事件回调里剥出来：
 //   • decideWrapUp            —— 某条驱动的采集结束（content 发来 scan-done，或该采集
 //                                tab 被关闭）后，本次扫描是否已经全部结束、要不要把焦点
 //                                切回探索页；
-//   • decideAfterExploreGone  —— 探索页 tab 被关闭时的中止动作（停所有仍在跑的采集）。
+//   • decideAfterExploreGone  —— 探索页 tab 被关闭时的中止动作（停所有仍在跑的采集）；
+//   • decideDeadDrives        —— 存活探测的结果里，哪些登记已经静默死亡（反爬跳走）。
 //
 // 之所以要抽出来：扩展后台是 MV3 service worker，上面这些分支（多平台/拆词/中途关 tab/
 // 全平台启动失败/开关关掉）在真实浏览器里几乎没法稳定复现，只有纯函数才测得起。
@@ -96,7 +97,46 @@
     return { stopTabIds, clearKeys };
   }
 
-  const api = { REASON, decideWrapUp, decideAfterExploreGone };
+  /**
+   * 采集端存活判定（ADR-0007 E10）：登记里哪些驱动已经静默死亡。
+   *
+   * 反爬把采集 tab 整页跳到验证页/换域名时，content script 连同它的定时器一起被销毁，
+   * `scan-done` 永远发不出来 —— 登记一直留着，收尾也永不触发。所以由后台主动探活，
+   * 本函数只负责把「探测结果」翻成「哪些该按结束处理」。
+   *
+   * 判定（fail-closed）：
+   *   • 还没完成启动握手（started 非真）→ **不**判死：此时内容脚本可能尚未注入，
+   *     无应答是正常的，这一段窗口必须让开；
+   *   • 明确答「活着」（alive === true）→ 不判死；
+   *   • 明确答「不在采集」或无应答（sendMessage 抛错、tab 上内容脚本被换掉）→ 判死。
+   * 最后一条是刻意的 fail-closed：漏判会让收尾永远不触发（本函数要修的就是这个），
+   * 误判的代价只是提前收尾——停采集 + 切回探索页，用户可重扫，不丢已采数据。
+   *
+   * @param {object} input
+   * @param {Array<{key?: string, scanId?: string, started?: boolean}>} input.drives 登记快照
+   * @param {Array<{key?: string, alive?: boolean}>} input.probes 每条已探测登记的结果
+   *   （只该包含 started 的登记；缺项按无应答处理）
+   * @returns {{deadKeys: string[], scanId: string|null}} deadKeys 要摘的登记；
+   *   scanId = 死掉登记里第一个非空 scanId（登记共享同一次扫描，取一个即可归口）
+   */
+  function decideDeadDrives({ drives, probes } = {}) {
+    const answers = new Map();
+    for (const p of Array.isArray(probes) ? probes : []) {
+      if (p && typeof p.key === "string" && p.key) answers.set(p.key, p.alive === true);
+    }
+    const deadKeys = [];
+    let scanId = null;
+    for (const d of Array.isArray(drives) ? drives : []) {
+      if (!d || typeof d.key !== "string" || !d.key) continue;
+      if (!d.started) continue;
+      if (answers.get(d.key) === true) continue;
+      deadKeys.push(d.key);
+      if (!scanId && typeof d.scanId === "string" && d.scanId) scanId = d.scanId;
+    }
+    return { deadKeys, scanId };
+  }
+
+  const api = { REASON, decideWrapUp, decideAfterExploreGone, decideDeadDrives };
 
   // service worker（经典脚本，background.js 经 importScripts 引入）：挂 self。
   // 内容脚本里 self === window，同一行也成立。

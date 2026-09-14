@@ -870,6 +870,14 @@
       }
       return true;
     }
+    if (msg && msg.type === "scan-ping") {
+      // 存活探测(ADR-0007 E10):背景端借探索页 2s 一次的轮询顺手问"这页还在采吗"。
+      // 只答本实例的真实状态 —— 反爬把 tab 整页跳到验证页后,站点会重新注入一个新
+      // content script(或干脆没有),它的 scan 是 null,如实答否,后台据此把该驱动
+      // 按结束处理(摘登记 + 收尾),而不是让用户停在验证页上。
+      sendResponse({ ok: true, active: !!scan, scanId: scan ? scan.scanId : null });
+      return true;
+    }
     if (msg && msg.type === "evaluated-updated") {
       // 快速路径:消息能到说明 SW 活着;refreshEvaluated 完成后 map 已新,立即
       // 收尾(toast/confirm + 重置)。轮询兜底仍在 —— finalizeDetail 内部会停。

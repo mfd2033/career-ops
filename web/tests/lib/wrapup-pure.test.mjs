@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 const mod = await import(pathToFileURL(join(ROOT, "extension", "wrapup-pure.js")).href);
-const { REASON, decideWrapUp, decideAfterExploreGone } = mod.default ?? mod;
+const { REASON, decideWrapUp, decideAfterExploreGone, decideDeadDrives } = mod.default ?? mod;
 
 const SCAN = "scan-1";
 /** 登记快照里一条驱动的最小形状（key 只为可读，判定只认 scanId）。 */
@@ -151,4 +151,53 @@ test("探索页被关：无采集在跑 / 字段缺失时不产出动作，且�
   assert.deepEqual(decideAfterExploreGone({}), { stopTabIds: [], clearKeys: [] });
   assert.deepEqual(decideAfterExploreGone(), { stopTabIds: [], clearKeys: [] });
   assert.deepEqual(decideAfterExploreGone({ drives: [null, {}, { tabId: "8" }] }), { stopTabIds: [], clearKeys: [] });
+});
+
+// ── 存活探测（06 / ADR-0007 E10）──────────────────────────────────────────────
+const live = (key, scanId = SCAN) => ({ key, scanId, started: true });
+
+test("探活：明确答活着 → 不判死", () => {
+  const d = decideDeadDrives({ drives: [live("a"), live("b")], probes: [{ key: "a", alive: true }, { key: "b", alive: true }] });
+  assert.deepEqual(d, { deadKeys: [], scanId: null });
+});
+
+test("探活：答不在采集（被站点重注入的新实例）→ 判死", () => {
+  const d = decideDeadDrives({ drives: [live("a")], probes: [{ key: "a", alive: false }] });
+  assert.deepEqual(d, { deadKeys: ["a"], scanId: SCAN });
+});
+
+test("探活：无应答（sendMessage 抛错 / 内容脚本被换掉）→ 判死（fail-closed）", () => {
+  const d = decideDeadDrives({ drives: [live("a")], probes: [] });
+  assert.deepEqual(d, { deadKeys: ["a"], scanId: SCAN });
+});
+
+test("探活：还没完成启动握手 → 不判死（让开内容脚本尚未注入的窗口）", () => {
+  const starting = { key: "a", scanId: SCAN, started: false };
+  assert.deepEqual(decideDeadDrives({ drives: [starting], probes: [] }), { deadKeys: [], scanId: null });
+  // 同一批里，握完手的照常判死，没握手的留着。
+  const d = decideDeadDrives({ drives: [starting, live("b")], probes: [{ key: "b", alive: false }] });
+  assert.deepEqual(d, { deadKeys: ["b"], scanId: SCAN });
+});
+
+test("探活：只判死该判死的，活着的登记原样留着", () => {
+  const d = decideDeadDrives({
+    drives: [live("a"), live("b"), live("c")],
+    probes: [{ key: "a", alive: true }, { key: "b", alive: false }, { key: "c", alive: true }],
+  });
+  assert.deepEqual(d.deadKeys, ["b"]);
+});
+
+test("探活：scanId 取死掉登记里第一个非空值", () => {
+  const d = decideDeadDrives({
+    drives: [live("a", "scan-x"), live("b", "scan-y")],
+    probes: [{ key: "a", alive: false }, { key: "b", alive: false }],
+  });
+  assert.deepEqual(d, { deadKeys: ["a", "b"], scanId: "scan-x" });
+});
+
+test("探活：空输入 / 字段缺失不抛错，也不凭空判死", () => {
+  for (const input of [undefined, {}, { drives: [] }, { drives: null, probes: null }]) {
+    assert.deepEqual(decideDeadDrives(input), { deadKeys: [], scanId: null });
+  }
+  assert.deepEqual(decideDeadDrives({ drives: [null, {}, { key: "", started: true }] }), { deadKeys: [], scanId: null });
 });

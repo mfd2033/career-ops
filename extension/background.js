@@ -326,6 +326,45 @@ function runWrapUp(facts) {
   return decision;
 }
 
+/** 问一句采集 tab:内容脚本按自己的状态答。无应答(tab 已关 / content 没注入 / 被换页)
+ *  一律当死 —— fail-closed,理由见 wrapup-pure 的 decideDeadDrives(漏判会让收尾永不触发)。 */
+async function pingDriveTab(tabId) {
+  try {
+    const r = await chrome.tabs.sendMessage(tabId, { type: "scan-ping" });
+    return !!(r && r.active);
+  } catch (e) {
+    return false;
+  }
+}
+
+/**
+ * 采集端存活探测(ADR-0007 E10):反爬把采集 tab 整页跳到验证页 / 换域名时,content
+ * script 连同它的定时器一起被销毁,`scan-done` 永远发不出来 —— 登记一直留着,收尾也
+ * 永不触发,用户就停在验证页上。这里借前端 2s 一次的 scan-status 轮询顺手问一句:内容
+ * script 按自己的状态回答,答不出或答"不在采集"就按该驱动结束处理(摘登记 + 走收尾)。
+ * 只探已完成启动握手的登记 —— tab 刚开、content 还没注入时的无应答是正常的。
+ */
+async function probeDeadDrives() {
+  const drives = [...activeDrives].map(([key, entry]) => ({
+    key,
+    scanId: entry.scanId,
+    started: !!entry.started,
+    tabId: entry.tabId,
+  }));
+  const probes = [];
+  for (const d of drives) {
+    if (!d.started) continue;
+    probes.push({ key: d.key, alive: await pingDriveTab(d.tabId) });
+  }
+  const { deadKeys, scanId } = WRAPUP.decideDeadDrives({ drives, probes });
+  if (deadKeys.length === 0) return;
+  for (const key of deadKeys) activeDrives.delete(key);
+  console.log("[bg] drive went silent → ended", deadKeys.length, "drive(s)");
+  if (scanId) {
+    runWrapUp({ drives: driveSnapshots(), scanId, wrapUpEnabled, exploreTabId });
+  }
+}
+
 /**
  * tab 关闭的两条路径(E9):
  *   ① 探索页被关 → 结果再也无处展示(结果只活在原 tab 的 state 与 per-tab
@@ -383,7 +422,7 @@ async function openAndDrive(source, url, scanId, maxCount) {
   try {
     const key = driveKey(source, url);
     const tab = await chrome.tabs.create({ url });
-    activeDrives.set(key, { scanId, tabId: tab.id });
+    activeDrives.set(key, { scanId, tabId: tab.id, started: false });
     await waitTabLoaded(tab.id);
     let res = await tryStartScan(tab.id, scanId, maxCount);
     if (!res || !res.ok) {
@@ -391,6 +430,9 @@ async function openAndDrive(source, url, scanId, maxCount) {
       res = await tryStartScan(tab.id, scanId, maxCount);
     }
     if (res && res.ok) {
+      // 握上手才算"这个采集端应该活着":在此之前无应答是正常的,存活探测必须让开这段窗口。
+      const entry = activeDrives.get(key);
+      if (entry) entry.started = true;
       return { source, status: "created", tabId: tab.id, scanId: res.scanId || scanId };
     }
     activeDrives.delete(key); // 启动失败:清登记,允许后续重试驱动
@@ -783,6 +825,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           if (source && !activeSources.includes(source)) activeSources.push(source);
         }
         sendResponse({ ok: true, scanId: typeof msg.scanId === "string" ? msg.scanId : null, active: activeSources });
+        // 应答之后再探活,不阻塞前端:采集端静默死亡(反爬跳验证页 / content script 被
+        // 重注入)不会发 scan-done,只能我们主动问。见 ADR-0007 E10。
+        probeDeadDrives().catch(() => {});
         break;
       }
       case "scan-batch": {
