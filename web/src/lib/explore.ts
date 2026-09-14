@@ -153,9 +153,11 @@ import {
   parseBrowserSources as rawParseBrowserSources,
   browserToParams as rawBrowserToParams,
 } from "./browser-search.mjs";
-// 薪资解析与门控（工单 01/03）的客户端再导出：探索页扩展路径（工单 04）在
-// scan-offers 取回处套用与服务端 browser-scan 相同的过滤语义。
-export { matchesBrowserSalary, isSalaryUnknown, applyBrowserSalaryGate } from "./browser-search.mjs";
+// 薪资判定与门控（工单 01/03）的客户端再导出：探索页扩展路径（工单 04）在
+// scan-offers 取回处套用与服务端 browser-scan 相同的过滤语义
+// （applyBrowserSalaryGate），卡片侧用 isSalaryUnknown 决定「薪资未知」打标。
+// matchesBrowserSalary 只剩 browser-search.mjs 内部与单测的调用方，不经此处。
+export { isSalaryUnknown, applyBrowserSalaryGate } from "./browser-search.mjs";
 
 function clampNum(v: unknown, lo: number, hi: number, fallback: number): number {
   const n = Number(v);

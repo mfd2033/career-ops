@@ -201,6 +201,33 @@ test("applyBrowserSalaryGate: 丢弃不达标、保留达标、未知打标、�
   assert.equal(applyBrowserSalaryGate(undefined, 20).length, 0);
 });
 
+test("applyBrowserSalaryGate: defaultSource 补上 bsk 列表行缺失的站点口径", () => {
+  // bsk 列表行只有 {title,url,city,salary}——没有 source。薪资口径逐站不同
+  // （猎聘裸「万」是年薪 ÷12，智联是月薪 ×10，工单 01），所以知道平台的一方必须
+  // 把平台传进来。漏传 = 猎聘裸万按未知源（智联口径）×10 算成 200-350K，薪资下限
+  // 对猎聘静默失效——这是本次修复钉住的回归点。
+  const bskRows = [
+    { title: "A", salary: "20-35万" }, // 猎聘年薪 → 16.7-29.2K
+    { title: "B", salary: "12-18万" }, // 猎聘年薪 → 10-15K
+  ];
+  // 漏传 source：裸万按未知源（智联月薪口径）×10 → 两条上限都远超 40，全留下
+  assert.equal(applyBrowserSalaryGate(bskRows, 40).length, 2);
+  // 传上 liepin：按年薪 ÷12 → 两条上限（29.2 / 15）都不足 40，全部丢弃
+  assert.equal(applyBrowserSalaryGate(bskRows, 40, "liepin").length, 0);
+  // 下限落在区间内 → 只留达标那条，且原行其余字段不动
+  const kept = applyBrowserSalaryGate(bskRows, 20, "liepin");
+  assert.equal(kept.length, 1);
+  assert.equal(kept[0].title, "A");
+  assert.equal(kept[0].salary, "20-35万");
+});
+
+test("applyBrowserSalaryGate: 行自带的 source 优先于 defaultSource", () => {
+  const rows = [{ title: "A", salary: "30K", source: "zhipin" }];
+  const gated = applyBrowserSalaryGate(rows, 20, "liepin");
+  assert.equal(gated.length, 1);
+  assert.equal(gated[0].source, "zhipin");
+});
+
 // ── matchesBrowserSalary —— 重叠判定门控（工单 01）──
 
 test("matchesBrowserSalary: 区间上限 ≥ 薪资下限即保留（重叠判定）", () => {

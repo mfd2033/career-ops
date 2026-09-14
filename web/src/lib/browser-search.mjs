@@ -266,15 +266,30 @@ export function isSalaryUnknown(job) {
  * failing matchesBrowserSalary drop; kept jobs whose salary text parses to no
  * monthly value get `salaryUnknown: true`. floor falsy/0 → returned unchanged
  * (gate off). Pure — exported for tests.
+ *
+ * `defaultSource` is the board the CALLER already knows. Salary口径 is per-board
+ * (猎聘's bare 万 is annual, 智联's is monthly — 工单 01), and the parse falls
+ * back to the unknown-source reading when a row carries no `source`. bsk's
+ * listing rows are exactly that list — `{title,url,city,salary}`, no source
+ * (`normalizeListing` drops unknown anchor fields) — so `browser-scan.ts` passes
+ * the platform it is currently collecting. Without it every 猎聘 bare 万 parses
+ * as 智联's ×10 and the floor silently stops filtering that board. A row that
+ * carries its own `source` keeps it; the extension path needs no fallback
+ * because its offers are stamped at construction (`scan-pure.js`).
  * @param {Array<{ salary?: string, salaryText?: string, source?: string }>} [jobs]
  * @param {number} [salaryMinK] monthly floor in K
+ * @param {string} [defaultSource] board id for rows without one ("liepin"/…)
  * @returns {Array<*>}
  */
-export function applyBrowserSalaryGate(jobs, salaryMinK) {
+export function applyBrowserSalaryGate(jobs, salaryMinK, defaultSource) {
   const floor = Number(salaryMinK) || 0;
   const list = Array.isArray(jobs) ? jobs : [];
   if (floor <= 0) return list;
-  return list.filter((j) => matchesBrowserSalary(j, floor)).map((j) => (isSalaryUnknown(j) ? { ...j, salaryUnknown: true } : j));
+  const board = String(defaultSource ?? "");
+  const withBoard = board
+    ? list.map((j) => (j && typeof j === "object" && !j.source ? { ...j, source: board } : j))
+    : list;
+  return withBoard.filter((j) => matchesBrowserSalary(j, floor)).map((j) => (isSalaryUnknown(j) ? { ...j, salaryUnknown: true } : j));
 }
 
 /**
