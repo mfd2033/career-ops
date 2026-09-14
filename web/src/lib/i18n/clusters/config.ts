@@ -71,6 +71,10 @@ export const en: Dict = {
   "config.scanMaxTitle": "Per-site scan cap",
   "config.scanMaxDesc": "Max postings collected per Chinese board in the Explorer browser scan. Liepin (paged) defaults to 1200 so large keywords aren't truncated at the 400 cap; BOSS/Zhaopin (lazy-load) keep 400.",
 
+  "config.scanWrapUpTitle": "Scan wrap-up",
+  "config.scanWrapUpDesc": "When a browser scan finishes, switch back to the Explorer tab so the results are in front of you instead of the job board tab the scan opened. Only the tab is switched — the browser window is never pulled to the front, and no job-board tab is ever closed.",
+  "config.scanWrapUpLabel": "Switch back to Explorer when a scan finishes",
+
   "config.concurrencyTitle": "Global concurrency limit",
   "config.concurrencyDesc": "How many evaluation CLI processes may run at the SAME time across the web single-card, web batch, and browser extension. Extra tasks queue and show as 排队中.",
   "config.concurrencyNote": "Takes effect immediately on save — running scheduling reads the new value; no restart needed.",
@@ -181,6 +185,10 @@ export const zh: Dict = {
 
   "config.scanMaxTitle": "每站采集上限",
   "config.scanMaxDesc": "探索页浏览器扫描时，每个国内平台最多采集的职位条数。猎聘（分页型）默认 1200，避免大关键词被 400 上限截掉末页；BOSS/智联（懒加载）保持 400。",
+
+  "config.scanWrapUpTitle": "扫描收尾",
+  "config.scanWrapUpDesc": "浏览器扫描全部跑完后，把浏览器切回探索页 tab，让结果直接在你眼前，而不是停在被自动打开的招聘站 tab 上。只切标签页——不会把浏览器窗口抢到前台，也不关闭任何招聘站标签页。",
+  "config.scanWrapUpLabel": "扫描结束后自动切回探索页",
 
   "config.concurrencyTitle": "全局并发上限",
   "config.concurrencyDesc": "web 单卡、web 批量、浏览器扩展同时运行的评估 CLI 子进程数量上限。超出部分自动排队（显示为“排队中”）。",

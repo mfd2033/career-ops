@@ -25,6 +25,7 @@ import { MAX_OFFER_LIMIT } from "@/lib/whats-new.mjs";
 import { isScannerMissing, isBrowserCollectorMissing } from "@/lib/explore-error.mjs";
 import { expandSearchTargets } from "@/lib/browser-search.mjs";
 import { readScanMax } from "@/lib/scan-max.mjs";
+import { readScanWrapUp } from "@/lib/scan-wrapup.mjs";
 import { useI18n } from "@/lib/i18n/context";
 import {
   readScanSources,
@@ -405,6 +406,9 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
         {
           type: "drive-scan",
           scanId,
+          // 收尾开关（ADR-0007 E9）：扩展读不到 localStorage，只能由页面读出带过去。
+          // 缺省（老版本前端）在扩展侧按「开启」处理。
+          wrapUp: readScanWrapUp(),
           sources: targets.map((t) => ({
             source: t.source,
             url: t.url,
