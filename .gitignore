@@ -2,6 +2,11 @@
 cv.md
 article-digest.md
 local/
+# Fork-local tests (ADR-0022): tripwire/regression tests for the gitignored
+# local/ layer. Gitignored so update-system's tracked-prune and upstream merges
+# never touch them; test-all.mjs discovers tests by directory scan, not git.
+/tests/local-*.test.mjs
+/web/tests/lib/local-*.test.mjs
 # Everything under data/ is generated or personal at runtime — only .gitkeep
 # placeholders are tracked (verify with `git ls-files data/`). A blanket rule
 # means a new generated file (e.g. a future log/cache addition) is covered

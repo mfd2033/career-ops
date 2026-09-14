@@ -1023,6 +1023,18 @@ const DEDUP_STRIP_PARAMS = new Set([
   'rltr', // StepStone: regenerated per request, so one posting returns as new every scan
 ]);
 
+// ── FORK-LOCAL anchor (ADR-0022) ─────────────────────────────────────────────
+// Fork dedup extensions (CN-board anti-bot params, the write-point pipeline
+// dedup) live in the gitignored local/ layer — see local/README.md. Missing
+// local/ (fresh clone) → warn + the upstream key above, i.e. this file behaves
+// exactly as upstream; tripwire: tests/local-*.test.mjs go red.
+let forkStripParam = null, localDedupeOffers = null;
+try {
+  ({ forkStripParam, localDedupeOffers } = await import('./local/scan-dedup.mjs'));
+} catch (err) {
+  console.warn('[fork-local] local/scan-dedup.mjs unavailable — upstream dedup keys in effect:', err?.code ?? err);
+}
+
 /**
  * Normalize a job posting URL into a stable dedup key.
  *
@@ -1059,7 +1071,9 @@ export function normalizeUrlForDedup(url) {
     return url;
   }
   for (const param of Array.from(parsed.searchParams.keys())) {
-    if (DEDUP_STRIP_PARAMS.has(param.toLowerCase())) {
+    // FORK-LOCAL anchor (ADR-0022): forkStripParam adds the gitignored local/
+    // layer's params (CN-board anti-bot etc.) on top of the upstream allowlist.
+    if (DEDUP_STRIP_PARAMS.has(param.toLowerCase()) || (forkStripParam?.(param.toLowerCase()) ?? false)) {
       parsed.searchParams.delete(param);
     }
   }
@@ -1882,34 +1896,13 @@ export async function appendToPipeline(offers, { pipelinePath = PIPELINE_PATH } 
 
     let text = readFileSync(pipelinePath, 'utf-8');
 
-    // WRITE-POINT DEDUP (2026-09-14): the upstream gates — scan-history dedup,
-    // each caller's own seen-set — are advisory, and the 2026-09-14 incident is
-    // what one skipped gate costs (9,161 pending rows for 2,500 postings). So
-    // the file defends itself: drop any offer whose canonical key
-    // (url-key.mjs normalizeUrl — the SAME key merge-tracker and the web inbox
-    // dedup on) is already present in ANY checkbox row of the file (Pending or
-    // Processed — re-offering an evaluated posting is wrong in both cases), and
-    // collapse duplicates within the incoming batch itself. The whole text is
-    // in hand for the rewrite below anyway, so this is one extra pass, not a
-    // second read. A non-http(s) URL yields no key ('' is not a key) and the
-    // offer passes through unfiltered — only keyable postings dedupe.
-    const seenKeys = new Set();
-    for (const line of text.split('\n')) {
-      if (!PIPELINE_CHECKBOX_RE.test(line)) continue;
-      const m = line.match(PIPELINE_URL_RE);
-      if (!m) continue;
-      // Markdown auto-link angle brackets: PIPELINE_URL_RE stops at
-      // whitespace/| only, so a trailing `>` from `<https://…>` rides along.
-      const k = normalizeUrl(m[0].replace(/>$/, ''));
-      if (k) seenKeys.add(k);
-    }
-    const fresh = [];
-    for (const offer of offers) {
-      const k = normalizeUrl(offer.url);
-      if (k && seenKeys.has(k)) continue;
-      if (k) seenKeys.add(k);
-      fresh.push(offer);
-    }
+    // WRITE-POINT DEDUP — FORK-LOCAL anchor (ADR-0022): the invariant "the same
+    // posting never enters pipeline.md twice" lives in the gitignored local/
+    // layer (local/scan-dedup.mjs), which filters offers whose canonical key
+    // (url-key.mjs normalizeUrl) is already in ANY checkbox row, and collapses
+    // batch-internal duplicates. local/ missing → no dedup (upstream
+    // behaviour); tripwire: tests/local-pipeline-write-dedup.test.mjs.
+    const fresh = localDedupeOffers ? localDedupeOffers(offers, text) : offers;
     if (fresh.length === 0) return;
 
     const marker = PENDING_MARKERS.find(m => text.includes(m)) ?? null;

@@ -107,3 +107,19 @@ export function normalizeUrl(raw) {
 }
 
 export default normalizeUrl;
+
+// ── FORK-LOCAL anchor (ADR-0022) ─────────────────────────────────────────────
+// Expose the canonical denylist to the gitignored local/ layer (the scanner's
+// dedup gate consults it there — local/scan-dedup.mjs) and extend it with
+// fork-local board params (local/dedup-params.mjs — the ONE place new params
+// are added; nothing tracked changes). Missing local/ → warn + the list above,
+// which is the upstream behaviour. The web mirror (web/src/lib/core/url-key.mjs)
+// deliberately does NOT load this layer — no fs in the browser; its parity
+// scope is the core list above, see ADR-0022 for the known trade-off.
+export { TRACKING_PARAMS };
+try {
+  const { extraTrackingParams } = await import('./local/dedup-params.mjs');
+  TRACKING_PARAMS.push(...extraTrackingParams);
+} catch (err) {
+  console.warn('[fork-local] local/dedup-params.mjs unavailable — core denylist only:', err?.code ?? err);
+}

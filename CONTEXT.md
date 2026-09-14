@@ -49,7 +49,7 @@ _Avoid_: 重新扫描、刷新页面（那是绕过而非机制）
 ## 职位标识
 
 **归一 URL（normalizeUrl）**:
-把职位 URL 降为稳定比较键（strip 跟踪/反爬参数）的算法。`web/src/lib/core/url-key.mjs` 是根 `url-key.mjs` 的镜像，必须逐字节对齐（parity 测试守卫）；扩展 core 内联副本与 web 镜像同规则。BOSS 专属参数 `securityId`/`ka`，猎聘 `pgRef`/`skId`/`fkId`/`ckId`/`d_*`/`sfrom`，智联 `refcode`/`srccode`/`preactionid`（智联职位详情 URL 本身无参数）。作用是判定「已评估」与去重的 key，不是展示用 URL。
+把职位 URL 降为稳定比较键（strip 跟踪/反爬参数）的算法。`web/src/lib/core/url-key.mjs` 是根 `url-key.mjs` 的镜像，**核心参数清单必须逐字节对齐**（parity 测试守卫）；扩展 core 内联副本与 web 镜像同规则。BOSS 专属参数 `securityId`/`ka`，猎聘 `pgRef`/`skId`/`fkId`/`ckId`/`d_*`/`sfrom`，智联 `refcode`/`srccode`/`preactionid`（智联职位详情 URL 本身无参数）。根文件的 FORK-LOCAL 尾部锚点（ADR-0022）注入的 fork-local 扩展参数不参与 parity，web/扩展侧不加载。作用是判定「已评估」与去重的 key，不是展示用 URL。
 _Avoid_: 规范化 URL、标准 URL
 
 **原始职位 URL（raw posting URL）**:
@@ -216,3 +216,18 @@ _Avoid_: 在飞(旧词，歧义，见排队中)
 **排队中(queued)**:
 任务已接受但未取到执行槽、未 spawn CLI 的态。不占写令牌；可被用户取消(dequeue)。对应 `/api/active-runs` 的 `queued` 聚合。
 _Avoid_: 在飞、等待中(口语)
+
+## Fork 维护
+
+**锚点（fork-local anchor）**:
+系统层文件里唯二的 fork 专属代码：一个 `await import('./local/…')` 加载点加一行调用（或尾部导出+参数注入），带 `FORK-LOCAL anchor (ADR-0022)` 注释。职责是把 gitignored `local/` 层的逻辑接进系统文件；`local/` 缺失时降级为上游原行为并打 warn。锚点行位置刻意选在上游不常改动的区域，使 git merge 三方合并自动通过。
+_Avoid_: 补丁（patch，暗示会被重放）、hook（它不是上游提供的扩展点，是我们自己打的孔）
+
+**fork-local 层（local layer）**:
+gitignored 的 `local/` 目录，存放只属于本 fork 的代码扩展（扫描去重扩展、去重参数清单），`.gitignore` 与 `config/local-paths.txt` 双重豁免。加新站去重参数只改这里；上游 merge 永远不会碰它。决策与取舍见 ADR-0022。
+_Avoid_: 本地补丁、私有目录（未表达「被锚点引用、有降级契约」的结构关系）
+
+**tripwire 测试（tripwire test）**:
+gitignored 的 `tests/local-*.test.mjs`，锚点或 local/ 层失效（换机器 clone 漏拷、上游重构切断锚点）时变红的哨兵。test-all.mjs 按目录扫描发现（不看 git 状态），照常自动运行。
+_Avoid_: 回归测试（太泛——它是哨兵语义，专测「fork 层还活着吗」）
+
