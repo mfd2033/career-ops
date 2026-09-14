@@ -21,6 +21,10 @@ import { inboxSalaryFromNote } from "@/lib/inbox-salary.mjs";
 // file read here like every other user-layer data file.
 import { evalTimingSummary } from "@/lib/eval-timings.mjs";
 import type { EvalTimingEntry } from "@/lib/eval-timing";
+// 公司体检台账 (ADR-0025) — tolerant reader mirror of lib/log-checkup.mjs,
+// keyed by tracker#; display-only, never a scoring input.
+import { checkupIndex } from "@/lib/company-checkups.mjs";
+import type { CheckupEntry } from "@/lib/format";
 
 /**
  * Resolve the career-ops "home" — the directory holding the user's sibling
@@ -291,6 +295,10 @@ export type PipelineSummary = {
    *  scores for postings evaluated outside this browser (CLI, batch, prior
    *  sessions) instead of a false "not scored". */
   scoredUrls: Record<string, { score: string }>;
+  /** 公司体检 (ADR-0025): tracker# → latest company-checkup entry. Empty
+   *  ledger / missing file → {} (graceful degradation, badge simply absent).
+   *  Display-only — never feeds score, status, or any gate. */
+  checkups: Record<string, CheckupEntry>;
 };
 
 export function pipelineSummary(): PipelineSummary {
@@ -311,6 +319,8 @@ export function pipelineSummary(): PipelineSummary {
     // one full read of the report URL headers per page load — bounded by the
     // tracker size, same cost the batch re-evaluate flow already pays on demand.
     scoredUrls: buildScoreByUrl(applications, readApplicationUrl),
+    // 公司体检台账 (ADR-0025) — missing/empty file degrades to {} (badge absent).
+    checkups: checkupIndex(read("data/company-checkups.tsv")),
   };
 }
 

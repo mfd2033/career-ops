@@ -24,6 +24,12 @@ data/parser-output/**
 !data/parser-output/**/.gitkeep
 reports/*.md
 !reports/.gitkeep
+# Company checkup HTML reports (offer体检 skill output — personal data, ADR-0025)
+reports/checkups/
+# Company checkup ledger (user-layer data, appended by lib/log-checkup.mjs — never commit)
+data/company-checkups.tsv
+# Eval-timing instrumentation ledger (user-layer data — never commit)
+data/eval-timings.tsv
 output/*
 !output/.gitkeep
 batch/logs/*

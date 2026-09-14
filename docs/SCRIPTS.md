@@ -326,6 +326,20 @@ Amounts: number + optional k/K suffix, ranges allowed ("80-90k"), annual gross u
 
 ---
 
+## log-checkup
+
+Writer + reader for the company-checkup ledger `data/company-checkups.tsv` (公司体检, ADR-0025 — the machine channel for the offer体检 skill's 7-dimension employer due-diligence results). Append-only: rows are never overwritten, corrections are new rows. Validation is owned here: star (1.0–5.0, 0.5 steps), date (YYYY-MM-DD), tracker# (digits or `?` — the company-name-mode sentinel when invite-match found no tracker row), risks (closed vocabulary: `social-zero`, `social-mismatch`, `scale-mismatch`, `entity-confusion`, `arbitration`, `review-negative`, `tactics`, `media-negative`), html (`reports/checkups/…` or `-`). The file is created with a `#` header comment on first write. Consumers: dashboard star badge (web, `web/src/lib/company-checkups.mjs` reader mirror) and `analyze-patterns.mjs --summary`'s checkup section. Orchestration rules (when to suggest a checkup, zero-score-impact discipline) live in `modes/_custom.md`; decisions in `docs/adr/0025-offer-checkup-skill-integration.md`.
+
+```bash
+node lib/log-checkup.mjs add --tracker <n|?> --date <YYYY-MM-DD> --slug <company-slug> --company <名称> --star <1.0-5.0> [--risks <a,b|->] [--html <reports/checkups/…|->] [--note <…>]
+node lib/log-checkup.mjs summary            # JSON (per-company aggregate + risk-factor counts)
+node lib/log-checkup.mjs summary --pretty
+```
+
+**Exit codes:** `0` appended / summary printed, `1` usage or validation error (invalid star/date/tracker#/risk factor, or an html path outside `reports/checkups/`).
+
+---
+
 ## funnel-velocity
 
 Funnel calibration vs market benchmarks + stage velocity. Three payloads, decreasing availability: **calibration** — your funnel rates (canonical `ever*` definition imported from `stats.mjs`) vs candidate-side benchmark ranges from `templates/benchmarks.yml` (override: `config/benchmarks.yml` or `--benchmarks <path>`); **waiting** — in-flight Applied rows and elapsed days vs the typical first-response window (per-row factual reporting; applied-date priority: status-log observation > `Applied YYYY-MM-DD` in tracker notes > unknown, never guessed); **velocity** — median/p75 days per stage hop (Applied→Responded→Interview→Offer, Applied→Rejected separate) folded from `data/status-log.tsv`.

@@ -18,6 +18,9 @@ import { join, dirname, relative, sep } from 'path';
 import { fileURLToPath } from 'url';
 import { load as yamlLoad } from 'js-yaml';
 import { resolveColumns, parseTrackerRow, normalizeVia } from './tracker-parse.mjs';
+// 公司体检台账 (ADR-0025) tolerant reader — same module owns writing+validation;
+// this is a read-only consumer, so the parser comes from the single source.
+import { parseLedger } from './lib/log-checkup.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 const APPS_FILE = existsSync(join(CAREER_OPS, 'data/applications.md'))
@@ -554,6 +557,42 @@ risk_summary:
     }
   }
 
+  // 公司体检维度 (ADR-0025): `?` rows only feed the star distribution and can
+  // never join outcome/score stats; numeric tracker# rows join by latest date.
+  {
+    const ckRows = parseLedger([
+      '# h',
+      '917\t2026-09-14\ta\tA\t2.5\tentity-confusion\thtml\tn',
+      '917\t2026-09-20\ta\tA\t3\tentity-confusion,arbitration\thtml\tn',
+      '918\t2026-09-14\tb\tB\t4.5\t-\thtml\tn',
+      '?\t2026-09-15\tghost\tG\t1.5\tsocial-zero\t-\tn',
+    ].join('\n'));
+    const ckEnriched = [
+      { n: '917', score: 2.0, outcome: 'negative', normalizedStatus: 'rejected' },
+      { n: '918', score: 4.2, outcome: 'positive', normalizedStatus: 'hired' },
+      { n: '919', score: 3.0, outcome: 'pending', normalizedStatus: 'evaluated' },
+    ];
+    const ck = buildCheckupAnalysis(ckEnriched, ckRows);
+    if (!ck || ck.totalCheckups !== 4) failures.push(`checkup: totalCheckups → ${ck?.totalCheckups}, expected 4`);
+    if (ck?.starDistribution['1.5'] !== 1 || ck?.starDistribution['2.5'] !== 1 || ck?.starDistribution['3.0'] !== 1 || ck?.starDistribution['4.5'] !== 1) {
+      failures.push(`checkup: starDistribution wrong → ${JSON.stringify(ck?.starDistribution)}`);
+    }
+    if (ck?.joinedToTracker !== 2) failures.push(`checkup: joinedToTracker → ${ck?.joinedToTracker}, expected 2 (a \`?\` row must not join)`);
+    // 917 joins via its LATEST checkup (09-20, risks entity-confusion+arbitration), not the older one.
+    const ec = ck?.riskFactorOutcomes['entity-confusion'];
+    if (!ec || ec.total !== 1 || ec.negative !== 1 || ec.avgScore !== 2) {
+      failures.push(`checkup: entity-confusion outcome → ${JSON.stringify(ec)}, expected total 1 / negative 1 / avgScore 2`);
+    }
+    if (ck?.riskFactorOutcomes['social-zero']) {
+      failures.push('checkup: `?`-row risk factor leaked into outcome stats (must stay distribution-only)');
+    }
+    if (ck?.riskFactorCounts['social-zero'] !== 1) failures.push('checkup: riskFactorCounts must cover all rows incl. `?`');
+    if (ck?.avgScoreWithRiskFactors !== 2 || ck?.avgScoreWithoutRiskFactors !== 4.2) {
+      failures.push(`checkup: avg score split → with ${ck?.avgScoreWithRiskFactors}, without ${ck?.avgScoreWithoutRiskFactors}, expected 2 / 4.2`);
+    }
+    if (buildCheckupAnalysis(ckEnriched, []) !== null) failures.push('checkup: empty ledger must omit the section (null)');
+  }
+
   if (failures.length > 0) {
     console.error(`analyze-patterns self-test failed: ${failures.join('; ')}`);
     process.exit(1);
@@ -926,6 +965,81 @@ function buildPatternSignals(enriched) {
   };
 }
 
+// --- 公司体检维度 (ADR-0025) ---
+// Joins the checkup ledger onto tracker rows by tracker# (the ledger's join
+// key). `?` rows (company-name-mode checkups with no tracker row) only count
+// toward the star distribution — they cannot join a tracker row, so they are
+// excluded from every outcome/score correlation by construction, not by
+// filtering after the fact. Display/analytics only: nothing here feeds score,
+// status, or recommendations that change behavior gates. Pure so the self-test
+// can exercise it with fixtures.
+function buildCheckupAnalysis(enriched, rows) {
+  if (!Array.isArray(rows) || rows.length === 0) return null;
+
+  const starDistribution = {};
+  for (const r of rows) {
+    const key = r.star.toFixed(1);
+    starDistribution[key] = (starDistribution[key] || 0) + 1;
+  }
+
+  const riskFactorCounts = {};
+  for (const r of rows) for (const f of r.risks) riskFactorCounts[f] = (riskFactorCounts[f] || 0) + 1;
+
+  // Latest checkup per numeric tracker# (`?` can never join — no such tracker row).
+  const latestByTracker = new Map();
+  for (const r of rows) {
+    if (!/^\d+$/.test(r.tracker)) continue;
+    const prev = latestByTracker.get(r.tracker);
+    if (!prev || r.date >= prev.date) latestByTracker.set(r.tracker, r);
+  }
+
+  // Join to tracker entries that carry a real outcome/score. The tracker row's
+  // number field is `num` (tracker-parse.mjs parseTrackerRow); `n` is the web
+  // side's spelling — accept both so a future caller shape can't silently
+  // un-join everything.
+  const joined = [];
+  for (const e of enriched) {
+    const c = latestByTracker.get(String(e.num ?? e.n));
+    if (c) joined.push({ e, c });
+  }
+
+  const riskFactorOutcomes = {};
+  let withRiskSum = 0, withRiskN = 0, noRiskSum = 0, noRiskN = 0;
+  for (const { e, c } of joined) {
+    const score = Number.isFinite(e.score) ? e.score : null;
+    if (c.risks.length > 0) {
+      if (score !== null) { withRiskSum += score; withRiskN += 1; }
+    } else if (score !== null) {
+      noRiskSum += score; noRiskN += 1;
+    }
+    for (const f of c.risks) {
+      if (!riskFactorOutcomes[f]) {
+        riskFactorOutcomes[f] = { total: 0, positive: 0, negative: 0, self_filtered: 0, pending: 0, avgScore: null, scoreN: 0, scoreSum: 0 };
+      }
+      const o = riskFactorOutcomes[f];
+      o.total += 1;
+      o[e.outcome] = (o[e.outcome] || 0) + 1;
+      if (score !== null) { o.scoreSum += score; o.scoreN += 1; }
+    }
+  }
+  for (const o of Object.values(riskFactorOutcomes)) {
+    o.avgScore = o.scoreN > 0 ? Math.round((o.scoreSum / o.scoreN) * 100) / 100 : null;
+    delete o.scoreSum;
+    delete o.scoreN;
+  }
+
+  return {
+    totalCheckups: rows.length,
+    distinctCompanies: new Set(rows.map(r => r.slug)).size,
+    joinedToTracker: joined.length,
+    starDistribution,
+    riskFactorCounts,
+    riskFactorOutcomes,
+    avgScoreWithRiskFactors: withRiskN > 0 ? Math.round((withRiskSum / withRiskN) * 100) / 100 : null,
+    avgScoreWithoutRiskFactors: noRiskN > 0 ? Math.round((noRiskSum / noRiskN) * 100) / 100 : null,
+  };
+}
+
 // --- Main analysis ---
 function analyze() {
   const entries = parseTracker();
@@ -1139,6 +1253,14 @@ function analyze() {
   // (#1596); without it every bucket is empty and nothing is claimed.
   const viaChannelAnalysis = buildViaChannelAnalysis(submitted, isAdvanced);
 
+  // --- 公司体检维度 (ADR-0025) ---
+  // Missing/empty ledger → null → the whole section is omitted from the JSON
+  // (not an empty object), per the graceful-degradation contract.
+  const checkupAnalysis = buildCheckupAnalysis(
+    enriched,
+    parseLedger(readTextIfExists(join(CAREER_OPS, 'data', 'company-checkups.tsv')) ?? ''),
+  );
+
   // --- Score threshold analysis ---
   const positiveScores = scoresByOutcome.positive.filter(s => s > 0);
   const minPositiveScore = positiveScores.length > 0 ? Math.min(...positiveScores) : 0;
@@ -1270,6 +1392,7 @@ function analyze() {
     companySizeBreakdown,
     vendorAnalysis,
     viaChannelAnalysis,
+    ...(checkupAnalysis ? { checkupAnalysis } : {}),
     scoreThreshold,
     techStackGaps,
     discardReasonStats,
@@ -1376,6 +1499,30 @@ function printSummary(result) {
       const flag = a.sufficientSample ? '' : '  (n too small for a claim)';
       console.log(`    ${a.agency.padEnd(16)} ${String(a.total).padStart(3)} apps  ${String(a.advanceRate).padStart(3)}% advance${flag}`);
     }
+  }
+
+  // 公司体检 (ADR-0025)
+  const ck = result.checkupAnalysis;
+  if (ck) {
+    console.log('\nCOMPANY CHECKUPS (ADR-0025)');
+    console.log('-'.repeat(40));
+    console.log(`  ${ck.totalCheckups} checkups across ${ck.distinctCompanies} companies (${ck.joinedToTracker} joined to tracker rows)`);
+    const dist = Object.entries(ck.starDistribution)
+      .sort((a, b) => parseFloat(a[0]) - parseFloat(b[0]))
+      .map(([star, n]) => `★${star}×${n}`)
+      .join('  ');
+    console.log(`  stars: ${dist}`);
+    const factors = Object.entries(ck.riskFactorCounts).sort((a, b) => b[1] - a[1]);
+    if (factors.length > 0) {
+      console.log('  risk factors:');
+      for (const [f, n] of factors) console.log(`    ${f.padEnd(20)} ${String(n).padStart(2)}x`);
+    }
+    if (ck.avgScoreWithRiskFactors !== null || ck.avgScoreWithoutRiskFactors !== null) {
+      const withS = ck.avgScoreWithRiskFactors ?? '—';
+      const noS = ck.avgScoreWithoutRiskFactors ?? '—';
+      console.log(`  avg offer score: with risk factors ${withS}/5, without ${noS}/5`);
+    }
+    console.log('  (display/analytics only — never a scoring input)');
   }
 
   // Score threshold
