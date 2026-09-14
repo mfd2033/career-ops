@@ -58,7 +58,7 @@ import { withPortalHealthLock } from './portal-health-lock.mjs';
 import { localToday } from './lib/local-today.mjs';
 // The canonical posting-key denylist. Imported, never re-typed: see
 // DEDUP_STRIP_PARAMS below for the duplicate that grew when it was re-typed.
-import { TRACKING_PARAMS } from './url-key.mjs';
+import { TRACKING_PARAMS, normalizeUrl } from './url-key.mjs';
 
 try {
   const { config } = await import('dotenv');
@@ -1900,16 +1900,46 @@ const PROCESSED_MARKERS = ['## Processed', '## Procesadas'];
 // Locked (pipeline-lock.mjs) so scan.mjs, scan-ats-full.mjs, and plugins.mjs
 // (pipeline mode) — the three current callers — can never interleave their
 // read-modify-write and silently drop each other's offers.
-export async function appendToPipeline(offers) {
+export async function appendToPipeline(offers, { pipelinePath = PIPELINE_PATH } = {}) {
   if (offers.length === 0) return;
 
-  await withPipelineLock(PIPELINE_PATH, async () => {
+  await withPipelineLock(pipelinePath, async () => {
     // Auto-create with standard skeleton if missing (fresh-install guard).
-    if (!existsSync(PIPELINE_PATH)) {
-      writeFileSync(PIPELINE_PATH, PIPELINE_SKELETON, 'utf-8');
+    if (!existsSync(pipelinePath)) {
+      writeFileSync(pipelinePath, PIPELINE_SKELETON, 'utf-8');
     }
 
-    let text = readFileSync(PIPELINE_PATH, 'utf-8');
+    let text = readFileSync(pipelinePath, 'utf-8');
+
+    // WRITE-POINT DEDUP (2026-09-14): the upstream gates — scan-history dedup,
+    // each caller's own seen-set — are advisory, and the 2026-09-14 incident is
+    // what one skipped gate costs (9,161 pending rows for 2,500 postings). So
+    // the file defends itself: drop any offer whose canonical key
+    // (url-key.mjs normalizeUrl — the SAME key merge-tracker and the web inbox
+    // dedup on) is already present in ANY checkbox row of the file (Pending or
+    // Processed — re-offering an evaluated posting is wrong in both cases), and
+    // collapse duplicates within the incoming batch itself. The whole text is
+    // in hand for the rewrite below anyway, so this is one extra pass, not a
+    // second read. A non-http(s) URL yields no key ('' is not a key) and the
+    // offer passes through unfiltered — only keyable postings dedupe.
+    const seenKeys = new Set();
+    for (const line of text.split('\n')) {
+      if (!PIPELINE_CHECKBOX_RE.test(line)) continue;
+      const m = line.match(PIPELINE_URL_RE);
+      if (!m) continue;
+      // Markdown auto-link angle brackets: PIPELINE_URL_RE stops at
+      // whitespace/| only, so a trailing `>` from `<https://…>` rides along.
+      const k = normalizeUrl(m[0].replace(/>$/, ''));
+      if (k) seenKeys.add(k);
+    }
+    const fresh = [];
+    for (const offer of offers) {
+      const k = normalizeUrl(offer.url);
+      if (k && seenKeys.has(k)) continue;
+      if (k) seenKeys.add(k);
+      fresh.push(offer);
+    }
+    if (fresh.length === 0) return;
 
     const marker = PENDING_MARKERS.find(m => text.includes(m)) ?? null;
     const idx = marker !== null ? text.indexOf(marker) : -1;
@@ -1921,7 +1951,7 @@ export async function appendToPipeline(offers) {
         return (found === -1 || (i !== -1 && i < found)) ? i : found;
       }, -1);
       const insertAt = procIdx === -1 ? text.length : procIdx;
-      const block = `\n## Pending\n\n` + offers.map(formatPipelineOffer).join('\n') + '\n\n';
+      const block = `\n## Pending\n\n` + fresh.map(formatPipelineOffer).join('\n') + '\n\n';
       text = text.slice(0, insertAt) + block + text.slice(insertAt);
     } else {
       // Find the end of existing Pending content (next ## or end)
@@ -1929,11 +1959,11 @@ export async function appendToPipeline(offers) {
       const nextSection = text.indexOf('\n## ', afterMarker);
       const insertAt = nextSection === -1 ? text.length : nextSection;
 
-      const block = '\n' + offers.map(formatPipelineOffer).join('\n') + '\n';
+      const block = '\n' + fresh.map(formatPipelineOffer).join('\n') + '\n';
       text = text.slice(0, insertAt) + block + text.slice(insertAt);
     }
 
-    writeFileSync(PIPELINE_PATH, text, 'utf-8');
+    writeFileSync(pipelinePath, text, 'utf-8');
   });
 }
 
