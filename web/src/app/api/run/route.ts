@@ -241,6 +241,14 @@ async function runPipeline({
   // released. Cancellation now arrives via setCancelHandler (POST /api/run/cancel)
   // instead of a stream-disconnect — there is no held response to disconnect.
   let terminal = false;
+  // Resolved when the run reaches its terminal state (close() or a cancel), so
+  // the try body below can AWAIT it. Without that await the body falls straight
+  // through to `finally`, which closes the run the instant the child handlers
+  // are registered — `terminal` flips true while the CLI is still running and
+  // every later event (the honesty gate's done/error, pdf's render) is silently
+  // swallowed. Found 2026-09-14 via web/qa-run-close.mjs (regression of 3bb566b).
+  let runSettled: (() => void) | null = null;
+  const settle = () => { runSettled?.(); runSettled = null; };
   let killer: ReturnType<typeof setTimeout> | undefined;
   // pdf-kind's render+mark work (renderPdf, below) keeps running detached even
   // after the agent child closes — and even after a cancel. Track its promise so
@@ -261,6 +269,7 @@ async function runPipeline({
   };
   const keepalive = setInterval(() => send({ type: "keepalive" }), 10_000);
   const close = () => {
+    settle(); // idempotent — also fires when a cancel already terminal'd the run
     if (terminal) return;
     terminal = true;
     clearInterval(keepalive);
@@ -274,6 +283,7 @@ async function runPipeline({
   // stream-cancel(): kill the child tree / dequeue from the pool, release the
   // guards, and terminate the run on the bus.
   setCancelHandler(runId, () => {
+    settle(); // a cancel is terminal too — the awaited body must not hang
     if (terminal) return;
     terminal = true;
     clearInterval(keepalive);
@@ -589,6 +599,11 @@ async function runPipeline({
         }
         close();
       });
+
+      // Hold the try body open until a terminal handler runs (close() via the
+      // child's error/close events, pdf's own finally, or a cancel). Reaching
+      // `finally` earlier closes the run before the CLI has said anything.
+      await new Promise<void>((resolve) => { runSettled = resolve; });
     } finally {
       // The run must ALWAYS terminate on the bus, whatever path it takes —
       // a thrown parse/spawn error must not leave a zombie "running" entry or
