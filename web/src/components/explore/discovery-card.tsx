@@ -37,7 +37,23 @@ function Logo({ company }: { company: string }) {
 }
 
 // What a running worker is doing on this exact posting → the live CTA label.
-export function DiscoveryCard({ offer, inPipeline, evaluatedN }: { offer: DiscoveredOffer; inPipeline: boolean; evaluatedN?: string }) {
+// ADR-0021: 结果区可勾选（selectable/selected/onToggleSelect 由 ResultsList 传入，
+// 组成「加入管道 (N)」的批量确认）；不传即无勾选框（旧调用方不受影响）。
+export function DiscoveryCard({
+  offer,
+  inPipeline,
+  evaluatedN,
+  selectable,
+  selected,
+  onToggleSelect,
+}: {
+  offer: DiscoveredOffer;
+  inPipeline: boolean;
+  evaluatedN?: string;
+  selectable?: boolean;
+  selected?: boolean;
+  onToggleSelect?: () => void;
+}) {
   const { t } = useI18n();
   const { added, adding, addToPipeline } = useExplore();
   const { jobs, startJob } = useJobs();
@@ -77,6 +93,16 @@ export function DiscoveryCard({ offer, inPipeline, evaluatedN }: { offer: Discov
   return (
     <div className="co-rise group flex min-w-0 flex-col gap-2.5 rounded-xl border border-border bg-surface/40 p-3.5 text-left transition-all hover:-translate-y-0.5 hover:border-brand/30 hover:shadow-sm">
       <div className="flex items-start gap-3">
+        {onToggleSelect && (
+          <input
+            type="checkbox"
+            checked={!!selected}
+            onChange={onToggleSelect}
+            disabled={!selectable}
+            aria-label={t("explore.results.selectAria", { title: offer.title })}
+            className="mt-1 size-4 shrink-0 accent-brand max-sm:size-5"
+          />
+        )}
         <Logo company={offer.company} />
         <a href={offer.url} target="_blank" rel="noopener noreferrer" className="block min-w-0 flex-1 max-sm:min-h-[44px]">
           <h3 className={`${instrumentSerif.className} truncate text-[17px] leading-tight text-foreground transition-colors group-hover:text-brand`}>{offer.title}</h3>

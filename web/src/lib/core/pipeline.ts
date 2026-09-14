@@ -3,24 +3,30 @@ import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { careerOpsRoot, rootScript } from "@/lib/career-ops";
+import { normalizeUrl } from "./url-key.mjs";
 import type { DiscoveredOffer } from "./scan";
 
 /**
- * "Add to pipeline" — appends user-selected discovered offers to data/pipeline.md
- * AND records them in data/scan-history.tsv (so future scans dedup them). We reuse
- * the CANONICAL writers exported by the core's scan.mjs (`appendToPipeline`,
- * `appendToScanHistory`) instead of re-implementing the line format / section
- * markers — single source of truth, per the web↔core contract. We invoke them in
- * a short-lived node process (cwd = the user's career-ops root) so the core's own
- * code does the writing; the web never owns a parallel copy of that logic.
+ * The canonical core writers (scan.mjs `appendToPipeline` / `appendToScanHistory`)
+ * invoked in a short-lived node process (cwd = the user's career-ops root), so the
+ * core owns the line format / section markers and the web never keeps a parallel
+ * copy. No tokens are spent here.
  *
- * Discovered-but-not-added offers stay "new" (a dry-run scan writes nothing);
- * only an explicit add records them as seen. No tokens are spent here.
+ * ADR-0021 splits the two writes into independent moments:
+ *   - 采集（collection）records ONLY the seen ledger (scan-history.tsv) — via
+ *     `recordSeenOffers`. A discovered posting is "seen", never auto-queued.
+ *   - 确认（confirm）writes pipeline.md — via `addOffersToPipeline`. For offers
+ *     already in the seen ledger (`skipScanHistory`) it must NOT append a second
+ *     scan-history row: `appendToScanHistory` does not dedupe.
  */
 export type AddResult = { added: number; error?: string };
+type WriterMode = "both" | "pipeline" | "history";
 
-export function addOffersToPipeline(offers: DiscoveredOffer[]): Promise<AddResult> {
-  const clean = offers
+export type AddOptions = { skipScanHistory?: boolean };
+
+/** url/company/title/location/source の sane defaults — the writers' input contract. */
+function cleanOffers(offers: DiscoveredOffer[]) {
+  return offers
     .filter((o) => o && typeof o.url === "string" && /^https?:\/\//i.test(o.url))
     .map((o) => ({
       url: o.url,
@@ -35,6 +41,10 @@ export function addOffersToPipeline(offers: DiscoveredOffer[]): Promise<AddResul
       // a floor gate was active but the text parsed to nothing) is appended.
       note: [o.note, o.salaryText || (o.salaryUnknown ? "薪资未知" : "")].filter(Boolean).join(" · "),
     }));
+}
+
+function runWriter(offers: DiscoveredOffer[], mode: WriterMode): Promise<AddResult> {
+  const clean = cleanOffers(offers);
   if (clean.length === 0) return Promise.resolve({ added: 0 });
 
   // Data-only / pre-scan-ats checkout has no scan.mjs writers → fail with an
@@ -53,13 +63,13 @@ process.stdin.setEncoding("utf8");
 process.stdin.on("data", (d) => { input += d; });
 process.stdin.on("end", async () => {
   try {
-    const offers = JSON.parse(input);
+    const { offers, mode } = JSON.parse(input);
     // LOCAL calendar day, not the UTC one — west of Greenwich, an evening
     // add would otherwise stamp scan-history.tsv's first_seen a day ahead,
     // opening scan.mjs's recheck/cooldown gate a day late for this row (#3070).
     const date = localToday();
-    await appendToPipeline(offers);
-    await appendToScanHistory(offers, date, "added");
+    if (mode !== "pipeline") await appendToScanHistory(offers, date, "added");
+    if (mode !== "history") await appendToPipeline(offers);
     process.stdout.write(JSON.stringify({ added: offers.length }));
   } catch (e) {
     process.stdout.write(JSON.stringify({ added: 0, error: String((e && e.message) || e) }));
@@ -85,7 +95,36 @@ process.stdin.on("end", async () => {
         resolve({ added: 0, error: err.trim().slice(0, 200) || "writer returned no result" });
       }
     });
-    child.stdin.write(JSON.stringify(clean));
+    child.stdin.write(JSON.stringify({ offers: clean, mode }));
     child.stdin.end();
   });
+}
+
+/** 确认入管（ADR-0021）：写 pipeline.md；`skipScanHistory` 用于已在见过台账里的
+ *  offer（采集阶段已记过，再写就是重复行）。 */
+export function addOffersToPipeline(offers: DiscoveredOffer[], opts?: AddOptions): Promise<AddResult> {
+  return runWriter(offers, opts?.skipScanHistory ? "pipeline" : "both");
+}
+
+/** 采集记「见过」（ADR-0021）：只写 scan-history.tsv，绝不碰 pipeline.md。 */
+export function recordSeenOffers(offers: DiscoveredOffer[]): Promise<AddResult> {
+  return runWriter(offers, "history");
+}
+
+/** 规范键的「见过」集合 —— data/scan-history.tsv 里出现过的每个职位 URL。
+ *  路由侧用它把 offer 切成「已见过（补 pipeline 即可）」与「全新（两处都写）」。 */
+export function loadSeenUrlKeys(): Set<string> {
+  const keys = new Set<string>();
+  let text = "";
+  try {
+    text = fs.readFileSync(path.join(careerOpsRoot(), "data", "scan-history.tsv"), "utf8");
+  } catch {
+    return keys; // 首跑无表
+  }
+  for (const line of text.split(/\r?\n/)) {
+    if (!line || line.startsWith("url\t")) continue;
+    const key = normalizeUrl(line.split("\t")[0]);
+    if (key) keys.add(key);
+  }
+  return keys;
 }

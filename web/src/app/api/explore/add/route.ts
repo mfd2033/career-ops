@@ -1,21 +1,24 @@
 import { NextRequest } from "next/server";
 import path from "node:path";
-import { addOffersToPipeline } from "@/lib/core/pipeline";
+import { addOffersToPipeline, loadSeenUrlKeys } from "@/lib/core/pipeline";
 import { partitionNewOffers, loadScanMap, saveScanMap, scanIdempotencyPath } from "@/lib/scan-idempotency.mjs";
 import { careerOpsRoot } from "@/lib/career-ops";
+import { normalizeUrl } from "@/lib/core/url-key.mjs";
 import type { DiscoveredOffer } from "@/lib/explore";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// Free + reversible: append chosen discovered offers to data/pipeline.md AND
-// record them in data/scan-history.tsv, via the core's CANONICAL exported writers
-// (no parallel writer). No tokens spent.
+// 确认入管（ADR-0021）：把用户在探索页结果区**显式选中**的 offer 写进 pipeline.md。
+// 自 ADR-0021 起，扩展采集阶段只写「见过」台账（/api/explore/seen），本路由是
+// pipeline.md 的唯一写入口 —— 「扫描 ≠ 加入管道」。
 //
-// Per-scan idempotency (ADR-0007 E5 layer 2): pipeline/scan-history don't dedup,
-// so the route must. A repeating POST with the same scanId cannot double-write the
-// same normalized posting URL — the content script already only sends each URL once
-// per page (inner URL Set), and this guard catches the front-end's re-start/replay.
+// 已见过 / 全新 的切分：确认的 offer 若已在见过台账（扩展路径必然如此），只补
+// pipeline.md —— appendToScanHistory 不去重，重写就是重复台账行；不在的（bsk 兜底
+// 路径的发现，采集时未记台账）两个都写，保持 bsk 路径「确认即记录发现」的旧行为。
+//
+// 幂等（ADR-0007 E5 第二层 + ADR-0021 命名空间）：`add:<scanId>` 防同一确认重放；
+// 与 `seen:<scanId>` 共用 data/scan-idempotency.tsv 但互不可见。
 export async function POST(req: NextRequest) {
   let offers: DiscoveredOffer[] = [];
   let scanId = "";
@@ -28,24 +31,41 @@ export async function POST(req: NextRequest) {
   }
   if (offers.length === 0) return Response.json({ added: 0 });
 
-  // 无 scanId → 原路径,不做幂等(每次全写)。有 scanId → 按 (scanId, 归一URL) 去重:
-  // 已写过的 URL 跳过,只写新增;写成功才记录键,下次同键重放即幂等返回。
-  if (scanId) {
-    const idemPath = scanIdempotencyPath(path.join(careerOpsRoot(), "data"));
-    const map = loadScanMap(idemPath);
-    const { newOffers, skipped, keysToAdd } = partitionNewOffers(map, scanId, offers);
-    if (newOffers.length === 0) {
-      // 全是已采/无效 → 幂等命中,不触碰 pipeline/scan-history。
-      return Response.json({ added: 0, skipped, idempotent: true });
-    }
-    const result = await addOffersToPipeline(newOffers);
-    if (result.error) return Response.json(result);
-    if (!map.has(scanId)) map.set(scanId, new Set());
-    for (const k of keysToAdd) map.get(scanId).add(k);
-    saveScanMap(idemPath, map);
-    return Response.json({ added: result.added ?? newOffers.length, skipped, idempotent: true });
+  const idemPath = scanIdempotencyPath(path.join(careerOpsRoot(), "data"));
+  const map = loadScanMap(idemPath);
+  const ns = scanId ? `add:${scanId}` : "";
+  const { newOffers, skipped, keysToAdd } = partitionNewOffers(map, ns, offers);
+  if (newOffers.length === 0) {
+    return Response.json({ added: 0, skipped, idempotent: true });
   }
 
-  const result = await addOffersToPipeline(offers);
-  return Response.json(result);
+  // 已见过 → 只补 pipeline；全新 → pipeline + 台账。
+  const seenKeys = loadSeenUrlKeys();
+  const inLedger = (o: DiscoveredOffer) => {
+    const k = normalizeUrl(o.url);
+    return !!k && seenKeys.has(k);
+  };
+  const seen = newOffers.filter(inLedger);
+  const unseen = newOffers.filter((o) => !inLedger(o));
+
+  let added = 0;
+  let error: string | undefined;
+  if (seen.length > 0) {
+    const r = await addOffersToPipeline(seen, { skipScanHistory: true });
+    added += r.added;
+    error = r.error;
+  }
+  if (!error && unseen.length > 0) {
+    const r = await addOffersToPipeline(unseen);
+    added += r.added;
+    error = error || r.error;
+  }
+  if (error) return Response.json({ added, error });
+
+  if (ns && keysToAdd.length) {
+    if (!map.has(ns)) map.set(ns, new Set());
+    for (const k of keysToAdd) map.get(ns)!.add(k);
+    saveScanMap(idemPath, map);
+  }
+  return Response.json({ added, skipped });
 }
