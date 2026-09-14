@@ -9,6 +9,7 @@ import type { AtsSource } from "@/lib/explore";
 import { ATS_SOURCES } from "@/lib/explore";
 import { daysSince, seniorityFromTitle, sourceFromUrl, SENIORITY_ORDER, type Seniority } from "@/lib/inbox";
 import { normalizeUrl } from "@/lib/core/url-key.mjs";
+import { inboxSalaryRange, inboxSalaryMedian, passesInboxSalaryFloor } from "@/lib/inbox-salary.mjs";
 import { resolveRowScore } from "@/lib/inbox-score.mjs";
 import { scoreTone } from "@/lib/format";
 import { scoreNum } from "@/lib/score-num.mjs";
@@ -21,6 +22,10 @@ import { cn } from "@/lib/cn";
 const SHORTLIST_KEY = "career-ops:shortlist";
 const HIDDEN_KEY = "career-ops:hidden";
 const CONFIG_KEY = "career-ops:config";
+// 收件箱薪资 facet 的持久化（ADR-0023 决定 3）：跟随 shortlist/hidden 的
+// localStorage 惯例（ADR-0010），刷新/重开保持。
+const SALARY_FLOOR_KEY = "career-ops:inbox-salary-min";
+const SALARY_SORT_KEY = "career-ops:inbox-salary-sort";
 const BATCH = 20;
 // /api/batch-evaluate's own MAX_URLS. A longer shortlist is sent as chunks.
 const SCORE_BATCH_MAX = 20;
@@ -46,6 +51,10 @@ export function InboxTriage({ inbox, scoredUrls }: { inbox: InboxJob[]; scoredUr
   const [locQ, setLocQ] = useState("");
   const [kw, setKw] = useState("");
   const [unscoredOnly, setUnscoredOnly] = useState(false);
+  // 薪资下限（月薪 K）——与探索页同一语义（区间重叠、未知放行打标）
+  const [salaryMin, setSalaryMin] = useState<number | null>(null);
+  // 按薪资排序（ADR-0023 决定 4）：开 = 解析区间中位值降序、未知沉底；关 = 新鲜度
+  const [sortBySalary, setSortBySalary] = useState(false);
   const [showAll, setShowAll] = useState(false);
 
   // persisted triage state + ephemeral selection/undo
@@ -66,6 +75,12 @@ export function InboxTriage({ inbox, scoredUrls }: { inbox: InboxJob[]; scoredUr
       if (h) setHidden(JSON.parse(h));
       const c = localStorage.getItem(CONFIG_KEY);
       setHasCli(!!(c && JSON.parse(c).cliId));
+      const f = localStorage.getItem(SALARY_FLOOR_KEY);
+      if (f) {
+        const n = Number(f);
+        if (Number.isFinite(n) && n > 0) setSalaryMin(n);
+      }
+      if (localStorage.getItem(SALARY_SORT_KEY) === "1") setSortBySalary(true);
     } catch {
       /* ignore */
     }
@@ -77,6 +92,12 @@ export function InboxTriage({ inbox, scoredUrls }: { inbox: InboxJob[]; scoredUr
   useEffect(() => {
     if (loaded) try { localStorage.setItem(HIDDEN_KEY, JSON.stringify(hidden)); } catch { /* quota */ }
   }, [hidden, loaded]);
+  useEffect(() => {
+    if (loaded) try { localStorage.setItem(SALARY_FLOOR_KEY, salaryMin != null ? String(salaryMin) : ""); } catch { /* quota */ }
+  }, [salaryMin, loaded]);
+  useEffect(() => {
+    if (loaded) try { localStorage.setItem(SALARY_SORT_KEY, sortBySalary ? "1" : "0"); } catch { /* quota */ }
+  }, [sortBySalary, loaded]);
   // auto-dismiss the undo toast
   useEffect(() => {
     if (!undo) return;
@@ -109,7 +130,7 @@ export function InboxTriage({ inbox, scoredUrls }: { inbox: InboxJob[]; scoredUr
   // Save and Skip all key uniformly instead of scattering per raw URL.
   const enriched = useMemo(() => {
     const seen = new Set<string>();
-    const out: { job: InboxJob; source: AtsSource | null; seniority: Seniority | null; age: number | null; urlKey: string }[] = [];
+    const out: { job: InboxJob; source: AtsSource | null; seniority: Seniority | null; age: number | null; urlKey: string; salaryRange: ReturnType<typeof inboxSalaryRange> }[] = [];
     for (const job of inbox) {
       const urlKey = normalizeUrl(job.url);
       if (seen.has(urlKey)) continue;
@@ -120,6 +141,8 @@ export function InboxTriage({ inbox, scoredUrls }: { inbox: InboxJob[]; scoredUr
         seniority: seniorityFromTitle(job.role),
         age: daysSince(job.postedAt, now),
         urlKey,
+        // 过滤/排序共用的月薪区间（薪资未知 → null，与 job.salaryUnknown 同源）
+        salaryRange: inboxSalaryRange(job.salaryText, job.url),
       });
     }
     return out;
@@ -181,18 +204,38 @@ export function InboxTriage({ inbox, scoredUrls }: { inbox: InboxJob[]; scoredUr
         if (seniorities.size && (!e.seniority || !seniorities.has(e.seniority))) return false;
         if (locQ.trim() && !(e.job.location || "").toLowerCase().includes(locQ.trim().toLowerCase())) return false;
         if (kw.trim() && !`${e.job.company} ${e.job.role}`.toLowerCase().includes(kw.trim().toLowerCase())) return false;
+        // 薪资下限：区间重叠保留、未知放行（与探索页同语义，ADR-0023）
+        if (!passesInboxSalaryFloor(e.salaryRange, salaryMin)) return false;
         if (unscoredOnly && isEvaluatedRow(resolveRowScore(liveScores.get(e.urlKey), persistedScores.get(e.urlKey)))) return false;
         return true;
       }),
-    [enriched, hidden, within, sources, seniorities, locQ, kw, unscoredOnly, liveScores, persistedScores],
+    [enriched, hidden, within, sources, seniorities, locQ, kw, salaryMin, unscoredOnly, liveScores, persistedScores],
   );
 
-  // 🔴 SINGLE ORDER PLUG POINT — freshness only (newest first_seen first; unknown last).
-  // A smarter ranker replaces ONLY this comparator; facets/triage/shortlist/score never
-  // touch relevance. This is the whole firewall in one line.
-  const ordered = useMemo(() => [...filtered].sort((a, b) => (a.age ?? Infinity) - (b.age ?? Infinity)), [filtered]);
+  // 🔴 SINGLE ORDER PLUG POINT — exactly one comparator, chosen by the sort toggle:
+  // default = freshness (newest first_seen first; unknown last); "按薪资" = salary
+  // median descending with unknown salary sinking to the bottom (ADR-0023). Facets /
+  // triage / shortlist / score never touch relevance. This is the whole firewall.
+  const ordered = useMemo(
+    () =>
+      [...filtered].sort(
+        sortBySalary
+          ? (a, b) => {
+              const ma = inboxSalaryMedian(a.salaryRange);
+              const mb = inboxSalaryMedian(b.salaryRange);
+              if (ma == null || mb == null) {
+                // 薪资未知沉底；两边都未知时退回新鲜度，保持稳定可预期
+                if (ma == null && mb == null) return (a.age ?? Infinity) - (b.age ?? Infinity);
+                return ma == null ? 1 : -1;
+              }
+              return mb - ma; // 中位值降序
+            }
+          : (a, b) => (a.age ?? Infinity) - (b.age ?? Infinity),
+      ),
+    [filtered, sortBySalary],
+  );
 
-  const anyFacet = within != null || sources.size > 0 || seniorities.size > 0 || locQ.trim() !== "" || kw.trim() !== "" || unscoredOnly;
+  const anyFacet = within != null || sources.size > 0 || seniorities.size > 0 || locQ.trim() !== "" || kw.trim() !== "" || salaryMin != null || unscoredOnly;
   const capped = !showAll && !anyFacet;
   const visible = capped ? ordered.slice(0, BATCH) : ordered;
   const hiddenCount = hidden.length;
@@ -308,12 +351,16 @@ export function InboxTriage({ inbox, scoredUrls }: { inbox: InboxJob[]; scoredUr
           setLocQ={setLocQ}
           kw={kw}
           setKw={setKw}
+          salaryMin={salaryMin}
+          setSalaryMin={setSalaryMin}
+          sortBySalary={sortBySalary}
+          onToggleSortBySalary={() => setSortBySalary((v) => !v)}
           availSources={availSources}
           availSeniorities={availSeniorities}
           resultCount={filtered.length}
           totalCount={enriched.length - hiddenCount}
           anyActive={anyFacet}
-          onClear={() => { setWithin(null); setSources(new Set()); setSeniorities(new Set()); setLocQ(""); setKw(""); setUnscoredOnly(false); }}
+          onClear={() => { setWithin(null); setSources(new Set()); setSeniorities(new Set()); setLocQ(""); setKw(""); setSalaryMin(null); setUnscoredOnly(false); }}
         />
       </div>
 
