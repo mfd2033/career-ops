@@ -7,7 +7,9 @@ import { Search, ChevronsUpDown, X, Compass, ArrowRight, RotateCcw, Loader2 } fr
 import type { Application, InboxJob } from "@/lib/career-ops";
 import { Badge } from "@/components/ui/badge";
 import { CompanyLogo } from "@/components/company-logo";
-import { canonStatus, fmtDuration, scoreTone, statusDot } from "@/lib/format";
+import { canonStatus, fmtDuration, scoreTone, statusDot, checkupTone } from "@/lib/format";
+import type { CheckupEntry } from "@/lib/format";
+import { CHECKUP_RISK_LABELS } from "@/lib/company-checkups.mjs";
 import { orderApplications, buildContextQuery } from "@/lib/pipeline-order.mjs";
 import { normalizeUrl } from "@/lib/core/url-key.mjs";
 import { sourceLabel } from "@/lib/source-label.mjs";
@@ -41,11 +43,27 @@ export function PipelineView({
   applications,
   inbox,
   scoredUrls,
+  checkups,
 }: {
   applications: Application[];
   inbox: InboxJob[];
   scoredUrls?: Record<string, { score: string }>;
+  /** 公司体检 (ADR-0025): tracker# → latest checkup. Absent/empty → no badges
+   *  (graceful degradation). Pure display — never feeds sort/filter/score. */
+  checkups?: Record<string, CheckupEntry>;
 }) {
+  // Tooltip text for one tracker#'s checkup badge: star, date, zh risk labels,
+  // history when re-checked. No entry → null (badge not rendered).
+  const checkupTitle = (n: string): string | null => {
+    const c = checkups?.[n];
+    if (!c) return null;
+    const risks = c.risks.map((r) => (CHECKUP_RISK_LABELS as Record<string, string>)[r] ?? r).join(" / ");
+    const parts = [`公司体检 ★${c.star.toFixed(1)}（${c.date}）`];
+    if (risks) parts.push(risks);
+    if (c.note) parts.push(c.note);
+    if (c.count > 1) parts.push(`共 ${c.count} 次（最低 ★${c.minStar.toFixed(1)}）`);
+    return parts.join(" · ");
+  };
   const params = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
@@ -401,6 +419,16 @@ export function PipelineView({
                     <Link href={`/pipeline/${r.n}${contextQuery}`} className="flex items-center gap-2.5 transition-colors group-hover:text-brand">
                       <CompanyLogo name={companyLabel(r)} size={20} />
                       {companyLabel(r)}
+                      {(() => {
+                        const title = checkupTitle(r.n);
+                        const c = checkups?.[r.n];
+                        if (!title || !c) return null;
+                        return (
+                          <span title={title} className="inline-flex shrink-0 cursor-help" onClick={(e) => e.stopPropagation()}>
+                            <Badge tone={checkupTone(c.star)}>★{c.star.toFixed(1)}</Badge>
+                          </span>
+                        );
+                      })()}
                     </Link>
                   </td>
                   <td className="px-4 py-3 text-muted">

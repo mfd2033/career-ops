@@ -69,6 +69,35 @@ export function legitimacyTone(l: string): "good" | "warn" | "bad" | "muted" {
   return "muted";
 }
 
+/** 公司体检（company checkup, ADR-0025）星级 → tone. Employer-reliability
+ *  scale, deliberately NOT the offer scoreTone thresholds: ≥4 trustworthy,
+ *  3–4 unremarkable, 2–3 risky, <2 high-risk. Display-only — never a scoring
+ *  or sorting input (ADR-0025 决议 9 零分影响). */
+export function checkupTone(star: number): "good" | "warn" | "bad" | "muted" {
+  if (!Number.isFinite(star)) return "muted";
+  if (star >= 4) return "good";
+  if (star >= 3) return "muted";
+  if (star >= 2) return "warn";
+  return "bad";
+}
+
+/** Shape of one company's aggregated checkup entry (producer:
+ *  web/src/lib/company-checkups.mjs checkupIndex; the ledger writer/validator
+ *  is repo-root lib/log-checkup.mjs). */
+export type CheckupEntry = {
+  slug: string;
+  company: string;
+  star: number;
+  date: string;
+  risks: string[];
+  note: string;
+  html: string;
+  count: number;
+  minStar: number;
+  maxStar: number;
+  history: { date: string; star: number }[];
+};
+
 /** Humanize seconds → "45.8s" / "4m03s" / "1h12m"; null/invalid → "—" (the
  *  no-record placeholder the 用时 column and worker cards share). */
 export function fmtDuration(seconds: number | null | undefined): string {
