@@ -26,14 +26,19 @@ const CONFIG_KEY = "career-ops:config";
 // localStorage 惯例（ADR-0010），刷新/重开保持。
 const SALARY_FLOOR_KEY = "career-ops:inbox-salary-min";
 const SALARY_SORT_KEY = "career-ops:inbox-salary-sort";
+// 未评分 facet 的持久化（ADR-0024）：与薪资排序同 localStorage 惯例。
+// 无记录 → 默认开；用户手动关掉后每次加载保持关。
+const UNSCORED_KEY = "career-ops:inbox-unscored";
 const BATCH = 20;
 // /api/batch-evaluate's own MAX_URLS. A longer shortlist is sent as chunks.
 const SCORE_BATCH_MAX = 20;
 
 // The inbox as a TRIAGE surface: Abundance → Triage → Shortlist → Opt-in Score.
-// Default is a small fresh batch (never the full wall); free facets + Save/Skip narrow
-// it; only "Score shortlist" spends tokens. 🔴 The shell is agnostic to what makes a
-// role relevant — order is freshness with a single documented plug point.
+// Default (ADR-0024): 未评分过滤 + 按薪资排序默认激活（均持久化于 localStorage，无记录
+// 时用默认开）→ anyFacet 恒真，默认是全量未评分墙，fresh-batch 截断不再是默认（仅在
+// 用户关掉两个开关后出现）。Free facets + Save/Skip narrow it; only "Score
+// shortlist" spends tokens. 🔴 The shell is agnostic to what makes a role
+// relevant — order is the single documented plug point below.
 //
 // scoredUrls: durable URL → tracker score map (server-built from reports'
 // `**URL:**` headers). The live job-store only covers evaluations fired THIS
@@ -50,11 +55,12 @@ export function InboxTriage({ inbox, scoredUrls }: { inbox: InboxJob[]; scoredUr
   const [seniorities, setSeniorities] = useState<Set<Seniority>>(() => new Set());
   const [locQ, setLocQ] = useState("");
   const [kw, setKw] = useState("");
-  const [unscoredOnly, setUnscoredOnly] = useState(false);
+  // 默认开（ADR-0024）；持久化键见上——无记录保持默认，显式 "0" 关
+  const [unscoredOnly, setUnscoredOnly] = useState(true);
   // 薪资下限（月薪 K）——与探索页同一语义（区间重叠、未知放行打标）
   const [salaryMin, setSalaryMin] = useState<number | null>(null);
-  // 按薪资排序（ADR-0023 决定 4）：开 = 解析区间中位值降序、未知沉底；关 = 新鲜度
-  const [sortBySalary, setSortBySalary] = useState(false);
+  // 按薪资排序（ADR-0023 决定 4；默认开见 ADR-0024）：开 = 解析区间中位值降序、未知沉底；关 = 新鲜度
+  const [sortBySalary, setSortBySalary] = useState(true);
   const [showAll, setShowAll] = useState(false);
 
   // persisted triage state + ephemeral selection/undo
@@ -80,7 +86,10 @@ export function InboxTriage({ inbox, scoredUrls }: { inbox: InboxJob[]; scoredUr
         const n = Number(f);
         if (Number.isFinite(n) && n > 0) setSalaryMin(n);
       }
-      if (localStorage.getItem(SALARY_SORT_KEY) === "1") setSortBySalary(true);
+      // 两者默认开（ADR-0024）：无记录 → 保持默认开；显式 "0" → 关
+      setSortBySalary(localStorage.getItem(SALARY_SORT_KEY) !== "0");
+      const u = localStorage.getItem(UNSCORED_KEY);
+      if (u != null) setUnscoredOnly(u === "1");
     } catch {
       /* ignore */
     }
@@ -98,6 +107,9 @@ export function InboxTriage({ inbox, scoredUrls }: { inbox: InboxJob[]; scoredUr
   useEffect(() => {
     if (loaded) try { localStorage.setItem(SALARY_SORT_KEY, sortBySalary ? "1" : "0"); } catch { /* quota */ }
   }, [sortBySalary, loaded]);
+  useEffect(() => {
+    if (loaded) try { localStorage.setItem(UNSCORED_KEY, unscoredOnly ? "1" : "0"); } catch { /* quota */ }
+  }, [unscoredOnly, loaded]);
   // auto-dismiss the undo toast
   useEffect(() => {
     if (!undo) return;
@@ -213,9 +225,10 @@ export function InboxTriage({ inbox, scoredUrls }: { inbox: InboxJob[]; scoredUr
   );
 
   // 🔴 SINGLE ORDER PLUG POINT — exactly one comparator, chosen by the sort toggle:
-  // default = freshness (newest first_seen first; unknown last); "按薪资" = salary
-  // median descending with unknown salary sinking to the bottom (ADR-0023). Facets /
-  // triage / shortlist / score never touch relevance. This is the whole firewall.
+  // "按薪资" (default on, ADR-0024) = salary median descending, unknown salary
+  // sinking to the bottom, ties falling back to freshness (ADR-0023/0024); off =
+  // freshness (newest first_seen first; unknown last). Facets / triage /
+  // shortlist / score never touch relevance. This is the whole firewall.
   const ordered = useMemo(
     () =>
       [...filtered].sort(
@@ -228,7 +241,9 @@ export function InboxTriage({ inbox, scoredUrls }: { inbox: InboxJob[]; scoredUr
                 if (ma == null && mb == null) return (a.age ?? Infinity) - (b.age ?? Infinity);
                 return ma == null ? 1 : -1;
               }
-              return mb - ma; // 中位值降序
+              if (ma !== mb) return mb - ma; // 中位值降序
+              // 平手回退新鲜度（ADR-0024）——不依赖排序稳定性这类隐含实现细节
+              return (a.age ?? Infinity) - (b.age ?? Infinity);
             }
           : (a, b) => (a.age ?? Infinity) - (b.age ?? Infinity),
       ),
@@ -360,7 +375,9 @@ export function InboxTriage({ inbox, scoredUrls }: { inbox: InboxJob[]; scoredUr
           resultCount={filtered.length}
           totalCount={enriched.length - hiddenCount}
           anyActive={anyFacet}
-          onClear={() => { setWithin(null); setSources(new Set()); setSeniorities(new Set()); setLocQ(""); setKw(""); setSalaryMin(null); setUnscoredOnly(false); }}
+          // 清空 = 回到默认（ADR-0024 决定 5）：两开关回默认开，其余条件清零——
+          // 否则会落入已退役的 fresh-batch 截断视图；清除后的开关状态照常持久化
+          onClear={() => { setWithin(null); setSources(new Set()); setSeniorities(new Set()); setLocQ(""); setKw(""); setSalaryMin(null); setUnscoredOnly(true); setSortBySalary(true); }}
         />
       </div>
 
