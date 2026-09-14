@@ -39,16 +39,7 @@
 // Query params that identify a click/campaign, never the posting itself. Keep
 // this list literal and board-specific; see the RFC note above on why generic
 // names are absent.
-//
-// EXPORTED because this is meant to be the ONE denylist: scan.mjs's dedup gate
-// imports it instead of keeping a second copy. That second copy (scan.mjs
-// DEDUP_STRIP_PARAMS) is exactly how the CN-board anti-bot params (BOSS
-// securityId/ka, 猎聘 pgRef/skId/fkId/ckId/…, 智联 refcode/srccode/preactionid)
-// came to be stripped HERE on 2026-09-05…09-07 — for the browser extension —
-// while the scanner's copy never learned them, so a browser-board sweep
-// re-keyed the same posting as "new" every time: 9161 pending rows in
-// data/pipeline.md for 2500 real postings (found 2026-09-14).
-export const TRACKING_PARAMS = [
+const TRACKING_PARAMS = [
   /^utm_/i, /^gh_src$/i, /^fbclid$/i, /^gclid$/i,
   /^mc_cid$/i, /^mc_eid$/i, /^igshid$/i, /^_hsenc$/i, /^_hsmi$/i, /^trk$/i, /^trackingid$/i,
   // BOSS直聘 board-specific: securityId is the anti-bot session token and ka is

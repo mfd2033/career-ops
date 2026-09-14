@@ -30,9 +30,7 @@
 
 // Query params that identify a click/campaign, never the posting itself. Keep
 // this list literal and board-specific, identical to the core's denylist.
-// Exported so the ONE denylist can be imported (scan.mjs does) instead of a
-// third copy being written — see the core file's note on the 2026-09-14 bug.
-export const TRACKING_PARAMS = [
+const TRACKING_PARAMS = [
   /^utm_/i, /^gh_src$/i, /^fbclid$/i, /^gclid$/i,
   /^mc_cid$/i, /^mc_eid$/i, /^igshid$/i, /^_hsenc$/i, /^_hsmi$/i, /^trk$/i, /^trackingid$/i,
   // BOSS直聘 board-specific: securityId is the anti-bot session token and ka is
