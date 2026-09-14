@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import fs from "node:fs";
 import path from "node:path";
-import { careerOpsRoot, readInbox } from "@/lib/career-ops";
+import { careerOpsRoot, readInbox, readApplications } from "@/lib/career-ops";
 import { normalizeUrl } from "@/lib/core/url-key.mjs";
 
 export const runtime = "nodejs";
@@ -11,7 +11,8 @@ export const dynamic = "force-dynamic";
 // 重建为探索页结果区的 offer —— scan-history 是未确认候选的持久层，关页/重开不丢。
 //
 // 口径：
-//   • 「未入管」= 规范 URL 不在 pipeline.md 的未完成 `- [ ]` 行里（done 行视为已处理）；
+//   • 「未入管」= 规范 URL 不在 pipeline.md 的任何行里（**含 done 行**：Processed 的
+//     职位已处理，不是候选），也不在 tracker 的 URL 列里（已评估更不是候选）；
 //   • 「近期」= first_seen 在最近 N 天（默认 7，上限 30）；
 //   • status 为 skipped/expired 的行仍然剔除（它们是明确的丢弃信号）；
 //   • 同 URL 多行取最早一行（first_seen 语义），浏览器板块的重复行已被 2026-09-14
@@ -24,12 +25,13 @@ export async function GET(req: NextRequest) {
   const cutoff = new Date(Date.now() - days * 86_400_000).toISOString().slice(0, 10);
 
   const root = careerOpsRoot();
-  // 未入管 = 不在 pipeline 的 pending 集合里（按规范键比对，与 web 收件箱同键）。
-  const pendingKeys = new Set(
-    readInbox()
-      .filter((j) => !j.done)
-      .map((j) => normalizeUrl(j.url))
-      .filter(Boolean),
+  // 已处理/已追踪的规范键集合：pipeline 的全部行（pending + done/Processed）∪
+  // tracker 的 URL 列。少了它们，已评估的职位会被当成「未入管候选」重新端上来。
+  const handled = new Set<string>(
+    [
+      ...readInbox().map((j) => normalizeUrl(j.url)),
+      ...readApplications().map((a) => normalizeUrl(a.url)),
+    ].filter(Boolean),
   );
 
   let text = "";
@@ -45,7 +47,7 @@ export async function GET(req: NextRequest) {
     if (!line || line.startsWith("url\t")) continue;
     const c = line.split("\t");
     const key = normalizeUrl(c[0]);
-    if (!key || pendingKeys.has(key)) continue;
+    if (!key || handled.has(key)) continue;
     const firstSeen = /^\d{4}-\d{2}-\d{2}$/.test(c[1] ?? "") ? c[1] : "";
     if (!firstSeen || firstSeen < cutoff) continue;
     const status = (c[5] ?? "").toLowerCase();
