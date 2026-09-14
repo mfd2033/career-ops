@@ -109,9 +109,26 @@ test("toDiscoveredOffer: BOSS PUA 数字按实证映射解码（E031+n = 数字 
   assert.equal(offer2.salaryText, "20-30K·13薪");
 });
 
-test("toDiscoveredOffer: 未映射 PUA 码点（9 的候选码点）→ 不携带 salaryText", () => {
-  // E030/E03A 是 9 的候选码点，未经实证不猜——含未映射码点的薪资归「薪资未知」。
-  const offer = toDiscoveredOffer({ url: "https://x.com/3", title: "AI", salary: "1\uE03A-15K" }, "zhipin");
+test("toDiscoveredOffer: E03A=9 —— 含 9 的薪资不再被丢成「薪资未知」（2026-09-14 修复）", () => {
+  // 修复前 E03A 落在映射范围外 → hasUnmappedPua → 整条薪资被丢弃 → 前端「薪资未知」徽章。
+  // 卡片实测取证（四个搜索列表页，card-probe）：E032..E039 覆盖 1..8，E03A 只在需要 9 的
+  // 薪资里出现；"10" 一律写作两个字形 {E032}{E031}，故 E03A 不可能是 10。详情页明文反查：
+  // {E039}-{E03A}K ↔ 8-9K、{E037}-{E03A}K ↔ 6-9K。
+  const cases = [
+    ["\uE039-\uE03AK", "8-9K"],
+    ["\uE037-\uE03AK", "6-9K"],
+    ["\uE036-\uE03AK", "5-9K"],
+    ["\uE03A-\uE032\uE031K", "9-10K"], // 报障职位（详情页明文 9-10K）在卡片上的形状
+  ];
+  for (const [raw, want] of cases) {
+    const offer = toDiscoveredOffer({ url: "https://x.com/9", title: "AI", salary: raw }, "zhipin");
+    assert.equal(offer.salaryText, want);
+  }
+});
+
+test("toDiscoveredOffer: 至今零观测的 PUA 码点（E030）→ 不携带 salaryText", () => {
+  // E030 至今零观测，未经实证不猜——含未映射码点的薪资归「薪资未知」。
+  const offer = toDiscoveredOffer({ url: "https://x.com/3", title: "AI", salary: "1\uE030-15K" }, "zhipin");
   assert.equal(Object.prototype.hasOwnProperty.call(offer, "salaryText"), false);
   // 纯 PUA 无 ASCII 数字（旧乱码场景）同样不带
   const offer2 = toDiscoveredOffer({ url: "https://x.com/4", title: "AI", salary: "\uE030\uE030" }, "zhipin");
