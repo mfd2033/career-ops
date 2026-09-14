@@ -31,7 +31,7 @@ const tabOf = (o: EnrichedOffer): ResultTab => (o.evaluatedN ? "evaluated" : o.i
 const inTab = (t: ResultTab, o: EnrichedOffer): boolean => t === "all" || tabOf(o) === t;
 
 export function ResultsList({ offers }: { offers: EnrichedOffer[] }) {
-  const { companiesScanned, partial, addToPipeline, added, mode } = useExplore();
+  const { companiesScanned, partial, addToPipeline, added, mode, restoreSeen, restoring } = useExplore();
   const isAi = mode === "ai";
   const [sort, setSort] = useState<"fresh" | "company">("fresh");
   const [q, setQ] = useState("");
@@ -80,7 +80,40 @@ export function ResultsList({ offers }: { offers: EnrichedOffer[] }) {
     return sorted;
   }, [offers, q, sort, tab]);
 
-  const addable = offers.filter((o) => !o.inPipeline && !o.evaluatedN && !added.has(o.url));
+  // ADR-0021 确认入管：勾选集 + 「加入管道 (N)」。默认全选「本次新采」的可加入项
+  // （offers 引用变化视为一次新结果集）；恢复出来的旧发现（source=explore-restore）
+  // 不进默认勾选，要入管得显式勾上。
+  const addable = useMemo(
+    () => offers.filter((o) => !o.inPipeline && !o.evaluatedN && !added.has(o.url)),
+    [offers, added],
+  );
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const lastOffersRef = useRef<typeof offers | null>(null);
+  useEffect(() => {
+    if (lastOffersRef.current === offers) return; // 只在结果集变化时重置默认勾选
+    lastOffersRef.current = offers;
+    setSelected(new Set(addable.filter((o) => o.source !== "explore-restore").map((o) => o.url)));
+  }, [offers, added, addable]);
+  const toggleSelect = (url: string) =>
+    setSelected((s) => {
+      const n = new Set(s);
+      if (n.has(url)) n.delete(url);
+      else n.add(url);
+      return n;
+    });
+  const selectedAddable = addable.filter((o) => selected.has(o.url));
+  const allAddableSelected = addable.length > 0 && selectedAddable.length === addable.length;
+  const toggleAll = () => setSelected(allAddableSelected ? new Set() : new Set(addable.map((o) => o.url)));
+  const addSelected = async () => {
+    const n = await addToPipeline(selectedAddable);
+    if (n > 0) {
+      setSelected((s) => {
+        const next = new Set(s);
+        for (const o of selectedAddable) next.delete(o.url);
+        return next;
+      });
+    }
+  };
 
   return (
     <div className="space-y-4">
@@ -119,14 +152,35 @@ export function ResultsList({ offers }: { offers: EnrichedOffer[] }) {
               </button>
             ))}
           </div>
-          {addable.length > 1 && (
+          {!isAi && addable.length > 0 && (
             <button
               type="button"
-              onClick={() => addToPipeline(addable)}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface/40 px-2.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-brand-soft hover:text-brand"
+              onClick={() => void restoreSeen()}
+              disabled={restoring}
+              title={t("explore.results.restoreSeenTitle")}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface/40 px-2.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-brand-soft hover:text-brand disabled:opacity-50"
             >
-              <Plus className="size-3.5" /> {t("explore.results.addAll", { n: addable.length })}
+              {restoring ? t("explore.results.restoring") : t("explore.results.restoreSeen")}
             </button>
+          )}
+          {addable.length > 0 && (
+            <>
+              <button
+                type="button"
+                onClick={toggleAll}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface/40 px-2.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-brand-soft hover:text-brand"
+              >
+                {allAddableSelected ? t("explore.results.clearSelection") : t("explore.results.selectAll", { n: addable.length })}
+              </button>
+              <button
+                type="button"
+                disabled={selectedAddable.length === 0}
+                onClick={() => void addSelected()}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-xs font-semibold text-brand-foreground shadow-sm transition-all hover:brightness-110 disabled:opacity-50"
+              >
+                <Plus className="size-3.5" /> {t("explore.results.addSelected", { n: selectedAddable.length })}
+              </button>
+            </>
           )}
         </div>
       </div>
@@ -150,7 +204,15 @@ export function ResultsList({ offers }: { offers: EnrichedOffer[] }) {
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         {view.map((o) => (
-          <DiscoveryCard key={o.url} offer={o} inPipeline={o.inPipeline} evaluatedN={o.evaluatedN} />
+          <DiscoveryCard
+            key={o.url}
+            offer={o}
+            inPipeline={o.inPipeline}
+            evaluatedN={o.evaluatedN}
+            selectable={!o.inPipeline && !o.evaluatedN && !added.has(o.url)}
+            selected={selected.has(o.url)}
+            onToggleSelect={() => toggleSelect(o.url)}
+          />
         ))}
       </div>
 

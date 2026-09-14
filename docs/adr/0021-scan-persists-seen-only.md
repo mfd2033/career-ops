@@ -1,0 +1,22 @@
+# ADR-0021: 扫描只记「见过」，入管必须显式确认
+
+- **Status:** Accepted (2026-09-14)
+- **Supersedes:** ADR-0007 E5 的落库语义（「content script 分批 POST `/api/explore/add`（复用现落库，零改动）」——采集即写 pipeline.md + scan-history.tsv）
+- **Context:** 用户在 2026-09-14 发现收件箱堆积 9,161 条待评行（唯一职位仅 2,500）：扩展驱动扫描是「采集即落库」，每轮扫描把搜索结果整页搬进管道，而 E5 的幂等只覆盖「同 scanId」，跨扫描完全放行；再叠加 scan.mjs 去重键与规范键分叉（见 2026-09-14 修复），同一职位每扫一轮就重复追加。用户明确：**扫描 ≠ 加入管道**，这是当时的需求沟通偏差——「扫描」的语义是发现与查看，「入管」是显式的收纳决策。
+
+## Decision
+
+四条，均为 2026-09-14 与用户逐条确认的选择：
+
+1. **采集只记「见过」**：扩展采集到的卡片不再写 pipeline.md，只写 `data/scan-history.tsv`（`first_seen` 即发现日期）。上报目标从 `/api/explore/add` 改为 `/api/explore/seen`。探索页结果区照常渲染（数据源是 SW 的 `scanOffers` 缓存，不变）。
+2. **入管必须显式确认，粒度为勾选 + 批量**：结果区默认全选本次新采，可取消勾选，一键「加入管道 (N)」→ `/api/explore/add`。逐条按钮与卡片级「评估」（其语义含入管）保留——它们同样是显式动作。
+3. **scan-history 兼作候选持久层**：未确认的采集结果以 scan-history 为准（12 列含 url/first_seen/portal/title/company/location，足以重建结果区），探索页可恢复「近期采集、未入管」的条目；不引入第三个候选文件。已知缺口：scan-history 无薪资列，恢复出的卡片薪资显示「未知」——需要时再加列，不在本次范围。
+4. **存量保留**：清理去重后的 1,877 条待评（真实发现、已唯一化）继续作为待评池，由收件箱正常消化。
+
+## Consequences
+
+- **发现与决策分离**：`first_seen`（发现）与 pipeline.md 的 `- [ ]`（收纳）自此是两个独立时刻。whats-new 的 `pipelineUrls` 维度只挡「已确认入管」的条目，未确认的新发现仍会以「本周新匹配」出现——这是期望行为（它本来就是发现面），不是泄漏。
+- **`/api/explore/add` 语义变化**：从「写两个文件」变为「确认入管」——对 scan-history 里已见过的 URL 只写 pipeline.md，对没见过的（bsk 兜底路径的发现）两个都写。调用方无需感知。
+- **幂等表命名空间**：`/api/explore/seen` 用 `seen:<scanId>`，`/api/explore/add` 用 `add:<scanId>`，共用 `data/scan-idempotency.tsv` 但互不可见——否则确认会被 seen 已记录的键整批误杀。`/api/explore/scan-progress` 同步改读 `seen:` 前缀。
+- **跨扫描重复从根上消失**：pipeline.md 只在确认时写（人不会重复确认已入管的条目，UI 也会挡）；scan-history 靠采集门禁的规范键去重。E5 当年「幂等必须在插件/路由侧兜底」的担忧，在 pipeline 侧由「确认制」结构性消解。
+- **扫描不再改变收件箱**：跑多少轮扫描，收件箱一条不加。收件箱的增长从此只来自用户的显式收纳。

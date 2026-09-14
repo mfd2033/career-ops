@@ -109,16 +109,24 @@ _Avoid_: 招聘站 tab、扫描 tab（与探索页 tab 混淆）
 _Avoid_: 清理、善后、收尾（未限定对象）
 
 **中止采集（aborting a drive）**:
-探索页 tab 被用户关闭时，扩展后台向所有仍在采集的采集 tab 发停止指令的动作——接住"用户关页面"这个信号，别再采了。与**扫描收尾**是两件事：收尾是"采完了，把人送回结果页"（受收尾开关管辖），中止是"接结果的那个页面没了，停止浪费"（不受开关管辖）；两者都保留已采数据（照常落 `pipeline.md`）。
+探索页 tab 被用户关闭时，扩展后台向所有仍在采集的采集 tab 发停止指令的动作——接住"用户关页面"这个信号，别再采了。与**扫描收尾**是两件事：收尾是"采完了，把人送回结果页"（受收尾开关管辖），中止是"接结果的那个页面没了，停止浪费"（不受开关管辖）；两者都保留已采数据（照常写 scan-history「见过」台账；ADR-0021 起不再自动写 pipeline.md）。
 _Avoid_: 取消扫描、停止收尾（都易与扫描收尾混淆）
 
 **卡片元数据（cardMeta）**:
-列表卡片上扩展采集的 `{url, title, company, salary, city?}` 字段。每站 site 适配对象提供 `cardMeta(card)`；智联 city 权威源是 `positionList[].workCity`（window 状态数据）非 DOM，BOSS/猎聘靠 title 兜底。供 `/api/explore/add` 落库与探索页扫描。
+列表卡片上扩展采集的 `{url, title, company, salary, city?}` 字段。每站 site 适配对象提供 `cardMeta(card)`；智联 city 权威源是 `positionList[].workCity`（window 状态数据）非 DOM，BOSS/猎聘靠 title 兜底。供探索页结果区展示与确认入管（ADR-0021：采集只写「见过」台账，确认才写 pipeline.md）。
 _Avoid_: 卡片数据、卡片字段
 
 **幂等扫描（scanId）**:
-对单次探索页扫描生成的操作号，路由侧用作幂等键，防前端连点重复写 pipeline/scan-history（`addOffersToPipeline` 不去重）。content script 另持本页已采 URL Set 防内部重发——双层幂等。
+对单次探索页扫描生成的操作号，路由侧用作幂等键的命名空间（ADR-0021：`seen:<scanId>` 记「见过」、`add:<scanId>` 管确认入管，共用 data/scan-idempotency.tsv 但互不可见，防止确认被 seen 已记录的键整批误杀）。content script 另持本页已采 URL Set 防内部重发——双层幂等。
 _Avoid_: 扫描 ID（易与报告号混淆）
+
+**见过台账（seen ledger）**:
+`data/scan-history.tsv` 在探索扫描语境下的角色——「这个职位我们什么时候见过」的发现记录（`first_seen`）。ADR-0021 起采集只写它；pipeline.md 的 `- [ ]` 行是显式确认后的另一时刻。它同时是未确认候选的持久层：探索页结果区可从「近期采集、未入管」的行恢复。已知缺口：无薪资列，恢复出的卡片薪资显示「未知」。
+_Avoid_: 落库（不区分见过与入管）、扫描历史（口语，易与 scan-runs 运行台账混淆）
+
+**确认入管（confirm to pipeline）**:
+把探索页结果区勾选的卡片显式写进 pipeline.md（`- [ ]` 待评行）的动作，粒度为勾选 + 「加入管道 (N)」，默认全选本次新采。扫描从不自动做这件事（ADR-0021）；卡片级「加入管道」与「评估」（语义含入管）同样是显式动作。
+_Avoid_: 加入管道（不分自动/显式时易歧义）、落库
 
 **薪资下限（salary floor）**:
 探索页 browser 模式薪酬条件的唯一输入——一个「最低月薪（K）」数字，岗位薪资区间与之比较后决定保留或丢弃；留空即不过滤。内部口径一律为月薪（千元/月），与输入一致。被过滤掉的岗位直接不进结果，与城市门控同行为。比较取区间重叠（区间上限 ≥ 下限即保留），沿用 `salary_filter` 的「不误删」取向。

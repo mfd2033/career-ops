@@ -22,6 +22,7 @@ export async function GET(req: NextRequest) {
   if (!scanId) return Response.json({ collected: 0 });
 
   const map = loadScanMap(scanIdempotencyPath(path.join(careerOpsRoot(), "data")));
-  const keys = map.get(scanId);
+  // ADR-0021: 采集条数记在 `seen:` 命名空间下（采集只记「见过」，不再写 add）。
+  const keys = map.get(`seen:${scanId}`) ?? map.get(scanId);
   return Response.json({ collected: keys ? keys.size : 0 });
 }

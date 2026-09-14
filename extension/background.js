@@ -244,7 +244,8 @@ const activeDrives = new Map();
 const driveKey = (source, url) => `${source}|${url}`;
 
 // scanId → DiscoveredOffer[];content script 分批上报的增量本地缓冲,供探索页在采集
-// 收尾后一次取回用于结果渲染(/api/explore/add 已落库为权威,此为前端展示镜像)。
+// 收尾后一次取回用于结果渲染(ADR-0021:上报只记「见过」台账,结果区是这些候选的
+// 展示面;入管由用户在结果区勾选后显式确认)。
 const scanOffers = new Map();
 
 // ---- 扫描收尾(ADR-0007 E9) ------------------------------------------------
@@ -488,12 +489,15 @@ async function driveScan(msg, sender) {
 }
 
 /**
- * content script 分批上报 → SW 转发 web /api/explore/add(E5)。批量上报本身即活动
- * 事件,间隔常醒来 SW,无需额外 keepalive。环回同源走 host_permissions,CORS 豁免。
+ * content script 分批上报 → SW 转发 web /api/explore/seen(ADR-0021,改自 E5 的
+ * /api/explore/add)。采集只记「见过」台账(scan-history.tsv),不写 pipeline.md ——
+ * 「扫描 ≠ 加入管道」,入管由用户在探索页结果区勾选后经 /api/explore/add 显式确认。
+ * 批量上报本身即活动事件,间隔常醒来 SW,无需额外 keepalive。环回同源走
+ * host_permissions,CORS 豁免。
  */
 async function relayScanBatch(scanId, offers) {
   const base = `http://127.0.0.1:${await ensureLivePort()}`;
-  const res = await fetch(`${base}/api/explore/add`, {
+  const res = await fetch(`${base}/api/explore/seen`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ scanId, offers }),

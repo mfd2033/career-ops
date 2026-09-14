@@ -89,6 +89,9 @@ type ExploreCtx = {
    *  fetched from /api/whats-new, straight into the results phase — no scan. */
   loadFresh: () => Promise<void>;
   addToPipeline: (offers: DiscoveredOffer[]) => Promise<number>;
+  /** ADR-0021 候选恢复：把「近期采集、未入管」的见过台账行并入结果区，返回并入数。 */
+  restoreSeen: () => Promise<number>;
+  restoring: boolean;
   applyPatch: (raw: Record<string, unknown>, opts?: { merge?: boolean; run?: boolean }) => void;
   reset: () => void;
   // ── AI search (modes/discover.md) ──
@@ -189,6 +192,7 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
   const [scannerMissing, setScannerMissing] = useState(false);
   const [added, setAdded] = useState<Set<string>>(new Set());
   const [adding, setAdding] = useState<Set<string>>(new Set());
+  const [restoring, setRestoring] = useState(false);
   const [mode, setModeState] = useState<ExploreMode>("scan");
   const [scanSource, setScanSource] = useState<ScanSource>(SCAN_SOURCE_DEFAULT[0]);
   const [enabledSources, setEnabledSources] = useState<ScanSource[]>([...SCAN_SOURCE_DEFAULT]);
@@ -664,6 +668,30 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     }
   }, [added, router]);
 
+  // ADR-0021 候选恢复：见过台账是未确认候选的持久层。把「近期采集、未入管」的行
+  // 并入当前结果区（按 url 去重，不覆盖本次扫描的结果）；恢复出的条目带
+  // source:"explore-restore"，结果区不把它们算进「默认全选本次新采」。
+  const restoreSeen = useCallback(async () => {
+    setRestoring(true);
+    try {
+      const r = await fetch("/api/explore/candidates");
+      const d = (await r.json().catch(() => null)) as { offers?: DiscoveredOffer[] } | null;
+      const list = d && Array.isArray(d.offers) ? d.offers : [];
+      let merged = 0;
+      setOffers((cur) => {
+        const have = new Set(cur.map((o) => o.url));
+        const add = list.filter((o) => o?.url && !have.has(o.url));
+        merged = add.length;
+        return merged > 0 ? [...cur, ...add] : cur;
+      });
+      return merged;
+    } catch {
+      return 0;
+    } finally {
+      setRestoring(false);
+    }
+  }, []);
+
   const applyPatch = useCallback((raw: Record<string, unknown>, opts?: { merge?: boolean; run?: boolean }) => {
     const next = parseExplorePatch(raw, filtersRef.current, opts?.merge ?? false);
     setFilters(next);
@@ -877,10 +905,10 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
       filters, setFilters, initFilters, phase,
       running: phase === "casting" || phase === "scanning" || phase === "revealing" || phase === "hunting",
       offers, sources, matchCount, companiesScanned, companiesAvailable, capHit, droppedNoDate, status, partial, error, scannerMissing, added, adding,
-      discover, discoverBrowser, loadFresh, addToPipeline, applyPatch, reset,
+      discover, discoverBrowser, loadFresh, addToPipeline, restoreSeen, restoring, applyPatch, reset,
       mode, setMode, scanSource, setScanSource, enabledSources, aiIntent, setAiIntent, discoverAI, aiTrace, aiCost,
     }),
-    [filters, setFilters, initFilters, phase, offers, sources, matchCount, companiesScanned, companiesAvailable, capHit, droppedNoDate, status, partial, error, scannerMissing, added, adding, discover, discoverBrowser, loadFresh, addToPipeline, applyPatch, reset, mode, setMode, scanSource, setScanSource, enabledSources, aiIntent, discoverAI, aiTrace, aiCost],
+    [filters, setFilters, initFilters, phase, offers, sources, matchCount, companiesScanned, companiesAvailable, capHit, droppedNoDate, status, partial, error, scannerMissing, added, adding, discover, discoverBrowser, loadFresh, addToPipeline, restoreSeen, restoring, applyPatch, reset, mode, setMode, scanSource, setScanSource, enabledSources, aiIntent, discoverAI, aiTrace, aiCost],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
