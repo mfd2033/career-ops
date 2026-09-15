@@ -24,7 +24,8 @@ import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { resolveCli } from "@/lib/clis";
-import { withModelFlag, isFatalGenericStderr } from "@/lib/run-cli-support.mjs";
+import { withModelFlag, isFatalGenericStderr, parseReservationOutput } from "@/lib/run-cli-support.mjs";
+import { permissionFlags } from "@/lib/claude-invocation.mjs";
 import { isReservedReportFile } from "@/lib/report-files.mjs";
 import { spawnHeadlessCli, terminateCli } from "@/lib/spawn-cli.mjs";
 import { careerOpsRoot, readMemory, readInbox, readScanDates } from "@/lib/career-ops";
@@ -125,11 +126,13 @@ export async function POST(req: Request) {
   let reserved: number[] = [];
   const reserveRange = async () => {
     const stdout = runNodeText(await runNode("reserve-report-num.mjs", ["--count", String(urls.length)]));
-    const m = stdout.trim().match(/^(\d{3})(?:-(\d{3}))?$/);
-    if (!m) throw new Error(`unexpected reservation output: ${stdout.trim()}`);
-    const a = parseInt(m[1], 10);
-    const b = m[2] ? parseInt(m[2], 10) : a;
-    reserved = Array.from({ length: b - a + 1 }, (_, k) => a + k);
+    // parseReservationOutput (tested in tests/reservation-output-parse.test.mjs)
+    // accepts 3+ digits: the allocator keeps emitting ranges past #999
+    // (formatReportNumber pads, never truncates), and the old inline \d{3}
+    // regex made every batch die there once reports crossed #999.
+    const parsed = parseReservationOutput(stdout);
+    if (!parsed) throw new Error(`unexpected reservation output: ${stdout.trim()}`);
+    reserved = parsed;
     if (reserved.length !== urls.length) throw new Error(`reserved ${reserved.length} but needed ${urls.length}`);
   };
 
@@ -230,7 +233,22 @@ export async function POST(req: Request) {
             // Plain-text argv (spec.args), not streamArgs: the batch route reads
             // the agent's output as text and extracts the VERDICT line — per-event
             // parsing is /api/run's single-run concern.
-            const args = withModelFlag(spec.args(prompt), spec.model, model);
+            // Tool policy comes from claude-invocation.mjs (the NO-RUNTIME-GRANTS
+            // rule in clis.ts) — never spelled here. Without it a headless
+            // `claude -p` runs on default permissions: Bash needs approval, so the
+            // FIRST browser-extract call (Chinese boards serve JDs behind a login
+            // wall) dead-ends on "This command requires approval" and the worker
+            // exits without writing anything (2026-09-15: 80 workers, ~77 min,
+            // zero reports — the batch card still went green, see the done gate).
+            // Batch reads plain text, not stream-json, so claudeCliArgs can't be
+            // reused wholesale — only its permission tail.
+            const args = withModelFlag(
+              spec.id === "claude"
+                ? [...spec.args(prompt), ...permissionFlags("evaluate")]
+                : spec.args(prompt),
+              spec.model,
+              model,
+            );
             const finish = (outcome: { cleanExit: boolean; sawError: boolean; verdict: string | null; errMsg: string | null; cancelled?: boolean }) => {
               poolHandles.delete(poolHandle);
               release(poolHandle.id);
@@ -398,7 +416,16 @@ export async function POST(req: Request) {
           // Clean up reservation sentinels — completed slots already hold real
           // reports, so releasing the range only removes leftover placeholders.
           await releaseReserved();
-          send({ type: "done", ok, failed });
+          // Honesty gate, same discipline as /api/run's: a batch where NOTHING
+          // was recorded is a failed batch, not a green card. The 2026-09-15
+          // permission outage ended 80/80 workers with zero reports and this
+          // still sent done — the card banked "done" and fired co-job-done
+          // refreshes for data that did not exist.
+          if (ok === 0 && failed > 0) {
+            send({ type: "error", msg: `All ${failed} evaluation(s) failed — no reports or tracker rows were written. See the NOT recorded lines above for per-URL reasons.` });
+          } else {
+            send({ type: "done", ok, failed });
+          }
         }
       } catch (err) {
         // Anything after a successful reserveRange() that throws (e.g. send()
