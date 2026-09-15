@@ -122,6 +122,30 @@ export function grantsWriteCapability(scope) {
 }
 
 /**
+ * The permission flags for a kind, WITHOUT the transport flags.
+ *
+ * claudeCliArgs composes this; batch-evaluate/route.ts appends it to the plain
+ * text argv (batch reads text, not stream-json, so it cannot reuse
+ * claudeCliArgs wholesale). Exported so every surface that spawns a headless
+ * claude worker takes its tool policy from HERE — a route that spells
+ * --allowedTools itself is how the batch path drifted: bare `claude -p` ran
+ * with default permissions, Bash came back "This command requires approval",
+ * and every worker dead-ended on an approval nobody could grant (2026-09-15:
+ * 80 batch workers, ~77 minutes, zero reports).
+ *
+ * @param {string} kind - Worker kind ("evaluate", "pdf", …).
+ * @returns {string[]} [--permission-mode, --allowedTools, --disallowedTools] flags.
+ */
+export function permissionFlags(kind) {
+  const scope = toolScopeFor(kind);
+  return [
+    "--permission-mode", "acceptEdits",
+    "--allowedTools", scope.allowed,
+    "--disallowedTools", scope.disallowed,
+  ];
+}
+
+/**
  * The complete headless `claude` argv for a run.
  *
  * Assembled here, not in the route, so a guard can assert on the command line
@@ -131,13 +155,12 @@ export function grantsWriteCapability(scope) {
  * @returns {string[]}
  */
 export function claudeCliArgs({ kind, prompt }) {
-  const scope = toolScopeFor(kind);
   return [
     "-p", prompt,
     "--output-format", "stream-json",
     "--verbose",
     "--include-partial-messages",
-    "--permission-mode", "acceptEdits",
+    ...permissionFlags(kind),
     // pdf only, deliberately. --strict-mcp-config with no --mcp-config loads ZERO
     // MCP servers, so the tool lists below describe everything the agent can
     // reach — without it an MCP server from the user's own config could supply a
@@ -146,8 +169,6 @@ export function claudeCliArgs({ kind, prompt }) {
     // optional Canva server) from loading on evaluate/research runs. The same gap
     // for the other kinds is #2507.
     ...(kind === "pdf" ? ["--strict-mcp-config"] : []),
-    "--allowedTools", scope.allowed,
-    "--disallowedTools", scope.disallowed,
   ];
 }
 
