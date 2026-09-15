@@ -83,7 +83,7 @@ export const TOOL_SCOPES = Object.freeze({
 });
 
 /** Kinds that legitimately write files. Everything else is read-only. */
-const PERSISTING_KINDS = new Set(["evaluate", "fix-portal"]);
+const PERSISTING_KINDS = new Set(["evaluate", "fix-portal", "checkup"]);
 
 /**
  * Every kind /api/run dispatches. Exported so guards iterate this rather than a
@@ -91,7 +91,7 @@ const PERSISTING_KINDS = new Set(["evaluate", "fix-portal"]);
  * Unknown kinds still resolve (read-only, see toolScopeFor); this is the set a
  * test can enumerate, not a validity check.
  */
-export const KNOWN_KINDS = Object.freeze(["pdf", "research", "evaluate", "fix-portal"]);
+export const KNOWN_KINDS = Object.freeze(["pdf", "research", "evaluate", "fix-portal", "checkup"]);
 
 /**
  * Resolve the tool scope for a worker kind.

@@ -10,7 +10,8 @@ import { after } from "next/server";
 import { resolveCli } from "@/lib/clis";
 import { accumulateTokens, hasNewCompletedReport, isFatalGenericStderr, withModelFlag } from "@/lib/run-cli-support.mjs";
 import { spawnHeadlessCli, terminateCli } from "@/lib/spawn-cli.mjs";
-import { careerOpsRoot, readMemory, findReportFile, readInbox, readScanDates } from "@/lib/career-ops";
+import { careerOpsRoot, readMemory, findReportFile, readInbox, readScanDates, findCheckupTarget, rootScript } from "@/lib/career-ops";
+import { checkupDispatchText } from "@/lib/checkup-request.mjs";
 import { readAppConfig } from "@/lib/app-config";
 import { resolvePdfPaths, type PdfPaths } from "@/lib/pdf-paths.mjs";
 import { renderAndMarkPdf, writeCvHtml, pdfRunOutcome } from "@/lib/pdf-render.mjs";
@@ -82,7 +83,7 @@ export async function POST(req: Request) {
 
   // These run the REAL core (modes/scripts), not just data — fail clearly if the
   // root is incomplete instead of faking it.
-  const needsScript: Record<string, string> = { evaluate: "modes/oferta.md", "fix-portal": "verify-portals.mjs", pdf: "generate-pdf.mjs" };
+  const needsScript: Record<string, string> = { evaluate: "modes/oferta.md", "fix-portal": "verify-portals.mjs", pdf: "generate-pdf.mjs", checkup: "modes/_custom.md" };
   const required = needsScript[kind];
   if (required && !fs.existsSync(path.join(careerOpsRoot(), required))) {
     return new Response(
@@ -117,6 +118,22 @@ export async function POST(req: Request) {
   // record when the first events flow.
   const runId = randomUUID();
   registerRun(runId);
+
+  // 公司体检审计行（ADR-0027 决议 3）：同步写一条已标记的 agent-inbox 行
+  // （含本 runId），关闭双击去重窗口；drain 规则会跳过已标记的体检请求。
+  if (kind === "checkup") {
+    const target = findCheckupTarget(String(input));
+    const company = target.ok ? target.company : `tracker #${input}`;
+    const auditLine = checkupDispatchText({ n: String(input), company, runId });
+    execFile(
+      process.execPath,
+      [rootScript("agent-inbox"), "add-done", auditLine, "--result", `dispatched worker ${runId}`],
+      { cwd: careerOpsRoot(), timeout: 15_000, env: process.env },
+      (err) => {
+        if (err) console.error("[checkup] audit line failed:", err.message);
+      },
+    );
+  }
 
   after(async () => {
     try {

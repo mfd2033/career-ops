@@ -141,59 +141,76 @@ function opt(name, def = '') {
 async function add() {
   const text = oneLine(process.argv.slice(3).join(' '));
   if (!text) fail('add needs a request, e.g. node agent-inbox.mjs add "evaluate https://..."');
-  // Append rather than rewrite. This is the queue's concurrent path — anything
-  // running in the background can drop an item in — and a read-whole-file /
-  // write-whole-file cycle loses every request that lands between the two. With
-  // 30 concurrent `add` calls, half the queue vanished silently.
-  //
-  // POSIX guarantees an O_APPEND write is atomic below PIPE_BUF, and one
-  // checklist line is far under it, so concurrent appends interleave instead of
-  // clobbering. WINDOWS IS NOT POSIX, and that is the whole reason for the lock
-  // below: with 30 concurrent adds on windows-latest this dropped exactly one
-  // item (#2777), silently, which is the same failure this function exists to
-  // remove — it just moved to the one platform the guarantee does not cover.
-  //
-  // The lock is the repo's existing one rather than a second mechanism: the
-  // same `withPipelineLock` that scan.mjs uses for scan-history appends. Two
-  // lock implementations would drift, and the append is short enough that
-  // serializing it costs nothing next to spawning the process that calls it.
-  //
-  // Checking the last byte still happens INSIDE the lock: it decides whether a
-  // separating newline is needed, and reading it outside would race with
-  // another writer's append between the check and the write.
-  //
-  // timeoutMs is raised from the shared 8s default because this queue's whole
-  // point is bursty concurrent writers (a dashboard, a script, cron all drop
-  // items at once), and lock acquisition is a retry lottery, not a fair queue.
-  // Serving N herded waiters is the coupon-collector problem: ~N·H(N) rounds,
-  // so 30 concurrent adds need ~120 rounds while 8000/80 = 100 only affords
-  // ~100. On the slow, contended windows-latest runner that shortfall makes one
-  // waiter time out and its item is LOST, the exact #2777 drop, reappearing as
-  // a loud LockTimeoutError instead of a silent overwrite. Jitter in
-  // pipeline-lock.mjs cuts the collision rate ~6x but is explicitly "not a
-  // cure"; the fit-for-purpose budget for a burst-write queue is the contained
-  // fix. 30s gives ~375 rounds of headroom, well past the herd's worst case,
-  // while the critical section itself is a single sub-millisecond append.
-  //
-  // ensureFile() is INSIDE the lock, not before it. Seeding the file is a
-  // check-create-initialise sequence, and run unlocked it loses items the same
-  // way the unlocked append did: a writer that observes the file between the
-  // creator's open() and its write() sees a zero-byte file, appends into it,
-  // and has its line overwritten when the header lands at offset 0. Every
-  // writer exits 0 and the queue is left perfectly well-formed, one item
-  // shorter — the silent drop the lock was added to end, one step earlier in
-  // the same function.
-  //
-  // Holding the lock across the seed makes the window unreachable rather than
-  // narrow: no writer can observe the file until the creator has released, and
-  // the creator writes the header before it releases. 'wx' above stays as the
-  // guard against writers that are not this function.
+  await appendLine(`- [ ] ${stamp()} — ${text}`);
+  process.stdout.write(`Queued: ${text}\n`);
+}
+
+// ADR-0027 决议 3：即时执行的审计轨迹——体检按钮派发 worker 时写入一条
+// 已标记（[x]）行，drain 语义跳过它；这里只提供通用的「直接写入已完成行」。
+async function addDone() {
+  // text 与 --result 分离解析：argv 全量 join 会把旗标对吞进正文。
+  const argv = process.argv.slice(3);
+  const rIdx = argv.indexOf('--result');
+  const text = oneLine((rIdx === -1 ? argv : argv.slice(0, rIdx)).join(' '));
+  if (!text) fail('add-done needs an entry, e.g. node agent-inbox.mjs add-done "公司体检 #917 …" --result "dispatched worker <runId>"');
+  const result = rIdx !== -1 ? oneLine(argv.slice(rIdx + 1).join(' ')) : '';
+  await appendLine(`- [x] ${stamp()} — ${text}${result ? ` → result: ${result}` : ''}`);
+  process.stdout.write(`Logged (done): ${text}\n`);
+}
+
+// Append rather than rewrite. This is the queue's concurrent path — anything
+// running in the background can drop an item in — and a read-whole-file /
+// write-whole-file cycle loses every request that lands between the two. With
+// 30 concurrent `add` calls, half the queue vanished silently.
+//
+// POSIX guarantees an O_APPEND write is atomic below PIPE_BUF, and one
+// checklist line is far under it, so concurrent appends interleave instead of
+// clobbering. WINDOWS IS NOT POSIX, and that is the whole reason for the lock
+// below: with 30 concurrent adds on windows-latest this dropped exactly one
+// item (#2777), silently, which is the same failure this function exists to
+// remove — it just moved to the one platform the guarantee does not cover.
+//
+// The lock is the repo's existing one rather than a second mechanism: the
+// same `withPipelineLock` that scan.mjs uses for scan-history appends. Two
+// lock implementations would drift, and the append is short enough that
+// serializing it costs nothing next to spawning the process that calls it.
+//
+// Checking the last byte still happens INSIDE the lock: it decides whether a
+// separating newline is needed, and reading it outside would race with
+// another writer's append between the check and the write.
+//
+// timeoutMs is raised from the shared 8s default because this queue's whole
+// point is bursty concurrent writers (a dashboard, a script, cron all drop
+// items at once), and lock acquisition is a retry lottery, not a fair queue.
+// Serving N herded waiters is the coupon-collector problem: ~N·H(N) rounds,
+// so 30 concurrent adds need ~120 rounds while 8000/80 = 100 only affords
+// ~100. On the slow, contended windows-latest runner that shortfall makes one
+// waiter time out and its item is LOST, the exact #2777 drop, reappearing as
+// a loud LockTimeoutError instead of a silent overwrite. Jitter in
+// pipeline-lock.mjs cuts the collision rate ~6x but is explicitly "not a
+// cure"; the fit-for-purpose budget for a burst-write queue is the contained
+// fix. 30s gives ~375 rounds of headroom, well past the herd's worst case,
+// while the critical section itself is a single sub-millisecond append.
+//
+// ensureFile() is INSIDE the lock, not before it. Seeding the file is a
+// check-create-initialise sequence, and run unlocked it loses items the same
+// way the unlocked append did: a writer that observes the file between the
+// creator's open() and its write() sees a zero-byte file, appends into it,
+// and has its line overwritten when the header lands at offset 0. Every
+// writer exits 0 and the queue is left perfectly well-formed, one item
+// shorter — the silent drop the lock was added to end, one step earlier in
+// the same function.
+//
+// Holding the lock across the seed makes the window unreachable rather than
+// narrow: no writer can observe the file until the creator has released, and
+// the creator writes the header before it releases. 'wx' above stays as the
+// guard against writers that are not this function.
+async function appendLine(line) {
   await withPipelineLock(PATH, () => {
     ensureFile();
     const separator = needsLeadingNewline(PATH) ? '\n' : '';
-    appendFileSync(PATH, `${separator}- [ ] ${stamp()} — ${text}\n`);
+    appendFileSync(PATH, `${separator}${line}\n`);
   }, { timeoutMs: 30_000 });
-  process.stdout.write(`Queued: ${text}\n`);
 }
 
 function list() {
@@ -228,6 +245,7 @@ function fail(msg) {
 
 const cmd = process.argv[2];
 if (cmd === 'add') await add();
+else if (cmd === 'add-done') await addDone();
 else if (cmd === 'list') list();
 else if (cmd === 'resolve') resolve();
 else {
