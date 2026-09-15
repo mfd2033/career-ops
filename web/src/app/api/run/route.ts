@@ -313,11 +313,15 @@ async function runPipeline({
       releaseTrackerWrite(writeToken);
     }
   };
+  // ADR-0027 账本观测：最后 ~1200 字符原始 stderr（去 ANSI），随 error 终态
+  // 入账本——通用门文案之下的真实根因线索。由 stderr data handler 更新。
+  let stderrTail = "";
   const send = (obj: { type: string; [key: string]: unknown }) => {
     if (terminal) return;
     publish(runId, obj);
     if (obj.type === "done") recordEnd("done");
-    else if (obj.type === "error") recordEnd("error", String(obj.msg ?? ""));
+    else if (obj.type === "error")
+      recordEnd("error", String(obj.msg ?? "") + (stderrTail ? ` ｜ stderr: ${stderrTail}` : ""));
   };
   const keepalive = setInterval(() => send({ type: "keepalive" }), 10_000);
   const close = () => {
@@ -521,6 +525,9 @@ async function runPipeline({
         // where a false positive fails a run whose PDF rendered fine, so the
         // boundary has to be settled before the regex sees it.
         stderrBuf += chunk;
+        // ADR-0027 账本观测：终端态只有通用门文案时，stderr 尾巴是唯一的根因
+        // 线索（strip ANSI，保最后 ~1200 字符）。
+        stderrTail = (stderrTail + chunk).slice(-1200).replace(/\x1b\[[0-9;]*m/g, "");
         let nl;
         while ((nl = stderrBuf.indexOf("\n")) !== -1) {
           const line = stderrBuf.slice(0, nl);

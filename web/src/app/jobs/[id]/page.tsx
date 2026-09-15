@@ -1,6 +1,6 @@
 "use client";
 
-import { use } from "react";
+import { useEffect, useState, use } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import ReactMarkdown from "react-markdown";
@@ -14,6 +14,19 @@ import { useJobTiming } from "@/lib/eval-duration-client";
 import { EvalTimingPanel } from "@/components/eval-timing-panel";
 import { ReportNumLink } from "@/components/report-num-link";
 import { goBackOr } from "@/lib/nav-history";
+import { fmtDuration } from "@/lib/format";
+
+type RunLedgerEntry = {
+  id: string;
+  kind: string;
+  input: string;
+  title: string;
+  page?: string;
+  status: "done" | "error";
+  startedAt: number;
+  finishedAt: number;
+  msg?: string;
+};
 
 export default function JobPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -25,7 +38,73 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
   const { reportNum, entry } = useJobTiming(job ?? {});
   const subtitleIsNum = !!job?.subtitle && /^#\d+$/.test(job.subtitle);
 
-  if (!job) {
+  // ADR-0027 follow-up: runs dispatched outside this browser (API, another
+  // tab) have no localStorage card — their record lives ONLY in the server
+  // run ledger. When the id isn't local, fall back to the ledger so the
+  // history page's detail links don't dead-end at "not in memory".
+  const [ledgerEntry, setLedgerEntry] = useState<RunLedgerEntry | null>(null);
+  const [ledgerLoaded, setLedgerLoaded] = useState(false);
+  useEffect(() => {
+    if (job) return; // local card wins — nothing to look up
+    let alive = true;
+    fetch("/api/runs/history")
+      .then((r) => (r.ok ? r.json() : { runs: [] }))
+      .then((d) => {
+        if (!alive) return;
+        setLedgerEntry((d.runs as RunLedgerEntry[]).find((r) => r.id === id) ?? null);
+      })
+      .catch(() => {})
+      .finally(() => alive && setLedgerLoaded(true));
+    return () => {
+      alive = false;
+    };
+  }, [job, id]);
+
+  if (!job && ledgerEntry) {
+    // Terminal-only ledger view: the live step stream was never persisted, so
+    // this renders the honest subset — status, title, duration, reason.
+    const e = ledgerEntry;
+    return (
+      <div className="mx-auto max-w-3xl px-6 py-8">
+        <button
+          type="button"
+          onClick={() => goBackOr(router, "/jobs")}
+          className="inline-flex items-center gap-1.5 text-sm text-muted transition-colors hover:text-brand"
+        >
+          <ArrowLeft className="size-4" /> {t("shared.back")}
+        </button>
+
+        <section className="dot-bg relative mt-5 overflow-hidden rounded-2xl border border-border bg-surface/40 px-6 py-7">
+          <div className="relative z-10">
+            <p className="flex items-center gap-2 font-mono text-xs uppercase tracking-[0.18em] text-faint">
+              {e.status === "done" ? (
+                <><Check className="size-3 text-emerald-500" /> {t("jobs.statusDone")}</>
+              ) : (
+                <><X className="size-3 text-red-400" /> {t("jobs.statusError")}</>
+              )}
+            </p>
+            <h1 className="mt-2 font-display text-2xl tracking-tight text-landing">{e.title}</h1>
+            <p className="mt-1 text-sm text-muted">
+              {e.kind} · {t("jobs.ledgerInput")}: {e.input} · {fmtDuration(Math.round((e.finishedAt - e.startedAt) / 1000))}
+            </p>
+            {e.page && (
+              <p className="mt-2">
+                <Link href={e.page} className="text-sm text-brand transition-colors hover:underline">
+                  {e.page}
+                </Link>
+              </p>
+            )}
+            {e.msg && (
+              <p className="mt-3 rounded-lg border border-border bg-surface/60 px-3 py-2 text-sm text-muted">{e.msg}</p>
+            )}
+          </div>
+        </section>
+        <p className="mt-4 text-xs text-faint">{t("jobs.ledgerNote")}</p>
+      </div>
+    );
+  }
+
+  if (!job && ledgerLoaded) {
     return (
       <div className="mx-auto max-w-3xl px-6 py-10">
         <button
@@ -37,6 +116,25 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
         </button>
         <p className="mt-8 text-sm text-muted">
           {t("jobs.notInMemory")}
+        </p>
+      </div>
+    );
+  }
+
+  if (!job) {
+    // Ledger fetch still in flight — keep the previous quiet placeholder so a
+    // ledger-backed detail never flashes "not in memory" first.
+    return (
+      <div className="mx-auto max-w-3xl px-6 py-10">
+        <button
+          type="button"
+          onClick={() => goBackOr(router, "/jobs")}
+          className="inline-flex items-center gap-1.5 text-sm text-muted transition-colors hover:text-brand"
+        >
+          <ArrowLeft className="size-4" /> {t("shared.back")}
+        </button>
+        <p className="mt-8 flex items-center gap-2 text-sm text-muted">
+          <Loader2 className="size-3.5 animate-spin" /> {t("jobs.ledgerLoading")}
         </p>
       </div>
     );

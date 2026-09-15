@@ -14,6 +14,10 @@ export const en: Dict = {
   "jobs.statusError": "error",
   "jobs.notInMemory":
     "This worker is no longer in memory (it finished earlier or the page was reloaded).",
+  "jobs.ledgerInput": "input",
+  "jobs.ledgerNote":
+    "This record comes from the server run ledger (ADR-0027): runs dispatched outside this browser retain their terminal state and reason, but not the live step stream.",
+  "jobs.ledgerLoading": "Looking up the server run ledger…",
   "jobs.statusWorking": "working",
   "jobs.output": "Output",
   "jobs.usingTool": "Using {label}",
@@ -74,6 +78,9 @@ export const zh: Dict = {
   "jobs.statusDone": "已完成",
   "jobs.statusError": "出错",
   "jobs.notInMemory": "这个工作器已不在内存中（它之前已结束，或页面被重新加载）。",
+  "jobs.ledgerInput": "输入",
+  "jobs.ledgerNote": "该记录来自服务端运行账本（ADR-0027）：非本浏览器派发的运行只保留终态与原因，不含实时步骤流。",
+  "jobs.ledgerLoading": "正在查询服务端运行账本…",
   "jobs.statusWorking": "进行中",
   "jobs.output": "输出",
   "jobs.usingTool": "正在使用 {label}",
