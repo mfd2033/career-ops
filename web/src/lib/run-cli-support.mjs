@@ -182,6 +182,29 @@ const GENERIC_FATAL_STDERR_RE =
   /\berror\b|\bdenied\b|\bfatal\b|not found|\bunauthorized\b|\bforbidden\b|not authenticated|authentication failed|\blogin\b|log in|\bcredentials?\b|api[ -]?key|\bquota\b|rate limit/i;
 
 /**
+ * Parse `reserve-report-num.mjs` stdout into the reserved number list.
+ *
+ * Lives here rather than inline in batch-evaluate/route.ts so it can be tested
+ * (tests/reservation-output-parse.test.mjs) — the inline `^(\d{3})...` version
+ * hard-coded three-digit report numbers, so the moment reports crossed #999
+ * every batch run died at the reserve step with "unexpected reservation
+ * output: 1838-1851" (2026-09-15: 40 red cards per click, 854 leaked
+ * RESERVED sentinels). `formatReportNumber` pads to three digits but never
+ * truncates, and the allocator's own occupancy scan is `\d+`-wide, so the
+ * lower bound here must be 3+ digits, not exactly 3.
+ *
+ * @param {string} stdout
+ * @returns {number[]|null} Contiguous reserved numbers, or null on garbage.
+ */
+export function parseReservationOutput(stdout) {
+  const m = stdout.trim().match(/^(\d{3,})(?:-(\d{3,}))?$/);
+  if (!m) return null;
+  const a = parseInt(m[1], 10);
+  const b = m[2] ? parseInt(m[2], 10) : a;
+  return Array.from({ length: b - a + 1 }, (_, k) => a + k);
+}
+
+/**
  * The argv that makes `codex exec` emit the JSONL `parseCodexEvent` reads.
  *
  * Lives beside that parser rather than inline in clis.ts because the two are one
