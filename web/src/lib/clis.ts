@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import { codexStreamArgs, isFatalClaudeStderr, isFatalCodexStderr, isFatalOpenCodeStderr, parseClaudeEvent, parseCodexEvent } from "./run-cli-support.mjs";
 import { loadOpencodeModels, resetOpencodeModelCache } from "./opencode-models.mjs";
 
@@ -322,13 +323,33 @@ export type DetectedCli = {
   url: string;
   installed: boolean;
   path: string | null;
+  /** ADR-0028: installed ≠ usable. true = `--version` printed something within
+   *  the timeout; false = installed but headless-broken (zero output — e.g. an
+   *  unauthenticated opencode) or the probe errored. undefined = not probed
+   *  (not installed). */
+  usable?: boolean;
   model: ModelMeta;
 };
+
+// ADR-0028: installed ≠ usable. A CLI that exits 0 with ZERO stdout (found on
+// this machine: an unauthenticated/broken opencode) can only produce empty
+// worker results — the honesty gate then eats the run and the user never
+// learns why. `--version` is the cheapest probe with no side effects; a run
+// probe is deliberately NOT used (cost + real side effects).
+function probeHeadlessUsable(binPath: string): boolean {
+  try {
+    const out = spawnSync(binPath, ["--version"], { encoding: "utf8", timeout: 15_000, stdio: ["ignore", "pipe", "pipe"] });
+    return Boolean(out.stdout?.trim());
+  } catch {
+    return false;
+  }
+}
 
 export function detectClis(): DetectedCli[] {
   const dirs = searchDirs();
   return KNOWN.map((c) => {
     const found = findBin(c.bin, dirs);
+    const usable = found ? probeHeadlessUsable(found) : undefined;
     let model = c.model;
     // opencode's model list is user-config-driven (opencode.jsonc providers),
     // so a static list would diverge from what the opencode TUI/desktop shows.
@@ -346,7 +367,7 @@ export function detectClis(): DetectedCli[] {
         model = { ...c.model, options: dynamic, default: dynamic[0].id };
       }
     }
-    return { id: c.id, name: c.name, run: c.run, url: c.url, installed: !!found, path: found, model };
+    return { id: c.id, name: c.name, run: c.run, url: c.url, installed: !!found, path: found, usable, model };
   });
 }
 

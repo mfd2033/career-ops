@@ -403,7 +403,11 @@ async function runPipeline({
     // killed mid-report — the reserve sentinel got written but no report, so
     // the honesty gate reported "didn't save a report". Evaluate has no
     // render phase to reserve headroom for, so give it the full 600s too.
-    const killMs = 600_000;
+    // checkup（公司体检，ADR-0027）是重调研：opencode 实测约 10 分钟起步，
+    // 600s 的通用 kill 定时器会在它写完 HTML/台账、正要写附录时 SIGTERM
+    // （2026-09-15 实测——131/119/124/916 四次「零产物失败」的真根因）。
+    // 30 分钟给足余量；evaluate/pdf 维持 600s。
+    const killMs = kind === "checkup" ? 1_800_000 : 600_000;
     // `killer` is armed AFTER spawn below (the CLI child is null while queued,
     // so there is nothing to kill and terminateCli(null) would throw).
 

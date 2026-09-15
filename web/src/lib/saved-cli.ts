@@ -13,7 +13,9 @@ export const CONFIG_KEY = "career-ops:config";
 // a lost write is invisible otherwise: the client store still shows the user's
 // pick while every evaluation reads the server's old value (report #836).
 // @returns {Promise<boolean>} true when the server accepted the write.
-async function pushServerConfig(patch: Record<string, string>): Promise<boolean> {
+/** ADR-0028 决议 3：导出给 config-form——cliId/model 的保存回执必须可见，
+ *  静默丢写正是「以为存了 claude、实际派发了 opencode」的根因（#836 同教训）。 */
+export async function pushServerConfig(patch: Record<string, string>): Promise<boolean> {
   try {
     const res = await fetch("/api/config", {
       method: "POST",

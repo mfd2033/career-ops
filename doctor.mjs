@@ -6,6 +6,7 @@
  */
 
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'fs';
+import { execFileSync } from 'child_process';
 import { homedir } from 'os';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -301,6 +302,49 @@ function resolveActiveCli() {
   return { cli: 'claude', source: 'default' };
 }
 
+// ADR-0028: installed ≠ usable. A CLI whose `--version` prints NOTHING cannot
+// produce headless output either — every dispatch to it fails the honesty gate
+// with zero artifacts (found 2026-09-15: an unauthenticated opencode.exe was
+// the active CLI and three checkup workers silently produced nothing).
+//
+// Probe discipline: locate EVERY on-PATH binary via where/which, then probe
+// each DIRECTLY (no shell) — the worker spawns the binary directly, and on
+// Windows a working .cmd shim can mask a broken .exe (and vice versa). .cmd
+// files are skipped: Node refuses to spawn them without a shell (EINVAL), so
+// they are unprobeable here, not broken. Warn only when every probeable
+// binary is broken; if none is probeable, say nothing (presence checks cover).
+function checkHeadlessUsable(activeCli) {
+  if (!activeCli || activeCli === 'unknown') return null;
+  const whereCmd = process.platform === 'win32' ? 'where' : 'which';
+  let paths = [];
+  try {
+    paths = execFileSync(whereCmd, [activeCli], { encoding: 'utf8' }).split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  } catch {
+    return null; // not on PATH — the installed/presence checks cover that case
+  }
+  const probeable = paths.filter((p) => !/\.cmd$/i.test(p));
+  if (probeable.length === 0) return null;
+  const broken = [];
+  for (const p of probeable.slice(0, 3)) {
+    let out = '';
+    try {
+      out = execFileSync(p, ['--version'], { encoding: 'utf8', timeout: 15_000, stdio: ['ignore', 'pipe', 'pipe'] });
+    } catch (e) {
+      out = String((e.stdout || '') + (e.stderr || ''));
+    }
+    if (!out.trim()) broken.push(p);
+  }
+  if (broken.length === 0) return null;
+  return {
+    warn: true,
+    label: `Active CLI "${activeCli}" is installed but headless-unusable — ${broken.length}/${probeable.length} located binary(ies) print nothing for --version. Tasks dispatched to it will fail with empty results.`,
+    fix: [
+      `Reinstall or re-authenticate "${activeCli}", then verify the binary prints here: <path-to-cli> --version`,
+      `Or switch runtimes: web config page, or CAREER_OPS_CLI in .env / --cli flag.`,
+    ],
+  };
+}
+
 function checkPlaywrightMcp(root, activeCli) {
   // Unknown CLI (typo / not in VALID_CLIS).
   if (activeCli === 'unknown') return null;
@@ -545,6 +589,7 @@ async function main() {
     checkDependencies(),
     await checkPlaywright(),
     checkPlaywrightMcp(projectRoot, activeCli),
+    checkHeadlessUsable(activeCli),
     checkScanExtractor(projectRoot),
     ...USER_LAYER_PREREQS.map(checkPrereq),
     checkFonts(),
