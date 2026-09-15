@@ -165,7 +165,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
         }).catch(() => {});
         // Tell server-snapshot surfaces (Today, pipeline) to refetch — the
         // worker just wrote a real tracker row / report they don't yet see.
-        if (typeof window !== "undefined" && ["evaluate", "pdf", "batch-evaluate"].includes(acc.opts.kind)) {
+        if (typeof window !== "undefined" && ["evaluate", "pdf", "batch-evaluate", "checkup"].includes(acc.opts.kind)) {
           window.dispatchEvent(new CustomEvent("co-job-done", { detail: { kind: acc.opts.kind, input: acc.opts.input } }));
         }
       }

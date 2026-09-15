@@ -254,6 +254,6 @@ _Avoid_: 体检日志、checkup 历史（口语）、体检数据库
 _Avoid_: 评估报告（那是 `reports/{###}-*.md`，两回事）
 
 **体检请求（checkup request）**:
-行详情页「体检这家」按钮写入 agent-inbox 的 intent（ADR-0026）：一条自带完整上下文的请求文本（tracker#、公司名、规则引用），按钮按下即用户确认，drain 时不再二次询问。`?` 行的体检对象是招聘主体（report Via）。API 侧按「同 tracker# + 当天 + 未 drain」去重；去重的是请求队列，台账照常 append。执行通路是异步的——UI 明示「下次会话执行」，不假装即时。
-_Avoid_: 体检任务（那是 worker 语境的口语）、体检队列（泛——队列是 agent-inbox，请求是其中一项）
+行详情页「体检这家」按钮触发的执行请求（ADR-0027）：按下即用户确认，经 **worker kind=checkup 即时执行**（全局并发池 + 引擎模式 CLI runtime，/jobs 实时进度），prompt 为指针式——tracker#、公司名与「按 modes/_custom.md 公司体检规则执行」，编排规则单一来源在 `_custom.md`。`?` 行的体检对象是招聘主体（report Via）。同 tracker# 当天已派发或 pending 的请求被 409 去重；agent-inbox 同步写一条已标记行（含 job id）作审计轨迹，drain 时跳过。历史遗留的 pending 请求仍走会话 drain 执行（两条路并存，ADR-0027 决议 5）。
+_Avoid_: 体检任务（worker 的正式称谓是 kind=checkup）、体检队列（旧异步通路的遗留语）
 

@@ -1,6 +1,6 @@
 # ADR-0026: 行详情页「体检这家」按钮经 agent-inbox 异步执行
 
-- **Status:** Accepted (2026-09-14)
+- **Status:** Accepted (2026-09-14) — **部分被 ADR-0027 取代（2026-09-15）**：决议 1（agent-inbox 异步通路）与决议 7（仅 pending 去重）由 ADR-0027 的 worker kind=checkup 即时执行取代；决议 2/3/4/5/6/8 继续有效。
 - **Context:** ADR-0025 落地后，体检的触发入口只有对话（用户对 agent 说「体检这家」）。需求：web 行详情页提供「体检这家」按钮。核心矛盾：体检能力（offer体检 技能 + bsk + 多轮搜索）住在本机 agent 侧，web 前端自己不会做调研；web 的 CLI worker 体系虽能即时执行，但其内建 prompt 运行时（claude/codex/opencode CLI）并没有装 offer体检 技能，内联体检编排会造成与 `_custom.md` 规则的第二份实现。决议于 2026-09-14 grill 会话逐条确认（7 项）。
 
 ## Decision

@@ -161,15 +161,16 @@ export const en: Dict = {
   "pipeline.reevaluateSubtitle": "Re-running the evaluation",
   "pipeline.reevaluateNoUrl": "No posting URL in this report — add one to re-evaluate.",
 
-  // ── Company checkup button (ADR-0026) ──
+  // ── Company checkup button (ADR-0026/0027) ──
   "pipeline.checkup": "Check this company",
   "pipeline.checkupRecheck": "Re-check",
-  "pipeline.checkupQueued": "Queued — runs at your next AI session",
-  "pipeline.checkupAlreadyQueued": "Already in the checkup queue",
-  "pipeline.checkupQueuedTitle": "Writes a checkup intent to the agent inbox — your next AI session runs it",
+  "pipeline.checkupRunning": "Checking…",
+  "pipeline.checkupJobTitle": "Company checkup: {company}",
+  "pipeline.checkupDispatchTitle": "Dispatches a checkup worker now — runs through the concurrency pool, progress on /jobs",
+  "pipeline.checkupAlreadyQueued": "A checkup for this row was already dispatched today",
   "pipeline.checkupNoVia": "Unknown-employer row has no Via company to check up on",
   "pipeline.checkupNoRow": "No tracker row for this report",
-  "pipeline.checkupFailed": "Failed to queue the checkup request",
+  "pipeline.checkupFailed": "Failed to dispatch the checkup worker",
   "pipeline.checkupLatest": "Checkup ★{star} · {date}",
   "pipeline.checkupReport": "Checkup report",
 
@@ -392,15 +393,16 @@ export const zh: Dict = {
   "pipeline.reevaluateSubtitle": "正在重新评估",
   "pipeline.reevaluateNoUrl": "此报告没有职位链接——补充链接后才能重新评估。",
 
-  // ── 公司体检按钮（ADR-0026） ──
+  // ── 公司体检按钮（ADR-0026/0027） ──
   "pipeline.checkup": "体检这家",
   "pipeline.checkupRecheck": "复检",
-  "pipeline.checkupQueued": "已加入体检队列，下次会话执行",
-  "pipeline.checkupAlreadyQueued": "已在体检队列",
-  "pipeline.checkupQueuedTitle": "向 agent 收件箱写入一条体检请求——下次 AI 会话自动执行",
+  "pipeline.checkupRunning": "体检中…",
+  "pipeline.checkupJobTitle": "公司体检：{company}",
+  "pipeline.checkupDispatchTitle": "立即派发体检 worker（并发池执行，进度见 /jobs）",
+  "pipeline.checkupAlreadyQueued": "该行今天已派发过体检",
   "pipeline.checkupNoVia": "未知雇主行没有可体检的招聘主体（Via）",
   "pipeline.checkupNoRow": "此报告没有对应的 tracker 行",
-  "pipeline.checkupFailed": "体检请求写入失败",
+  "pipeline.checkupFailed": "体检 worker 派发失败",
   "pipeline.checkupLatest": "公司体检 ★{star} · {date}",
   "pipeline.checkupReport": "体检报告",
 

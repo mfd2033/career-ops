@@ -2,22 +2,24 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { Loader2, ShieldCheck, ExternalLink } from "lucide-react";
+import { ExternalLink, Loader2, ShieldCheck } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { checkupTone, type CheckupEntry } from "@/lib/format";
 import { CHECKUP_RISK_LABELS } from "@/lib/company-checkups.mjs";
 import type { CheckupTargetResult } from "@/lib/career-ops";
+import { useJobs } from "@/components/jobs/job-store";
 import { useI18n } from "@/lib/i18n/context";
 
 // 形状单一来源是 career-ops.ts 的 findCheckupTarget（ReturnType 推导），
 // 这里只是语义别名，避免两处手写漂移。
 export type CheckupTarget = CheckupTargetResult;
 
-// 「体检这家」（ADR-0026）: writes one intent into the agent inbox — the press
-// IS the human confirmation; the checkup itself runs at the user's NEXT AI
-// session (agent-inbox is async by design, so the UI says "queued", never
-// "done"). With an existing checkup it shows ★ + risks + report link and the
-// button becomes 复检 (re-check → a NEW ledger row; history is the point).
+// 「体检这家」（ADR-0027）: the press IS the user's confirmation — it
+// pre-flights via POST /api/checkup-request (target + same-day dedup), then
+// dispatches a kind=checkup WORKER through the global concurrency pool. The
+// run is immediately visible on /jobs; the checkup writes HTML report + ledger
+// row + report appendix, and never touches the offer score. With an existing
+// checkup the button becomes 复检 (a NEW ledger row — history is the point).
 export function CheckupRequestButton({
   n,
   checkup,
@@ -28,11 +30,17 @@ export function CheckupRequestButton({
   target: CheckupTarget;
 }) {
   const { t } = useI18n();
-  const [state, setState] = useState<"idle" | "busy" | "queued" | "error">("idle");
+  const { jobs, startJob } = useJobs();
+  const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
 
+  // Latest checkup worker for THIS row (the run's input is the tracker#).
+  const job = jobs
+    .filter((j) => j.kind === "checkup" && j.input === n)
+    .sort((a, b) => b.startedAt - a.startedAt)[0];
+
   const trigger = async () => {
-    setState("busy");
+    setBusy(true);
     setNote(null);
     try {
       const res = await fetch("/api/checkup-request", {
@@ -41,15 +49,27 @@ export function CheckupRequestButton({
         body: JSON.stringify({ n }),
       });
       if (res.ok) {
-        setState("queued");
-        return;
+        startJob({
+          title: t("pipeline.checkupJobTitle", { company: target.ok ? target.company : `#${n}` }),
+          subtitle: `#${n}`,
+          kind: "checkup",
+          input: n,
+          page: `/pipeline/${n}`,
+        });
+      } else {
+        const j = (await res.json().catch(() => ({}))) as { error?: string; deduped?: boolean };
+        setNote(
+          j.deduped
+            ? t("pipeline.checkupAlreadyQueued")
+            : j.error === "no-via"
+              ? t("pipeline.checkupNoVia")
+              : t("pipeline.checkupFailed"),
+        );
       }
-      const j = (await res.json().catch(() => ({}))) as { error?: string; deduped?: boolean };
-      setState("error");
-      setNote(j.deduped ? t("pipeline.checkupAlreadyQueued") : j.error === "no-via" ? t("pipeline.checkupNoVia") : t("pipeline.checkupFailed"));
     } catch {
-      setState("error");
       setNote(t("pipeline.checkupFailed"));
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -94,24 +114,25 @@ export function CheckupRequestButton({
           )}
         </span>
       )}
-      {state === "busy" ? (
-        <button
-          disabled
-          className="inline-flex cursor-wait items-center justify-center gap-1.5 rounded-full border border-border px-3 py-1 text-xs font-medium text-muted max-sm:min-h-[44px]"
+      {job?.status === "running" ? (
+        <Link
+          href={`/jobs/${job.id}`}
+          className="inline-flex items-center justify-center gap-1.5 rounded-full border border-brand/40 bg-brand-soft px-3 py-1 text-xs font-medium text-brand max-sm:min-h-[44px]"
         >
-          <Loader2 className="size-3.5 animate-spin" /> {t("pipeline.checkup")}…
-        </button>
+          <Loader2 className="size-3.5 animate-spin" /> {t("pipeline.checkupRunning")}
+        </Link>
       ) : (
         <button
           onClick={trigger}
-          title={t("pipeline.checkupQueuedTitle")}
-          className="inline-flex items-center justify-center gap-1.5 rounded-full border border-border px-3 py-1 text-xs font-medium text-muted transition-colors hover:border-brand/40 hover:text-brand max-sm:min-h-[44px]"
+          disabled={busy}
+          title={t("pipeline.checkupDispatchTitle")}
+          className="inline-flex items-center justify-center gap-1.5 rounded-full border border-border px-3 py-1 text-xs font-medium text-muted transition-colors hover:border-brand/40 hover:text-brand max-sm:min-h-[44px] disabled:cursor-wait disabled:opacity-60"
         >
-          <ShieldCheck className="size-3.5" /> {checkup ? t("pipeline.checkupRecheck") : t("pipeline.checkup")}
+          {busy ? <Loader2 className="size-3.5 animate-spin" /> : <ShieldCheck className="size-3.5" />}
+          {checkup ? t("pipeline.checkupRecheck") : t("pipeline.checkup")}
         </button>
       )}
-      {state === "queued" && <span className="text-xs text-emerald-600 dark:text-emerald-400">{t("pipeline.checkupQueued")}</span>}
-      {state === "error" && note && <span className="text-xs text-red-600 dark:text-red-400">{note}</span>}
+      {note && <span className="text-xs text-red-600 dark:text-red-400">{note}</span>}
     </span>
   );
 }
