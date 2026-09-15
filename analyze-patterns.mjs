@@ -583,6 +583,9 @@ risk_summary:
     if (!ec || ec.total !== 1 || ec.negative !== 1 || ec.avgScore !== 2) {
       failures.push(`checkup: entity-confusion outcome → ${JSON.stringify(ec)}, expected total 1 / negative 1 / avgScore 2`);
     }
+    if (ec?.scoreBands?.lt3 !== 1 || ec?.scoreBands['3-4'] !== 0 || ec?.scoreBands.gte4 !== 0) {
+      failures.push(`checkup: entity-confusion scoreBands → ${JSON.stringify(ec?.scoreBands)}, expected lt3=1 only`);
+    }
     if (ck?.riskFactorOutcomes['social-zero']) {
       failures.push('checkup: `?`-row risk factor leaked into outcome stats (must stay distribution-only)');
     }
@@ -1014,12 +1017,17 @@ function buildCheckupAnalysis(enriched, rows) {
     }
     for (const f of c.risks) {
       if (!riskFactorOutcomes[f]) {
-        riskFactorOutcomes[f] = { total: 0, positive: 0, negative: 0, self_filtered: 0, pending: 0, avgScore: null, scoreN: 0, scoreSum: 0 };
+        riskFactorOutcomes[f] = { total: 0, positive: 0, negative: 0, self_filtered: 0, pending: 0, avgScore: null, scoreN: 0, scoreSum: 0, scoreBands: { lt3: 0, '3-4': 0, gte4: 0 } };
       }
       const o = riskFactorOutcomes[f];
       o.total += 1;
       o[e.outcome] = (o[e.outcome] || 0) + 1;
-      if (score !== null) { o.scoreSum += score; o.scoreN += 1; }
+      if (score !== null) {
+        o.scoreSum += score; o.scoreN += 1;
+        // 得分段交叉（工单 04）：风险因子 × 评估得分的分布段
+        const band = score < 3 ? 'lt3' : score < 4 ? '3-4' : 'gte4';
+        o.scoreBands[band] += 1;
+      }
     }
   }
   for (const o of Object.values(riskFactorOutcomes)) {

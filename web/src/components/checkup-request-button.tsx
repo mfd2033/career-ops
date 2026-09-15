@@ -6,11 +6,12 @@ import { Loader2, ShieldCheck, ExternalLink } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { checkupTone, type CheckupEntry } from "@/lib/format";
 import { CHECKUP_RISK_LABELS } from "@/lib/company-checkups.mjs";
+import type { CheckupTargetResult } from "@/lib/career-ops";
 import { useI18n } from "@/lib/i18n/context";
 
-export type CheckupTarget =
-  | { ok: true; company: string; source: "company" | "via" }
-  | { ok: false; reason: "row-not-found" | "no-via" };
+// 形状单一来源是 career-ops.ts 的 findCheckupTarget（ReturnType 推导），
+// 这里只是语义别名，避免两处手写漂移。
+export type CheckupTarget = CheckupTargetResult;
 
 // 「体检这家」（ADR-0026）: writes one intent into the agent inbox — the press
 // IS the human confirmation; the checkup itself runs at the user's NEXT AI
