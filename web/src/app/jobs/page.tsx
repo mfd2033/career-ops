@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Check, AlertTriangle, Loader2, Trash2, Clock } from "lucide-react";
 import { useJobs } from "@/components/jobs/job-store";
@@ -25,9 +26,54 @@ const STATUS_LABEL: Record<string, string> = {
   error: "jobs.statusError",
 };
 
+/** Shape of one server run-ledger entry (producer: web/src/lib/run-ledger.mjs
+ *  via GET /api/runs/history — ADR-0027 follow-up observability fix). */
+type RunLedgerEntry = {
+  id: string;
+  kind: string;
+  input: string;
+  title: string;
+  page?: string;
+  status: "done" | "error";
+  startedAt: number;
+  finishedAt: number;
+  msg?: string;
+};
+
 export default function JobsHistory() {
   const { jobs, clearFinished } = useJobs();
   const { t } = useI18n();
+
+  // Server run ledger (ADR-0027 follow-up): terminated runs dispatched outside
+  // this browser (API, script, another tab) exist only in the server ledger.
+  // Merge them in, deduped by runId — a card that knows its runId wins (it has
+  // richer live state); ledger-only rows fill the gaps so a finished checkup
+  // can never vanish from history again.
+  const [ledgerRuns, setLedgerRuns] = useState<RunLedgerEntry[]>([]);
+  useEffect(() => {
+    fetch("/api/runs/history")
+      .then((r) => (r.ok ? r.json() : { runs: [] }))
+      .then((d) => setLedgerRuns(d.runs ?? []))
+      .catch(() => {});
+  }, []);
+
+  const knownRunIds = new Set(jobs.map((j) => j.runId).filter(Boolean));
+  const ledgerOnly: Job[] = ledgerRuns
+    .filter((r) => !knownRunIds.has(r.id))
+    .map((r) => ({
+      id: r.id,
+      title: r.title,
+      page: r.page,
+      input: r.input,
+      kind: r.kind,
+      runId: r.id,
+      status: r.status === "done" ? "done" : "error",
+      steps: [],
+      text: r.msg || "",
+      startedAt: r.startedAt,
+      endedAt: r.finishedAt,
+    }));
+  const merged = [...jobs, ...ledgerOnly].sort((a, b) => b.startedAt - a.startedAt);
 
   return (
     <div className="mx-auto max-w-4xl px-6 py-10">
@@ -35,10 +81,10 @@ export default function JobsHistory() {
         <div>
           <h1 className="font-display text-2xl tracking-tight text-landing">{t("jobs.workers")}</h1>
           <p className="mt-1 text-sm text-muted">
-            {t("jobs.historyIntro")}<span className="tabular-nums">{jobs.length}</span>{t("jobs.total")}
+            {t("jobs.historyIntro")}<span className="tabular-nums">{merged.length}</span>{t("jobs.total")}
           </p>
         </div>
-        {jobs.some((j) => j.status !== "running" && j.status !== "queued") && (
+        {merged.some((j) => j.status !== "running" && j.status !== "queued") && (
           <button
             onClick={clearFinished}
             className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-3 py-1.5 text-xs text-muted transition-colors hover:bg-surface-hover hover:text-foreground"
@@ -48,13 +94,13 @@ export default function JobsHistory() {
         )}
       </div>
 
-      {jobs.length === 0 ? (
+      {merged.length === 0 ? (
         <div className="mt-8 rounded-2xl border border-dashed border-border bg-surface/30 px-6 py-12 text-center text-sm text-muted">
           {t("jobs.empty")}
         </div>
       ) : (
         <ul className="mt-6 divide-y divide-border overflow-hidden rounded-2xl border border-border bg-surface/40">
-          {jobs.map((j) => (
+          {merged.map((j) => (
             <JobsRow key={j.id} job={j} />
           ))}
         </ul>

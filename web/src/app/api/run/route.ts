@@ -21,6 +21,7 @@ import { claudeCliArgs } from "@/lib/claude-invocation.mjs";
 import { acquireTrackerWrite, releaseTrackerWrite } from "@/lib/core/run-registry";
 import { acquire, release, __setSizeSource, DEFAULT_POOL_SIZE } from "@/lib/core/concurrency-pool";
 import { registerRun, setCancelHandler, publish, completeRun } from "@/lib/core/run-events";
+import { appendRunRecord } from "@/lib/run-ledger.mjs";
 
 // Feed the global concurrency pool the live configured size (app-config), re-read
 // on every dispatch so a config-page edit takes effect without restart.
@@ -117,14 +118,41 @@ export async function POST(req: Request) {
   // Register the run BEFORE returning the runId so the bus already has the
   // record when the first events flow.
   const runId = randomUUID();
+  const startedAt = Date.now();
   registerRun(runId);
+
+  // Server-side run ledger (B4-class observability): a terminated run must be
+  // visible even when no UI card exists (API-dispatched runs, another tab).
+  // Recorded once per run at the terminal send/cancel/crash — see recordEnd.
+  const checkupTarget = kind === "checkup" ? findCheckupTarget(String(input)) : null;
+  const ledgerTitle = checkupTarget?.ok
+    ? `公司体检：${checkupTarget.company}`
+    : `${kind} ${input}`;
+  let endRecorded = false;
+  const recordEnd = (status: "done" | "error", msg?: string) => {
+    if (endRecorded) return;
+    endRecorded = true;
+    try {
+      appendRunRecord(careerOpsRoot(), {
+        id: runId,
+        kind,
+        input,
+        title: ledgerTitle,
+        page: kind === "checkup" ? `/pipeline/${input}` : undefined,
+        status,
+        startedAt,
+        finishedAt: Date.now(),
+        msg: msg ? String(msg).slice(0, 300) : undefined,
+      });
+    } catch (e) {
+      console.error("[run-ledger] append failed:", e instanceof Error ? e.message : e);
+    }
+  };
 
   // 公司体检审计行（ADR-0027 决议 3）：同步写一条已标记的 agent-inbox 行
   // （含本 runId），关闭双击去重窗口；drain 规则会跳过已标记的体检请求。
-  if (kind === "checkup") {
-    const target = findCheckupTarget(String(input));
-    const company = target.ok ? target.company : `tracker #${input}`;
-    const auditLine = checkupDispatchText({ n: String(input), company, runId });
+  if (checkupTarget?.ok) {
+    const auditLine = checkupDispatchText({ n: String(input), company: checkupTarget.company, runId });
     execFile(
       process.execPath,
       [rootScript("agent-inbox"), "add-done", auditLine, "--result", `dispatched worker ${runId}`],
@@ -137,11 +165,13 @@ export async function POST(req: Request) {
 
   after(async () => {
     try {
-      await runPipeline({ runId, kind, input, cliId, model, spec, binPath });
+      await runPipeline({ runId, kind, input, cliId, model, spec, binPath, recordEnd });
     } catch (e) {
       // Nothing else catches this promise — a crash here must still terminate
       // the run on the bus instead of leaving it open until process shutdown.
-      publish(runId, { type: "error", msg: `Worker crashed unexpectedly: ${e instanceof Error ? e.message : String(e)}`.slice(0, 200) });
+      const msg = `Worker crashed unexpectedly: ${e instanceof Error ? e.message : String(e)}`.slice(0, 200);
+      publish(runId, { type: "error", msg });
+      recordEnd("error", msg);
       completeRun(runId);
     }
   });
@@ -159,6 +189,7 @@ async function runPipeline({
   model,
   spec,
   binPath,
+  recordEnd,
 }: {
   runId: string;
   kind: string;
@@ -167,6 +198,8 @@ async function runPipeline({
   model?: string;
   spec: import("@/lib/clis").CliSpec;
   binPath: string;
+  /** Server run-ledger recorder (once per run; passed in from POST scope). */
+  recordEnd: (status: "done" | "error", msg?: string) => void;
 }) {
   const today = new Date().toISOString().slice(0, 10);
 
@@ -283,6 +316,8 @@ async function runPipeline({
   const send = (obj: { type: string; [key: string]: unknown }) => {
     if (terminal) return;
     publish(runId, obj);
+    if (obj.type === "done") recordEnd("done");
+    else if (obj.type === "error") recordEnd("error", String(obj.msg ?? ""));
   };
   const keepalive = setInterval(() => send({ type: "keepalive" }), 10_000);
   const close = () => {
@@ -303,6 +338,7 @@ async function runPipeline({
     settle(); // a cancel is terminal too — the awaited body must not hang
     if (terminal) return;
     terminal = true;
+    recordEnd("error", "cancelled by user");
     clearInterval(keepalive);
     if (killer) clearTimeout(killer);
     if (child) {

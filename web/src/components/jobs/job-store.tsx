@@ -34,6 +34,9 @@ export type Job = {
   // agent mid-run, so that kind resolves via the posting URL instead (ADR-0018).
   reportNum?: string;
   batchId?: string; // groups jobs fired together (e.g. "evaluate all Anthropic")
+  /** The server-side run id (from /api/run's {runId}), when known. Joins the
+   *  localStorage card to the server run ledger so /jobs can dedupe the two. */
+  runId?: string;
   status: "running" | "queued" | "done" | "error";
   // For a server-sourced (pool) card: its pool id + whether it was queued, so the
   // dismiss action can route to the right cancel path (dequeue via API).
@@ -408,6 +411,9 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
               return;
             }
             runIds.current.set(runId, id);
+            // Persist the runId onto the card so /jobs can dedupe this card
+            // against the server run ledger (same run, one history row).
+            patch(id, (j) => ({ ...j, runId }));
             // Events (including the tail of anything published between the
             // server registering the run and this map write) are recovered by
             // the channel's buffer replay; `seq` dedup keeps it exactly-once.
