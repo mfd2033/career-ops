@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useState } from "react";
 import {
+  AlertTriangle,
   Check,
   KeyRound,
   TerminalSquare,
@@ -16,7 +17,7 @@ import { cn } from "@/lib/cn";
 import { CadenceSettings } from "@/components/followups/cadence-settings";
 import { JdRulesSettings } from "@/components/jd-rules-settings";
 import { JobTargetSettings } from "@/components/job-target-settings";
-import { persistCliId, persistModel, readSavedCliId, readSavedModel, readSavedUnknownEmployer, persistUnknownEmployer, readServerUnknownEmployer, mirrorUnknownEmployer, type UnknownEmployerPolicy } from "@/lib/saved-cli";
+import { persistCliId, persistModel, pushServerConfig, readSavedCliId, readSavedModel, readSavedUnknownEmployer, persistUnknownEmployer, readServerUnknownEmployer, mirrorUnknownEmployer, type UnknownEmployerPolicy } from "@/lib/saved-cli";
 import { readSavedConcurrencyPool, persistConcurrencyPool, CONCURRENCY_POOL_DEFAULT } from "@/lib/saved-cli";
 import { resolveModelPicker } from "@/lib/model-picker.mjs";
 import {
@@ -51,6 +52,8 @@ type Cli = {
   url: string;
   installed: boolean;
   path: string | null;
+  /** ADR-0028: installed ≠ usable（headless `--version` 探针），见 clis.ts。 */
+  usable?: boolean;
   model: ModelMeta;
 };
 
@@ -101,6 +104,7 @@ export function ConfigForm() {
   const [policySyncFailed, setPolicySyncFailed] = useState(false);
   const [concurrencyPool, setConcurrencyPool] = useState(CONCURRENCY_POOL_DEFAULT);
   const [saved, setSaved] = useState(false);
+  const [mirrorFailed, setMirrorFailed] = useState(false);
   // 未安装工具的安装链接默认收起：默认视觉只留下拉，需要时再展开 6 个外链。
   const [showInstallLinks, setShowInstallLinks] = useState(false);
   // 「当前使用」回执读取的是已保存的工具，与 savedModel 同一原则 —— 保存前不跳。
@@ -170,7 +174,7 @@ export function ConfigForm() {
     // Highlight-only used to look configured while jobs still read empty localStorage.
     setCliId((prev) => {
       if (prev) return prev;
-      const only = list.filter((c) => c.installed);
+      const only = list.filter((c) => c.installed && c.usable !== false);
       if (only.length !== 1) return list.find((c) => c.installed)?.id || "";
       if (!readSavedCliId()) persistCliId(only[0].id);
       return only[0].id;
@@ -280,6 +284,9 @@ export function ConfigForm() {
     setSavedCliId(cliId);
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
+    // ADR-0028 决议 3：服务端镜像写入结果必须可见——静默丢写正是
+    // 「以为存了 claude、实际派发了 opencode」的根因（#836 同教训）。
+    pushServerConfig({ cliId, model: nextModel }).then((ok) => setMirrorFailed(!ok));
   }
 
   const installed = clis?.filter((c) => c.installed) ?? [];
@@ -378,6 +385,7 @@ export function ConfigForm() {
                     {installed.map((c) => (
                       <option key={c.id} value={c.id}>
                         {c.name}
+                        {c.usable === false ? ` — ${t("config.cliUnusable")}` : ""}
                       </option>
                     ))}
                   </optgroup>
@@ -398,6 +406,14 @@ export function ConfigForm() {
                     <Sparkles className="size-4 shrink-0 text-brand" />
                     <span className="text-muted">{t("config.currentTool")}</span>
                     <span className="min-w-0 truncate font-medium text-foreground">{currentCli.name}</span>
+                  </div>
+                )}
+
+                {/* ADR-0028：installed ≠ usable——headless 无输出的工具派发必败，就地警告。 */}
+                {selectedCli?.usable === false && (
+                  <div className="mt-3 flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-400">
+                    <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+                    <span>{t("config.cliUnusableWarn", { name: currentCli?.name ?? selectedCli.name })}</span>
                   </div>
                 )}
 
@@ -847,6 +863,10 @@ export function ConfigForm() {
           {saved ? t("config.saved") : t("config.saveConfig")}
         </button>
         <span className="text-xs text-faint">{t("config.localFirstRoadmap")}</span>
+        {mirrorFailed && (
+          // ADR-0028 决议 3：服务端镜像丢写必须可见（#836 同教训）。
+          <span className="text-xs font-medium text-amber-700 dark:text-amber-400">{t("config.mirrorFailed")}</span>
+        )}
       </div>
     </div>
   );
