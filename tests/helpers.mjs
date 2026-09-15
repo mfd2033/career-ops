@@ -491,7 +491,16 @@ export function toBashPath(wpath) {
   try {
     // execFileSync: the path is passed as an argv element, never interpolated
     // into a shell string, so quotes/spaces in it can't be re-parsed.
-    const cygpathCmd = WINDOWS_CYGPATH_CANDIDATES.find((p) => existsSync(p)) || 'cygpath';
+    // Derive cygpath from the RESOLVED bash root first (B4 review 2026-09-15):
+    // a non-standard install root (e.g. D:\Program Files\Git) otherwise needs
+    // its own entry in WINDOWS_CYGPATH_CANDIDATES, and the two lists drifting
+    // apart is exactly the #1409 trap. Fallback: the static allowlist, then PATH.
+    let cygpathCmd = null;
+    if (bashCache) {
+      const derived = bashCache.replace(/[\\/]bin[\\/]bash\.exe$/i, '\\usr\\bin\\cygpath.exe');
+      if (derived !== bashCache && existsSync(derived)) cygpathCmd = derived;
+    }
+    cygpathCmd = cygpathCmd || WINDOWS_CYGPATH_CANDIDATES.find((p) => existsSync(p)) || 'cygpath';
     const out = execFileSync(cygpathCmd, ['-u', forwardSlashed], { stdio: ['pipe', 'pipe', 'ignore'] }).toString().trim();
     if (out) return out;
   } catch {}

@@ -17,6 +17,10 @@ import path from "node:path";
 import { execFile } from "node:child_process";
 import { careerOpsRoot, findCheckupTarget, rootScript } from "@/lib/career-ops";
 import { checkupRequestText, hasPendingCheckupRequest } from "@/lib/checkup-request.mjs";
+// 本地日历日（ADR-0026 决议 7 的「当天」= 用户所在的今天，不是 UTC 日——
+// UTC+8 的早上 8 点前 UTC 日还是昨天，会静默放行重复请求）。复用 followups
+// 的既有实现，不另起副本。
+import { localISODate } from "@/lib/followups";
 
 export const runtime = "nodejs";
 
@@ -47,7 +51,8 @@ export async function POST(req: Request) {
   }
 
   // 当天 pending 去重：同 tracker# 已有未 drain 的体检请求 → 409（跨天可复检）。
-  const today = new Date().toISOString().slice(0, 10);
+  // 「当天」是用户本地日历日（lib/local-today.mjs 纪律），绝非 UTC 日。
+  const today = localISODate();
   const inboxPath = path.join(root, "data", "agent-inbox.md");
   const inboxText = fs.existsSync(inboxPath) ? fs.readFileSync(inboxPath, "utf8") : "";
   if (hasPendingCheckupRequest(inboxText, n, today)) {

@@ -421,6 +421,9 @@ export function findCheckupTarget(
   return { ok: true, company: via, source: "via" };
 }
 
+/** 单一类型来源：按钮组件与报告视图从这里 import，不再各自手写形状。 */
+export type CheckupTargetResult = ReturnType<typeof findCheckupTarget>;
+
 /** 本行的最近一次公司体检（checkupIndex 按 tracker# 索引）；无台账/无记录 → null。 */
 export function readCheckupFor(n: string): CheckupEntry | null {
   const idx = checkupIndex(read("data/company-checkups.tsv")) as Record<string, CheckupEntry>;
