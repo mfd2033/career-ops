@@ -24,7 +24,7 @@
 //
 // This test extracts the REAL emitter out of batch/batch-runner.sh and runs it,
 // rather than restating it, so the two cannot drift apart.
-import { pass, fail, rmSync, getBash } from './helpers.mjs';
+import { pass, fail, warn, rmSync, getBash, bashSource } from './helpers.mjs';
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync, mkdtempSync } from 'node:fs';
 import { join, dirname } from 'node:path';
@@ -33,6 +33,15 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const SRC = readFileSync(join(ROOT, 'batch/batch-runner.sh'), 'utf-8').replace(/\r\n/g, '\n');
+
+// B4 定性（2026-09-14）：本机 `bash` 落到 WSL（Git Bash 未装）时，WSL 内裸
+// `node` 不在 PATH（只有 node.exe 互操作），e2e 段以 `node` 收尾的脚本必挂
+// ——环境不满足时显式跳过并说明；装上 Git for Windows 后自动恢复运行。
+getBash();
+const FOREIGN_BASH = bashSource() === 'wsl';
+if (FOREIGN_BASH) {
+  warn('score-delimiter e2e skipped: `bash` resolves to WSL (no Git Bash) and bare `node` is not on PATH inside WSL — install Git for Windows to run this suite');
+}
 
 console.log('\nbatch-runner.sh — worker payload delimiter');
 
@@ -65,7 +74,7 @@ if (!emit) {
 // --- end to end, using the real emitter ----------------------------------
 // A successful worker: error is empty and score is present. That is the exact
 // shape that broke, and the only one worth asserting.
-if (emit && read) {
+if (emit && read && !FOREIGN_BASH) {
   const nodeProg = SRC.match(/parsed=\$\(printf '%s' "\$worker_result_json" \| node -e '([\s\S]*?)'\s*2>\/dev\/null/);
   if (!nodeProg) {
     fail('could not extract the node -e payload parser from batch-runner.sh');

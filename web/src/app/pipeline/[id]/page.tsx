@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { readReport, findApplication, readApplications, trackerCanDelete, readEvalTimings } from "@/lib/career-ops";
+import { readReport, findApplication, readApplications, trackerCanDelete, readEvalTimings, findCheckupTarget, readCheckupFor } from "@/lib/career-ops";
 import { evalTimingKey } from "@/lib/eval-timing-key.mjs";
 import { orderApplications, buildContextQuery, DEFAULT_ORDER } from "@/lib/pipeline-order.mjs";
 import { ReportView } from "@/components/report-view";
@@ -81,6 +81,10 @@ export default async function ReportPage({
   // to the id outright when the row itself is gone (deleted tracker row, live
   // report file), preserving the pre-ADR-0017 behaviour there.
   const timing = readEvalTimings()[app ? evalTimingKey(app) : id] ?? null;
+  // 公司体检（ADR-0026）：本行最近一次体检（无记录 → null）+ 体检对象判定
+  // （`?` 行 → 招聘主体 Via；不可判定 → 禁用原因码），供操作区按钮渲染。
+  const checkup = readCheckupFor(id);
+  const checkupTarget = findCheckupTarget(id);
 
   return (
     <>
@@ -95,6 +99,8 @@ export default async function ReportPage({
         position={position}
         total={total}
         contextQuery={contextQuery}
+        checkup={checkup}
+        checkupTarget={checkupTarget}
       />
       <div className="mx-auto max-w-3xl px-6 pb-10">
         <EvalTimingPanel entry={timing} />

@@ -141,5 +141,4 @@ for (const [range, expected] of MEDIAN_CASES) {
   if (eq(got, expected)) pass(`  median(${JSON.stringify(range)}) → ${expected}`);
   else fail(`  median(${JSON.stringify(range)}) → ${got}，期望 ${expected}`);
 }
-
-finish();
+// discovered suite 只 pass/fail、不打印全局汇总（test-all.mjs 纪律），单独运行也安静结束。
