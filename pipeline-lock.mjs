@@ -168,8 +168,46 @@ function processIsAlive(pid) {
   }
 }
 
-// Conservative: a lock whose recorded owner is still running is never stale,
-// however old it is. Age is the fallback only when there's no readable owner.
+/**
+ * How long a lock whose owner.json still says "alive" may sit before it is
+ * reclaimable anyway.
+ *
+ * The pid-liveness check is unsound on Windows, two ways: PIDs are reused
+ * (the pid in a 30-hour-old owner.json can belong to a wholly unrelated live
+ * process by the time it is checked), and kill(pid, 0) can answer "alive" for
+ * a holder that is gone. Either way `processIsAlive` pins the lock in
+ * RECOVER_LIVE forever — observed 2026-09-15: data/pipeline.md.lock held by a
+ * pid dead since the previous day, "alive:true", stale recovery disabled,
+ * reconcile-pipeline timing out for every caller until the lock was deleted
+ * by hand.
+ *
+ * The critical sections this lock guards are single-file read-modify-writes
+ * measured in seconds (a pipeline append; a tracker merge over ~650 rows), so
+ * a hold older than the ceiling is a wedged or pid-reused holder no matter
+ * what kill(0) claims. Ceiling, not liveness, is what makes recovery
+ * terminating.
+ */
+export const DEFAULT_MAX_HOLD_MS = 10 * 60_000;
+
+/** Effective hold ceiling, overridable for tests (floored at OWNERLESS_GRACE_MS). */
+export function maxHoldMs() {
+  const v = Number(process.env.CAREER_OPS_LOCK_MAX_HOLD_MS);
+  return Number.isFinite(v) && v >= OWNERLESS_GRACE_MS ? v : DEFAULT_MAX_HOLD_MS;
+}
+
+function lockHeldMs(owner) {
+  const started = Date.parse(owner?.started_at ?? '');
+  return Number.isFinite(started) ? Date.now() - started : null;
+}
+
+// Conservative: a lock whose recorded owner is STILL RUNNING, and whose hold
+// has not outlived maxHoldMs(), is never stale. Age is the fallback only when
+// there's no readable owner.
+//
+// The hold ceiling exists because pid liveness is unsound on Windows (PID
+// reuse, kill(0) false positives — see DEFAULT_MAX_HOLD_MS): without it, a
+// dead holder's lock can pin itself in RECOVER_LIVE forever and silently
+// disable stale recovery for every future caller.
 //
 // That fallback needs a floor. Two directories are ownerless by construction,
 // not by accident: a lock between its mkdir and its owner.json write, and the
@@ -205,7 +243,15 @@ export function lockRecoveryVerdict(lockDir, staleMs) {
   // rule on that basis is how a LIVE lock gets condemned — the same reasoning
   // #2984 applied to the stat below, one step earlier in the same function.
   if (!inspected) return RECOVER_LIVE;
-  if (owner?.pid) return processIsAlive(owner.pid) ? RECOVER_LIVE : RECOVER_STALE;
+  if (owner?.pid) {
+    if (!processIsAlive(owner.pid)) return RECOVER_STALE;
+    // "Alive" is not trusted past the hold ceiling: Windows pid reuse makes a
+    // dead holder's pid answer alive, and without this a wedged lock pins
+    // stale recovery off forever (30-hour pipeline.md.lock, 2026-09-15).
+    const held = lockHeldMs(owner);
+    if (held !== null && held > maxHoldMs()) return RECOVER_STALE;
+    return RECOVER_LIVE;
+  }
   try {
     return Date.now() - statSync(lockDir).mtimeMs > Math.max(staleMs, OWNERLESS_GRACE_MS)
       ? RECOVER_STALE
