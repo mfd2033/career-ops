@@ -11,6 +11,8 @@ import { readApplyBehavior, APPLY_BEHAVIOR_DEFAULT, type ApplyBehavior } from "@
 import { useUnknownEmployerPolicy } from "@/lib/use-unknown-employer";
 import { UNKNOWN_EMPLOYER_SENTINEL, resolveCompanyLabel } from "@/lib/unknown-employer.mjs";
 import type { Application } from "@/lib/career-ops";
+import { CheckupRequestButton, type CheckupTarget } from "@/components/checkup-request-button";
+import type { CheckupEntry } from "@/lib/format";
 import { Badge } from "@/components/ui/badge";
 import { scoreTone, scoreNum, legitimacyTone, parseReport } from "@/lib/format";
 import { cleanHeading, splitSections } from "@/lib/report-sections.mjs";
@@ -68,6 +70,8 @@ export function ReportView({
   position = null,
   total = null,
   contextQuery = "",
+  checkup = null,
+  checkupTarget = null,
 }: {
   id: string;
   app: Application | null;
@@ -87,6 +91,10 @@ export function ReportView({
   /** Query string carrying the list context (tab/min/sort/dir/q) — appended to
    *  the back + prev/next links so a round-trip returns to the SAME view. */
   contextQuery?: string;
+  /** 公司体检（ADR-0026）：本行最近一次体检记录（null = 从未体检）与体检
+   *  对象判定结果，供操作区的「体检这家/复检」按钮渲染。 */
+  checkup?: CheckupEntry | null;
+  checkupTarget?: CheckupTarget | null;
 }) {
   const { t } = useI18n();
   const router = useRouter();
@@ -516,6 +524,10 @@ export function ReportView({
           <ReevaluateButton id={id} url={url && url.startsWith("http") ? url : undefined} company={companyLabel} />
           {pdfReady && <OpenCvFolderButton company={typeof companyLabel === "string" ? companyLabel : id} />}
           <ApplyButton n={id} url={url && url.startsWith("http") ? url : undefined} company={companyLabel} pdfReady={pdfReady} />
+          {/* 公司体检（ADR-0026）：按钮按下 = 用户确认，写入 agent-inbox 异步执行 */}
+          {checkupTarget && (
+            <CheckupRequestButton n={id} checkup={checkup} target={checkupTarget} />
+          )}
         </div>
 
         {app && canDelete && (

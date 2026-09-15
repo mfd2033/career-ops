@@ -14,11 +14,16 @@ console.log('\ndoctor.mjs — CLI resolution');
 
 const DOCTOR = join(ROOT, 'doctor.mjs');
 
+// B4 定性（2026-09-14）：与 playwright-mcp-detection.test.mjs 同一条隔离纪律
+// —— 环境里的 CAREER_OPS_CLI（可能来自更早套件 dotenv 加载的仓库 .env）必须
+// 剥离，场景显式传入的 env 仍然最后生效。
+const { CAREER_OPS_CLI: _ambientCli, ...AMBIENT_ENV } = process.env;
+
 function runDoctor(cwd, args, env) {
   try {
     const out = execFileSync(NODE, [DOCTOR, '--json', '--target', cwd, ...args], {
       cwd,
-      env: { ...process.env, ...env },
+      env: { ...AMBIENT_ENV, ...env },
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'pipe'],
     }).trim();

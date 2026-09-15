@@ -253,3 +253,4 @@ package-build.log
 # Session-scoped working docs (handoff / pack run logs, ephemeral)
 docs/handoff-*.md
 docs/pack-*.md
+data/agent-inbox.md

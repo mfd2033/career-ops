@@ -21,13 +21,20 @@ const DOCTOR = join(ROOT, 'doctor.mjs');
 // Scenarios that exercise the plugin path pass their own CLAUDE_CONFIG_DIR.
 const EMPTY_CONFIG_DIR = mkdtempSync(join(tmpdir(), 'co-mcp-emptycfg-'));
 
+// B4 定性（2026-09-14）：discovered 套件与 test-all 同进程，更早的套件
+// （ci-gemini-check 的 dotenv.config()）会把仓库 .env 的 CAREER_OPS_CLI 灌进
+// process.env，污染所有「default CLI」场景（observed cli_source=env 而非
+// default）。与 CLAUDE_CONFIG_DIR 同一条隔离纪律：能决定结果的环境变量必须
+// 钉死，场景显式传入的 env 仍然最后生效。
+const { CAREER_OPS_CLI: _ambientCli, ...AMBIENT_ENV } = process.env;
+
 function runDoctor(cwd, args, env) {
   try {
     const out = execFileSync(NODE, [DOCTOR, '--json', '--target', cwd, ...args], {
       cwd,
       // Order matters: the empty dir must override an ambient CLAUDE_CONFIG_DIR
       // from the developer's own shell, while a scenario's explicit env still wins.
-      env: { ...process.env, CLAUDE_CONFIG_DIR: EMPTY_CONFIG_DIR, ...env },
+      env: { ...AMBIENT_ENV, CLAUDE_CONFIG_DIR: EMPTY_CONFIG_DIR, ...env },
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'pipe'],
     }).trim();

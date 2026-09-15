@@ -253,3 +253,7 @@ _Avoid_: 体检日志、checkup 历史（口语）、体检数据库
 公司体检的单文件 HTML 产出，存 `reports/checkups/{tracker#}-{company-slug}-{YYYY-MM-DD}.html`（技能自带 reports/ 目录弃用）。完成后在对应评估报告尾部追加人读附录（星级 + 链接 + 主要风险）。人读为主，机器数据走台账。
 _Avoid_: 评估报告（那是 `reports/{###}-*.md`，两回事）
 
+**体检请求（checkup request）**:
+行详情页「体检这家」按钮写入 agent-inbox 的 intent（ADR-0026）：一条自带完整上下文的请求文本（tracker#、公司名、规则引用），按钮按下即用户确认，drain 时不再二次询问。`?` 行的体检对象是招聘主体（report Via）。API 侧按「同 tracker# + 当天 + 未 drain」去重；去重的是请求队列，台账照常 append。执行通路是异步的——UI 明示「下次会话执行」，不假装即时。
+_Avoid_: 体检任务（那是 worker 语境的口语）、体检队列（泛——队列是 agent-inbox，请求是其中一项）
+

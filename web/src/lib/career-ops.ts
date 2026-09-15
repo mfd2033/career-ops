@@ -406,6 +406,27 @@ export function findApplication(n: string): Application | null {
   return readApplications().find((a) => a.n === n) ?? null;
 }
 
+/** 体检对象判定（ADR-0026 决议 6）：company 非 `?` → company 本身；
+ *  `?` 行（未知雇主）→ 报告 Via（招聘主体——尽调价值最高的对象）；
+ *  Via 缺失 → ok:false + 稳定 reason 码（详情页按钮据此禁用并给文案）。 */
+export function findCheckupTarget(
+  n: string,
+): { ok: true; company: string; source: "company" | "via" } | { ok: false; reason: "row-not-found" | "no-via" } {
+  const app = findApplication(n);
+  if (!app) return { ok: false, reason: "row-not-found" };
+  const company = app.company.trim();
+  if (company !== "?") return { ok: true, company, source: "company" };
+  const via = readReportVia(app).trim();
+  if (!via || via === "—") return { ok: false, reason: "no-via" };
+  return { ok: true, company: via, source: "via" };
+}
+
+/** 本行的最近一次公司体检（checkupIndex 按 tracker# 索引）；无台账/无记录 → null。 */
+export function readCheckupFor(n: string): CheckupEntry | null {
+  const idx = checkupIndex(read("data/company-checkups.tsv")) as Record<string, CheckupEntry>;
+  return idx[n] ?? null;
+}
+
 /**
  * Resolve the report file path for an ALREADY-parsed Application, without the
  * `readApplications()` re-read that `findReportFile(n)` does. Same containment +

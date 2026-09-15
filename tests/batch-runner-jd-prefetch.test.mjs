@@ -17,7 +17,7 @@
 //
 // Tests extract the real bash snippets from batch-runner.sh so the tests and
 // the implementation can never drift apart.
-import { pass, fail, rmSync, getBash } from './helpers.mjs';
+import { pass, fail, warn, rmSync, getBash, bashSource } from './helpers.mjs';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, existsSync, mkdtempSync as _mdt } from 'node:fs';
 import { join, dirname } from 'node:path';
@@ -25,6 +25,17 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+
+// B4 定性（2026-09-14）：本机 `bash` 落到 WSL（Git Bash 未装）时，WSL 内裸
+// `node` 不在 PATH（只有 node.exe 互操作），下列以 `node` 收尾的 case 脚本
+// 必挂（"/bin/bash: node: command not found"）——这正是 helpers 的 fallback-
+// shell 警告预告的失败。环境不满足时显式跳过并说明，而不是产出假失败。
+// 装上 Git for Windows 后本套件自动恢复运行。
+getBash();
+const FOREIGN_BASH = bashSource() === 'wsl';
+if (FOREIGN_BASH) {
+  warn('jd-prefetch e2e skipped: `bash` resolves to WSL (no Git Bash) and bare `node` is not on PATH inside WSL — install Git for Windows to run this suite');
+}
 const SRC = readFileSync(join(ROOT, 'batch/batch-runner.sh'), 'utf-8').replace(/\r\n/g, '\n');
 
 // Extract the curl prefetch block once so flag assertions target only that region,
@@ -451,6 +462,8 @@ if (!wordCountMatch) {
 
     if (!prefetchBlock) {
       fail('could not extract the prefetch block from batch-runner.sh for e2e test');
+    } else if (FOREIGN_BASH) {
+      // skipped: 顶部 warn 已说明（WSL bash 环境不满足）
     } else {
       pass('prefetch block is extractable for e2e simulation');
 
