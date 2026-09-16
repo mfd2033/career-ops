@@ -4,6 +4,13 @@
      下方是完整编排；`modes/_custom.md` 只保留一短索引（关键常量）。
      改此文件前先同步更新 _custom.md 索引中的常量，避免两处漂移。 -->
 
+- **一键入口（2026-09-16 起，首选）**：`node local/pack-launcher.mjs`
+  - 它是下方第 0/1/2/3 步编排的**可执行版本**；**本文件仍是权威描述**——语义有分歧以本文件为准，改任一侧时两边一起改。
+  - 脚本住 gitignored 的 `local/`（ADR-0022 的 fork-local 层，见 `local/README.md`）：不进仓库、不与上游 merge 冲突；换机器 clone 后 `local/` 本就不在，照本文件手跑即可。
+  - 为什么是 Node 而不是 PowerShell 脚本：本编排要求「命令必须与所在 shell 匹配」，而本机 shell 会在 PowerShell 与 cmd 之间回落（实测 `Set-Location` 报「不是内部或外部命令」、PS 里 `$i:` 被当成驱动器变量而解析失败）。脚本用 `child_process` + `shell: false` 直传 argv，绕开引号与插值整类问题。
+  - 开关：`--no-start`（只打包不启动）/ `--keep-next`（不删 `web/.next`，也就不碰 dev server）/ `--fresh-winres`（**上次打包失败过**才用，强制重装 go-winres）/ `--keep-runtime`（保留旧 runtime 目录）/ `--dev-port N`（默认 3100）。`--help` 打印同一份清单。
+  - 它替你兜住三件容易漏的事：① APPDATA 空陷阱（用 `USERPROFILE` 兜出实路径 + 进程级注入 GOPROXY）；② safe-delete shim（清 `NODE_OPTIONS` 与三个 `_BULK_*` 变量——只设 `CODEBUDDY_SAFE_DELETE_ENABLED=0` 不够，2026-09-12 实测）；③ 清 `.next` 前先停 dev server，以及打包后按 `dashboard-ui/app/build-info.json` 的 cacheVersion 删掉旧 runtime 目录。
+
 - **用途（2026-09-11 拆分）**：本文件承载「打包 career-dashboard-launcher.exe」的完整编排流程。原居 `modes/_custom.md`，因内容多、每会话全量加载耗 token，迁移至此，打包时再按索引显式 Read。
 
 - **执行约定（每条命令统一标注：工具 / 执行位置 / 超时，2026-09-11 补——照此可复现）：**
