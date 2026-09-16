@@ -8,7 +8,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { orderApplications, buildContextQuery } from "../../src/lib/pipeline-order.mjs";
+import { orderApplications, buildContextQuery, countSelectedOffView } from "../../src/lib/pipeline-order.mjs";
 
 // Minimal Application-shaped fixtures (only the fields the ordering touches).
 const apps = [
@@ -84,6 +84,44 @@ test("buildContextQuery always serializes tab, elides only tracker-defaults", ()
   assert.equal(buildContextQuery({ tab: "ALL", min: 4 }), "?tab=ALL&min=4");
   assert.equal(buildContextQuery({ sortKey: "company", dir: 1, q: "acme" }), "?tab=ALL&sort=company&dir=1&q=acme");
   assert.equal(buildContextQuery({ tab: "APPLIED", min: 3, sortKey: "date", dir: 1, q: " eng " }), "?tab=APPLIED&min=3&sort=date&dir=1&q=eng");
+});
+
+// ── countSelectedOffView: the batch pill names the part of its batch that the
+// filter hides (the deliberate opposite of the explore results bar, whose label
+// promises the visible set and therefore must be narrowed to it) ───────────────
+
+test("a filter that hides part of the batch is counted, not silently ignored", () => {
+  const selected = new Set(["1", "2", "3", "4", "5"]);
+  const applied = orderApplications(apps, { tab: "APPLIED" }); // rows 2, 3
+  assert.equal(countSelectedOffView(apps, applied, selected), 3, "1/4/5 sit outside the APPLIED tab");
+  assert.equal(countSelectedOffView(apps, orderApplications(apps, {}), selected), 0, "no filter hides nothing");
+});
+
+test("the search box is a filter too", () => {
+  const selected = new Set(["1", "5"]);
+  assert.equal(countSelectedOffView(apps, orderApplications(apps, { q: "acme" }), selected), 1, "5 is hidden by the search");
+});
+
+test("narrowing the count instead would have dropped the hidden half — so it is not narrowed", () => {
+  // The invariant the pill depends on: selected.size is what the batch will do
+  // (reevaluateSelected fires over ALL of `selected`), and the off-view count is
+  // the part of it the user cannot see. selected.size - offView === rows on screen.
+  const selected = new Set(["1", "2", "3"]);
+  const visible = orderApplications(apps, { min: 4 }); // rows 1, 5
+  const off = countSelectedOffView(apps, visible, selected);
+  const onScreen = visible.filter((r) => selected.has(r.n)).length;
+  assert.equal(off + onScreen, selected.size, "off-view + on-view must account for the whole batch");
+});
+
+test("a key left over from a finished refresh is not reported as hidden", () => {
+  // router.refresh() can retire a row the user had checked; it is gone, not
+  // "outside the filter" — counting it would promise work that cannot happen.
+  const selected = new Set(["1", "999"]);
+  assert.equal(countSelectedOffView(apps, orderApplications(apps, {}), selected), 0);
+});
+
+test("an empty selection is a no-op", () => {
+  assert.equal(countSelectedOffView(apps, [], new Set()), 0);
 });
 
 test("buildContextQuery round-trips: query → ctx reproduces the same list", () => {

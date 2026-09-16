@@ -10,7 +10,7 @@ import { CompanyLogo } from "@/components/company-logo";
 import { canonStatus, fmtDuration, scoreTone, statusDot, checkupTone } from "@/lib/format";
 import type { CheckupEntry } from "@/lib/format";
 import { CHECKUP_RISK_LABELS } from "@/lib/company-checkups.mjs";
-import { orderApplications, buildContextQuery } from "@/lib/pipeline-order.mjs";
+import { orderApplications, buildContextQuery, countSelectedOffView } from "@/lib/pipeline-order.mjs";
 import { normalizeUrl } from "@/lib/core/url-key.mjs";
 import { sourceLabel } from "@/lib/source-label.mjs";
 import { InboxTriage } from "@/components/inbox/inbox-triage";
@@ -211,6 +211,16 @@ export function PipelineView({
     [selected, urlMap],
   );
 
+  // 勾选与筛选是两件事：在「全部」勾、切到某个 tab 或输入搜索词后再确认，是这个持久
+  // 批量条的正当用法（勾选集就是批次，筛选只是当前窗口）。所以这里不把计数收窄——收窄
+  // 会把半批勾选静默丢掉——而是把「有多少勾选在屏幕外」说出来。重新评估按 URL 烧评估
+  // 成本，唯一不能发生的是对看不见的行动手却不说（对照探索页批量条：那里的文案承诺
+  // 「全选可加入」，故必须收窄到可见集合，见 results-view.mjs / ADR-0021）。
+  const selectedOffView = useMemo(
+    () => countSelectedOffView(applications, filtered, selected),
+    [applications, filtered, selected],
+  );
+
   // Header checkbox checked / indeterminate state tracks the VISIBLE (filtered)
   // rows, not all applications — so "select all" means "all on this tab".
   useEffect(() => {
@@ -321,6 +331,9 @@ export function PipelineView({
       {tab !== "INBOX" && selected.size > 0 && (
         <div className="mt-3 flex flex-wrap items-center gap-2 rounded-full border border-brand/30 bg-brand-soft/40 px-3 py-1.5 text-xs md:shrink-0">
           <span className="font-medium text-brand">{t("pipeline.batchSelected", { count: selected.size })}</span>
+          {selectedOffView > 0 && (
+            <span className="text-muted">{t("pipeline.batchOffView", { count: selectedOffView })}</span>
+          )}
           {urlMapLoading ? (
             <span className="inline-flex items-center gap-1 text-muted">
               <Loader2 className="size-3 animate-spin" /> {t("pipeline.batchUrlsLoading")}

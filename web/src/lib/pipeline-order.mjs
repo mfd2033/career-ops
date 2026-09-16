@@ -81,6 +81,43 @@ export function orderApplications(applications, ctx = {}) {
 }
 
 /**
+ * How many of the batch-selected rows the current view HIDES.
+ *
+ * Deliberately the opposite scope from the explore results bar
+ * (`results-view.mjs`), and the contrast is the point — the two labels make
+ * different promises:
+ *   - explore: 「全选可加入 (N)」 promises what a SELECT-ALL will take, so N must
+ *     be the visible set; a count taken over the whole result set made a
+ *     filtered confirm write rows the user never saw.
+ *   - here: 「已选 N 项」 reports what the user checked. Checking rows in one tab,
+ *     filtering, then confirming is a legitimate sequence — the selection is the
+ *     batch, the filter is only the window. Narrowing the count here would
+ *     silently drop half a batch instead.
+ * What must never happen on either surface is acting on rows the user cannot see
+ * WITHOUT saying so, so the hidden-but-selected count is shown next to the pill.
+ * The action behind it (`reevaluateSelected`) spends real evaluation cost per
+ * URL, which is why the invisible part is the part worth naming.
+ *
+ * `applications` is everything the page holds — not the filtered rows — so a
+ * selected row the filter hides is still counted, while a key left over from a
+ * finished refresh (no longer in `applications`) is NOT reported as hidden.
+ *
+ * @param {Array<{n: string}>} applications - every tracker row the page holds.
+ * @param {Array<{n: string}>} visible - rows the current tab/filter shows.
+ * @param {Set<string>} selected - selected row keys (`r.n`).
+ * @returns {number} selected rows that exist but sit outside the current view.
+ */
+export function countSelectedOffView(applications, visible, selected) {
+  if (selected.size === 0) return 0;
+  const onScreen = new Set(visible.map((r) => r.n));
+  let off = 0;
+  for (const a of applications) {
+    if (selected.has(a.n) && !onScreen.has(a.n)) off += 1;
+  }
+  return off;
+}
+
+/**
  * Serialize the same context into a URL query string ("?tab=APPLIED&min=4…").
  * Used by pipeline-view.tsx to append context to row links and by the report
  * page to build prev/next + back links — both must emit IDENTICAL queries so a

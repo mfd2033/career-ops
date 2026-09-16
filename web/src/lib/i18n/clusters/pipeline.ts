@@ -176,6 +176,7 @@ export const en: Dict = {
 
   // ── Batch re-evaluate (pipeline-view.tsx) ──
   "pipeline.batchSelected": "{count} selected",
+  "pipeline.batchOffView": "{count} outside the current filter",
   "pipeline.batchReevaluableHint": "{count} of {total} have a posting URL",
   "pipeline.batchNoneHasUrl": "None of the selected have a posting URL",
   "pipeline.batchReevaluate": "Re-evaluate {count}",
@@ -408,6 +409,7 @@ export const zh: Dict = {
 
   // ── 批量重新评估（pipeline-view.tsx） ──
   "pipeline.batchSelected": "已选 {count} 项",
+  "pipeline.batchOffView": "{count} 项在当前筛选之外",
   "pipeline.batchReevaluableHint": "{total} 项中有 {count} 项含职位链接",
   "pipeline.batchNoneHasUrl": "所选职位都没有链接",
   "pipeline.batchReevaluate": "重新评估 {count} 项",
