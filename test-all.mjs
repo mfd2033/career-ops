@@ -15964,7 +15964,11 @@ console.log('\n59b. Pipeline lock (pipeline-lock.mjs)');
 {
   const unit = run(NODE, ['--test', 'test/pipeline-lock.test.mjs']);
   if (unit !== null) pass('pipeline-lock unit tests pass');
-  else fail('pipeline-lock unit tests failed (run: node --test test/pipeline-lock.test.mjs)');
+  // Carry the child's stdout/stderr (same as the run()-based sections above): this
+  // suite is the ONLY place this child ever fails — it passes standalone — so a bare
+  // "unit tests failed" leaves the failure with no output to read. Diagnosing the
+  // red of 2026-09-16 started by adding this line.
+  else fail(`pipeline-lock unit tests failed (run: node --test test/pipeline-lock.test.mjs)${formatRunFailure()}`);
 }
 
 console.log('\n59c. The exported script budget matches the one run() enforces');
