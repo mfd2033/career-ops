@@ -4,6 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState } f
 import { scoreTone } from "@/lib/format";
 import { readSavedCliId, readSavedModel, resolveCliId } from "@/lib/saved-cli";
 import { useI18n } from "@/lib/i18n/context";
+import { reconcileJobsWithLedger } from "@/lib/job-ledger-reconcile.mjs";
 
 export type JobStep = { kind: "tool" | "status"; label: string; ts: number };
 export type JobResult = { score: number | null; summary: string; tone: "good" | "warn" | "bad" | "muted" };
@@ -38,6 +39,11 @@ export type Job = {
    *  localStorage card to the server run ledger so /jobs can dedupe the two. */
   runId?: string;
   status: "running" | "queued" | "done" | "error";
+  // Set ONLY by the localStorage restore when it guess-marks a previously
+  // "running" card as interrupted (ADR-0031): the marker lets the run-ledger
+  // reconciliation tell a guess apart from a real SSE-delivered error and
+  // upgrade it to the ledger's true terminal state.
+  interruptedAt?: number;
   // For a server-sourced (pool) card: its pool id + whether it was queued, so the
   // dismiss action can route to the right cancel path (dequeue via API).
   active?: boolean;
@@ -315,13 +321,51 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
       const raw = localStorage.getItem(JOBS_KEY);
       const arr = raw ? JSON.parse(raw) : null;
       if (Array.isArray(arr)) {
-        // anything left "running" from a previous session is stale → mark interrupted
-        setJobs(arr.map((j: Job) => (j.status === "running" ? { ...j, status: "error", steps: [...(j.steps || []), { kind: "status", label: t("jobs.stepInterrupted"), ts: Date.now() }] } : j)));
+        // anything left "running" from a previous session is stale → mark interrupted.
+        // The interruptedAt marker keeps this a GUESS (ADR-0031): the run-ledger
+        // reconciliation below can still upgrade such cards to the ledger's real
+        // terminal state, which a plain "error" status would block forever.
+        setJobs(arr.map((j: Job) => (j.status === "running" ? { ...j, status: "error", interruptedAt: Date.now(), steps: [...(j.steps || []), { kind: "status", label: t("jobs.stepInterrupted"), ts: Date.now() }] } : j)));
       }
     } catch {
       /* ignore */
     }
     loaded.current = true;
+  }, []);
+
+  // Zombie-card reconciliation (ADR-0031): a card whose /api/events terminal
+  // event was missed (tab sleep / dropped connection) stays "running" forever,
+  // and /jobs's "card wins" merge then shadows the server ledger's real
+  // outcome — the #27 checkup spun 30+ minutes on screen after erroring at 88
+  // seconds. Poll the TERMINATED-run ledger at low frequency and let
+  // reconcileJobsWithLedger cure stale cards; live cards (accumulator present)
+  // stay owned by the SSE path. No co-job-done / runs/save side effects here:
+  // a reconciled card has no trustworthy local accumulation.
+  useEffect(() => {
+    const reconcile = async () => {
+      try {
+        const res = await fetch("/api/runs/history", { cache: "no-store" });
+        if (!res.ok) return;
+        const data = (await res.json()) as { runs?: unknown[] };
+        const runs = Array.isArray(data.runs) ? data.runs : [];
+        setJobs((js) => {
+          const r = reconcileJobsWithLedger(js, runs as never[], {
+            isLive: (id: string) => accs.current.has(id),
+            now: Date.now(),
+            doneLabel: t("jobs.stepDone"),
+            errorLabel: t("jobs.stepError"),
+          });
+          return r.healed.length ? r.jobs : js; // no heal → no re-render
+        });
+      } catch {
+        /* transient — the next tick retries */
+      }
+    };
+    reconcile();
+    const timer = setInterval(reconcile, 15000);
+    return () => clearInterval(timer);
+    // reconcile closes over refs and `t` (stable per locale) only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // persist
