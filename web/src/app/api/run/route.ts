@@ -8,7 +8,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { after } from "next/server";
 import { resolveCli } from "@/lib/clis";
-import { accumulateTokens, hasNewCompletedReport, isFatalGenericStderr, withModelFlag } from "@/lib/run-cli-support.mjs";
+import { accumulateTokens, checkupLedgerRowCount, hasNewCompletedReport, isFatalGenericStderr, persistRunOutcome, PERSISTENCE_GATED_KINDS, withModelFlag } from "@/lib/run-cli-support.mjs";
 import { spawnHeadlessCli, terminateCli } from "@/lib/spawn-cli.mjs";
 import { careerOpsRoot, readMemory, findReportFile, readInbox, readScanDates, findCheckupTarget, rootScript } from "@/lib/career-ops";
 import { checkupDispatchText } from "@/lib/checkup-request.mjs";
@@ -264,8 +264,19 @@ async function runPipeline({
       return [];
     }
   };
-  const persists = kind === "evaluate";
-  const reportsBefore = persists ? reportEntries() : [];
+  const reportsBefore = kind === "evaluate" ? reportEntries() : [];
+  // checkup 的产物通道是台账（data/company-checkups.tsv，ADR-0025 的唯一机器
+  // 通道；HTML 只是可选附件，--html - 合法），所以快照行数而非 reports/ 增量
+  // —— ADR-0030 决议 1。读失败按 0 行：一个读不出的台账不能反过来豁免门禁。
+  const checkupLedgerPath = path.join(careerOpsRoot(), "data", "company-checkups.tsv");
+  const readCheckupLedger = (): string | undefined => {
+    try {
+      return fs.readFileSync(checkupLedgerPath, "utf8");
+    } catch {
+      return undefined;
+    }
+  };
+  const ledgerRowsBefore = kind === "checkup" ? checkupLedgerRowCount(readCheckupLedger()) : 0;
 
   // Global concurrency: queue for a slot in the global CLI-concurrency pool
   // BEFORE touching the write token or spawning. A full pool keeps the task
@@ -643,23 +654,22 @@ async function runPipeline({
           return close();
         }
 
-        const wroteReport = hasNewCompletedReport(reportsBefore, reportEntries());
-        // Honesty gate (#9): a green "done" with a parsed score requires a CLEAN exit,
-        // real output, AND (for evaluations) a report actually written. Anything else
-        // is surfaced — an errored run must never be banked as a confident score.
-        const baseErr = noOutputError();
-        if (baseErr) {
-          send({ type: "error", msg: baseErr });
-        } else if (persists && !wroteReport) {
-          // The worker ran but never wrote the report/tracker row (e.g. a CLI
-          // without file-write authorization) — surface it instead of a fake score.
-          send({ type: "error", msg: "This evaluation didn't save a report, so it's not in your tracker. Full evaluation is verified on Claude Code." });
-        } else if (!cleanExit || sawError) {
-          // Produced output (maybe even a report) but did NOT finish cleanly — flag it
-          // instead of recording a confident score off a half-finished run.
-          send({ type: "error", msg: "This run hit an error before finishing, so it isn't recorded as a confident result — re-run it to verify." });
-        } else {
+        const persisted = kind === "evaluate"
+          ? hasNewCompletedReport(reportsBefore, reportEntries())
+          : kind === "checkup"
+            ? checkupLedgerRowCount(readCheckupLedger()) > ledgerRowsBefore
+            : false;
+        // Honesty gate (#9, ADR-0030): a green "done" requires a CLEAN exit, real
+        // output, AND — for the artifact-persisting kinds — the channel actually
+        // written (evaluate: a completed report; checkup: a ledger row). The
+        // decision lives in persistRunOutcome so it is assertable: an inline copy
+        // here is exactly how checkup drifted out from under this gate and two
+        // zero-artifact runs got banked as done (2026-09-16, #73/#131).
+        const outcome = persistRunOutcome({ kind, cleanExit, sawError, emittedText, persisted });
+        if (outcome.ok) {
           send({ type: "done", tokens: lastTokens, costUsd: lastCostUsd });
+        } else {
+          send({ type: "error", msg: outcome.message });
         }
         close();
       });

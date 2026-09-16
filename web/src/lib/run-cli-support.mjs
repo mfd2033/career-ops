@@ -402,3 +402,79 @@ export function hasNewCompletedReport(beforeEntries, afterEntries) {
   }
   return false;
 }
+
+/**
+ * Worker kinds whose honesty gate demands a persisted artifact.
+ *
+ * checkup joined evaluate here after 2026-09-16: two checkup workers were
+ * aborted by their upstream relay mid-research ("任务处理步骤过多已自动中止"),
+ * the CLI exited 0 with an apology as its final message, and the route — whose
+ * artifact check was inline and evaluate-only — banked both zero-artifact runs
+ * as `done` (ADR-0030). Same class as the batch-evaluate "all failed, recorded
+ * done" fix. fix-portal deliberately stays out: its artifact is a portals.yml
+ * edit, which needs a config-delta verdict of its own before it can be gated
+ * honestly (recorded as a gap in ADR-0030, not silently skipped).
+ *
+ * @type {ReadonlySet<string>}
+ */
+export const PERSISTENCE_GATED_KINDS = Object.freeze(new Set(["evaluate", "checkup"]));
+
+/**
+ * Count data rows in the checkup ledger (`data/company-checkups.tsv`).
+ *
+ * `lib/log-checkup.mjs` owns the row schema (locked by
+ * tests/checkup-ledger.test.mjs); this counter deliberately re-states only the
+ * one thing a persistence gate needs — "is there one more row than before" —
+ * because importing the root module into the web bundle couples the gate to a
+ * file that is not part of the app. A data row starts with its tracker key
+ * (digits or the `?` empty key) followed by a tab, which is exactly how
+ * `parseTracker` defines the key; comment headers, blank lines and truncated
+ * rows therefore never count.
+ *
+ * @param {string | undefined} text - Raw ledger file contents (undefined = unreadable/absent).
+ * @returns {number}
+ */
+export function checkupLedgerRowCount(text) {
+  if (typeof text !== "string") return 0;
+  let n = 0;
+  for (const line of text.split("\n")) {
+    if (/^(\d+|\?)\t/.test(line.trim())) n++;
+  }
+  return n;
+}
+
+/**
+ * The evaluate/checkup honesty gate, extracted from route.ts's close handler.
+ *
+ * It was inline there, which is why it had no test seam and why checkup could
+ * silently drift out from under it (ADR-0030). Pure: the caller snapshots its
+ * artifact channel and passes the verdict in as `persisted` — evaluate passes
+ * `hasNewCompletedReport(reportsBefore, reportEntries())`, checkup passes
+ * `checkupLedgerRowCount(after) > checkupLedgerRowCount(before)`. Branch order
+ * mirrors the original if/else chain exactly; the evaluate message is kept
+ * byte-identical.
+ *
+ * @param {{kind: string, cleanExit: boolean, sawError: boolean, emittedText: boolean, persisted: boolean}} args
+ * @returns {{ok: true} | {ok: false, message: string}}
+ */
+export function persistRunOutcome({ kind, cleanExit, sawError, emittedText, persisted }) {
+  // A CLI that produced no output at all is the same failure mode whether it
+  // was evaluating or running a checkup — one place for the condition/message
+  // pair (formerly route.ts's noOutputError).
+  if (!emittedText && !sawError && !cleanExit) {
+    return { ok: false, message: "The CLI exited with an error — is it installed and authenticated?" };
+  }
+  if (!emittedText && !sawError) {
+    return { ok: false, message: "The CLI produced no output — is it installed and authenticated? (career-ops is best on Claude Code.)" };
+  }
+  if (PERSISTENCE_GATED_KINDS.has(kind) && !persisted) {
+    const message = kind === "checkup"
+      ? "This checkup finished without adding a row to the checkup ledger (data/company-checkups.tsv) — nothing was persisted, so it's not recorded. Re-run it to verify."
+      : "This evaluation didn't save a report, so it's not in your tracker. Full evaluation is verified on Claude Code.";
+    return { ok: false, message };
+  }
+  if (!cleanExit || sawError) {
+    return { ok: false, message: "This run hit an error before finishing, so it isn't recorded as a confident result — re-run it to verify." };
+  }
+  return { ok: true };
+}
