@@ -225,3 +225,20 @@ test("both browser drivers hand their rejects to one ledger write", () => {
   assert.match(src, /status: "skipped_title"/, "the ledger row must carry skipped_title — the value the CLI scanner already writes");
   assert.match(src, /\/api\/explore\/seen/, "the rejects must land in the seen ledger, the same file collection writes to");
 });
+
+// ── 被毙原因要穿过服务端路径的重建（gate-visibility 工单 03）────────────────
+// 扩展路径的 rejects 是页面侧算的、天然带 gateReason；服务端 bsk 路径会把每条 offer 经
+// toOffer 重建一次，字段漏一个就是「同一个折叠区，跑哪条 driver 长得不一样」——一个有解释，
+// 一个只有标题和平台。这个错不会让任何测试变红，只会让用户对着「已过滤」猜自己被哪个词毙了。
+test("browser-scan.ts carries the title-gate reason through toOffer", () => {
+  const src = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "../../src/lib/core/browser-scan.ts"),
+    "utf8",
+  ).replace(/\s+/g, " ");
+  assert.match(src, /dropped\.map\(toOffer\)/, "the rejects leave through toOffer — the one place a field can be silently dropped");
+  assert.match(
+    src,
+    /\.\.\.\(j\.gateReason \? \{ gateReason: j\.gateReason \} : \{\}\)/,
+    "toOffer must carry gateReason, or the bsk path's 「已过滤」 fold renders a title and a platform with no explanation while the extension path shows one",
+  );
+});

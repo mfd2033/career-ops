@@ -34,7 +34,7 @@ const code = (rel) =>
     .join("\n")
     .replace(/\s+/g, " ");
 
-const FIXTURE = `# Portal Scanner Configuration — 张三
+const FIXTURE = `# Portal Scanner Configuration — Example User
 # 目标岗位：软件项目经理 / 技术经理 · 期望城市：郑州
 
 # -- Location filter --

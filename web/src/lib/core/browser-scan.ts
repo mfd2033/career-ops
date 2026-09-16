@@ -43,6 +43,10 @@ export function browserCollectorReady(): boolean {
 }
 
 type BskJob = { title?: string; url?: string; city?: string; salary?: string; salaryUnknown?: boolean };
+// 标题门的被毙条目是「职位 + 被毙原因」。toOffer 要把原因带过去：扩展路径的 rejects 是
+// 页面侧自己算的、天然带原因，服务端这条若在重建 offer 时丢掉它，同一个「已过滤」折叠区
+// 就会因跑的是哪条 driver 而给出两种答案——一个有解释，一个只有标题和平台。
+type BskReject = BskJob & { gateReason?: DiscoveredOffer["gateReason"] };
 type BskListing = { url?: string; jobs?: BskJob[] };
 
 export function runBrowserDiscovery(
@@ -181,7 +185,7 @@ export function runBrowserDiscovery(
           );
           // 清洗字形反爬 PUA（智联 positionList 薪资字段同样可能携带）；清洗后无数字
           // （如只剩 "-K"）则不带 salaryText，走「薪资未知」打标。
-          const toOffer = (j: BskJob): DiscoveredOffer => {
+          const toOffer = (j: BskReject): DiscoveredOffer => {
             const cleanedSalary = cleanSalaryText(j.salary);
             const salaryText = cleanedSalary && /\d/.test(cleanedSalary) ? cleanedSalary : "";
             return {
@@ -195,6 +199,7 @@ export function runBrowserDiscovery(
               note: city ? `browser · ${platform} · ${city}` : `browser · ${platform}`,
               ...(salaryText ? { salaryText } : {}),
               ...(j.salaryUnknown ? { salaryUnknown: true as const } : {}),
+              ...(j.gateReason ? { gateReason: j.gateReason } : {}),
             };
           };
           for (const j of kept) {

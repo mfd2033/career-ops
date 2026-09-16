@@ -175,10 +175,10 @@ import {
   browserToParams as rawBrowserToParams,
 } from "./browser-search.mjs";
 // 采集门（ADR-0029）与薪资判定的客户端再导出：探索页扩展路径在 scan-offers 取回处
-// 套用与服务端 browser-scan **逐字相同**的门组合（薪资门 → 城市门），两道都是
+// 套用与服务端 browser-scan **逐字相同**的门组合（薪资门 → 城市门 → 标题门），三道都是
 // browser-search.mjs 的纯函数——两条 driver 的 keep/drop 因此由同一段代码保证，而不是
 // 靠两处各自正确。卡片侧用 isSalaryUnknown 决定「薪资未知」打标。
-// matchesBrowserSalary / matchesBrowserCity 是两道门的单元级形态，只剩
+// matchesBrowserSalary / matchesBrowserCity 是三道门里前两道的单元级形态，只剩
 // browser-search.mjs 内部与单测的调用方，不经此处。
 export { isSalaryUnknown, applyBrowserSalaryGate, applyBrowserCityGate, applyBrowserTitleGate, effectiveBrowserCity, ZH_CITY_ANY } from "./browser-search.mjs";
 
