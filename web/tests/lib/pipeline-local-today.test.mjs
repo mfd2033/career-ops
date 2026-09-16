@@ -65,10 +65,17 @@ test("the date handed to appendToScanHistory comes from localToday()", () => {
   // that the call site actually passes it on. A rename at the call (e.g. back
   // to an inline `new Date()...`, or a stray second variable) would leave the
   // `date` assignment unused and this bug's actual symptom would resurface.
+  //
+  // The third argument stopped being the literal "added" when ADR-0029 made the
+  // status caller-supplied (the seen ledger now also carries skipped_title for
+  // collection-gate rejects). What this guards is unchanged and is still the
+  // point: the local-day value must REACH the writer, not just get computed and
+  // discarded. Which status arrives is pinned separately — by SeenStatus's
+  // closed set and by /api/explore/seen's validation.
   assert.match(
     code,
-    /appendToScanHistory\(\s*offers\s*,\s*date\s*,\s*["']added["']\s*\)/,
-    `${SRC}: expected appendToScanHistory(offers, date, "added") — the local-day ` +
+    /appendToScanHistory\(\s*offers\s*,\s*date\s*,\s*status\s*\)/,
+    `${SRC}: expected appendToScanHistory(offers, date, status) — the local-day ` +
       `value must reach the writer, not just get computed and discarded.`,
   );
 });

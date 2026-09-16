@@ -2,7 +2,7 @@ import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { careerOpsRoot, rootScript } from "@/lib/career-ops";
-import { cleanBrowserSources, expandSearchTargets, matchesBrowserCity, applyBrowserSalaryGate, cleanSalaryText } from "../browser-search.mjs";
+import { cleanBrowserSources, expandSearchTargets, applyBrowserCityGate, applyBrowserSalaryGate, applyBrowserTitleGate, effectiveBrowserCity, cleanSalaryText } from "../browser-search.mjs";
 import { type BrowserSource, type DiscoveredOffer, type ExploreFilters, type ScanEvent } from "@/lib/explore";
 
 export type { DiscoveredOffer, ScanEvent } from "@/lib/explore";
@@ -42,7 +42,8 @@ export function browserCollectorReady(): boolean {
   }
 }
 
-type BskListing = { url?: string; jobs?: Array<{ title?: string; url?: string; city?: string; salary?: string; salaryUnknown?: boolean }> };
+type BskJob = { title?: string; url?: string; city?: string; salary?: string; salaryUnknown?: boolean };
+type BskListing = { url?: string; jobs?: BskJob[] };
 
 export function runBrowserDiscovery(
   filters: ExploreFilters,
@@ -53,7 +54,10 @@ export function runBrowserDiscovery(
     // 用户在关键词框用空格分隔多个职位候选（便于手动编辑）。实际搜索时按 CLI query
     // 语义把连续空白替换成 OR，使各平台按"多候选职位"处理，而不是把整串当作单个 AND 短语。
     const query = (filters.zhQuery ?? "").trim().replace(/\s+/g, " OR ");
-    const city = filters.zhCity?.trim() ?? "";
+    // 城市条件由 effectiveBrowserCity 解析（ADR-0029 决议 6）：显式选择 → 覆盖偏好；
+    // 「全国」哨兵 → 门关闭；未设置 → 回落 zhCityPreference。解析值同时驱动搜索 URL 与
+    // 城市门，两者才会说同一件事（否则会「全国搜、按郑州筛」）。
+    const city = effectiveBrowserCity(filters);
     // 采集目标成对展开：猎聘搜索框不支持 OR 分隔的多关键词（只认单关键词），逐词
     // 拆成多条搜索 URL，每词一个采集会话；BOSS/智联整串一条。避免 buildSearchUrls
     // 的 source↔url 齐序被拆词破坏。
@@ -148,33 +152,42 @@ export function runBrowserDiscovery(
         }
         try {
           const parsed = JSON.parse(out) as BskListing;
-          // 薪酬门控（工单 03）：与扩展路径共用 applyBrowserSalaryGate——区间重叠
-          // 判定（上限 ≥ zhSalaryMin），无薪资/解析失败放行并打「薪资未知」标记，
-          // 与 salary_filter「不误删」一致。过滤在循环前列表级完成。
-          // 站点口径必须显式传入：bsk 列表行只有 `{title,url,city,salary}`，不带
-          // source，而薪资口径逐站不同（猎聘裸「万」是年薪，工单 01）。这里正在采
-          // 的 platform 就是答案——漏传会把 20-35万 当智联的月薪口径算成 200-350K，
-          // 猎聘的薪资下限静默失效。
-          const jobs = applyBrowserSalaryGate(Array.isArray(parsed.jobs) ? parsed.jobs : [], filters.zhSalaryMin, platform);
-          for (const j of jobs) {
-            const link = String(j.url ?? "").trim();
-            const title = String(j.title ?? "").trim();
-            if (!/^https?:\/\//i.test(link) || !title || title.length < 3) continue;
-            // Q2 zero-tolerance post-gate: a requested city MUST match — never
-            // keep a job on trust that the search URL's city parameter filtered
-            // it (智联's list is not strictly filtered; its positionList city is
-            // authoritative, 猎聘/BOSS fall back to the title).
-            if (!matchesBrowserCity(j, city)) continue;
-            if (seen.has(link)) continue;
-            seen.add(link);
-            // 清洗字形反爬 PUA（智联 positionList 薪资字段同样可能携带）；清洗后
-            // 无数字（如只剩 "-K"）则不带 salaryText，走「薪资未知」打标。
+          // 采集门（ADR-0029）：与扩展路径逐字相同的组合——薪资门 → 城市门 → 标题门，
+          // 三道都是 browser-search.mjs 的纯函数，过滤在循环前列表级完成。两条 driver 的
+          // keep/drop 由这条共享组合保证一致；任一侧漏接一道门，真实扫描里就表现为两路
+          // 结果不同。
+          // 薪酬门（工单 03）：区间重叠判定（上限 ≥ zhSalaryMin），无薪资/解析失败放行并
+          // 打「薪资未知」标记，与 salary_filter「不误删」一致。站点口径必须显式传入：bsk
+          // 列表行只有 `{title,url,city,salary}`，不带 source，而薪资口径逐站不同（猎聘裸
+          // 「万」是年薪，工单 01）。这里正在采的 platform 就是答案——漏传会把 20-35万 当
+          // 智联的月薪口径算成 200-350K，猎聘的薪资下限静默失效。
+          // 城市门（ADR-0029 决议 7）：Q2 zero-tolerance——请求了城市就必须命中，绝不因
+          // 搜索 URL 带了城市参数就信任它（智联的列表并非严格过滤；其 positionList 的城市
+          // 字段权威，猎聘/BOSS 回退 title）。
+          // 标题门（ADR-0029 决议 1/2）：词表是 portals.yml 的 title_filter，由探索页的
+          // seedExploreFilters 播种进 ExploreFilters——这里刻意**不**回读 portals.yml：
+          // 页面态与门控共用一份词表，两路才可能给出同一判定。
+          //
+          // 行校验刻意排在标题门之前：这样 dropped 里只会有「本可以进结果区、单被标题门
+          // 毙掉」的岗位，台账那行 skipped_title 才名副其实（URL/title 残缺的行不该被记成
+          // 「被关键词过滤」）。
+          const raw = Array.isArray(parsed.jobs) ? parsed.jobs : [];
+          const usable = raw.filter(
+            (j) => /^https?:\/\//i.test(String(j.url ?? "").trim()) && String(j.title ?? "").trim().length >= 3,
+          );
+          const { kept, dropped } = applyBrowserTitleGate(
+            applyBrowserCityGate(applyBrowserSalaryGate(usable, filters.zhSalaryMin, platform), city),
+            { positive: filters.positive, negative: filters.negative },
+          );
+          // 清洗字形反爬 PUA（智联 positionList 薪资字段同样可能携带）；清洗后无数字
+          // （如只剩 "-K"）则不带 salaryText，走「薪资未知」打标。
+          const toOffer = (j: BskJob): DiscoveredOffer => {
             const cleanedSalary = cleanSalaryText(j.salary);
             const salaryText = cleanedSalary && /\d/.test(cleanedSalary) ? cleanedSalary : "";
-            const offer: DiscoveredOffer = {
-              url: link,
+            return {
+              url: String(j.url ?? "").trim(),
               company: "",
-              title,
+              title: String(j.title ?? "").trim(),
               location: "",
               postedAt: "",
               ats: "browser",
@@ -183,9 +196,18 @@ export function runBrowserDiscovery(
               ...(salaryText ? { salaryText } : {}),
               ...(j.salaryUnknown ? { salaryUnknown: true as const } : {}),
             };
+          };
+          for (const j of kept) {
+            const offer = toOffer(j);
+            if (seen.has(offer.url)) continue;
+            seen.add(offer.url);
             offers.push(offer);
             onEvent({ kind: "offer", offer });
           }
+          // 被标题门毙掉的岗位也要送到页面：台账要写一行 skipped_title，结果区的
+          // 「已过滤」折叠区要展示它们（ADR-0029 决议 4）。它们**不进 offers** —— 采集
+          // 落地门的定义就是「不进结果区」，这是刻意的。
+          if (dropped.length > 0) onEvent({ kind: "folded", offers: dropped.map(toOffer) });
           onEvent({ kind: "atsDone", ats: platform, unreachable: 0 });
           runNext();
         } catch (e) {

@@ -6,7 +6,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { extractBrowserQuery, buildSearchUrls, expandSearchTargets, parseSalaryText, matchesBrowserSalary, isSalaryUnknown, browserToParams, applyBrowserSalaryGate, cleanSalaryText } from "../../src/lib/browser-search.mjs";
+import { extractBrowserQuery, buildSearchUrls, expandSearchTargets, parseSalaryText, matchesBrowserSalary, isSalaryUnknown, browserToParams, applyBrowserSalaryGate, applyBrowserCityGate, applyBrowserTitleGate, effectiveBrowserCity, browserCityValue, ZH_CITY_ANY, cleanSalaryText } from "../../src/lib/browser-search.mjs";
 
 // ── cleanSalaryText —— 字形反爬清洗（工单 03 缺陷修复）──
 
@@ -260,4 +260,204 @@ test("isSalaryUnknown: 无薪资或解析不出数值即未知（与门是否启
   assert.equal(isSalaryUnknown({ salary: "面议", source: "zhaopin" }), true);
   assert.equal(isSalaryUnknown({ salary: "200-350元/天", source: "zhipin" }), true);
   assert.equal(isSalaryUnknown({ salary: "20-35K", source: "zhipin" }), false);
+});
+
+// ── applyBrowserCityGate —— 城市门的列表级形态（两条 driver 共用，ADR-0029 决议 7）──
+//
+// 改动前城市门只接在 bsk 服务端路径上（逐职位埋在采集循环里），扩展路径只套了薪资
+// 门——带城市条件的扩展扫描因此漏进异地卡片。列表级形态让两条 driver 用同一条组合
+// 表达式，keep/drop 由同一段代码保证，而不是靠两处各自正确。
+
+test("applyBrowserCityGate: 结构化城市字段优先，缺失回退 title，门关时原样返回", () => {
+  const jobs = [
+    { city: "郑州", title: "项目经理" },
+    { city: "安庆", title: "叉车司机" }, // 异地——扩展路径改动前会漏进结果区
+    { title: "IT项目管理 【 郑州-高新区 】 5-8k 3年以上 统招本科" }, // 无 city 字段，title 兜底
+    { title: "财务主管 【 苏州-吴中区 】 10-15k" }, // 无 city 字段，title 不含目标城市
+    { city: "郑州 金水区", title: "软件实施工程师" }, // 复合城市值
+  ];
+  const gated = applyBrowserCityGate(jobs, "郑州");
+  assert.deepEqual(
+    gated.map((j) => j.title),
+    ["项目经理", "IT项目管理 【 郑州-高新区 】 5-8k 3年以上 统招本科", "软件实施工程师"],
+  );
+  // 门关（""/缺省）→ 原数组原样返回（含异地岗），与改动前的行为逐例一致
+  assert.equal(applyBrowserCityGate(jobs, "").length, 5);
+  assert.equal(applyBrowserCityGate(jobs, undefined).length, 5);
+  assert.equal(applyBrowserCityGate(undefined, "郑州").length, 0);
+});
+
+test("采集门组合（薪资门 → 城市门）：顺序无关，空条件退化为恒等", () => {
+  // browser-scan（服务端）与 explore-provider（页面侧）用的是同一条组合表达式。
+  // 钉住它的两条性质：①两道门是互相独立的谓词，先后顺序不改变 keep 集合（任一侧
+  // 即使内部调序也不会与另一侧分叉）；②任一条件为空即门关闭、组合退化为恒等——
+  // 「城市条件留空」的行为因此不受接上城市门这件事影响（回落语义见工单 04）。
+  const rows = [
+    { title: "A", city: "郑州", salary: "20-35K", source: "zhipin" },
+    { title: "B", city: "安庆", salary: "20-35K", source: "zhipin" },
+    { title: "C", city: "郑州", salary: "8-10K", source: "zhipin" },
+    { title: "D", city: "安庆", salary: "8-10K", source: "zhipin" },
+    { title: "E", city: "郑州", salary: "面议", source: "zhipin" },
+  ];
+  const titles = (xs) => xs.map((x) => x.title);
+  const salaryThenCity = applyBrowserCityGate(applyBrowserSalaryGate(rows, 20), "郑州");
+  const cityThenSalary = applyBrowserSalaryGate(applyBrowserCityGate(rows, "郑州"), 20);
+  assert.deepEqual(titles(salaryThenCity), titles(cityThenSalary));
+  assert.deepEqual(titles(salaryThenCity), ["A", "E"]); // B/D 异地、C 薪资不达标
+  // 两道门都关 → 恒等（含异地与不达标行）
+  assert.equal(applyBrowserCityGate(applyBrowserSalaryGate(rows, 0), "").length, 5);
+});
+
+// ── 被毙原因（gate-visibility 工单 03）──────────────────────────────────────
+// 规则牌要把「为什么被毙」说给人听。原因是门自己算出来的（buildTitleFilterExplained
+// 的同一份编译结果），不是面板再判一遍——面板重判会在词表被编辑之后与事实不一致，而
+// 那正是用户最需要信这条信息的时候。
+
+test("applyBrowserTitleGate: 被毙条目带原因，说得出是被哪个词毙的", () => {
+  const filter = { positive: ["软件", "技术"], negative: ["销售", "兼职"] };
+  const jobs = [
+    { title: "软件项目经理" },
+    { title: "（高薪）软件/项目销售" },
+    { title: "叉车司机" },
+    { title: "兼职居家ERP 开发项目经理" },
+    { title: "销售兼职" },
+  ];
+  const { kept, dropped } = applyBrowserTitleGate(jobs, filter);
+  assert.deepEqual(kept.map((j) => j.title), ["软件项目经理"]);
+  assert.equal("gateReason" in kept[0], false, "放行条目不该带原因");
+  assert.deepEqual(
+    dropped.map((j) => j.gateReason),
+    [
+      { type: "negative", words: ["销售"] },
+      { type: "no-positive", words: [] },
+      { type: "negative", words: ["兼职"] },
+      { type: "negative", words: ["销售", "兼职"] },
+    ],
+    "命中的黑名单条目要全列（一条是一个否决，不是排序），「没命中白名单」是另一类原因——两者要对症下药，改法相反",
+  );
+  assert.deepEqual(dropped.map((j) => j.title), jobs.slice(1).map((j) => j.title), "被毙的仍按原序返回，offer 自己的字段都在");
+});
+
+test("applyBrowserTitleGate: 空词表不产生任何原因（不设约束）", () => {
+  const none = applyBrowserTitleGate([{ title: "叉车司机" }], {});
+  assert.equal(none.kept.length, 1);
+  assert.equal(none.dropped.length, 0, "空 positive 是「不设约束」而不是「什么都不匹配」——这里若反了，原因会声称一个不存在的白名单没命中");
+  const negOnly = applyBrowserTitleGate([{ title: "行政专员" }], { negative: ["行政"] });
+  assert.deepEqual(negOnly.dropped[0].gateReason, { type: "negative", words: ["行政"] }, "只有黑名单时，原因仍是「被这个词毙掉」");
+});
+
+// ── applyBrowserTitleGate —— 标题门的列表级形态（ADR-0029 决议 1/2/3）──────
+//
+// 词表来源是 portals.yml 的 title_filter，判定走 web 镜像（parity 由根目录的
+// tests/title-keywords-parity.test.mjs 守着），所以探索页与 CLI 扫描器对同一份
+// 词表给出同一判定。与城市门/薪资门不同，这一道把被毙者留在 dropped 里——台账的
+// skipped_title 与结果区的「已过滤」折叠区都从它取值。
+
+const REAL_FILTER = {
+  positive: ["软件", "技术", "信息化", "IT", "系统", "交付", "数据"],
+  negative: ["销售", "行政", "技术员", "实习生", "兼职"],
+};
+
+test("applyBrowserTitleGate: positive 必命中、negative 一票否决，被毙者留在 dropped", () => {
+  const jobs = [
+    { title: "软件实施工程师" },
+    { title: "叉车司机【安庆-迎江区】7-8k1-3年学历不限" },
+    { title: "行政后勤/总务【上海-浦东新区】9-12k经验不限大专" },
+    { title: "技术员" },
+    { title: "（高薪）软件/项目销售" },
+  ];
+  const { kept, dropped } = applyBrowserTitleGate(jobs, REAL_FILTER);
+  assert.deepEqual(kept.map((j) => j.title), ["软件实施工程师"]);
+  assert.deepEqual(dropped.map((j) => j.title), [
+    "叉车司机【安庆-迎江区】7-8k1-3年学历不限",
+    "行政后勤/总务【上海-浦东新区】9-12k经验不限大专",
+    "技术员",
+    "（高薪）软件/项目销售",
+  ]);
+  // 一条也不能凭空消失：kept ∪ dropped 必须等于输入
+  assert.equal(kept.length + dropped.length, jobs.length);
+});
+
+test("applyBrowserTitleGate: 匹配面是原始 title，不剥尾", () => {
+  // 猎聘把城市/薪资/经验/学历 glue 在标题上，门控刻意照原样看（ADR-0029 决议 3）。
+  // 这行的尾部不含任何 positive 词，故被毙——尾巴里出现 positive 词就会反过来救活它。
+  const { kept, dropped } = applyBrowserTitleGate(
+    [{ title: "财务主管 【 苏州-吴中区 】 10-15k" }],
+    { positive: ["软件"] },
+  );
+  assert.equal(kept.length, 0);
+  assert.equal(dropped.length, 1);
+  const tail = applyBrowserTitleGate([{ title: "财务主管 【 苏州-吴中区 】 10-15k · 软件" }], { positive: ["软件"] });
+  assert.equal(tail.kept.length, 1, "尾部命中即算命中——这正是「不剥尾」的代价，也由干跑清单量出");
+});
+
+test("applyBrowserTitleGate: 词表缺省/为空 = 不设约束，全部保留（绝不空转成整批否决）", () => {
+  const jobs = [{ title: "叉车司机" }, { title: "软件实施工程师" }];
+  assert.equal(applyBrowserTitleGate(jobs, undefined).kept.length, 2);
+  assert.equal(applyBrowserTitleGate(jobs, {}).kept.length, 2);
+  assert.equal(applyBrowserTitleGate(jobs, { positive: [], negative: [] }).kept.length, 2);
+  assert.equal(applyBrowserTitleGate(undefined, { positive: ["软件"] }).kept.length, 0);
+});
+
+// 这条钉的是本仓共享匹配规则的 CJK 词边界修复（根模块与镜像同改）。曾经 \p{L}
+// 把汉字算作「词字符」，于是 `IT` 匹配不到 `IT项目管理`——用户词表里恰有 `IT`，存量
+// 里也有 `IT项目管理 【 郑州-高新区 】 5-8k` 这类明确想要的岗，门一接上就会静默毙掉。
+// 现在汉字反而是边界。行为细节的守卫在 tests/title-filter-word-prefix.test.mjs (f)。
+test("applyBrowserTitleGate: 缩写跨越汉字边界时命中（CJK 词边界修复）", () => {
+  const cjk = applyBrowserTitleGate([{ title: "IT项目管理 【 郑州-高新区 】 5-8k" }], { positive: ["IT"] });
+  assert.equal(cjk.kept.length, 1, "汉字应构成词边界，IT项目管理 必须命中");
+  assert.equal(cjk.dropped.length, 0);
+  // 拉丁侧不受影响：IT 仍不能命中 IThub / unit
+  const ascii = applyBrowserTitleGate(
+    [{ title: "IThub Platform" }, { title: "Unit Tests" }],
+    { positive: ["IT"] },
+  );
+  assert.equal(ascii.kept.length, 0);
+  assert.equal(ascii.dropped.length, 2);
+});
+
+// ── effectiveBrowserCity —— 城市条件的三种状态（ADR-0029 决议 6）──────────────
+
+test("effectiveBrowserCity: 显式城市覆盖偏好，「全国」哨兵关掉城市门", () => {
+  assert.equal(effectiveBrowserCity({ zhCity: "郑州", zhCityPreference: "北京" }), "郑州");
+  assert.equal(effectiveBrowserCity({ zhCity: ZH_CITY_ANY, zhCityPreference: "北京" }), "");
+  assert.equal(effectiveBrowserCity({ zhCity: ZH_CITY_ANY }), "");
+});
+
+test("effectiveBrowserCity: 未设置回落偏好城市（即 seedExploreFilters 解析出的那一个）", () => {
+  assert.equal(effectiveBrowserCity({ zhCity: "", zhCityPreference: "郑州" }), "郑州");
+  assert.equal(effectiveBrowserCity({ zhCity: "   ", zhCityPreference: "郑州" }), "郑州");
+  assert.equal(effectiveBrowserCity({ zhCityPreference: "郑州" }), "郑州");
+  // 两条 seed 路径都没有 → 门关闭，全国
+  assert.equal(effectiveBrowserCity({ zhCity: "", zhCityPreference: "" }), "");
+  assert.equal(effectiveBrowserCity({}), "");
+  assert.equal(effectiveBrowserCity(undefined), "");
+});
+
+test("effectiveBrowserCity: 不是已知城市的值绝不成为城市条件（否则静默筛掉一切）", () => {
+  // location_filter.allow 是 CLI 扫描器的清单，可以放「河南」这类地区名，profile 的
+  // location.city 也可能写任意文本。拿它们当城市条件会让城市门对每一行都不命中——
+  // 比放行更糟，且完全没有症状。
+  assert.equal(effectiveBrowserCity({ zhCity: "河南" }), "");
+  assert.equal(effectiveBrowserCity({ zhCityPreference: "河南" }), "");
+  assert.equal(effectiveBrowserCity({ zhCity: "不存在的城市", zhCityPreference: "郑州" }), "郑州");
+});
+
+test("城市条件的两个「无具体城市」状态在分享链接里可区分", () => {
+  // 未设置 → 不带 city 参数；全国 → 带哨兵值。这正是决议 6 要保住的可区分性。
+  assert.ok(!browserToParams("项目经理", ["zhipin"], "").includes("city="));
+  assert.ok(!browserToParams("项目经理", ["zhipin"], undefined).includes("city="));
+  assert.equal(new URLSearchParams(browserToParams("项目经理", ["zhipin"], ZH_CITY_ANY)).get("city"), ZH_CITY_ANY);
+  // 哨兵在站点侧退化成「无城市槽」＝全国搜索，与它的语义一致
+  assert.equal(browserCityValue("zhipin", ZH_CITY_ANY), "");
+});
+
+test("城市门接上解析值：未设置按偏好筛，选『全国』全过", () => {
+  const jobs = [{ city: "郑州", title: "A" }, { city: "安庆", title: "B" }];
+  const unset = { zhCity: "", zhCityPreference: "郑州" };
+  assert.deepEqual(applyBrowserCityGate(jobs, effectiveBrowserCity(unset)).map((j) => j.title), ["A"]);
+  const national = { zhCity: ZH_CITY_ANY, zhCityPreference: "郑州" };
+  assert.equal(applyBrowserCityGate(jobs, effectiveBrowserCity(national)).length, 2);
+  // 偏好缺失时门关闭——不误删，与另两道门同取向
+  assert.equal(applyBrowserCityGate(jobs, effectiveBrowserCity({})).length, 2);
 });

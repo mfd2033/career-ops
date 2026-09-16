@@ -1,15 +1,30 @@
-// title-keywords.mjs — one definition of how a `title_filter` keyword matches a
-// job title, imported by every path that filters titles.
+// title-keywords.mjs (WEB MIRROR) — behaviourally identical to the repo-root
+// ../title-keywords.mjs, which stays the single definition of how a
+// `title_filter` keyword matches a job title.
 //
-// It lives in its own module because there are two such paths and they must not
-// drift: scan.mjs (the main pipeline) and openrouter-runner.mjs (the no-Claude
-// path, which deliberately does not import scan.mjs because scan.mjs creates
-// data/ at import time). Same reason user-agent.mjs and profile-language.mjs
-// are separate modules rather than exports of a bigger one.
+// WHY A MIRROR AT ALL: the root module's own header says there is one copy of
+// this logic "so a second copy would repeat" the profile-keywords drift. The
+// copy exists anyway, for a reason the root module cannot see: Turbopack's root
+// is pinned to web/ and refuses modules outside it (web/next.config.mjs; same
+// constraint as web/src/lib/tracker-table.mjs and profile-keywords.mjs). The
+// browser-mode title gate runs in the EXTENSION path, inside the Next app, so it
+// cannot import the root module — and the CLI cannot run it either, because
+// browser discovery is extension-driven (ADR-0007) and must not spawn the
+// scanner.
 //
-// The repo has already paid for a mirror once: tests/profile-keywords-parity
-// exists because web/ carries a copy of the keyword logic and the copy was
-// wrong. A second copy of THIS logic would repeat that, so there is one.
+// The alternative — inlining "just the substring match" — is exactly the drift
+// this pair exists to prevent: an empty positive list means "accept everything"
+// here and "reject everything" there, AND-groups work on one side only, a
+// non-string YAML entry is dropped on one side and coerced on the other. Those
+// three drifts are historical, not hypothetical.
+//
+// The pair is held together by tests/title-keywords-parity.test.mjs in the ROOT
+// suite (web-ci.yml cannot run it: importing the root module resolves nothing
+// inside web/). If you change the root module, change this one to match — the
+// parity test is the tripwire.
+//
+// Only the header differs from the root file; every rule below is kept
+// textually identical on purpose, so a diff of the two bodies is empty.
 
 // Opt-in whole-word matching for a keyword too long to get it automatically.
 // Chosen over widening the 2-3 char rule to every single-word keyword, because

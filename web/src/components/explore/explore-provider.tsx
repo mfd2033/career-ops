@@ -13,6 +13,9 @@ import {
   parseExplorePatch,
   browserToParams,
   applyBrowserSalaryGate,
+  applyBrowserCityGate,
+  applyBrowserTitleGate,
+  effectiveBrowserCity,
   type AtsSource,
   type BrowserSource,
   type DiscoveredOffer,
@@ -32,6 +35,28 @@ import {
   SCAN_SOURCE_DEFAULT,
   type ScanSource,
 } from "@/lib/scan-mode";
+
+/**
+ * 把被采集门毙掉的岗位记一行「见过」台账（status=skipped_title，ADR-0029 决议 4）。
+ *
+ * 两条 driver 统一由页面 POST：服务端 browser-scan 的 dropped 先经 kind:"folded"
+ * 事件送到这里，扩展路径的 dropped 本来就是页面侧算出来的——两路同一个写入点，
+ * 就不会出现「一边写了、一边忘了」。
+ *
+ * best-effort：台账是审计旁路，一次网络抖动不该把已经采到的结果变成失败。
+ */
+async function recordFiltered(offers: DiscoveredOffer[], scanId: string): Promise<void> {
+  if (offers.length === 0) return;
+  try {
+    await fetch("/api/explore/seen", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ offers, scanId, status: "skipped_title" }),
+    });
+  } catch {
+    /* audit side-channel — never fails the scan */
+  }
+}
 
 export type Phase =
   | "idle"
@@ -67,6 +92,10 @@ type ExploreCtx = {
   phase: Phase;
   running: boolean;
   offers: DiscoveredOffer[];
+  /** 被采集门毙掉的岗位（ADR-0029 决议 4）。它们**不进 offers** —— 采集落地门的定义
+   *  就是「不进结果区」——但结果区的只读「已过滤」折叠区要展示它们，台账里那行
+   *  skipped_title 也由它们产生。只在 browser 模式有值；随扫描生命周期，不落盘。 */
+  folded: DiscoveredOffer[];
   sources: SourceMap;
   matchCount: number;
   companiesScanned: number;
@@ -178,6 +207,7 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
   const touched = useRef(false);
   const [phase, setPhase] = useState<Phase>("idle");
   const [offers, setOffers] = useState<DiscoveredOffer[]>([]);
+  const [folded, setFolded] = useState<DiscoveredOffer[]>([]);
   const [sources, setSources] = useState<SourceMap>({});
   const [matchCount, setMatchCount] = useState(0);
   const [companiesScanned, setCompaniesScanned] = useState(0);
@@ -230,6 +260,7 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     setPartial(false);
     setError("");
     setScannerMissing(false);
+    setFolded([]);
     setStatus(t("explore.disc.castingNet"));
     const init: Partial<Record<AtsSource, SourceState>> = {};
     for (const a of f.ats) init[a] = { state: "queued" };
@@ -380,6 +411,7 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     setPartial(false);
     setError("");
     setScannerMissing(false);
+    setFolded([]);
     const init: SourceMap = {};
     for (const p of platforms) init[p] = { state: "queued" };
     setSources(init);
@@ -393,7 +425,9 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     // 端口/搜索 URL 与 runBrowserDiscovery 同源(buildSearchUrls + " OR " 展开)。
     const driveViaExtension = async (): Promise<void> => {
       const queryForUrl = query.replace(/\s+/g, " OR ");
-      const city = f.zhCity?.trim() ?? "";
+      // 与服务端 runBrowserDiscovery 同一解析（ADR-0029 决议 6）：显式选择覆盖偏好、
+      // 「全国」哨兵关门、未设置回落 zhCityPreference。解析值同时喂搜索 URL 与城市门。
+      const city = effectiveBrowserCity(f);
       // 目标成对展开：猎聘拆词逐词一 URL，其余平台整串一条（见 expandSearchTargets）。
       const targets = expandSearchTargets(platforms as unknown as string[], queryForUrl, city);
       // 每站采集上限走用户配置（配置页可改，默认猎聘 1200 / BOSS/智联 400），随消息
@@ -468,16 +502,28 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
       });
       const offersRes = await extRequest({ type: "scan-offers", scanId });
       const found = Array.isArray(offersRes.offers) ? (offersRes.offers as DiscoveredOffer[]) : [];
-      // 薪酬门控（工单 04，页面侧）：扩展路径的 offer 不经过 browser-scan 服务端
-      // 门，在取回处套用同一 applyBrowserSalaryGate（区间重叠、薪资未知放行并打
-      // 标），保证扩展驱动与 bsk 兜底两条路径行为一致。
-      const gated = applyBrowserSalaryGate(found, f.zhSalaryMin);
-      setOffers(gated);
-      if (gated.length > 0) {
-        setMatchCount(gated.length);
-        setCompaniesScanned(gated.length);
+      // 采集门（ADR-0029，页面侧）：扩展路径的 offer 不经过 browser-scan 服务端门，
+      // 在取回处套用与服务端**逐字相同**的组合（薪资门 → 城市门 → 标题门）；三道都是
+      // browser-search.mjs 的纯函数，两条 driver 的 keep/drop 因此由同一段代码保证。
+      // 城市门此前只接在服务端路径上（ADR-0007 E4 声称两路都有，实际没有），带城市
+      // 条件的扩展扫描因此漏进异地卡片；标题门则是两路都缺，搜索页的「相关推荐」位
+      // 才会整页搬进收件箱。
+      // 词表取 f.positive/f.negative——由服务端 seedExploreFilters 从 portals.yml 播
+      // 种而来，与 CLI 扫描器同一份（ADR-0029 决议 2）；刻意不回读 portals.yml。
+      const gated = applyBrowserTitleGate(applyBrowserCityGate(applyBrowserSalaryGate(found, f.zhSalaryMin), city), {
+        positive: f.positive,
+        negative: f.negative,
+      });
+      const kept = gated.kept;
+      // 被毙掉的也要落台账（status=skipped_title），与 bsk 路径同一个写入点。
+      void recordFiltered(gated.dropped, scanId);
+      setOffers(kept);
+      setFolded(gated.dropped);
+      if (kept.length > 0) {
+        setMatchCount(kept.length);
+        setCompaniesScanned(kept.length);
         setPhase("revealing");
-        setStatus(t(gated.length === 1 ? "explore.disc.browserFoundOne" : "explore.disc.browserFoundMany", { n: gated.length }));
+        setStatus(t(kept.length === 1 ? "explore.disc.browserFoundOne" : "explore.disc.browserFoundMany", { n: kept.length }));
         window.setTimeout(() => setPhase("results"), 850);
       } else if (failed.length) {
         setPhase("degraded");
@@ -493,7 +539,15 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
+    // bsk 路径此前从不写「见过」台账（它的台账首行出现在确认入管那一刻），所以这里
+    // 自己造一个 scanId 供幂等命名空间使用——它只服务本次扫描的 filtered 批次。
+    const bskScanId = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `bsk-scan-${Date.now()}`;
     const acc: DiscoveredOffer[] = [];
+    // 被采集门毙掉的岗位，来自服务端的 kind:"folded" 事件（ADR-0029 决议 4）。
+    // 名字避开组件态的 folded —— 同名局部会把它遮住，届时 setFolded 拿不到本批数据。
+    const foldedAcc: DiscoveredOffer[] = [];
     let sawError = "";
     let sawCollectorMissing = false; // Playwright collector absent — structured 400 → blocked
     let reachedAcc = 0; // platforms that completed a real sweep
@@ -543,6 +597,11 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
                 acc.push(ev.offer);
                 setOffers((o) => [...o, ev.offer]);
                 break;
+              case "folded":
+                // 被采集门毙掉的岗位：不进结果区，只进台账（下方统一 POST）与只读
+                // 「已过滤」折叠区。
+                foldedAcc.push(...ev.offers);
+                break;
               case "summary":
                 reachedAcc = ev.companiesScanned;
                 setCompaniesScanned(ev.companiesScanned);
@@ -569,6 +628,10 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     });
 
     runningRef.current = false;
+    // 服务端 browser-scan 把「被标题门毙掉」的岗位经 folded 事件送过来，在这里统一
+    // 落台账（status=skipped_title）——与扩展路径同一个写入点（ADR-0029 决议 4）。
+    void recordFiltered(foldedAcc, bskScanId);
+    setFolded(foldedAcc);
     if (acc.length > 0) {
       setMatchCount(acc.length);
       setPhase("revealing");
@@ -597,6 +660,7 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     setPhase("casting");
     setStatus(t("explore.disc.loadingFresh"));
     setOffers([]);
+    setFolded([]);
     setMatchCount(0);
     setCompaniesScanned(0);
     setCompaniesAvailable(0);
@@ -703,6 +767,7 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     runningRef.current = false;
     setPhase("idle");
     setOffers([]);
+    setFolded([]);
     setSources({});
     setMatchCount(0);
     setCompaniesScanned(0);
@@ -904,11 +969,11 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     () => ({
       filters, setFilters, initFilters, phase,
       running: phase === "casting" || phase === "scanning" || phase === "revealing" || phase === "hunting",
-      offers, sources, matchCount, companiesScanned, companiesAvailable, capHit, droppedNoDate, status, partial, error, scannerMissing, added, adding,
+      offers, folded, sources, matchCount, companiesScanned, companiesAvailable, capHit, droppedNoDate, status, partial, error, scannerMissing, added, adding,
       discover, discoverBrowser, loadFresh, addToPipeline, restoreSeen, restoring, applyPatch, reset,
       mode, setMode, scanSource, setScanSource, enabledSources, aiIntent, setAiIntent, discoverAI, aiTrace, aiCost,
     }),
-    [filters, setFilters, initFilters, phase, offers, sources, matchCount, companiesScanned, companiesAvailable, capHit, droppedNoDate, status, partial, error, scannerMissing, added, adding, discover, discoverBrowser, loadFresh, addToPipeline, restoreSeen, restoring, applyPatch, reset, mode, setMode, scanSource, setScanSource, enabledSources, aiIntent, discoverAI, aiTrace, aiCost],
+    [filters, setFilters, initFilters, phase, offers, folded, sources, matchCount, companiesScanned, companiesAvailable, capHit, droppedNoDate, status, partial, error, scannerMissing, added, adding, discover, discoverBrowser, loadFresh, addToPipeline, restoreSeen, restoring, applyPatch, reset, mode, setMode, scanSource, setScanSource, enabledSources, aiIntent, discoverAI, aiTrace, aiCost],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

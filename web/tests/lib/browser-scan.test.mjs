@@ -163,3 +163,65 @@ test("browser-scan.ts passes the platform into the salary gate", () => {
     "the bsk gate call must pass platform as the board fallback, or 猎聘's annual 万 parses as 智联's monthly ×10",
   );
 });
+
+// ── 两条 driver 的采集门组合必须一致（ADR-0029 决议 1/7）────────────────────
+// browser-scan 的门在子进程 close 回调里、explore-provider 的门在 React 事件里，
+// 单测都跑不到，所以按上条同口径做源码断言：两处都必须是「城市门套薪资门，并传
+// 入各自的 city」。城市门此前只接在服务端路径上——ADR-0007 E4 的注释声称猎聘/BOSS
+// 的城市过滤「复用 web 端 matchesBrowserCity」，实际没有，带城市条件的扩展扫描
+// 因此漏进异地卡片（叉车司机【安庆】、食品化验员【宁波】）。
+
+test("browser-scan.ts composes all three collection gates in one expression", () => {
+  const src = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "../../src/lib/core/browser-scan.ts"),
+    "utf8",
+  ).replace(/\s+/g, " ");
+  assert.match(
+    src,
+    /applyBrowserTitleGate\( applyBrowserCityGate\(applyBrowserSalaryGate\(/,
+    "the bsk path must run all three gates at list level, as one composition (薪资门 → 城市门 → 标题门)",
+  );
+  assert.match(src, /filters\.zhSalaryMin, platform\), city\)/, "the bsk path must pass the requested city into the city gate");
+  assert.match(
+    src,
+    /\{ positive: filters\.positive, negative: filters\.negative \}/,
+    "the bsk path must filter titles by the EXPLORER's seeded title_filter, not by re-reading portals.yml",
+  );
+  assert.match(src, /kind: "folded"/, "the rejects must reach the page — the ledger row and the 已过滤 fold both need them (ADR-0029 决议 4)");
+  assert.ok(
+    !src.includes("matchesBrowserCity"),
+    "browser-scan.ts must not keep a second, per-job city check — every gate lives at list level, so the two drivers cannot drift",
+  );
+});
+
+test("explore-provider.tsx composes the same three gates for the extension path", () => {
+  const src = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "../../src/components/explore/explore-provider.tsx"),
+    "utf8",
+  ).replace(/\s+/g, " ");
+  assert.match(
+    src,
+    /applyBrowserTitleGate\(applyBrowserCityGate\(applyBrowserSalaryGate\(found, f\.zhSalaryMin\), city\), \{/,
+    "the extension path must run all three gates at scan-offers retrieval — a city-filtered hunt must not leak 异地 postings, nor a keyword hunt the search page's 相关推荐 rail",
+  );
+  assert.match(
+    src,
+    /positive: f\.positive, negative: f\.negative/,
+    "the extension path must use the same seeded word list as the server path",
+  );
+});
+
+// ── 被毙岗位的台账送达（ADR-0029 决议 4）──────────────────────────────
+// 两条 driver 的 dropped 都必须在同一处落台账、且带 skipped_title：bsk 的来自
+// kind:"folded" 事件，扩展路径的是页面侧算的。这里钉住「一个写入点 + 正确的状态」，
+// 因为漏掉它正是本仓反复吃过的那类 bug（新流程写了记录、没人标记它在哪结束）。
+test("both browser drivers hand their rejects to one ledger write", () => {
+  const src = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "../../src/components/explore/explore-provider.tsx"),
+    "utf8",
+  ).replace(/\s+/g, " ");
+  assert.match(src, /recordFiltered\(gated\.dropped, scanId\)/, "the extension path must record its rejects");
+  assert.match(src, /recordFiltered\(foldedAcc, bskScanId\)/, "the bsk path must record the folded batch it received");
+  assert.match(src, /status: "skipped_title"/, "the ledger row must carry skipped_title — the value the CLI scanner already writes");
+  assert.match(src, /\/api\/explore\/seen/, "the rejects must land in the seen ledger, the same file collection writes to");
+});

@@ -78,7 +78,14 @@ export function ExplorerView({
       setMode("ai");
       setAiIntent(ai);
     } else {
-      const browser = paramsToBrowser(sp);
+      // Restore ON TOP OF the server seed, not on top of DEFAULT_FILTERS: the URL
+      // carries the browser hunt's own conditions (query/city/salary floor), it
+      // does not carry the long-term config. Without the base, a restored link
+      // brought empty `positive`/`negative` — and those are exactly what the
+      // browser-mode title gate filters by (ADR-0029 决议 2), so a shared hunt
+      // would have run its gate against an empty word list and silently filtered
+      // nothing. Same shape as the scan/ai restores below, which do pass a base.
+      const browser = paramsToBrowser(sp, seed.filters);
       if (browser !== null) {
         // A restored browser hunt (?mode=browser&zh=…&sources=…) lands straight
         // back in the browser surface with its filters and URL intact.

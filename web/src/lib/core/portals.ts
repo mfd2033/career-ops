@@ -83,11 +83,16 @@ export function seedExploreFilters(): { filters: ExploreFilters; seededFrom: str
     filters.alwaysAllow = listFrom(lf.always_allow);
     filters.blockHard = listFrom(lf.block_hard);
     if (filters.positive.length || filters.allow.length || filters.block.length || filters.blockHard.length) seededFrom.push("portals.yml");
-    // Browser mode's city box: seed from the user's own config — profile.yml
+    // Browser mode's city PREFERENCE: seed from the user's own config — profile.yml
     // location.city first (the ground truth of where they want to work), then
     // portals.yml location_filter.allow (the CLI scan's location filter). Only a
     // KNOWN Chinese city (in BROWSER_CITY_MAP) is used — an unrecognised value
-    // keeps the national default rather than silently mis-filtering.
+    // resolves to "no preference", which leaves the hunt national rather than
+    // silently mis-filtering.
+    //
+    // 刻意写进 zhCityPreference 而不是直接写 zhCity（ADR-0029 决议 6）：zhCity 的 `""`
+    // 现在表示「未设置 = 用偏好」，把偏好复制进去就再也分不开「我的长期偏好」与「我
+    // 这次的选择」，而且日后改了配置，旧链接也追不回来。
     const profileCity =
       (profile?.candidate && typeof profile.candidate === "object" && (profile.candidate as Record<string, unknown>).location) ||
       (profile?.location && typeof profile.location === "object" && (profile.location as Record<string, unknown>).city);
@@ -95,10 +100,10 @@ export function seedExploreFilters(): { filters: ExploreFilters; seededFrom: str
     const allowList = Array.isArray(lf.allow) ? (lf.allow as unknown[]) : [];
     const allowCity = String(allowList[0] ?? "").trim();
     if (browserCityValue("zhipin", candidateCity)) {
-      filters.zhCity = candidateCity;
+      filters.zhCityPreference = candidateCity;
       seededFrom.push("profile.yml");
     } else if (browserCityValue("zhipin", allowCity)) {
-      filters.zhCity = allowCity;
+      filters.zhCityPreference = allowCity;
       seededFrom.push("portals.yml");
     }
   }

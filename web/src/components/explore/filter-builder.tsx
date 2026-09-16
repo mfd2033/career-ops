@@ -3,7 +3,8 @@
 import { useState } from "react";
 import { X, Ban, Clock, MapPin, ChevronDown, SlidersHorizontal, Search, Banknote } from "lucide-react";
 import { cn } from "@/lib/cn";
-import { ATS_LABEL, ATS_SOURCES, BROWSER_LABEL, BROWSER_SOURCES, cleanChips, type AtsSource, type BrowserSource, type ExploreFilters, type ExploreMode } from "@/lib/explore";
+import { ATS_LABEL, ATS_SOURCES, BROWSER_LABEL, BROWSER_SOURCES, ZH_CITY_ANY, cleanChips, type AtsSource, type BrowserSource, type ExploreFilters, type ExploreMode } from "@/lib/explore";
+import { CITY_NAMES } from "@/lib/browser-search.mjs";
 import { useI18n } from "@/lib/i18n/context";
 
 const RECENCY = [
@@ -23,7 +24,8 @@ html.dark .co-fb__chip.inc{color:hsl(26 86% 70%);background:hsl(26 80% 55% / .14
 .co-fb__field{display:flex;flex-wrap:wrap;gap:.4rem;align-items:center;min-height:2.6rem;padding:.45rem .55rem;border-radius:.7rem}
 .co-fb__field input{flex:1;min-width:7rem;background:transparent;border:none;outline:none;font-size:13.5px;color:inherit}
 .co-fb__field input::placeholder{color:var(--co-faint,hsl(0 0% 60%))}
-@media (max-width:639px){.co-fb__chip button{min-width:44px;min-height:44px;justify-content:center}.co-fb__chip{min-height:44px}.co-fb__field{min-height:44px}.co-fb__field input{min-height:32px}}
+.co-fb__field select{flex:1;min-width:7rem;background:transparent;border:none;outline:none;font-size:13.5px;color:inherit;color-scheme:light dark}
+@media (max-width:639px){.co-fb__chip button{min-width:44px;min-height:44px;justify-content:center}.co-fb__chip{min-height:44px}.co-fb__field{min-height:44px}.co-fb__field input,.co-fb__field select{min-height:32px}}
 `;
 
 function KeywordField({
@@ -154,15 +156,27 @@ export function FilterBuilder({
           <Label hint={t("explore.filter.zhCityHint")}>{t("explore.filter.zhCity")}</Label>
           <div className="co-fb__field border border-border bg-surface/40 focus-within:border-brand/40 transition-colors">
             <MapPin className="size-3.5 shrink-0 text-muted" />
-            <input
+            {/* 下拉而非自由输入（ADR-0029 决议 6）：两个「没有具体城市」的状态必须可区分——
+                「未设置」= 用我的长期偏好，「全国」= 真的不限。自由输入还会引入第三个坏状态：
+                一个地图里没有的值会变成城市条件，把一切筛掉（搜索 URL 那边反而退化成全国搜，
+                两边说的不是一件事）。所以这里只给已知城市 + 两个哨兵。 */}
+            <select
               value={filters.zhCity ?? ""}
               onChange={(e) => set({ zhCity: e.target.value })}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") e.currentTarget.blur();
-              }}
-              placeholder={t("explore.filter.zhCityPlaceholder")}
               className="min-w-0 flex-1 bg-transparent outline-none"
-            />
+            >
+              <option value="">
+                {filters.zhCityPreference
+                  ? t("explore.filter.zhCityPreference", { city: filters.zhCityPreference })
+                  : t("explore.filter.zhCityUnset")}
+              </option>
+              <option value={ZH_CITY_ANY}>{t("explore.filter.zhCityAny")}</option>
+              {CITY_NAMES.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
           </div>
         </div>
         <div>

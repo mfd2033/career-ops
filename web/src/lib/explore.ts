@@ -58,8 +58,17 @@ export type ExploreFilters = {
   /** Chinese keyword for the browser hunt ("AI 工程师") */
   zhQuery?: string;
   /** Optional logical Chinese city to filter the browser hunt by (e.g. "郑州").
-   *  Empty = national search. Only the three browser boards honor it. */
+   *  Only the three browser boards honor it. Three states (ADR-0029 决议 6):
+   *  empty = unset, fall back to `zhCityPreference`; `ZH_CITY_ANY` (全国) = a
+   *  deliberate national hunt; any other value = that city for THIS hunt. */
   zhCity?: string;
+  /** The long-term city preference an UNSET hunt falls back to, resolved once by
+   *  seedExploreFilters (profile.yml `location.city`, else portals.yml
+   *  `location_filter.allow`[0]). Kept separate from `zhCity` so "my standing
+   *  preference" and "what I picked this time" never become the same field — and
+   *  deliberately NOT read off `location_filter.allow`, which is serialized into
+   *  the ephemeral portals.yml the CLI scanner runs against. */
+  zhCityPreference?: string;
   /** 薪资下限（月薪 K，如 20 = ≥20K/月）。区间重叠判定；0/缺省 = 不过滤。
    *  无薪资文本或解析失败的岗位放行并打「薪资未知」。 */
   zhSalaryMin?: number;
@@ -78,6 +87,7 @@ export const DEFAULT_FILTERS: ExploreFilters = {
   browserSources: [...BROWSER_SOURCES],
   zhQuery: "",
   zhCity: "",
+  zhCityPreference: "",
 };
 
 export type DiscoveredOffer = {
@@ -95,6 +105,13 @@ export type DiscoveredOffer = {
    *  writer (scan.mjs formatPipelineOffer). Generic and source-agnostic — an
    *  importer can attach a note; the deterministic scan omits it. */
   note?: string;
+  /** Set on a title-gate reject only (ADR-0029 决议 4): the negative entries the
+   *  title hit (an entry is a veto, so several can apply), or the fact that
+   *  nothing in `positive` matched it. Produced by the gate's own compiled filter
+   *  — the rules card names those words to the user, and a panel that named the
+   *  wrong one on its own reading of the rule would be indistinguishable from the
+   *  gate being broken (gate-visibility 工单 03). */
+  gateReason?: { type: "negative" | "no-positive"; words: string[] };
   // ── browser-mode salary additions (工单 03；scan/ai offers omit both) ──
   /** raw salary display text from the listing card (e.g. "20-35K·14薪").
    *  Empty/absent = the card carried no salary the collector could read. */
@@ -126,6 +143,10 @@ export type ScanEvent =
   | { kind: "progress"; ats: string; scanned: number; total: number; matches: number }
   | { kind: "atsDone"; ats: string; unreachable: number }
   | { kind: "offer"; offer: DiscoveredOffer }
+  // 被采集门毙掉的岗位（ADR-0029 决议 4）。它们不进结果区，但必须到页面来：台账
+  // 要写一行 status=skipped_title，结果区的「已过滤」折叠区要展示它们。只有服务端
+  // 的 browser 路径会发——扩展路径的 dropped 是页面侧自己算出来的，无需回传。
+  | { kind: "folded"; offers: DiscoveredOffer[] }
   | {
       kind: "summary";
       companiesScanned: number;
@@ -153,11 +174,13 @@ import {
   parseBrowserSources as rawParseBrowserSources,
   browserToParams as rawBrowserToParams,
 } from "./browser-search.mjs";
-// 薪资判定与门控（工单 01/03）的客户端再导出：探索页扩展路径（工单 04）在
-// scan-offers 取回处套用与服务端 browser-scan 相同的过滤语义
-// （applyBrowserSalaryGate），卡片侧用 isSalaryUnknown 决定「薪资未知」打标。
-// matchesBrowserSalary 只剩 browser-search.mjs 内部与单测的调用方，不经此处。
-export { isSalaryUnknown, applyBrowserSalaryGate } from "./browser-search.mjs";
+// 采集门（ADR-0029）与薪资判定的客户端再导出：探索页扩展路径在 scan-offers 取回处
+// 套用与服务端 browser-scan **逐字相同**的门组合（薪资门 → 城市门），两道都是
+// browser-search.mjs 的纯函数——两条 driver 的 keep/drop 因此由同一段代码保证，而不是
+// 靠两处各自正确。卡片侧用 isSalaryUnknown 决定「薪资未知」打标。
+// matchesBrowserSalary / matchesBrowserCity 是两道门的单元级形态，只剩
+// browser-search.mjs 内部与单测的调用方，不经此处。
+export { isSalaryUnknown, applyBrowserSalaryGate, applyBrowserCityGate, applyBrowserTitleGate, effectiveBrowserCity, ZH_CITY_ANY } from "./browser-search.mjs";
 
 function clampNum(v: unknown, lo: number, hi: number, fallback: number): number {
   const n = Number(v);

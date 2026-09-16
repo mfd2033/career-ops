@@ -378,3 +378,42 @@ if (groupAlive.length === 0) {
 } else {
   fail(`false alarm on a live AND-group: ${JSON.stringify(groupAlive)}`);
 }
+
+// (f) CJK is a BOUNDARY, not a word character. Han/Hiragana/Katakana/Hangul are
+// \p{L}, so the boundary class swallowed them — and an acronym glued to an
+// ideograph then matched NOTHING: `IT` failed inside `IT项目管理`, `HR` inside
+// `HR主管`. Those scripts are written without spaces, so a neighbouring
+// ideograph is exactly where a word ends; treating it as "inside a word"
+// inverted the rule for every Chinese title, and only Latin titles kept
+// matching — which reads as "the filter works, the market is just thin" instead
+// of as a bug. Nothing about Latin may change: `IT` still refuses `IThub`.
+//
+// Reproduced on this user's own data, not a hypothetical: their
+// title_filter.positive carries `IT`, and data/pipeline.md holds
+// `IT项目管理 【 郑州-高新区 】 5-8k` — a wanted posting the old rule dropped
+// silently, and would have gone on dropping behind the new browser-mode title
+// gate (ADR-0029).
+const it = compileKeyword('it');
+const cjkWrong = [
+  ...[
+    'it项目管理',        // acronym then ideograph
+    'it项目经理 郑州',
+    '招聘it工程师',       // ideograph then acronym
+    'itエンジニア',       // Katakana
+    'it개발자',           // Hangul
+  ].filter((t) => it(t) !== true),
+  ...['ithub platform', 'unit tests', 'digit toolkit'].filter((t) => it(t) !== false),
+];
+if (cjkWrong.length === 0) {
+  pass('an acronym matches across a CJK boundary and still refuses Latin neighbours');
+} else {
+  fail(`acronym/CJK boundary wrong for: ${JSON.stringify(cjkWrong)}`);
+}
+
+// The `word:` branch shares the class, so it moves with it.
+const wordIntern = compileKeyword('word:intern');
+if (wordIntern('实习生 intern') && !wordIntern('实习生 interna')) {
+  pass('`word:intern` treats a neighbouring ideograph as a boundary, not a glue');
+} else {
+  fail('`word:` boundary disagrees with the acronym branch over CJK');
+}

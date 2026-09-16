@@ -5,6 +5,8 @@
 // and the Next.js app (client-safe types in lib/explore.ts) re-exports the
 // constants from here so UI chrome and server routing can never drift.
 
+import { buildTitleFilterExplained } from "./core/title-keywords.mjs";
+
 /** The closed set of Chinese job boards the browser mode can search. */
 export const BROWSER_SOURCES = ["zhipin", "liepin", "zhaopin"];
 
@@ -143,6 +145,122 @@ export function matchesBrowserCity(job, cityName) {
     return jobCity === city || jobCity.includes(city) || city.includes(jobCity);
   }
   return String(job?.title ?? "").includes(city);
+}
+
+/**
+ * Apply the city gate to a LIST of jobs — the list-level sibling of
+ * matchesBrowserCity, mirroring applyBrowserSalaryGate so both drivers wire
+ * their gates the same way (ADR-0029 决议 1/7). Before this existed only the
+ * bsk path ran the city gate, per job inside its collection loop; the extension
+ * path ran the salary gate alone, so a city-filtered hunt leaked异地 postings.
+ * Keeping the gate at list level is what lets the two drivers' keep/drop be
+ * asserted equal instead of merely hoped equal.
+ *
+ * No city requested (falsy/empty) → returned unchanged (gate off). Pure —
+ * exported for tests.
+ * @param {Array<{ city?: string, title?: string }>} [jobs]
+ * @param {string} [cityName] logical Chinese city, e.g. "郑州"; "" = gate off
+ * @returns {Array<*>}
+ */
+export function applyBrowserCityGate(jobs, cityName) {
+  const list = Array.isArray(jobs) ? jobs : [];
+  const city = String(cityName ?? "").trim();
+  if (!city) return list;
+  return list.filter((j) => matchesBrowserCity(j, city));
+}
+
+/**
+ * The city selector's explicit "search the whole country on purpose" value
+ * (ADR-0029 决议 6). It is a real, selectable OPTION rather than the empty
+ * string, because empty now means "unset — use my long-term preference" and the
+ * two states must stay distinguishable both on screen and in a shared link.
+ *
+ * Safe as a sentinel: the city box only ever offers BROWSER_CITY_MAP keys plus
+ * this one, and a real placename never collides with it. It also degrades
+ * correctly downstream — `browserCityValue` does not know it, so the search URL
+ * gets no city slot, which is exactly the national search it asks for.
+ */
+export const ZH_CITY_ANY = "全国";
+
+/**
+ * Resolve the city condition a browser hunt actually runs with (ADR-0029 决议 6).
+ *
+ * Three states, in priority order:
+ *   • an explicit known city  → that city (this hunt overrides the preference)
+ *   • the 全国 sentinel        → "" (gate off, national search — the deliberate case)
+ *   • unset (empty/absent)    → `zhCityPreference`, the long-term preference
+ *                               seedExploreFilters resolved once (profile.yml
+ *                               location.city, else portals.yml location_filter.allow)
+ *
+ * The preference is RESOLVED here, never copied into `zhCity`: that field stays
+ * "what the user chose for THIS hunt", so changing the config later changes what an
+ * unset hunt does, and a link shared before the change keeps meaning "my preference
+ * now" instead of freezing one city forever.
+ *
+ * Anything that is not a city the boards can filter by — an unset preference, an
+ * unknown string, a region like 河南 that `location_filter.allow` is free to hold —
+ * resolves to "" (gate off). It must never become the city CONDITION: matching on a
+ * value no posting carries drops everything, silently and totally, which is the one
+ * failure this whole gate set exists to avoid in the other direction.
+ *
+ * Pure — exported for tests.
+ * @param {{ zhCity?: string, zhCityPreference?: string }} [filters]
+ * @returns {string} a logical Chinese city name, or "" for a national hunt
+ */
+export function effectiveBrowserCity(filters) {
+  const chosen = String(filters?.zhCity ?? "").trim();
+  if (chosen === ZH_CITY_ANY) return "";
+  if (browserCityValue("zhipin", chosen)) return chosen;
+  const pref = String(filters?.zhCityPreference ?? "").trim();
+  return browserCityValue("zhipin", pref) ? pref : "";
+}
+
+/**
+ * Apply the TITLE gate to a LIST of jobs — the third collection gate, sibling of
+ * the city and salary gates, and the one whose absence let a search page's
+ * 「相关推荐」 rail (叉车司机, 食品化验员, 行政专员… per the user's own
+ * data/pipeline.md) flow straight into the inbox (ADR-0029 决议 1).
+ *
+ * The predicate is the repo-root title-keywords rule, reached through the web
+ * mirror that tests/title-keywords-parity.test.mjs holds in lockstep with it, so
+ * a browser hunt is filtered by the SAME portals.yml `title_filter` the CLI
+ * scanner reads (ADR-0029 决议 2) — 词表单一来源.
+ *
+ * Unlike the city and salary gates this one RETAINS the rejects: they are what
+ * the seen ledger records as `skipped_title` and what the results panel's
+ * 「已过滤」 fold shows (ADR-0029 决议 4). Callers that only want the survivors
+ * read `.kept`; a caller that drops the rejects loses the audit trail.
+ *
+ * Match surface is the RAW board title, not a stripped one: 猎聘 glues city /
+ * salary / experience / education onto it, and the title gate deliberately sees
+ * exactly what the CLI sees (ADR-0029 决议 3 — 不剥尾, 误杀靠调词表纠正).
+ *
+ * No title_filter (or an empty one) → everything kept, `.dropped` empty: both
+ * arrays empty is buildTitleFilter's documented "no constraint" state, the same
+ * reading the CLI scanner gives it. An empty list must never veto a whole hunt.
+ *
+ * Each reject carries `gateReason` — `{ type: "negative", words }` (the entries it
+ * hit; an entry is a veto, so there can be several) or `{ type: "no-positive" }`.
+ * It comes from the SAME compiled filter that produced the verdict, never from a
+ * second reading of the rule: the rules card names those words to the user, and a
+ * panel that confidently names the wrong one would be indistinguishable from the
+ * gate being broken.
+ *
+ * @param {Array<{ title?: string }>} [jobs]
+ * @param {{positive?: unknown, negative?: unknown}} [titleFilter]
+ * @returns {{ kept: Array<*>, dropped: Array<*> }} rejects are shallow copies with `gateReason`
+ */
+export function applyBrowserTitleGate(jobs, titleFilter) {
+  const list = Array.isArray(jobs) ? jobs : [];
+  const gate = buildTitleFilterExplained(titleFilter);
+  const kept = [];
+  const dropped = [];
+  for (const job of list) {
+    const title = String(job?.title ?? "");
+    if (gate.pass(title)) kept.push(job);
+    else dropped.push({ ...job, gateReason: gate.explain(title) });
+  }
+  return { kept, dropped };
 }
 
 // ── 薪资条件（探索页 browser 模式「最低月薪」，工单 01）──────────────────

@@ -24,6 +24,21 @@ type WriterMode = "both" | "pipeline" | "history";
 
 export type AddOptions = { skipScanHistory?: boolean };
 
+/**
+ * The statuses the web may stamp on a seen-ledger row.
+ *
+ * `added` is the historical default — a discovery recorded at collection or
+ * confirmation time. `skipped_title` is a COLLECTION-GATE reject (ADR-0029): the
+ * posting was discovered and then dropped by the browser-mode title gate. It
+ * reuses the value the CLI scanner already writes for a title-filtered posting
+ * (`modes/scan.md`, `scan-interamt.mjs`), so one vocabulary covers both paths and
+ * the ledger can answer "why is this URL not in the results" without a second file.
+ *
+ * Closed on purpose: the status column is read by dedup, whats-new and the
+ * recheck/cooldown logic, none of which knows how to interpret an invented value.
+ */
+export type SeenStatus = "added" | "skipped_title";
+
 /** url/company/title/location/source の sane defaults — the writers' input contract. */
 function cleanOffers(offers: DiscoveredOffer[]) {
   return offers
@@ -43,7 +58,7 @@ function cleanOffers(offers: DiscoveredOffer[]) {
     }));
 }
 
-function runWriter(offers: DiscoveredOffer[], mode: WriterMode): Promise<AddResult> {
+function runWriter(offers: DiscoveredOffer[], mode: WriterMode, status: SeenStatus = "added"): Promise<AddResult> {
   const clean = cleanOffers(offers);
   if (clean.length === 0) return Promise.resolve({ added: 0 });
 
@@ -63,12 +78,12 @@ process.stdin.setEncoding("utf8");
 process.stdin.on("data", (d) => { input += d; });
 process.stdin.on("end", async () => {
   try {
-    const { offers, mode } = JSON.parse(input);
+    const { offers, mode, status } = JSON.parse(input);
     // LOCAL calendar day, not the UTC one — west of Greenwich, an evening
     // add would otherwise stamp scan-history.tsv's first_seen a day ahead,
     // opening scan.mjs's recheck/cooldown gate a day late for this row (#3070).
     const date = localToday();
-    if (mode !== "pipeline") await appendToScanHistory(offers, date, "added");
+    if (mode !== "pipeline") await appendToScanHistory(offers, date, status);
     if (mode !== "history") await appendToPipeline(offers);
     process.stdout.write(JSON.stringify({ added: offers.length }));
   } catch (e) {
@@ -95,7 +110,7 @@ process.stdin.on("end", async () => {
         resolve({ added: 0, error: err.trim().slice(0, 200) || "writer returned no result" });
       }
     });
-    child.stdin.write(JSON.stringify({ offers: clean, mode }));
+    child.stdin.write(JSON.stringify({ offers: clean, mode, status }));
     child.stdin.end();
   });
 }
@@ -106,9 +121,11 @@ export function addOffersToPipeline(offers: DiscoveredOffer[], opts?: AddOptions
   return runWriter(offers, opts?.skipScanHistory ? "pipeline" : "both");
 }
 
-/** 采集记「见过」（ADR-0021）：只写 scan-history.tsv，绝不碰 pipeline.md。 */
-export function recordSeenOffers(offers: DiscoveredOffer[]): Promise<AddResult> {
-  return runWriter(offers, "history");
+/** 采集记「见过」（ADR-0021）：只写 scan-history.tsv，绝不碰 pipeline.md。
+ *  `status` 区分「发现了」与「发现了但被采集门毙掉」（ADR-0029）——两者都是
+ *  「见过」，合并成一行会丢掉「为什么它不在结果区」。 */
+export function recordSeenOffers(offers: DiscoveredOffer[], status: SeenStatus = "added"): Promise<AddResult> {
+  return runWriter(offers, "history", status);
 }
 
 /** 规范键的「见过」集合 —— data/scan-history.tsv 里出现过的每个职位 URL。
