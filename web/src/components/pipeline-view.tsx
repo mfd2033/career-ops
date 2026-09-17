@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Search, ChevronsUpDown, X, Compass, ArrowRight, RotateCcw, Loader2 } from "lucide-react";
+import { Search, ChevronsUpDown, X, Compass, ArrowRight, RotateCcw, Loader2, SkipForward } from "lucide-react";
 import type { Application, InboxJob } from "@/lib/career-ops";
 import { Badge } from "@/components/ui/badge";
 import { CompanyLogo } from "@/components/company-logo";
@@ -196,6 +196,9 @@ export function PipelineView({
   const [urlMapLoading, setUrlMapLoading] = useState(false);
   const [lastBatchId, setLastBatchId] = useState<string | null>(null);
   const urlMapFetched = useRef(false);
+  // Batch skip (EVALUATED tab only): marks selected rows Discarded, the same
+  // terminal state the report-page single skip writes (CONTEXT.md「跳过」).
+  const [skipBusy, setSkipBusy] = useState(false);
   const selectAllRef = useRef<HTMLInputElement>(null);
 
   // Lazy-fetch the URL map the first time a row is checked. Reset on clear so
@@ -269,6 +272,43 @@ export function PipelineView({
     setUrlMap(null);
     urlMapFetched.current = false;
   }, [selected, urlMap, urlMapLoading, startJob, t]);
+
+  // Row click toggles selection (the blank area outside the checkbox). Links and
+  // the checkbox cell stop propagation so navigation / checkbox toggle are not
+  // hijacked by the row click.
+  const toggleRow = useCallback((n: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(n)) next.delete(n);
+      else next.add(n);
+      return next;
+    });
+  }, []);
+
+  // Batch skip: write Discarded (已放弃) for every selected row, same terminal
+  // state as the report-page single skip. Only offered on the EVALUATED tab, so
+  // every target is currently Evaluated → a legal forward transition. Sequential
+  // POSTs (not concurrent) so they don't fight over the tracker lock (503); a
+  // confirm guards the blast radius of a terminal, non-undoable bulk write.
+  const skipSelected = useCallback(async () => {
+    if (selected.size === 0 || skipBusy) return;
+    const targets = [...selected];
+    if (!window.confirm(t("pipeline.batchSkipConfirm", { count: targets.length }))) return;
+    setSkipBusy(true);
+    try {
+      for (const n of targets) {
+        await fetch("/api/status", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ n, status: "Discarded" }),
+        });
+      }
+      router.refresh();
+      setSelected(new Set());
+    } finally {
+      setSkipBusy(false);
+    }
+  }, [selected, skipBusy, router, t]);
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8 max-sm:pb-24 md:flex md:h-screen md:flex-col">
@@ -360,6 +400,17 @@ export function PipelineView({
           >
             <RotateCcw className="size-3.5" /> {t("pipeline.batchReevaluate", { count: reevaluableCount })}
           </button>
+          {tab === "EVALUATED" && (
+            <button
+              type="button"
+              onClick={skipSelected}
+              disabled={skipBusy}
+              className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1 font-medium text-muted transition-colors hover:border-red-400/50 hover:text-red-400 disabled:cursor-not-allowed disabled:opacity-50 max-sm:min-h-[44px]"
+              title={t("pipeline.batchSkipTitle", { count: selected.size })}
+            >
+              {skipBusy ? <Loader2 className="size-3.5 animate-spin" /> : <SkipForward className="size-3.5" />} {t("pipeline.batchSkip", { count: selected.size })}
+            </button>
+          )}
           <button
             type="button"
             onClick={() => setSelected(new Set())}
@@ -419,8 +470,12 @@ export function PipelineView({
             </thead>
             <tbody className="divide-y divide-border">
               {filtered.map((r, i) => (
-                <tr key={`${r.n}-${i}`} className="group transition-colors hover:bg-surface/40">
-                  <td className="w-10 px-2 py-3">
+                <tr
+                  key={`${r.n}-${i}`}
+                  onClick={() => toggleRow(r.n)}
+                  className="group cursor-pointer transition-colors hover:bg-surface/40"
+                >
+                  <td className="w-10 px-2 py-3" onClick={(e) => e.stopPropagation()}>
                     <input
                       type="checkbox"
                       checked={selected.has(r.n)}
@@ -435,7 +490,11 @@ export function PipelineView({
                     />
                   </td>
                   <td className="px-4 py-3 font-medium">
-                    <Link href={`/pipeline/${r.n}${contextQuery}`} className="flex items-center gap-2.5 transition-colors group-hover:text-brand">
+                    <Link
+                      href={`/pipeline/${r.n}${contextQuery}`}
+                      onClick={(e) => e.stopPropagation()}
+                      className="flex items-center gap-2.5 transition-colors group-hover:text-brand"
+                    >
                       <CompanyLogo name={companyLabel(r)} size={20} />
                       {companyLabel(r)}
                       {(() => {
@@ -451,12 +510,18 @@ export function PipelineView({
                     </Link>
                   </td>
                   <td className="px-4 py-3 text-muted">
-                    <Link href={`/pipeline/${r.n}${contextQuery}`}>{r.role}</Link>
+                    <Link href={`/pipeline/${r.n}${contextQuery}`} onClick={(e) => e.stopPropagation()}>
+                      {r.role}
+                    </Link>
                   </td>
                   <td className="px-4 py-3">
                     {/* score badge → /report/{n}: the direct report jump (Q4b);
                         the row itself still navigates to the full detail page. */}
-                    <Link href={`/report/${r.n}`} className="inline-flex transition-opacity hover:opacity-80">
+                    <Link
+                      href={`/report/${r.n}`}
+                      onClick={(e) => e.stopPropagation()}
+                      className="inline-flex transition-opacity hover:opacity-80"
+                    >
                       <Badge tone={scoreTone(r.score)}>{r.score || "—"}</Badge>
                     </Link>
                   </td>
