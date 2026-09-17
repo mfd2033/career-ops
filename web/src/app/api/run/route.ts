@@ -172,7 +172,19 @@ export async function POST(req: Request) {
 
   after(async () => {
     try {
-      await runPipeline({ runId, kind, input, cliId, model, spec, binPath, recordEnd });
+      await runPipeline({
+        runId,
+        kind,
+        input,
+        cliId,
+        model,
+        spec,
+        binPath,
+        recordEnd,
+        // ADR-0035：体检的目标公司在派发时已解析（同一份就是审计行用的那个），
+        // 直接带进 prompt，省掉 worker 自解析 tracker 的那一步易错查表。
+        checkupCompany: checkupTarget?.ok ? checkupTarget.company : undefined,
+      });
     } catch (e) {
       // Nothing else catches this promise — a crash here must still terminate
       // the run on the bus instead of leaving it open until process shutdown.
@@ -201,6 +213,7 @@ async function runPipeline({
   spec,
   binPath,
   recordEnd,
+  checkupCompany,
 }: {
   runId: string;
   kind: string;
@@ -209,6 +222,9 @@ async function runPipeline({
   model?: string;
   spec: import("@/lib/clis").CliSpec;
   binPath: string;
+  /** ADR-0035: the checkup's resolved target company (absent when the dispatch
+   *  bypassed the report-page pre-flight — the prompt then self-resolves). */
+  checkupCompany?: string;
   /** Server run-ledger recorder (once per run; passed in from POST scope). */
   recordEnd: (status: "done" | "error", msg?: string) => void;
 }) {
@@ -240,7 +256,7 @@ async function runPipeline({
     kind === "evaluate"
       ? readInbox().find((j) => j.url === input)?.postedAt ?? readScanDates().get(input)
       : undefined;
-  const prompt = buildPrompt({ kind, input, memory: readMemory(), today, postedAt, unknownEmployer: readAppConfig().unknownEmployer });
+  const prompt = buildPrompt({ kind, input, memory: readMemory(), today, postedAt, unknownEmployer: readAppConfig().unknownEmployer, checkupCompany });
 
   const isClaude = cliId === "claude";
   // Which tools each kind gets, and the whole claude argv, live in
