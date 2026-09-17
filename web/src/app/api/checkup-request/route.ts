@@ -1,29 +1,32 @@
-// POST /api/checkup-request — 「体检这家」按钮的前置校验（ADR-0027）。
+// POST /api/checkup-request — 「体检这家」按钮的前置校验（ADR-0027，重复与替换语义见 ADR-0033）。
 //
 // The button dispatches a WORKER (kind=checkup) that runs the checkup
-// immediately through the global concurrency pool (ADR-0026's agent-inbox
-// async path is superseded). This route is the pre-flight: target resolution
-// (`?` rows → the recruiting agency from the report's Via; missing Via → 400,
-// the button disables itself) and same-day dedup (pending legacy request OR
-// dispatched worker audit line → 409). The actual dispatch happens when the
-// client calls /api/run with kind=checkup — that route also writes the
-// already-marked agent-inbox audit line (with its runId); the ledger stays
-// append-only. Pure helpers live in @/lib/checkup-request.mjs (node --test
-// locked); this route is the transport layer the repo leaves untested by
-// design (same as /api/status, /api/tracker/delete).
-import fs from "node:fs";
-import path from "node:path";
-import { careerOpsRoot, findCheckupTarget } from "@/lib/career-ops";
-import { hasPendingCheckupRequest } from "@/lib/checkup-request.mjs";
-// 本地日历日（ADR-0027 决议 4 的「当天」= 用户所在的今天，不是 UTC 日——
-// UTC+8 的早上 8 点前 UTC 日还是昨天，会静默放行重复请求）。复用 followups
-// 的既有实现，不另起副本。
-import { localISODate } from "@/lib/followups";
+// immediately through the global concurrency pool. This route is the
+// pre-flight, and it is the ONLY gate (ADR-0026 决议 5「后端设防」；/api/run 不带守卫):
+//   - 目标解析：`?` 行 → 报告 Via 的招聘主体；Via 缺失 → 400（前端据此禁用按钮）。
+//   - 无在跑          → 200 {ok}，前端随后 startJob。
+//   - 有在跑、未带 replace → 409 {running:[{runId,state,startedAt}]}：前端就地展开面板，
+//                        用户裁决「停止」（拿 runId 调 /api/run/cancel）或替换。
+//   - 带 replace: true  → 先停掉同 tracker# 全部在跑体检，等它们真的不在，再 200
+//                        {ok, replaced[, unconfirmed]}（ADR-0033 决议 3/6）。
+//
+// 同日去重（ADR-0027 决议 4）已废止：agent-inbox 只是审计轨迹，不再是闸门——按「当天」
+// 拦会把「当天首次失败就再也重试不了」写死，而真正该拦的「这一行正在体检」它又拦不住。
+//
+// 纯判定住 @/lib/checkup-request.mjs（node --test 锁定）；本路由是传输层，按仓库惯例
+// 不测（同 /api/status、/api/tracker/delete）。
+import { findCheckupTarget } from "@/lib/career-ops";
+import { decideCheckupPreflight, checkupReplaceBody } from "@/lib/checkup-request.mjs";
+import { listLiveCheckups, awaitCheckupGone } from "@/lib/checkup-live.mjs";
+import { cancelRun } from "@/lib/core/run-events";
 
 export const runtime = "nodejs";
 
+/** 替换路径等旧进程退出的上限（ADR-0033 决议 6）：超时不阻断，但如实标 unconfirmed。 */
+const REPLACE_WAIT_MS = 5000;
+
 export async function POST(req: Request) {
-  let body: { n?: string | number };
+  let body: { n?: string | number; replace?: unknown };
   try {
     body = await req.json();
   } catch {
@@ -34,20 +37,31 @@ export async function POST(req: Request) {
     return Response.json({ error: "a numeric application number is required" }, { status: 400 });
   }
 
-  // 体检对象判定：company / `?`→Via / Via 缺失 → 400（前端据此禁用按钮）。
   const target = findCheckupTarget(n);
   if (!target.ok) {
     return Response.json({ error: target.reason }, { status: target.reason === "row-not-found" ? 404 : 400 });
   }
+  const meta = { company: target.company, target: target.source };
 
-  // 当天去重：同 tracker# 已有 pending 请求或已派发的 worker → 409（跨天可复检）。
-  // 「当天」是用户本地日历日（lib/local-today.mjs 纪律），绝非 UTC 日。
-  const today = localISODate();
-  const inboxPath = path.join(careerOpsRoot(), "data", "agent-inbox.md");
-  const inboxText = fs.existsSync(inboxPath) ? fs.readFileSync(inboxPath, "utf8") : "";
-  if (hasPendingCheckupRequest(inboxText, n, today)) {
-    return Response.json({ error: "已在体检队列", deduped: true }, { status: 409 });
+  const decision = decideCheckupPreflight({ live: listLiveCheckups(n), replace: body.replace });
+
+  if (decision.action === "dispatch") {
+    return Response.json({ ok: true, ...meta });
   }
 
-  return Response.json({ ok: true, company: target.company, target: target.source });
+  if (decision.action === "blocked") {
+    // 在跑：把在跑条目的 runId 一并给出 —— 「停止」靠它调 /api/run/cancel，跨标签页/
+    // 跨浏览器也成立（那时本页并没有那张工作器卡片，也没有它的 job id）。
+    return Response.json({ running: decision.running, ...meta }, { status: 409 });
+  }
+
+  // replace：先起等死（此刻条目仍在在跑列表里），再取消，最后收等待结果。顺序不是必需的
+  // （登记表对「已终态但未确认死掉」的条目留有墓碑），但先起等死更直白。
+  const runIds = decision.running.map((r) => r.runId);
+  const waits = runIds.map((id) => awaitCheckupGone(n, id, REPLACE_WAIT_MS));
+  const cancelled = runIds.map((id) => cancelRun(id));
+  const outcomes = await Promise.all(waits);
+  // 只把真的发出取消的那几条列进 replaced：ran 已自行结束的（cancelRun false）不算替换。
+  const replaced = runIds.filter((_, i) => cancelled[i]);
+  return Response.json({ ...checkupReplaceBody({ replaced, outcomes }), ...meta });
 }

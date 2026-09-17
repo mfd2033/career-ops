@@ -12,6 +12,7 @@ import { accumulateTokens, checkupLedgerRowCount, hasNewCompletedReport, isFatal
 import { spawnHeadlessCli, terminateCli } from "@/lib/spawn-cli.mjs";
 import { careerOpsRoot, readMemory, findReportFile, readInbox, readScanDates, findCheckupTarget, rootScript } from "@/lib/career-ops";
 import { checkupDispatchText } from "@/lib/checkup-request.mjs";
+import { registerCheckup, markCheckupRunning, clearCheckup, attachCheckupExit } from "@/lib/checkup-live.mjs";
 import { readAppConfig } from "@/lib/app-config";
 import { resolvePdfPaths, type PdfPaths } from "@/lib/pdf-paths.mjs";
 import { renderAndMarkPdf, writeCvHtml, pdfRunOutcome } from "@/lib/pdf-render.mjs";
@@ -120,6 +121,10 @@ export async function POST(req: Request) {
   const runId = randomUUID();
   const startedAt = Date.now();
   registerRun(runId);
+  // 体检在跑登记（ADR-0033 决议 2）：登记必须在进入并发池**之前**（此时是 queued），
+  // 也必须早于 runId 回到客户端——它既是「这一行此刻有没有体检在跑」的唯一权威（前哨
+  // 据此拦下按钮），也是「停止」需要的 runId 来源（跨标签页/跨浏览器也成立）。
+  if (kind === "checkup") registerCheckup(String(input), runId);
 
   // Server-side run ledger (B4-class observability): a terminated run must be
   // visible even when no UI card exists (API-dispatched runs, another tab).
@@ -172,6 +177,10 @@ export async function POST(req: Request) {
       const msg = `Worker crashed unexpectedly: ${e instanceof Error ? e.message : String(e)}`.slice(0, 200);
       publish(runId, { type: "error", msg });
       recordEnd("error", msg);
+      // 体检登记兜底：正常路径由 runPipeline 的 close()/取消处理器清除，这里只覆盖
+      // close() 自身抛错的情形（那时进程可能还活着，所以不声称 processGone —
+      // ADR-0033 决议 6）。
+      if (kind === "checkup") clearCheckup(String(input), runId);
       completeRun(runId);
     }
   });
@@ -290,6 +299,9 @@ async function runPipeline({
   // (null → cancel just dequeues and closes the run) or running (→ terminate
   // the child + release both the token and the pool slot).
   let child: ReturnType<typeof spawnHeadlessCli> | null = null;
+  // 子进程的 'close' / 'error' 已到（stdio 全关，不可能再写文件）。体检登记的等死
+  // 信号与 close() 的终态记账都依据它区分「run 终态」与「进程真的不在」（ADR-0033 决议 6）。
+  let childClosed = false;
   let writeToken: number | null = null;
   let poolReleased = false;
   const releasePoolOnce = () => {
@@ -324,6 +336,14 @@ async function runPipeline({
       releaseTrackerWrite(writeToken);
     }
   };
+  // 体检在跑登记的终态清除（ADR-0033 决议 2/6）——幂等，close() 与取消路径共用。
+  // processGone 只在「子进程的 'close' 已到」或「从未 spawn」时为真：taskkill 是
+  // fire-and-forget，取消一个正在跑的 run 时进程还在喘气，此刻不能假装它已经死了，
+  // 登记表会把条目留在墓碑里继续等退出信号——替换路径才不会在旧 worker 还能写文件的
+  // 窗口里放行新的。
+  const clearCheckupLiveOnce = () => {
+    if (kind === "checkup") clearCheckup(input, runId, { processGone: child === null || childClosed });
+  };
   // ADR-0027 账本观测：最后 ~1200 字符原始 stderr（去 ANSI），随 error 终态
   // 入账本——通用门文案之下的真实根因线索。由 stderr data handler 更新。
   let stderrTail = "";
@@ -343,6 +363,7 @@ async function runPipeline({
     if (killer) clearTimeout(killer);
     releaseWriteTokenOnce();
     releasePoolOnce();
+    clearCheckupLiveOnce();
     completeRun(runId);
   };
 
@@ -379,6 +400,7 @@ async function runPipeline({
       poolHandle.cancel();
       releasePoolOnce();
     }
+    clearCheckupLiveOnce();
     publish(runId, { type: "error", msg: "Cancelled" });
     completeRun(runId);
   });
@@ -493,6 +515,9 @@ async function runPipeline({
         // and completed the run — nothing to do here.
         return;
       }
+      // 拿到槽位 → 登记表从 queued 翻成 running（ADR-0033 决议 2：排队中同样算「在
+      // 体检」，它也有权拦下按钮、也同样能被取消）。
+      if (kind === "checkup") markCheckupRunning(input, runId);
       // Only NOW, with a slot in hand, hold the tracker-write token (ADR-0014
       // Q4 — a long queue must not keep n write tokens held) and spawn the CLI.
       // Tracker-mutating runs guard the row-delete race (tracker.mjs delete
@@ -503,6 +528,20 @@ async function runPipeline({
       // reports a generic auth-flavoured error (#1973 fixed it via an inline
       // stdio:["ignore",…], generalized into spawnHeadlessCli).
       child = spawnHeadlessCli(binPath, args, { cwd: careerOpsRoot(), env: process.env });
+      // 子进程真的不在了的信号：'close'（stdio 全关，不可能再写文件——替换路径等的
+      // 就是它）与 'error'（spawn 失败，进程从未存在）。体检把它交给在跑登记表当等死
+      // 信号（ADR-0033 决议 6）；childClosed 同时供 clearCheckupLiveOnce 区分
+      // 「run 终态」与「进程真的不在」。
+      const proc = child;
+      const exited = new Promise<void>((resolve) => {
+        const markExited = () => {
+          childClosed = true;
+          resolve();
+        };
+        proc.once("close", markExited);
+        proc.once("error", markExited);
+      });
+      if (kind === "checkup") attachCheckupExit(input, runId, exited);
       if (kind === "pdf") logEvalTiming(String(input), "start");
       // Decode once on the stream, not per chunk: Buffer#toString() decodes each
       // chunk independently, so a boundary inside a multi-byte UTF-8 sequence

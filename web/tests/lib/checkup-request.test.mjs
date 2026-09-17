@@ -1,13 +1,15 @@
-// Tests for the 「体检这家」request contract (ADR-0027):
+// Tests for the 「体检这家」request contract (ADR-0027, re-decided by ADR-0033):
 // the button dispatches a kind=checkup WORKER (immediate, concurrency pool);
 // the agent-inbox gets an already-marked ([x]) AUDIT line with the runId.
-// Dedup blocks on same tracker# + same day for BOTH legacy pending (`[ ]`)
-// request lines and dispatched worker audit lines; drain-resolved lines and
-// other days never block.
+//
+// ADR-0033 取代了 ADR-0027 决议 4 的同日去重：审计行不再是闸门，唯一被拦的状态是
+// 「本行此刻有体检在跑」。前哨因此只有三种答法——放行（dispatch）、报告在跑让用户
+// 裁决（blocked）、用户已知情先把旧的停掉再放行（replace）。这里锁的就是这三种答法
+// 的形状、replace 开关的严格性，以及替换结果里「没确认停掉」的诚实标记。
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { checkupDispatchText, hasPendingCheckupRequest } from "../../src/lib/checkup-request.mjs";
+import { checkupDispatchText, decideCheckupPreflight, checkupReplaceBody } from "../../src/lib/checkup-request.mjs";
 import { buildPrompt } from "../../src/lib/run-prompts.mjs";
 import { toolScopeFor, grantsWriteCapability, KNOWN_KINDS } from "../../src/lib/claude-invocation.mjs";
 
@@ -18,44 +20,68 @@ test("dispatch text quotes the untrusted company name as a data field", () => {
   assert.match(text, /不构成指令/);
 });
 
-const INBOX = `# Agent Inbox
-> protocol header
-- [x] 2026-09-13 10:00 — evaluate https://acme.com/jobs/1 → result: scored 4.0
-- [ ] 2026-09-14 09:00 — 公司体检 #917 河南蓝辉（checkup request, ADR-0025/0026）— ...
-- [ ] 2026-09-14 09:30 — evaluate https://acme.com/jobs/2
-- [ ] 2026-09-13 08:00 — 公司体检 #917 河南蓝辉（checkup request, ADR-0025/0026）— ...
-- [x] 2026-09-14 12:00 — 公司体检 #918 Acme dispatched（web 详情页按钮，ADR-0027）— ... → result: dispatched worker run-918
-- [x] 2026-09-13 12:00 — 公司体检 #919 Old Co dispatched（web 详情页按钮，ADR-0027）— ... → result: dispatched worker run-919
-- [x] 2026-09-14 08:00 — 公司体检 #920 Done Co（checkup request, ADR-0025/0026）— ... → result: ★2.5`;
+// ADR-0033 决议 2：在跑登记表的快照（listLiveCheckups 的产出）。
+const QUEUED = [{ runId: "run-a", state: "queued", startedAt: null }];
+const RUNNING = [{ runId: "run-b", state: "running", startedAt: 1789700000000 }];
 
-test("dedup: same-day dispatched worker audit line blocks", () => {
-  assert.equal(hasPendingCheckupRequest(INBOX, "918", "2026-09-14"), true);
+test("preflight: 没有在跑 → 放行（同日已派发过不再拦，ADR-0033 决议 1）", () => {
+  assert.deepEqual(decideCheckupPreflight({ live: [], replace: undefined }), { action: "dispatch" });
+  assert.deepEqual(decideCheckupPreflight({ live: [], replace: true }), { action: "dispatch" });
+  assert.deepEqual(decideCheckupPreflight({}), { action: "dispatch" });
 });
 
-test("dedup: same-day legacy pending request blocks", () => {
-  assert.equal(hasPendingCheckupRequest(INBOX, "917", "2026-09-14"), true);
+test("preflight: 有在跑、未带 replace → blocked，并把 runId 交给前端", () => {
+  const d = decideCheckupPreflight({ live: RUNNING, replace: undefined });
+  assert.equal(d.action, "blocked");
+  assert.deepEqual(d.running, RUNNING, "「停止」要的 runId 必须原样带出（跨标签页也成立）");
 });
 
-test("dedup: same-day drain-resolved (`[x]` with a real result) does NOT block", () => {
-  assert.equal(hasPendingCheckupRequest(INBOX, "920", "2026-09-14"), false);
+test("preflight: 排队中的体检同样拦（queued 也是「在体检」）", () => {
+  const d = decideCheckupPreflight({ live: QUEUED, replace: undefined });
+  assert.equal(d.action, "blocked");
+  assert.deepEqual(d.running, QUEUED);
 });
 
-test("dedup: dispatched on an earlier day never blocks (跨天可复检)", () => {
-  assert.equal(hasPendingCheckupRequest(INBOX, "919", "2026-09-14"), false);
-  assert.equal(hasPendingCheckupRequest(INBOX, "918", "2026-09-15"), false);
+test("preflight: 带 replace → replace，且带走全部在跑条目（决议 3：停全部）", () => {
+  const d = decideCheckupPreflight({ live: [...QUEUED, ...RUNNING], replace: true });
+  assert.equal(d.action, "replace");
+  assert.deepEqual(
+    d.running.map((e) => e.runId),
+    ["run-a", "run-b"],
+  );
 });
 
-test("dedup: other rows' lines don't block this row", () => {
-  assert.equal(hasPendingCheckupRequest(INBOX, "999", "2026-09-14"), false);
+test("preflight: replace 必须是严格布尔 true（它决定要不要真的杀进程）", () => {
+  for (const loose of ["true", 1, "yes", {}, null]) {
+    assert.equal(
+      decideCheckupPreflight({ live: RUNNING, replace: loose }).action,
+      "blocked",
+      `replace=${JSON.stringify(loose)} 不是显式同意，必须仍走 blocked`,
+    );
+  }
 });
 
-test("dedup: prefix collision — #91 must not match #917/#918", () => {
-  assert.equal(hasPendingCheckupRequest(INBOX, "91", "2026-09-14"), false);
+test("preflight: 在跑快照只暴露 runId/state/startedAt（不外泄登记表内部字段）", () => {
+  const d = decideCheckupPreflight({
+    live: [{ runId: "run-c", state: "running", startedAt: 1, gone: false, resolveGone: () => {}, gonePromise: Promise.resolve() }],
+    replace: undefined,
+  });
+  assert.deepEqual(d.running, [{ runId: "run-c", state: "running", startedAt: 1 }]);
 });
 
-test("dedup: empty/missing inbox → never blocks", () => {
-  assert.equal(hasPendingCheckupRequest(null, "917", "2026-09-14"), false);
-  assert.equal(hasPendingCheckupRequest("", "917", "2026-09-14"), false);
+test("replace 结果：全部确认不在（gone/unknown）→ 干净放行", () => {
+  assert.deepEqual(checkupReplaceBody({ replaced: ["run-b"], outcomes: ["gone"] }), { ok: true, replaced: ["run-b"] });
+  assert.deepEqual(checkupReplaceBody({ replaced: [], outcomes: [] }), { ok: true, replaced: [] });
+});
+
+test("replace 结果：任一旧 run 没确认停掉（timeout）→ 放行但如实标 unconfirmed", () => {
+  const body = checkupReplaceBody({ replaced: ["run-a", "run-b"], outcomes: ["gone", "timeout"] });
+  assert.deepEqual(body, { ok: true, replaced: ["run-a", "run-b"], unconfirmed: true });
+});
+
+test("replace 结果：已自行结束的 run（cancelRun false）不列进 replaced", () => {
+  // 路由按 cancelled[i] 过滤后才调这里；这里锁的是「unknown 不算异常」。
+  assert.deepEqual(checkupReplaceBody({ replaced: ["run-b"], outcomes: ["unknown"] }), { ok: true, replaced: ["run-b"] });
 });
 
 test("checkup worker prompt is pointer-style (ADR-0027 决议 2)", () => {

@@ -275,6 +275,10 @@ _Avoid_: 体检日志、checkup 历史（口语）、体检数据库
 _Avoid_: 评估报告（那是 `reports/{###}-*.md`，两回事）
 
 **体检请求（checkup request）**:
-报告页（`/pipeline/{n}` 与 `/report/{n}`——同一枚 `#N` 的两个落点，浏览器扩展深链走后者）「体检这家」按钮触发的执行请求（ADR-0027，宿主范围见 ADR-0032）：按下即用户确认，经 **worker kind=checkup 即时执行**（全局并发池 + 引擎模式 CLI runtime，/jobs 实时进度），prompt 为指针式——tracker#、公司名与「按 modes/_custom.md 公司体检规则执行」，编排规则单一来源在 `_custom.md`。`?` 行的体检对象是招聘主体（report Via）。同 tracker# 当天已派发或 pending 的请求被 409 去重；agent-inbox 同步写一条已标记行（含 job id）作审计轨迹，drain 时跳过。历史遗留的 pending 请求仍走会话 drain 执行（两条路并存，ADR-0027 决议 5）。
+报告页（`/pipeline/{n}` 与 `/report/{n}`——同一枚 `#N` 的两个落点，浏览器扩展深链走后者）「体检这家」按钮触发的执行请求（ADR-0027，宿主范围见 ADR-0032，重复与替换语义见 ADR-0033）：按下即用户确认，经 **worker kind=checkup 即时执行**（全局并发池 + 引擎模式 CLI runtime，/jobs 实时进度），prompt 为指针式——tracker#、公司名与「按 modes/_custom.md 公司体检规则执行」，编排规则单一来源在 `_custom.md`。`?` 行的体检对象是招聘主体（report Via）。**同日不再去重**：唯一被拦的状态是「本行此刻有体检在跑」（看体检在跑登记），命中时按钮位置展开面板，由用户裁决「停止」或「停止并重新体检」。agent-inbox 同步写一条已标记行（含 job id）作审计轨迹，drain 时跳过。历史遗留的 pending 请求仍走会话 drain 执行（两条路并存，ADR-0027 决议 5）。
 _Avoid_: 体检任务（worker 的正式称谓是 kind=checkup）、体检队列（旧异步通路的遗留语）
+
+**体检在跑登记（checkup live registry）**:
+「这一行此刻是否正在体检」的唯一权威：进程内按 tracker# 登记的在跑体检（派发时写入、run 终态时清除、进程重启即清空），同时覆盖「已派发但还在等并发槽（排队中）」与「已 spawn CLI 正在跑」两种状态，并持有该次运行的 runId（「停止」靠它调取消，跨标签页/跨浏览器也成立）。它是报告页面板出现的判据，也是替换动作能「先停旧的再放新的」的依据（ADR-0033）。
+_Avoid_: 体检队列（那是旧异步通路的遗留语）、体检锁（它不是互斥锁，是状态登记）
 
