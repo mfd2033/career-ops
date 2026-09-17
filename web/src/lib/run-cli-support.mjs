@@ -478,3 +478,56 @@ export function persistRunOutcome({ kind, cleanExit, sawError, emittedText, pers
   }
   return { ok: true };
 }
+
+/** 失败证据的候选行（闭集，声明处即权威）。为什么要挑：本机这类失败——代理层的
+ *  `API Error: Content block not found`、拒绝语「抱歉，内容可能包含敏感信息…」——走的是
+ *  stdout 的 assistant text，而 ADR-0027 的 stderrTail 在本机账本里 0 条命中，信号根本
+ *  不在那条通道上。不挑行的话，十几次搜索的空结果与工具回显会把死因淹掉。 */
+const FAILURE_EVIDENCE_RE = /API Error|敏感|refus|rate[ -]?limit|overloaded|\bquota\b|\bError:|timeout|ECONN/i;
+
+/**
+ * 从 agent 的可见正文里挑出失败证据（ADR-0034 决议 2）。
+ *
+ * 相邻重复折叠成 `×N`（#119 那次同一句 `API Error` 出现了 26 次，逐行抄 26 遍等于没有
+ * 信息）；超上限时保留**靠后**的行——离退出最近的几行才是死因。纯函数：调用方累积正文，
+ * 何时入账本由 route.ts 决定。
+ *
+ * @param {string | null | undefined} text - agent 的可见正文（stdout 侧累积）
+ * @param {{maxLines?: number, maxChars?: number}} [opts]
+ * @returns {string} 证据串；无命中返回空串（调用方据此不加这一段）
+ */
+export function failureEvidence(text, { maxLines = 6, maxChars = 600 } = {}) {
+  if (typeof text !== "string" || !text) return "";
+  const folded = [];
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line || !FAILURE_EVIDENCE_RE.test(line)) continue;
+    const last = folded[folded.length - 1];
+    if (last && last.line === line) last.count += 1;
+    else folded.push({ line, count: 1 });
+  }
+  if (folded.length === 0) return "";
+  return folded
+    .slice(-Math.max(1, maxLines))
+    .map((e) => (e.count > 1 ? `${e.line} ×${e.count}` : e.line))
+    .join(" ｜ ")
+    .slice(0, maxChars);
+}
+
+/**
+ * 失败终态的账本 msg（ADR-0034 决议 3）：一句话原因 + 可选的两段证据。
+ *
+ * 上限 800（原 300）：checkup 的门禁文案本身就 175 字，300 的老上限会把证据整段截掉——
+ * 不提升上限，补丁等于没打。stderr 段取尾部 200 字，保证 stdout 那段（真正的信号所在）
+ * 不会被挤掉；两段谁有算谁。整体仍是纯文本、单行、无换行（TSV/JSONL 与 UI 都是单行渲染）。
+ *
+ * @param {string | null | undefined} message - 门禁/CLI 的一句话原因
+ * @param {{stderrTail?: string, stdoutTail?: string, maxChars?: number}} [opts]
+ * @returns {string}
+ */
+export function failureLedgerMsg(message, { stderrTail, stdoutTail, maxChars = 800 } = {}) {
+  const parts = [String(message ?? "").trim()];
+  if (stderrTail) parts.push(`stderr: ${String(stderrTail).slice(-200)}`);
+  if (stdoutTail) parts.push(`输出尾部: ${stdoutTail}`);
+  return parts.filter(Boolean).join(" ｜ ").slice(0, maxChars);
+}

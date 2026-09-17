@@ -13,6 +13,8 @@ import {
   accumulateTokens,
   codexStreamArgs,
   completedReportNames,
+  failureEvidence,
+  failureLedgerMsg,
   hasNewCompletedReport,
   isFatalClaudeStderr,
   isFatalCodexStderr,
@@ -552,4 +554,76 @@ test("the fallback still catches every real failure it caught before", () => {
   ]) {
     assert.equal(isFatalGenericStderr(line), true, `real failure no longer detected: ${line}`);
   }
+});
+
+// ── ADR-0034：失败终态的证据尾巴 ────────────────────────────────────────────
+// 原始症状（#119 悠桦林，2026-09-17）：体检 worker 零产物收场，账本里只有门禁那一句话，
+// 而真因躺在 stdout 的 agent 正文里——26× `API Error: Content block not found` 与一条
+// 代理拒绝语。下面用那次会话的真实文本形状锁住规则：挑行 / 相邻折叠 / 靠后保留 / 上限。
+
+const REAL_119_TAIL = [
+  "Let me try different search queries to find information about 悠桦林.",
+  "Web search results for query: 悠桦林 公司信息 规模",
+  "REMINDER: You MUST include the sources above in your response",
+  "API Error: Content block not found",
+  "API Error: Content block not found",
+  "API Error: Content block not found",
+  "抱歉，内容可能包含敏感信息，请修改后重新发送。",
+].join("\n");
+
+test("failureEvidence: 挑出错误/拒绝行，相邻重复折叠成 ×N，普通正文不入账本", () => {
+  const ev = failureEvidence(REAL_119_TAIL);
+  assert.match(ev, /API Error: Content block not found ×3/);
+  assert.match(ev, /敏感/);
+  assert.doesNotMatch(ev, /Web search results/);
+  assert.doesNotMatch(ev, /REMINDER/);
+});
+
+test("failureEvidence: 无命中 → 空串（调用方据此不加这一段）", () => {
+  assert.equal(failureEvidence("一切正常，正在写入报告"), "");
+  assert.equal(failureEvidence(""), "");
+  assert.equal(failureEvidence(undefined), "");
+  assert.equal(failureEvidence(null), "");
+});
+
+test("failureEvidence: 超上限保留靠后的行（离退出最近）", () => {
+  const text = ["API Error: one", "Error: two", "timeout three", "quota four", "rate limit five", "ECONN six", "Error: seven"].join("\n");
+  const ev = failureEvidence(text, { maxLines: 3 });
+  assert.match(ev, /ECONN six/);
+  assert.match(ev, /Error: seven/);
+  assert.doesNotMatch(ev, /API Error: one/);
+});
+
+test("failureEvidence: 容忍 CRLF 与空行", () => {
+  assert.match(failureEvidence("ok\r\n\r\nAPI Error: x\r\n"), /API Error: x/);
+});
+
+test("failureEvidence: 非相邻的同一行不折叠，整体字数上限生效", () => {
+  const ev = failureEvidence(["API Error: x", "Error: y", "API Error: x"].join("\n"));
+  assert.equal((ev.match(/API Error: x/g) ?? []).length, 2);
+  assert.ok(failureEvidence(`API Error: ${"z".repeat(2000)}`, { maxChars: 120 }).length <= 120);
+});
+
+test("failureLedgerMsg: 一句话原因 + 输出尾部", () => {
+  const msg = failureLedgerMsg("This checkup finished without adding a row to the checkup ledger.", {
+    stdoutTail: failureEvidence(REAL_119_TAIL),
+  });
+  assert.match(msg, /^This checkup finished/);
+  assert.match(msg, /｜ 输出尾部: /);
+  assert.match(msg, /API Error: Content block not found ×3/);
+  assert.ok(msg.length <= 800);
+});
+
+test("failureLedgerMsg: stderr 段只取尾部 200 字，不挤掉 stdout 证据", () => {
+  const msg = failureLedgerMsg("boom", { stderrTail: `${"x".repeat(500)}TAIL_MARKER`, stdoutTail: "API Error: y" });
+  assert.match(msg, /TAIL_MARKER/);
+  assert.match(msg, /输出尾部: API Error: y/);
+  assert.doesNotMatch(msg, /x{300}/);
+});
+
+test("failureLedgerMsg: 只有原因时逐字保留（ADR-0030 门禁文案不漂移）；整体仍受 800 上限约束", () => {
+  const one = "This evaluation didn't save a report, so it's not in your tracker. Full evaluation is verified on Claude Code.";
+  assert.equal(failureLedgerMsg(one, {}), one);
+  assert.equal(failureLedgerMsg(one), one);
+  assert.ok(failureLedgerMsg("m".repeat(2000), {}).length <= 800);
 });

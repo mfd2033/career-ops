@@ -8,7 +8,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { after } from "next/server";
 import { resolveCli } from "@/lib/clis";
-import { accumulateTokens, checkupLedgerRowCount, hasNewCompletedReport, isFatalGenericStderr, persistRunOutcome, PERSISTENCE_GATED_KINDS, withModelFlag } from "@/lib/run-cli-support.mjs";
+import { accumulateTokens, checkupLedgerRowCount, failureEvidence, failureLedgerMsg, hasNewCompletedReport, isFatalGenericStderr, persistRunOutcome, PERSISTENCE_GATED_KINDS, withModelFlag } from "@/lib/run-cli-support.mjs";
 import { spawnHeadlessCli, terminateCli } from "@/lib/spawn-cli.mjs";
 import { careerOpsRoot, readMemory, findReportFile, readInbox, readScanDates, findCheckupTarget, rootScript } from "@/lib/career-ops";
 import { checkupDispatchText } from "@/lib/checkup-request.mjs";
@@ -147,7 +147,9 @@ export async function POST(req: Request) {
         status,
         startedAt,
         finishedAt: Date.now(),
-        msg: msg ? String(msg).slice(0, 300) : undefined,
+        // 800（原 300）：门禁那一句 checkup 文案就 175 字，300 会把 ADR-0034 的证据
+        // 段整段截掉——上限不抬，补丁等于没打。
+        msg: msg ? String(msg).slice(0, 800) : undefined,
       });
     } catch (e) {
       console.error("[run-ledger] append failed:", e instanceof Error ? e.message : e);
@@ -347,12 +349,16 @@ async function runPipeline({
   // ADR-0027 账本观测：最后 ~1200 字符原始 stderr（去 ANSI），随 error 终态
   // 入账本——通用门文案之下的真实根因线索。由 stderr data handler 更新。
   let stderrTail = "";
+  // ADR-0034：stdout 侧的同类线索。本机实测失败信号（代理层的 `API Error: …`、拒绝语）
+  // 走的是 agent 可见正文，而 stderrTail 至今 0 条命中——两条通道都要有原料。
+  let stdoutTail = "";
   const send = (obj: { type: string; [key: string]: unknown }) => {
     if (terminal) return;
     publish(runId, obj);
     if (obj.type === "done") recordEnd("done");
     else if (obj.type === "error")
-      recordEnd("error", String(obj.msg ?? "") + (stderrTail ? ` ｜ stderr: ${stderrTail}` : ""));
+      // 证据组装抽成纯函数（ADR-0034 决议 3）：一句话原因 ｜ stderr ｜ 输出尾部。
+      recordEnd("error", failureLedgerMsg(String(obj.msg ?? ""), { stderrTail, stdoutTail: failureEvidence(stdoutTail) }));
   };
   const keepalive = setInterval(() => send({ type: "keepalive" }), 10_000);
   const close = () => {
@@ -500,7 +506,11 @@ async function runPipeline({
     };
     const sendAgentText = (text: string) => {
       const visible = cvFilter ? cvFilter.push(text) : text;
-      if (visible) send({ type: "text", text: visible });
+      if (!visible) return;
+      // 失败证据的原料（ADR-0034）：尾部留 4k 字符供筛选。pdf 的 <<cv-html>> 信封已被
+      // cvFilter 挡在上面，不会进这里（否则尾巴会变成一段 CV 正文）。
+      stdoutTail = (stdoutTail + visible).slice(-4000);
+      send({ type: "text", text: visible });
     };
 
     try {
