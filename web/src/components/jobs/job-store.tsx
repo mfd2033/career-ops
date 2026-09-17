@@ -334,13 +334,14 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   // Zombie-card reconciliation (ADR-0031): a card whose /api/events terminal
-  // event was missed (tab sleep / dropped connection) stays "running" forever,
-  // and /jobs's "card wins" merge then shadows the server ledger's real
-  // outcome — the #27 checkup spun 30+ minutes on screen after erroring at 88
-  // seconds. Poll the TERMINATED-run ledger at low frequency and let
-  // reconcileJobsWithLedger cure stale cards; live cards (accumulator present)
-  // stay owned by the SSE path. No co-job-done / runs/save side effects here:
-  // a reconciled card has no trustworthy local accumulation.
+  // event was missed (tab sleep / dropped connection — or the channel dropped
+  // right at settle, where the reconnect replay no longer covers a settled
+  // run, #73) stays "running" forever, and /jobs's "card wins" merge then
+  // shadows the server ledger's real outcome. Poll the TERMINATED-run ledger
+  // at low frequency and let reconcileJobsWithLedger cure stale cards once
+  // their ledger record is older than the grace window. No co-job-done /
+  // runs/save side effects here: a reconciled card has no trustworthy local
+  // accumulation.
   useEffect(() => {
     const reconcile = async () => {
       try {
@@ -350,8 +351,8 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
         const runs = Array.isArray(data.runs) ? data.runs : [];
         setJobs((js) => {
           const r = reconcileJobsWithLedger(js, runs as never[], {
-            isLive: (id: string) => accs.current.has(id),
             now: Date.now(),
+            graceMs: 30000, // the live SSE path delivers within ~1s of settle — never races this
             doneLabel: t("jobs.stepDone"),
             errorLabel: t("jobs.stepError"),
           });

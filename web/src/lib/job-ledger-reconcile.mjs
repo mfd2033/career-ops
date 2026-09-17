@@ -9,26 +9,33 @@
 // THE RULE: a card that (a) claims running/queued — or is a restored card that
 // was GUESS-marked interrupted (status "error" + `interruptedAt`, set by
 // job-store's localStorage restore, indistinguishable from a real error
-// without the marker) — plus (b) holds a runId, (c) has NO live event
-// accumulator (isLive(id) === false — the SSE path can no longer deliver for
-// it), and (d) whose runId appears in the ledger with a terminal status, IS
+// without the marker) — plus (b) holds a runId, and (c) whose runId appears in
+// the ledger with a terminal record that settled at least `graceMs` ago, IS
 // stale: the ledger wins. The ledger only ever records TERMINATED runs
 // (run-ledger.mjs), so "card claims active + ledger says terminal" can only
-// mean the card is out of date — no false-positive surface.
+// mean the card is out of date.
+//
+// WHY A GRACE WINDOW INSTEAD OF AN isLive SKIP (2026-09-17 amendment, #73):
+// v1 skipped cards whose event accumulator was still present, assuming a
+// connected channel always delivers the terminal event. It doesn't — if the
+// SSE channel drops right at settle, the reconnect replay only covers LIVE
+// runs, the settled run's done/error event is lost forever, and the orphaned
+// accumulator then blocks reconciliation indefinitely. The live path delivers
+// within ~1s of settle, so a grace window (default 30s) never races it.
 //
 // Plain .mjs (same pattern as run-ledger.mjs): unit-tested with node --test,
-// no TypeScript build step. `isLive` and `now` are injected for purity.
+// no TypeScript build step. `now` and `graceMs` are injected for purity.
 
 /**
  * Reconcile local job cards against the server run ledger.
  * @param {Array<{id: string, runId?: string, status: string, interruptedAt?: number, steps: Array<{kind: string, label: string, ts: number}>, text: string, endedAt?: number, [k: string]: unknown}>} jobs
  * @param {Array<{id: string, status: "done"|"error", finishedAt: number, msg?: string}>} ledgerRuns
  *        — as produced by readRunHistory(): newest first.
- * @param {{isLive: (id: string) => boolean, now: number, doneLabel: string, errorLabel: string}} opts
+ * @param {{now: number, graceMs?: number, doneLabel: string, errorLabel: string}} opts
  * @returns {{jobs: Array, healed: string[]}} — healed = ids of cured zombie cards.
  *          Unchanged cards pass through by identity so React sees minimal churn.
  */
-export function reconcileJobsWithLedger(jobs, ledgerRuns, { isLive, now, doneLabel, errorLabel }) {
+export function reconcileJobsWithLedger(jobs, ledgerRuns, { now, graceMs = 30000, doneLabel, errorLabel }) {
   // Newest-first array: the FIRST record per run id is the authoritative one.
   const byRunId = new Map();
   for (const rec of ledgerRuns) {
@@ -43,9 +50,9 @@ export function reconcileJobsWithLedger(jobs, ledgerRuns, { isLive, now, doneLab
     const isStale =
       j.status === "running" || j.status === "queued" || (j.status === "error" && j.interruptedAt != null);
     if (!j.runId || !isStale) return j;
-    if (isLive(j.id)) return j; // live SSE path owns this card's terminal state
     const rec = byRunId.get(j.runId);
-    if (!rec) return j; // not settled yet (or never dispatched) — hands off
+    // Fresh record: give the live SSE path its race window first.
+    if (!rec || now - rec.finishedAt < graceMs) return j;
     const isError = rec.status === "error";
     const label = isError ? (rec.msg || errorLabel) : doneLabel;
     healed.push(j.id);

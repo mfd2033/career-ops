@@ -6,9 +6,9 @@
 
 ## Decision
 
-1. **对账规则（纯函数抽缝）：** 卡片同时满足「状态 running/queued，或带 `interruptedAt` 标记的猜测性 error（localStorage restore 把遗留 running 卡标记为 interrupted 时打的戳——无此标记，猜测性 error 与 SSE 真实投递的 error 无法区分，而后者是终态不可改）· 有 runId · 无 live 事件 accumulator（`accs` 中不存在，即事件通道已不可能再为它投递）· 账本同 runId 存在终态记录」时，账本终态胜出：卡片改为 done/error，`endedAt` 取账本 `finishedAt`，失败文案取账本 `msg`，治愈时清除 `interruptedAt`。服务器账本只记 TERMINATED run——「卡片声称活跃 + 账本已终态」矛盾时卡片必然过时，此规则无误伤面。反之，账本无记录时卡片不动（run 可能仍在跑，账本还没写；猜测卡维持 interrupted 原状）。
+1. **对账规则（纯函数抽缝）：** 卡片同时满足「状态 running/queued，或带 `interruptedAt` 标记的猜测性 error（localStorage restore 把遗留 running 卡标记为 interrupted 时打的戳——无此标记，猜测性 error 与 SSE 真实投递的 error 无法区分，而后者是终态不可改）· 有 runId · 账本同 runId 存在终态记录，且该记录已落盘超过宽限窗（30 秒）」时，账本终态胜出：卡片改为 done/error，`endedAt` 取账本 `finishedAt`，失败文案取账本 `msg`，治愈时清除 `interruptedAt`。服务器账本只记 TERMINATED run——「卡片声称活跃 + 账本已终态」矛盾时卡片必然过时，此规则无误伤面。反之，账本无记录或记录尚新时卡片不动（run 可能仍在跑或 live 事件尚在投递竞态窗口内）。
 2. **接线点在 `JobsProvider`（job-store），不在 `/jobs` 页。** 已有 3 秒 `/api/active-runs` 轮询证明 store 级轮询可行；对账放在 store 让所有消费面（/jobs、pipeline 徽章、浮层）一起受益。轮询 `/api/runs/history` 低频（15 秒）即可——僵尸对账不追求实时，只为自愈。`/jobs` 页的「card wins」合并策略保持不变，在对账存在后它是安全的。
-3. **与 live 事件路径互斥：** `accs` 中仍有 accumulator 的卡片（本标签页事件通道可达）交给 SSE 投递终态，对账跳过——同一终态两路各投一次没有正确性问题，但跳过可避免 replay 情形下重复 step 追加。刚 startJob、POST 尚未返回 runId 的卡片天然不满足条件，无需特判。
+3. **与 live 事件路径的竞态用宽限窗解决（2026-09-17 修正，#73 实测）：** v1 用「`accs` 中仍有 accumulator 即跳过」保护 live 路径，但假设不成立——SSE 通道恰在 run 收尾时断线，重连 replay 只覆盖 live run，已终结 run 的 done/error 事件永久丢失，而孤儿 accumulator 会永久挡住对账（#73 深圳国超：worker 10 分钟成功落盘三项交付、账本记 done，卡片却继续转圈）。改为 30 秒宽限窗：live 路径在收尾后约 1 秒内投递，从不与 30 秒竞态；超窗即视为事件已丢，账本胜出。刚 startJob、POST 尚未返回 runId 的卡片天然不满足条件，无需特判。
 4. **回归测试锁纯函数**（ADR-0030 同款教训：内联在 tsx 里没有可断言的测试缝）：`reconcileJobsWithLedger()` 抽成 `web/src/lib/job-ledger-reconcile.mjs` 纯 .mjs，`web/tests/lib/job-ledger-reconcile.test.mjs` 覆盖：僵尸 running 卡片被账本 error 治愈（#27 场景）、done 同理、账本无记录不动、live accumulator 存在时不动、queued 卡片同理、无 runId 卡片永不参与对账、interrupted 猜测卡被账本升级且真实 error 永不被改、同 runId 多条记录取最新。
 
 ## Consequences

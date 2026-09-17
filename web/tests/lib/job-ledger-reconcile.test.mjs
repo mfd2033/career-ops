@@ -36,11 +36,9 @@ const zombie = (id, runId, status = "running") => ({
   startedAt: NOW - 60000,
 });
 
-const neverLive = () => false;
-
 test("reconcile: the #27 scenario — a running card whose ledger record says error is healed", () => {
   const jobs = [zombie("job-1", REC_27_ERROR.id)];
-  const { jobs: out, healed } = reconcileJobsWithLedger(jobs, [REC_27_ERROR], { isLive: neverLive, now: NOW, doneLabel: "done", errorLabel: "error" });
+  const { jobs: out, healed } = reconcileJobsWithLedger(jobs, [REC_27_ERROR], { now: NOW, doneLabel: "done", errorLabel: "error" });
 
   assert.deepEqual(healed, ["job-1"], "the zombie card must be reported as healed");
   assert.equal(out[0].status, "error");
@@ -53,7 +51,7 @@ test("reconcile: the #27 scenario — a running card whose ledger record says er
 
 test("reconcile: a running card whose ledger record says done is healed too", () => {
   const jobs = [zombie("job-2", REC_DONE.id)];
-  const { jobs: out, healed } = reconcileJobsWithLedger(jobs, [REC_DONE], { isLive: neverLive, now: NOW, doneLabel: "done", errorLabel: "error" });
+  const { jobs: out, healed } = reconcileJobsWithLedger(jobs, [REC_DONE], { now: NOW, doneLabel: "done", errorLabel: "error" });
 
   assert.deepEqual(healed, ["job-2"]);
   assert.equal(out[0].status, "done");
@@ -63,25 +61,36 @@ test("reconcile: a running card whose ledger record says done is healed too", ()
 
 test("reconcile: no ledger record for the runId → untouched (the run may still be going)", () => {
   const jobs = [zombie("job-3", "run-not-in-ledger")];
-  const { jobs: out, healed } = reconcileJobsWithLedger(jobs, [REC_27_ERROR], { isLive: neverLive, now: NOW, doneLabel: "d", errorLabel: "e" });
+  const { jobs: out, healed } = reconcileJobsWithLedger(jobs, [REC_27_ERROR], { now: NOW, doneLabel: "d", errorLabel: "e" });
 
   assert.deepEqual(healed, []);
   assert.equal(out[0].status, "running");
   assert.equal(out[0].endedAt, undefined);
 });
 
-test("reconcile: a card with a live accumulator is left to the SSE path", () => {
+test("reconcile: a ledger record inside the grace window is left to the live SSE path", () => {
   const jobs = [zombie("job-4", REC_27_ERROR.id)];
-  const isLive = (id) => id === "job-4";
-  const { jobs: out, healed } = reconcileJobsWithLedger(jobs, [REC_27_ERROR], { isLive, now: NOW, doneLabel: "d", errorLabel: "e" });
+  // Record settled 5s ago (< default 30s grace) — the live path may still deliver.
+  const { jobs: out, healed } = reconcileJobsWithLedger(jobs, [REC_27_ERROR], { now: REC_27_ERROR.finishedAt + 5000, doneLabel: "d", errorLabel: "e" });
 
-  assert.deepEqual(healed, [], "live cards own their terminal state via /api/events");
+  assert.deepEqual(healed, [], "inside the grace window the live event wins the race");
   assert.equal(out[0].status, "running");
+});
+
+test("reconcile: beyond the grace window even a still-accumulating card is healed (#73 hole)", () => {
+  // The SSE channel dropped at settle: the accumulator is present but the
+  // terminal event can never arrive (settled runs are not replayed). 30s past
+  // finishedAt, the ledger wins regardless of any local accumulator.
+  const jobs = [zombie("job-4b", REC_27_ERROR.id)];
+  const { jobs: out, healed } = reconcileJobsWithLedger(jobs, [REC_27_ERROR], { now: REC_27_ERROR.finishedAt + 31000, doneLabel: "d", errorLabel: "e" });
+
+  assert.deepEqual(healed, ["job-4b"]);
+  assert.equal(out[0].status, "error");
 });
 
 test("reconcile: a queued card is healed the same way", () => {
   const jobs = [zombie("job-5", REC_27_ERROR.id, "queued")];
-  const { jobs: out, healed } = reconcileJobsWithLedger(jobs, [REC_27_ERROR], { isLive: neverLive, now: NOW, doneLabel: "d", errorLabel: "e" });
+  const { jobs: out, healed } = reconcileJobsWithLedger(jobs, [REC_27_ERROR], { now: NOW, doneLabel: "d", errorLabel: "e" });
 
   assert.deepEqual(healed, ["job-5"]);
   assert.equal(out[0].status, "error");
@@ -89,7 +98,7 @@ test("reconcile: a queued card is healed the same way", () => {
 
 test("reconcile: cards without a runId never participate (nothing to join on)", () => {
   const jobs = [{ ...zombie("job-6", undefined), runId: undefined }];
-  const { jobs: out, healed } = reconcileJobsWithLedger(jobs, [REC_27_ERROR], { isLive: neverLive, now: NOW, doneLabel: "d", errorLabel: "e" });
+  const { jobs: out, healed } = reconcileJobsWithLedger(jobs, [REC_27_ERROR], { now: NOW, doneLabel: "d", errorLabel: "e" });
 
   assert.deepEqual(healed, []);
   assert.equal(out[0].status, "running");
@@ -98,7 +107,7 @@ test("reconcile: cards without a runId never participate (nothing to join on)", 
 test("reconcile: terminal cards (done/error) are never touched, and unchanged jobs pass through by identity", () => {
   const finished = { ...zombie("job-7", REC_27_ERROR.id), status: "error", endedAt: 123 };
   const untouched = zombie("job-8", "run-not-in-ledger");
-  const { jobs: out, healed } = reconcileJobsWithLedger([finished, untouched], [REC_27_ERROR], { isLive: neverLive, now: NOW, doneLabel: "d", errorLabel: "e" });
+  const { jobs: out, healed } = reconcileJobsWithLedger([finished, untouched], [REC_27_ERROR], { now: NOW, doneLabel: "d", errorLabel: "e" });
 
   assert.deepEqual(healed, []);
   assert.equal(out[0], finished, "terminal cards pass through by identity");
@@ -109,7 +118,7 @@ test("reconcile: when a runId appears more than once, the NEWEST ledger record w
   // #131 history: an early error record, later a real done record. Newest first.
   const ledger = [REC_DONE, REC_27_ERROR];
   const jobs = [zombie("job-9", REC_DONE.id)];
-  const { jobs: out } = reconcileJobsWithLedger(jobs, ledger, { isLive: neverLive, now: NOW, doneLabel: "d", errorLabel: "e" });
+  const { jobs: out } = reconcileJobsWithLedger(jobs, ledger, { now: NOW, doneLabel: "d", errorLabel: "e" });
 
   assert.equal(out[0].status, "done", "readRunHistory returns newest first; the newest record is authoritative");
 });
@@ -118,7 +127,7 @@ test("reconcile: a restore-interrupted guess card (interruptedAt) is upgraded to
   // Reload marked a still-settling run "interrupted"; the run then settled as
   // done — the reconciler replaces the guess with the real result.
   const guessed = { ...zombie("job-10", REC_DONE.id), status: "error", interruptedAt: NOW - 1000, steps: [{ kind: "status", label: "interrupted", ts: NOW - 1000 }] };
-  const { jobs: out, healed } = reconcileJobsWithLedger([guessed], [REC_DONE], { isLive: neverLive, now: NOW, doneLabel: "d", errorLabel: "e" });
+  const { jobs: out, healed } = reconcileJobsWithLedger([guessed], [REC_DONE], { now: NOW, doneLabel: "d", errorLabel: "e" });
 
   assert.deepEqual(healed, ["job-10"]);
   assert.equal(out[0].status, "done", "the interrupted guess yields to the ledger's done");
@@ -127,7 +136,7 @@ test("reconcile: a restore-interrupted guess card (interruptedAt) is upgraded to
 
 test("reconcile: a REAL error card (no interruptedAt) is never touched", () => {
   const realError = { ...zombie("job-11", REC_DONE.id), status: "error", endedAt: 5 };
-  const { jobs: out, healed } = reconcileJobsWithLedger([realError], [REC_DONE], { isLive: neverLive, now: NOW, doneLabel: "d", errorLabel: "e" });
+  const { jobs: out, healed } = reconcileJobsWithLedger([realError], [REC_DONE], { now: NOW, doneLabel: "d", errorLabel: "e" });
 
   assert.deepEqual(healed, []);
   assert.equal(out[0], realError, "errors reached via the live SSE path are terminal, not guesses");
