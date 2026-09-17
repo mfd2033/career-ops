@@ -22,6 +22,18 @@ import { parseSalaryText, cleanSalaryText } from "./browser-search.mjs";
 
 /** Machine Summary 的字段行（YAML 围栏内，行首、可能带缩进与引号）。 */
 const COMP_LINE_RE = /^[ \t]*advertised_comp:[ \t]*(.*)$/m;
+/**
+ * ADR-0037 之前（2026-09-17 之前）的 Machine Summary 用的是旧字段名承载同一事实
+ * （JD 招聘薪资）：`salary_advertised` / `comp_advertised`（后者常配 `comp_currency`
+ * / `comp_period`）。ADR-0037 统一为 `advertised_comp`。本模块只认新名，导致这批旧
+ * 报告在薪资列显示「—」——其实薪资数据就在旧字段里。这里作为**兼容 shim** 回退读取
+ * 旧名（仅当新名缺失/null 时才生效），不引入第二事实源：旧字段与新字段语义完全相同
+ * （都是 JD 招聘薪资），与 `salary_target`/`salary_candidate_target`（候选人目标）严格区分。
+ */
+const LEGACY_COMP_RES = [
+  /^[ \t]*salary_advertised:[ \t]*(.*)$/m,
+  /^[ \t]*comp_advertised:[ \t]*(.*)$/m,
+];
 /** YAML 里的「没有值」写法——不算原文，不产出可悬停文本。 */
 const NO_TEXT_RE = /^(null|~|none|n\/a|-)$/i;
 /** 非人民币币种：一律不解析（ADR-0037 决议 3）。实测 1 条日元，且报告里作者
@@ -44,8 +56,20 @@ const PARENTHETICAL_RE = /[（(][^）)]*[）)]/g;
  * @returns {string} 去引号的字段原文，或 ""
  */
 export function extractAdvertisedComp(reportMd) {
-  const m = String(reportMd ?? "").match(COMP_LINE_RE);
-  if (!m) return "";
+  const md = String(reportMd ?? "");
+  const m = md.match(COMP_LINE_RE);
+  // 新字段完全缺失 → 兼容回退到 ADR-0037 之前的旧字段名（同一事实）。
+  // 注意：仅当「整行缺失」才回退；若新字段存在但为 null/~，按原语义返回 ""。
+  if (!m) {
+    for (const re of LEGACY_COMP_RES) {
+      const lm = md.match(re);
+      if (lm) {
+        const lt = lm[1].trim().replace(/^["']|["']$/g, "").trim();
+        if (lt && !NO_TEXT_RE.test(lt)) return lt;
+      }
+    }
+    return "";
+  }
   const text = m[1].trim().replace(/^["']|["']$/g, "").trim();
   return NO_TEXT_RE.test(text) ? "" : text;
 }

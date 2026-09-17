@@ -62,6 +62,24 @@ test("extractAdvertisedComp: 第一处（Machine Summary）胜出，D 段不覆�
   assert.equal(extractAdvertisedComp(md), "10-15K");
 });
 
+test("extractAdvertisedComp: ADR-0037 之前的旧字段名兼容（同一事实）", () => {
+  // salary_advertised（真实语料 #640：JD 标注 8000-10000元/月，与候选人目标区分）
+  assert.equal(extractAdvertisedComp("salary_advertised: \"8000-10000元/月\"\nsalary_candidate_target: \"25000-30000元/月\""), "8000-10000元/月");
+  // comp_advertised（真实语料 #401，常配 comp_currency / comp_period）
+  assert.equal(extractAdvertisedComp("comp_advertised: 8-13K\ncomp_currency: CNY\ncomp_period: monthly"), "8-13K");
+  // salary_advertised（真实语料 #428，·月 后缀）
+  assert.equal(extractAdvertisedComp("salary_advertised: \"12-20K·月\""), "12-20K·月");
+});
+
+test("extractAdvertisedComp: 新名优先于旧名（双字段并存时）", () => {
+  assert.equal(extractAdvertisedComp("advertised_comp: 10-15K\nsalary_advertised: 99-99K"), "10-15K");
+});
+
+test("extractAdvertisedComp: 旧名不误吃候选人目标字段", () => {
+  assert.equal(extractAdvertisedComp("salary_target: 25000-30000元/月\nsalary_candidate_target: 25000-30000元/月"), "");
+  assert.equal(extractAdvertisedComp("comp_target: 25-30K"), "");
+});
+
 // ── parseReportSalary：可解析的报告串形态（均取自真实语料）───────────────
 
 test("parseReportSalary: 元/月 形态 ÷1000", () => {
