@@ -9,6 +9,8 @@
 // Auto-discovered by test-all.mjs: a discovered suite is a guest, not a co-host —
 // it reports through the pass/fail helpers and returns.
 
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { pass, fail } from './helpers.mjs';
 import {
   parseStar,
@@ -178,5 +180,25 @@ console.log('parseLedger 解析与 summarize 聚合');
   if (empty.total_checkups === 0 && empty.companies.length === 0) pass('  空台账 → 零值汇总（优雅降级）');
   else fail('  空台账应得零值汇总');
 }
+
+// ── 5. 用法探测（--help）不抛异常 ──────────────────────────────────────────
+// 2026-09-17 实测：agent 拿 `add --help` 探命令用法（常规动作），旧行为把 --help 当成吃值
+// 的开关 → 抛「缺少 --help 的值」；那天的 #119 worker 因此误诊并改了本脚本。用法探测现在
+// 一律打印 usage 并退 0（内容走 stderr，格式不变）。#27 复盘记的是同一个坑。
+console.log('log-checkup CLI --help');
+{
+  const script = fileURLToPath(new URL('../lib/log-checkup.mjs', import.meta.url));
+  for (const argv of [['--help'], ['-h'], ['add', '--help'], ['summary', '-h']]) {
+    const r = spawnSync(process.execPath, [script, ...argv], { encoding: 'utf8' });
+    const out = `${r.stdout ?? ''}${r.stderr ?? ''}`;
+    if (r.status === 0 && /用法:/.test(out)) pass(`  ${argv.join(' ')} → 用法 + 退 0`);
+    else fail(`  ${argv.join(' ')} → exit=${r.status}，输出: ${out.slice(0, 120)}`);
+  }
+  // 对照：未知子命令仍应报用法并退非 0（用法探测的放宽不改变「用错了要报错」）
+  const bad = spawnSync(process.execPath, [script, 'nope'], { encoding: 'utf8' });
+  if (bad.status !== 0 && /用法:/.test(`${bad.stdout ?? ''}${bad.stderr ?? ''}`)) pass('  未知子命令 → 用法 + 非 0 退出');
+  else fail(`  未知子命令应报用法并退非 0，实得 exit=${bad.status}`);
+}
+
 // 不打印全局汇总：discovered suite 只用 pass/fail 报告（test-all.mjs 纪律），
 // 单独 `node tests/checkup-ledger.test.mjs` 跑也同样安静结束。
