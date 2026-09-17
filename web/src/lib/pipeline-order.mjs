@@ -30,6 +30,43 @@ export const DEFAULT_ORDER = {
 
 const SORT_KEYS = ["company", "role", "score", "status", "date", "duration"];
 
+/** The value a row sorts on, under `sortKey`. Numeric for score/duration (a
+ *  missing value is -Infinity so it sinks to the bottom of the default
+ *  descending sort), the raw string otherwise. */
+function sortKeyValue(row, sortKey) {
+  if (sortKey === "score") {
+    const n = scoreNum(row.score);
+    return Number.isNaN(n) ? -Infinity : n;
+  }
+  if (sortKey === "duration") return typeof row.evalDuration === "number" ? row.evalDuration : -Infinity;
+  return row[sortKey] || "";
+}
+
+/** The one sort comparison, shared by orderApplications and navNeighbors'
+ *  insertion point — a second copy is what would let "where the row left from"
+ *  drift from "the order the list shows". A NaN result (two missing scores) is
+ *  treated as a tie, exactly as the spec's SortCompare does for the sort itself;
+ *  ties then fall back to the stable (tracker row) order. */
+function compareByKey(a, b, sortKey, dir) {
+  const av = sortKeyValue(a, sortKey);
+  const bv = sortKeyValue(b, sortKey);
+  if (typeof av === "number" || typeof bv === "number") return (av - bv) * dir;
+  return av.localeCompare(bv) * dir;
+}
+
+/** Normalize a URL-derived context to the shape every consumer sorts/filters
+ *  with. Falls back per field, never throws — the detail page parses raw query
+ *  params and hands them straight in. */
+function normalizeContext(ctx = {}) {
+  return {
+    tab: ctx.tab ?? "ALL",
+    min: ctx.min ?? null,
+    q: ctx.q ?? "",
+    sortKey: SORT_KEYS.includes(ctx.sortKey) ? ctx.sortKey : "score",
+    dir: ctx.dir === 1 ? 1 : -1,
+  };
+}
+
 /**
  * Filter + sort applications under the pipeline view's URL context.
  * @param {Array} applications - Application rows ({ n, company, role, score, status, date, evalDuration, ... }).
@@ -43,41 +80,117 @@ const SORT_KEYS = ["company", "role", "score", "status", "date", "duration"];
  *   not mutate the input).
  */
 export function orderApplications(applications, ctx = {}) {
-  const tab = ctx.tab ?? "ALL";
+  const { tab, min, q, sortKey, dir } = normalizeContext(ctx);
   if (tab === "INBOX") return [];
   let rows = applications;
   if (tab !== "ALL") rows = rows.filter((r) => canonStatus(r.status).includes(tab));
-  const min = ctx.min ?? null;
   if (min != null) {
     rows = rows.filter((r) => {
       const n = scoreNum(r.score);
       return !Number.isNaN(n) && n >= min;
     });
   }
-  const q = ctx.q ?? "";
   if (q.trim()) {
     const needle = q.toLowerCase();
     rows = rows.filter((r) => `${r.company} ${r.role}`.toLowerCase().includes(needle));
   }
-  const sortKey = SORT_KEYS.includes(ctx.sortKey) ? ctx.sortKey : "score";
-  const dir = ctx.dir === 1 ? 1 : -1;
-  return [...rows].sort((a, b) => {
-    if (sortKey === "score") {
-      const an = scoreNum(a.score);
-      const bn = scoreNum(b.score);
-      const av = Number.isNaN(an) ? -Infinity : an;
-      const bv = Number.isNaN(bn) ? -Infinity : bn;
-      return (av - bv) * dir;
-    }
-    if (sortKey === "duration") {
-      // Numeric like score: no-record rows (-Infinity) sink to the bottom on
-      // the default descending sort (slowest first), same convention as NaN scores.
-      const av = typeof a.evalDuration === "number" ? a.evalDuration : -Infinity;
-      const bv = typeof b.evalDuration === "number" ? b.evalDuration : -Infinity;
-      return (av - bv) * dir;
-    }
-    return (a[sortKey] || "").localeCompare(b[sortKey] || "") * dir;
+  return [...rows].sort((a, b) => compareByKey(a, b, sortKey, dir));
+}
+
+/** One row per tracker number, first occurrence winning (ADR-0036). The
+ *  navigable unit is the report row: a duplicated `#` must not get a prev/next
+ *  link of its own — that is what turned "下一个" into a jump back to the first
+ *  copy and closed the positions in between into a loop. */
+function dedupeById(list) {
+  const seen = new Set();
+  return list.filter((r) => {
+    if (seen.has(r.n)) return false;
+    seen.add(r.n);
+    return true;
   });
+}
+
+/** The slot a row WOULD occupy in `list`, i.e. how many rows sort before it.
+ *  Ties are broken by the row's own position in the tracker (the same tie-break
+ *  the stable sort applies), so the slot is the one the row really left from. */
+function insertionSlot(list, probe, context, rawIndex) {
+  const probeRaw = rawIndex.get(probe) ?? Number.MAX_SAFE_INTEGER;
+  for (let i = 0; i < list.length; i++) {
+    let cmp = compareByKey(probe, list[i], context.sortKey, context.dir);
+    if (cmp === 0 || Number.isNaN(cmp)) {
+      cmp = probeRaw < (rawIndex.get(list[i]) ?? Number.MAX_SAFE_INTEGER) ? -1 : 1;
+    }
+    if (cmp < 0) return i;
+  }
+  return list.length;
+}
+
+/**
+ * The report detail page's prev/next navigation (ADR-0036) — one implementation
+ * for "where am I in the list I was walking", replacing the page's inline
+ * `findIndex` + silent fallback.
+ *
+ * Three rules make it behave the way the user's queue does:
+ *   1. `id` matches the context → plain neighbours, as the list shows them.
+ *   2. `id` is a real tracker row but no longer matches the context (the user's
+ *      own status write just moved it out of the tab they are walking) → STAY in
+ *      that context and report the slot it left from. Falling back to ALL here
+ *      was the bug: 下一个 jumped out of the queue into an unrelated report.
+ *   3. The context cannot host navigation at all — INBOX (the triage queue is
+ *      not the tracker table), an empty view (no slot exists), or an `id` the
+ *      tracker does not hold — → the historical fallback to DEFAULT_ORDER, so
+ *      deep links and deleted rows keep working exactly as before.
+ *
+ * Returns { prev, next, position, total, context }: the neighbouring rows (null at
+ * the boundaries), the 1-based slot, how many rows that context can walk, and —
+ * the part callers get wrong — the context that ACTUALLY took effect, which is
+ * what the `?tab=…` links must be built from, not the raw query params.
+ *
+ * @param {Array} applications - tracker rows, in file order.
+ * @param {{tab?: string, min?: number|null, q?: string, sortKey?: string, dir?: number}} ctx
+ *   `dir` stays a plain number on purpose: it comes from a URL param, and this
+ *   function normalizes it (`1` accepted, everything else descending) rather
+ *   than making every caller cast.
+ * @param {string} id - the row the page is showing.
+ */
+export function navNeighbors(applications, ctx = {}, id) {
+  const rows = Array.isArray(applications) ? applications : [];
+  const requested = normalizeContext(ctx);
+  const rawIndex = new Map();
+  rows.forEach((r, i) => {
+    if (!rawIndex.has(r)) rawIndex.set(r, i);
+  });
+
+  let context = requested;
+  let list = dedupeById(orderApplications(rows, context));
+  let index = list.findIndex((a) => a.n === id);
+
+  if (index === -1) {
+    const probe = rows.find((a) => a.n === id) ?? null;
+    if (context.tab !== "INBOX" && probe && list.length > 0) {
+      const at = insertionSlot(list, probe, context, rawIndex);
+      return {
+        prev: at > 0 ? list[at - 1] : null,
+        next: at < list.length ? list[at] : null,
+        // The slot it left from, clamped so a row that departed from the tail
+        // cannot read "69 / 68" (its 下一个 is null either way).
+        position: Math.min(at + 1, list.length),
+        total: list.length,
+        context,
+      };
+    }
+    context = { ...DEFAULT_ORDER };
+    list = dedupeById(orderApplications(rows, context));
+    index = list.findIndex((a) => a.n === id);
+  }
+
+  return {
+    prev: index > 0 ? list[index - 1] : null,
+    next: index >= 0 && index < list.length - 1 ? list[index + 1] : null,
+    position: index >= 0 ? index + 1 : null,
+    total: list.length,
+    context,
+  };
 }
 
 /**
@@ -128,15 +241,17 @@ export function countSelectedOffView(applications, visible, selected) {
  * a row link (and the report page's back link) fall back to INBOX instead of
  * the table the user actually came from. Only min/sort/dir/q — whose omissions
  * resolve to the same tracker-table defaults — are elided.
- * @param {{tab?: string, min?: number|null, q?: string, sortKey?: string, dir?: 1|-1}} ctx
+ * @param {{tab?: string, min?: number|null, q?: string, sortKey?: string, dir?: number}} ctx
+ *   `dir` accepts any number (the URL param / navNeighbors' own inferred
+ *   return): only `1` means ascending, everything else serializes as descending.
  * @returns {string} "?tab=ALL" for the empty/default context.
  */
 export function buildContextQuery(ctx = {}) {
-  const tab = ctx.tab ?? "ALL";
-  const min = ctx.min ?? null;
+  // Normalized by the same function the sort/filter use — a second copy of the
+  // defaulting rules is what would let the serialized query and the list it
+  // reproduces drift apart.
+  const { tab, min, sortKey, dir } = normalizeContext(ctx);
   const q = (ctx.q ?? "").trim();
-  const sortKey = SORT_KEYS.includes(ctx.sortKey) ? ctx.sortKey : "score";
-  const dir = ctx.dir === 1 ? 1 : -1;
   const sp = new URLSearchParams();
   sp.set("tab", tab);
   if (min != null) sp.set("min", String(min));

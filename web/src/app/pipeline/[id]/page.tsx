@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import { readReport, findApplication, readApplications, trackerCanDelete, readEvalTimings, findCheckupTarget, readCheckupFor } from "@/lib/career-ops";
 import { evalTimingKey } from "@/lib/eval-timing-key.mjs";
-import { orderApplications, buildContextQuery, DEFAULT_ORDER } from "@/lib/pipeline-order.mjs";
+import { navNeighbors, buildContextQuery } from "@/lib/pipeline-order.mjs";
 import { ReportView } from "@/components/report-view";
 import { EvalTimingPanel } from "@/components/eval-timing-panel";
 
@@ -52,28 +52,14 @@ export default async function ReportPage({
   if (!app && !report) notFound();
 
   // Rebuild the list page's ordered view from the carried context and locate
-  // this report in it. When the id is missing from the ordered list (direct
-  // navigation, an expired q, a tab the row no longer matches, or INBOX) we
-  // fall back to the default order — ALL rows, score descending — so the
-  // prev/next navigation is still meaningful instead of silently vanishing.
-  // The `.mjs` shared fn's JSDoc types widen `dir` to number, so narrow it
-  // back here before handing the context to the typed consumers.
-  const navCtx = { ...ctx, dir: ctx.dir as 1 | -1 };
-  let ordered = orderApplications(readApplications(), navCtx);
-  let index = ordered.findIndex((a) => a.n === id);
-  let effectiveCtx: NavCtx = navCtx;
-  if (index === -1) {
-    const fallbackCtx: NavCtx = { ...DEFAULT_ORDER, dir: DEFAULT_ORDER.dir as 1 | -1 };
-    ordered = orderApplications(readApplications(), fallbackCtx);
-    index = ordered.findIndex((a) => a.n === id);
-    effectiveCtx = fallbackCtx;
-  }
-
-  const prev = index > 0 ? ordered[index - 1] : null;
-  const next = index >= 0 && index < ordered.length - 1 ? ordered[index + 1] : null;
-  const position = index >= 0 ? index + 1 : null;
-  const total = ordered.length;
-  const contextQuery = buildContextQuery(effectiveCtx);
+  // this report in it (ADR-0036). navNeighbors owns that: it keeps the context
+  // the user is walking when their own status write moved the row out of the
+  // tab, counts a duplicated tracker number once, and only stops navigating
+  // when the context genuinely has no slot for this row (INBOX / row gone).
+  // `context` is the context that took effect — the links below must carry it,
+  // not the raw query params, or 下一个 would leave the walked view.
+  const { prev, next, position, total, context } = navNeighbors(readApplications(), ctx, id);
+  const contextQuery = buildContextQuery(context);
   // 评估用时 breakdown (ADR-0016/0017): latest eval session, straight from
   // data/eval-timings.tsv — no report body required. The join key follows the
   // row's CURRENT report link (a re-evaluation reserves a new number while the

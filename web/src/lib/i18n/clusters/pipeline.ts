@@ -104,6 +104,13 @@ export const en: Dict = {
   // ── Status select (status-select.tsx) ──
   "pipeline.statusLabel": "status",
   "pipeline.saved": "saved",
+  // Failed status writeback (ADR-0036) — keys returned by lib/status-write-error.mjs.
+  "pipeline.statusError.ambiguous": "This row number is duplicated in the tracker, so the change can't be applied — run node dedup-tracker.mjs to fix the data, then retry.",
+  "pipeline.statusError.locked": "The tracker is being written by something else — retry in a moment.",
+  "pipeline.statusError.gone": "That row is no longer in the tracker (it may have been removed).",
+  "pipeline.statusError.timeoutUnknown": "The write timed out and whether it applied is unknown — reload the page to check before retrying.",
+  "pipeline.statusError.offline": "Couldn't reach the local server — is the dashboard still running?",
+  "pipeline.statusError.generic": "Status not saved: {detail}",
 
   // ── Delete from tracker (delete-from-tracker.tsx) ──
   "pipeline.removeFromTracker": "Remove from tracker",
@@ -347,6 +354,13 @@ export const zh: Dict = {
   // ── Status select (status-select.tsx) ──
   "pipeline.statusLabel": "状态",
   "pipeline.saved": "已保存",
+  // 状态写盘失败（ADR-0036）—— 由 lib/status-write-error.mjs 返回的 key。
+  "pipeline.statusError.ambiguous": "这个行号在 tracker 里重复，改不了 —— 先运行 node dedup-tracker.mjs 修数据，再重试。",
+  "pipeline.statusError.locked": "tracker 正被其它写入占用，稍后重试。",
+  "pipeline.statusError.gone": "tracker 里已经没有这一行了（可能已被删除）。",
+  "pipeline.statusError.timeoutUnknown": "写入超时，是否生效未知 —— 先刷新页面确认，再决定要不要重试。",
+  "pipeline.statusError.offline": "连不上本地服务，确认 dashboard 还在运行。",
+  "pipeline.statusError.generic": "状态没写成：{detail}",
 
   // ── Delete from tracker (delete-from-tracker.tsx) ──
   "pipeline.removeFromTracker": "从追踪器移除",
