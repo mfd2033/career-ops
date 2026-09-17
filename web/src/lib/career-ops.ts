@@ -408,7 +408,7 @@ export function findApplication(n: string): Application | null {
 
 /** 体检对象判定（ADR-0026 决议 6）：company 非 `?` → company 本身；
  *  `?` 行（未知雇主）→ 报告 Via（招聘主体——尽调价值最高的对象）；
- *  Via 缺失 → ok:false + 稳定 reason 码（详情页按钮据此禁用并给文案）。 */
+ *  Via 缺失 → ok:false + 稳定 reason 码（报告页按钮据此禁用并给文案，宿主范围见 ADR-0032）。 */
 export function findCheckupTarget(
   n: string,
 ): { ok: true; company: string; source: "company" | "via" } | { ok: false; reason: "row-not-found" | "no-via" } {

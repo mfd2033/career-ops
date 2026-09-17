@@ -6,7 +6,7 @@
 ## Decision
 
 1. **通路 = agent-inbox 异步队列。** 按钮调新 web API，由 API 调 `node agent-inbox.mjs add "<体检请求>"` 写入 `data/agent-inbox.md`（复用其锁与并发安全，零系统层改动）；下次用户在仓库开 AI 会话时 drain 执行。不做 worker kind=checkup——即时体验不值得背上编排双实现的漂移成本。
-2. **按钮位置 = 仅 `/pipeline/{n}` 行详情页。** 有 tracker# 与公司上下文，是「这家」最自然的指代处；`/report/{n}` 保持纯阅读。
+2. **按钮位置 = 仅 `/pipeline/{n}` 行详情页。** 有 tracker# 与公司上下文，是「这家」最自然的指代处；`/report/{n}` 保持纯阅读。**（已被 ADR-0032 取代：按钮宿主 = 一切渲染 `ReportView` 的路由。`/report/{n}` 本就是工作器报告跳转的落点（ADR-0018），且渲染同一个 `ReportView` 的完整操作区，「纯阅读」前提不成立。）**
 3. **已有体检时 = 展示★ + 复检。** 详情页直接展示体检星级/主要风险/HTML 链接（数据来自 `pipelineSummary` 已有的 `checkups` 索引），按钮变「复检」；复检 append 新台账行，历史对比是台账天然能力。
 4. **关联 = 挂触发行。** 体检记录只关联触发行 tracker#，同公司其他行不自动关联——与台账 join 语义一致，不在 web 侧实现 company-slug 归一（ADR-0025 明确回避的坑）。
 5. **drain 后直接执行。** 按钮按下即用户确认（agent-inbox 协议本义就是 human-in-the-loop intent），drain 到请求后按 `_custom.md` 公司体检规则直接跑，不再二次询问。请求文本自带全部上下文（tracker#、公司名、规则引用），agent 无需追问。
