@@ -204,8 +204,8 @@ export const en: Dict = {
   "pipeline.batchClear": "Clear",
   "pipeline.batchUrlsLoading": "Resolving posting URLs…",
   "pipeline.batchSkip": "Skip {count}",
-  "pipeline.batchSkipTitle": "Mark the {count} selected as Discarded (skipped) — same terminal state as the report-page skip, moves them out of the evaluated queue",
-  "pipeline.batchSkipConfirm": "Mark {count} selected roles as Discarded (skipped)? This cannot be undone with one click.",
+  "pipeline.batchSkipTitle": "Mark the {count} selected as SKIP — moves them out of the evaluated queue into the skip group",
+  "pipeline.batchSkipConfirm": "Mark {count} selected roles as SKIP? This cannot be undone with one click.",
 
   // ── Section headings (from report markdown) ──
   // Newer oferta.md heading forms (current core): "## C) Level and Strategy",
@@ -459,8 +459,8 @@ export const zh: Dict = {
   "pipeline.batchClear": "清除选择",
   "pipeline.batchUrlsLoading": "正在解析职位链接…",
   "pipeline.batchSkip": "跳过 {count} 项",
-  "pipeline.batchSkipTitle": "将所选 {count} 项标记为已放弃（跳过）——与报告页单个跳过同一终态，移出已评估队列",
-  "pipeline.batchSkipConfirm": "确认将所选 {count} 项标记为已放弃（跳过）？此操作无法一键撤销。",
+  "pipeline.batchSkipTitle": "将所选 {count} 项标记为跳过（SKIP）——移出已评估队列，归入跳过分组",
+  "pipeline.batchSkipConfirm": "确认将所选 {count} 项标记为跳过（SKIP）？此操作无法一键撤销。",
 
   // ── Section headings (from report markdown) ──
   "pipeline.section.roleSummary": "职位概述",

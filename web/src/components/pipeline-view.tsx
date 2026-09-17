@@ -196,8 +196,9 @@ export function PipelineView({
   const [urlMapLoading, setUrlMapLoading] = useState(false);
   const [lastBatchId, setLastBatchId] = useState<string | null>(null);
   const urlMapFetched = useRef(false);
-  // Batch skip (EVALUATED tab only): marks selected rows Discarded, the same
-  // terminal state the report-page single skip writes (CONTEXT.md「跳过」).
+  // Batch skip (EVALUATED tab only): marks selected rows SKIP — the canonical
+  // "don't apply" state (its own 跳过 tab), distinct from the report-page single
+  // skip which writes Discarded (CONTEXT.md「跳过」).
   const [skipBusy, setSkipBusy] = useState(false);
   const selectAllRef = useRef<HTMLInputElement>(null);
 
@@ -285,9 +286,9 @@ export function PipelineView({
     });
   }, []);
 
-  // Batch skip: write Discarded (已放弃) for every selected row, same terminal
-  // state as the report-page single skip. Only offered on the EVALUATED tab, so
-  // every target is currently Evaluated → a legal forward transition. Sequential
+  // Batch skip: write SKIP for every selected row — the canonical "don't apply"
+  // state (its own 跳过 tab). Only offered on the EVALUATED tab, so every target
+  // is currently Evaluated → a legal forward terminal transition. Sequential
   // POSTs (not concurrent) so they don't fight over the tracker lock (503); a
   // confirm guards the blast radius of a terminal, non-undoable bulk write.
   const skipSelected = useCallback(async () => {
@@ -300,7 +301,7 @@ export function PipelineView({
         await fetch("/api/status", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ n, status: "Discarded" }),
+          body: JSON.stringify({ n, status: "SKIP" }),
         });
       }
       router.refresh();
