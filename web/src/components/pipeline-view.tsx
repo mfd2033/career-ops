@@ -12,6 +12,8 @@ import type { CheckupEntry } from "@/lib/format";
 import { CHECKUP_RISK_LABELS } from "@/lib/company-checkups.mjs";
 import { orderApplications, buildContextQuery, countSelectedOffView } from "@/lib/pipeline-order.mjs";
 import { normalizeUrl } from "@/lib/core/url-key.mjs";
+// 报告薪资（ADR-0037）：列里显示归一化月薪区间，字段原文进悬停提示。
+import { formatSalaryRange } from "@/lib/report-salary.mjs";
 import { sourceLabel } from "@/lib/source-label.mjs";
 import { InboxTriage } from "@/components/inbox/inbox-triage";
 import { useJobs } from "@/components/jobs/job-store";
@@ -36,7 +38,10 @@ const TABS = [
 ] as const;
 type Tab = (typeof TABS)[number];
 
-const SORT_KEYS = ["company", "role", "score", "duration", "status", "date"] as const;
+// Column order == this array's order (the header and the body both follow it):
+// salary (报告薪资, ADR-0037) sits right after score — the two numbers a user
+// trades off against each other.
+const SORT_KEYS = ["company", "role", "score", "salary", "duration", "status", "date"] as const;
 type SortKey = (typeof SORT_KEYS)[number];
 
 export function PipelineView({
@@ -93,6 +98,7 @@ export function PipelineView({
     company: t("pipeline.col.company"),
     role: t("pipeline.col.role"),
     score: t("pipeline.col.score"),
+    salary: t("pipeline.col.salary"),
     duration: t("pipeline.col.duration"),
     status: t("pipeline.col.status"),
     date: t("pipeline.col.date"),
@@ -453,6 +459,18 @@ export function PipelineView({
                     <Link href={`/report/${r.n}`} className="inline-flex transition-opacity hover:opacity-80">
                       <Badge tone={scoreTone(r.score)}>{r.score || "—"}</Badge>
                     </Link>
+                  </td>
+                  {/* 报告薪资（ADR-0037）：归一化月薪区间，报告的字段原文进悬停提示；
+                      未披露/无报告 → 「—」（与分数列、来源列的空值写法一致，全列只有
+                      「区间」与「—」两种形态）。 */}
+                  <td
+                    className={cn(
+                      "whitespace-nowrap px-4 py-3 tabular-nums",
+                      r.reportSalary?.range ? "text-muted" : "text-faint",
+                    )}
+                    title={r.reportSalary?.text || undefined}
+                  >
+                    {r.reportSalary?.range ? formatSalaryRange(r.reportSalary.range) : "—"}
                   </td>
                   <td className="whitespace-nowrap px-4 py-3 text-muted tabular-nums">
                     {fmtDuration(r.evalDuration ?? null)}

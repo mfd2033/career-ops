@@ -138,6 +138,77 @@ test("buildContextQuery round-trips: query → ctx reproduces the same list", ()
   assert.deepEqual(orderApplications(apps, reparsed), orderApplications(apps, ctx));
 });
 
+// ── salary: 报告薪资排序键（ADR-0037）───────────────────────────────────────
+// 区间中位值排序；未披露**恒沉底**（升降序都在最后，比较器不乘 dir）；平手回退
+// score 降序 → 报告号降序。
+
+const salaried = [
+  {
+    n: "20",
+    company: "A",
+    role: "x",
+    score: "4.0/5",
+    status: "Evaluated",
+    date: "2026-08-01",
+    reportSalary: { text: "10-15K", range: { minK: 10, maxK: 15, medianK: 12.5 } },
+  },
+  {
+    n: "21",
+    company: "B",
+    role: "x",
+    score: "3.0/5",
+    status: "Evaluated",
+    date: "2026-08-02",
+    reportSalary: { text: "25-30K", range: { minK: 25, maxK: 30, medianK: 27.5 } },
+  },
+  {
+    n: "22",
+    company: "C",
+    role: "x",
+    score: "4.5/5",
+    status: "Evaluated",
+    date: "2026-08-03",
+    reportSalary: { text: "not stated", range: null },
+  },
+  // 老行 / 无报告：整个字段缺失，与 range: null 同等对待
+  { n: "23", company: "D", role: "x", score: "2.0/5", status: "Evaluated", date: "2026-08-04" },
+];
+
+test("salary: 区间中位值降序，未披露沉底", () => {
+  assert.deepEqual(orderApplications(salaried, { sortKey: "salary" }).map((a) => a.n), ["21", "20", "22", "23"]);
+});
+
+test("salary: 升序时未披露仍在最后——这是有意偏离 score/duration 惯例的回归点", () => {
+  assert.deepEqual(orderApplications(salaried, { sortKey: "salary", dir: 1 }).map((a) => a.n), ["20", "21", "22", "23"]);
+});
+
+test("salary: 未披露块内部按 score 降序（平手回退），与方向无关", () => {
+  const desc = orderApplications(salaried, { sortKey: "salary" }).slice(2).map((a) => a.n);
+  const asc = orderApplications(salaried, { sortKey: "salary", dir: 1 }).slice(2).map((a) => a.n);
+  assert.deepEqual(desc, ["22", "23"], "22 是 4.5/5，23 是 2.0/5");
+  assert.deepEqual(asc, desc);
+});
+
+test("salary: 中位值平手回退 score 降序", () => {
+  const tie = [
+    { n: "30", score: "3.0/5", reportSalary: { text: "10-15K", range: { minK: 10, maxK: 15, medianK: 12.5 } } },
+    { n: "31", score: "4.0/5", reportSalary: { text: "12.5K", range: { minK: 12.5, maxK: 12.5, medianK: 12.5 } } },
+  ];
+  assert.deepEqual(orderApplications(tie, { sortKey: "salary" }).map((a) => a.n), ["31", "30"]);
+});
+
+test("salary: 中位值与 score 都平手回退报告号降序，且不随方向翻转", () => {
+  const mk = (n) => ({ n, score: "4.0/5", reportSalary: { text: "10-15K", range: { minK: 10, maxK: 15, medianK: 12.5 } } });
+  const tie = [mk("30"), mk("32"), mk("31")];
+  assert.deepEqual(orderApplications(tie, { sortKey: "salary" }).map((a) => a.n), ["32", "31", "30"]);
+  assert.deepEqual(orderApplications(tie, { sortKey: "salary", dir: 1 }).map((a) => a.n), ["32", "31", "30"]);
+});
+
+test("salary: 序列化进 URL 上下文（列表与报告页导航共用一个键）", () => {
+  assert.equal(buildContextQuery({ tab: "ALL", sortKey: "salary", dir: 1 }), "?tab=ALL&sort=salary&dir=1");
+  assert.equal(buildContextQuery({ tab: "ALL", sortKey: "salary", dir: -1 }), "?tab=ALL&sort=salary");
+});
+
 // ── navNeighbors: the report detail page's prev/next (ADR-0036) ──────────────
 // The detail page used to compute `index = ordered.findIndex(a => a.n === id)`
 // and, when that missed, silently fall back to the ALL rows. Two failures came

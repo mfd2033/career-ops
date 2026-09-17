@@ -231,7 +231,12 @@ test("the list and the detail page share ONE label rule", () => {
     "the report page must use the shared rule, not a private copy of it");
   // The list is server-rendered from a zero-IO parse: the Via has to be attached
   // server-side, and ONLY for `?` rows (a known employer needs no report read).
-  assert.match(CORE, /a\.company\.trim\(\) === "\?" \? \{ \.\.\.a, reportVia: readReportVia\(a\) \}/,
+  // ADR-0037 把「URL 头 / 报告薪资 / Via」并进同一次读盘，形状随之改变（不再有
+  // per-row 的 `readReportVia(a)` 内联调用）——这两条钉的是新的接线，不变的仍是
+  // 那条不变量：`?` 判定只有一处，Via 只属于 `?` 行。
+  assert.match(CORE, /const isUnknownEmployer = app\.company\.trim\(\) === "\?";/,
+    "readReportFacts must decide the Via by the same `?` test");
+  assert.match(CORE, /\.\.\.\(f && f\.via !== undefined \? \{ reportVia: f\.via \} : null\)/,
     "pipelineSummary must attach the report Via to `?` rows");
 });
 

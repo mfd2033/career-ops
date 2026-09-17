@@ -16,6 +16,7 @@
 
 import { canonStatus } from "./status-alias.mjs";
 import { scoreNum } from "./score-num.mjs";
+import { salaryMedian } from "./report-salary.mjs";
 
 /** The tracker table's own default context — ALL rows, score descending. Used
  *  as the fallback when a report is opened without (or outside) a list
@@ -28,11 +29,13 @@ export const DEFAULT_ORDER = {
   dir: -1,
 };
 
-const SORT_KEYS = ["company", "role", "score", "status", "date", "duration"];
+const SORT_KEYS = ["company", "role", "score", "salary", "status", "date", "duration"];
 
 /** The value a row sorts on, under `sortKey`. Numeric for score/duration (a
  *  missing value is -Infinity so it sinks to the bottom of the default
- *  descending sort), the raw string otherwise. */
+ *  descending sort), the raw string otherwise. `salary` is deliberately NOT
+ *  handled here — it needs a direction-independent "unknown always last" rule,
+ *  which the (av - bv) * dir shape cannot express; see compareSalary. */
 function sortKeyValue(row, sortKey) {
   if (sortKey === "score") {
     const n = scoreNum(row.score);
@@ -42,12 +45,46 @@ function sortKeyValue(row, sortKey) {
   return row[sortKey] || "";
 }
 
+/** 报告薪资比较（ADR-0037 决议 5/6）：区间中位值（与收件箱 ADR-0024 决议 4 同
+ *  口径，一个「薪资排序」概念只定义一次）。
+ *
+ *  未披露 / 无报告 / 老行没有该字段的行**恒沉底**——不论升降序都在最后，所以这
+ *  条分支不把结果乘 dir。这是对上面 score/duration 的 -Infinity 惯例的**有意偏
+ *  离**：未知不是一个「很小的薪资」，若让它在升序里冒充最低薪，最该看的那些行
+ *  会被顶到列表最前面。
+ *
+ *  中位值平手 → score 降序 → 报告号降序（完全确定，不依赖 Array.sort 稳定性——
+ *  与 ADR-0024 决议 4 同一取向）。 */
+function compareSalary(a, b, dir) {
+  const am = salaryMedian(a);
+  const bm = salaryMedian(b);
+  if (am === null || bm === null) {
+    if (am === null && bm === null) return compareSalaryTie(a, b);
+    return am === null ? 1 : -1;
+  }
+  if (am !== bm) return (am - bm) * dir;
+  return compareSalaryTie(a, b);
+}
+
+/** 薪资平手时的次级比较：score 降序，再报告号降序。 */
+function compareSalaryTie(a, b) {
+  const as = scoreNum(a.score);
+  const bs = scoreNum(b.score);
+  const av = Number.isNaN(as) ? -Infinity : as;
+  const bv = Number.isNaN(bs) ? -Infinity : bs;
+  if (av !== bv) return bv - av;
+  const ai = parseInt(a.n, 10);
+  const bi = parseInt(b.n, 10);
+  return (Number.isNaN(bi) ? 0 : bi) - (Number.isNaN(ai) ? 0 : ai);
+}
+
 /** The one sort comparison, shared by orderApplications and navNeighbors'
  *  insertion point — a second copy is what would let "where the row left from"
  *  drift from "the order the list shows". A NaN result (two missing scores) is
  *  treated as a tie, exactly as the spec's SortCompare does for the sort itself;
  *  ties then fall back to the stable (tracker row) order. */
 function compareByKey(a, b, sortKey, dir) {
+  if (sortKey === "salary") return compareSalary(a, b, dir);
   const av = sortKeyValue(a, sortKey);
   const bv = sortKeyValue(b, sortKey);
   if (typeof av === "number" || typeof bv === "number") return (av - bv) * dir;
@@ -74,7 +111,8 @@ function normalizeContext(ctx = {}) {
  *   - tab: uppercase canonical tab (INBOX / ALL / EVALUATED / …). Default ALL.
  *   - min: numeric score floor; null/undefined disables.
  *   - q: company+role search needle.
- *   - sortKey: company | role | score | status | date | duration. Default score.
+ *   - sortKey: company | role | score | salary | status | date | duration. Default score.
+ *     salary = 报告薪资（ADR-0037）：区间中位值，未披露恒沉底。
  *   - dir: 1 ascending, -1 descending. Default -1.
  * @returns {Array} A NEW array (the view used `[...rows].sort`, callers must
  *   not mutate the input).

@@ -17,6 +17,10 @@ import { pendingSectionLines } from "@/lib/pipeline-sections.mjs";
 // 收件箱薪资（ADR-0023）：note 尾段 → salaryText / salaryUnknown。纯 .mjs
 // （node --test locked），解析口径复用探索页 parseSalaryText。
 import { inboxSalaryFromNote } from "@/lib/inbox-salary.mjs";
+// 报告薪资（ADR-0037）：tracker 行的薪资 = 该行报告 Machine Summary 的
+// `advertised_comp` → 归一化月薪 K 区间。纯 .mjs（node --test locked），口径与
+// 上面收件箱的采集卡片薪资**刻意分开**（ADR-0023 决议 5 的口径边界）。
+import { extractAdvertisedComp, parseReportSalary } from "@/lib/report-salary.mjs";
 // Eval timing summary (评估用时) — pure parser in .mjs (node --test locked),
 // file read here like every other user-layer data file.
 import { evalTimingSummary } from "@/lib/eval-timings.mjs";
@@ -188,6 +192,14 @@ export function readScanDates(): Map<string, string> {
   return dates;
 }
 
+/** 报告薪资的月薪 K 区间（ADR-0037）：minK/maxK 是展示用的区间，medianK 是排序值
+ *  （中位值，与收件箱 ADR-0024 同口径）。 */
+export type ReportSalaryRange = { minK: number; maxK: number; medianK: number };
+/** 报告薪资（ADR-0037）。`range` 为 null = 字段有原文但解析不出月薪（列表显示
+ *  「—」，原文仍在悬停提示里）；整个对象为 null = 连原文都没有（无报告，或字段是
+ *  `null`/`~`/空）。 */
+export type ReportSalary = { text: string; range: ReportSalaryRange | null };
+
 export type Application = {
   n: string;
   date: string;
@@ -214,6 +226,10 @@ export type Application = {
    * 那是代招方名字唯一的落点（tracker 没有 Via 列），列表页按未知雇主策略回退显示
    * （ADR-0004 D1）。同 evalDuration，页面级附加，解析器不管。 */
   reportVia?: string;
+  /** 报告薪资（ADR-0037）：本行报告的 Machine Summary `advertised_comp`。同
+   *  evalDuration/reportVia，页面级附加字段——解析器（tracker-table.mjs）不读报告。
+   *  null/缺省 = 无可用原文，列表显示「—」。 */
+  reportSalary?: ReportSalary | null;
 };
 
 /**
@@ -305,34 +321,95 @@ export function pipelineSummary(): PipelineSummary {
   const root = careerOpsRoot();
   const scanDates = readScanDates();
   const applications = readApplications();
+  // 一次读盘拿齐每行的报告事实（URL 头 / 报告薪资 / `?` 行的 Via，ADR-0037 决议 9）
+  // —— 三者此前分别读一趟，合并后页面加载仍是「一行一读」。
+  const facts = readReportFacts(applications);
   return {
     root,
     rootExists: fs.existsSync(root),
     // join the freshness date (first_seen) onto each raw posting — the inbox's
     // triage view orders/faceted-filters on it entirely client-side.
     inbox: readInbox().map((j) => ({ ...j, postedAt: j.postedAt ?? scanDates.get(j.url) })),
-    // `?` (unknown-employer) rows additionally carry their report's Via header, so
-    // the list can show 「{代招方}（代招）」under the agency policy without the
-    // client reading report files. Bounded to those rows (~25 today) — the whole
-    // tracker's reports are already read once below for the score map.
-    applications: applications.map((a) => (a.company.trim() === "?" ? { ...a, reportVia: readReportVia(a) } : a)),
-    // one full read of the report URL headers per page load — bounded by the
-    // tracker size, same cost the batch re-evaluate flow already pays on demand.
-    scoredUrls: buildScoreByUrl(applications, readApplicationUrl),
+    // 每行带上报告薪资（列展示 + salary 排序）；`?`（未知雇主）行另带上报告的
+    // `**Via:**` 头，让列表在 agency 策略下显示「{代招方}（代招）」而无需客户端读文件。
+    applications: applications.map((a) => {
+      const f = facts.get(a.n);
+      return {
+        ...a,
+        reportSalary: f?.salary ?? null,
+        ...(f && f.via !== undefined ? { reportVia: f.via } : null),
+      };
+    }),
+    // score map 用同一次读盘取到的 `**URL:**` 头（每个 URL 首个 app 胜出）。
+    scoredUrls: buildScoreByUrl(applications, (a) => facts.get(a.n)?.url),
     // 公司体检台账 (ADR-0025) — missing/empty file degrades to {} (badge absent).
     checkups: checkupIndex(read("data/company-checkups.tsv")),
   };
 }
 
-/** 报告头 `**Via:**`（发帖/代招方）。读不到报告 → ""，调用方保持 `?`。 */
-function readReportVia(app: Application): string {
-  const file = resolveReportPathFor(app);
-  if (!file) return "";
-  try {
-    return parseReport(fs.readFileSync(file, "utf8")).fields.find((f) => f.label === "Via")?.value ?? "";
-  } catch {
-    return "";
+/** 一行的报告事实：一次读盘能拿到的三样（ADR-0037 决议 9）。 */
+export type ReportFacts = {
+  /** 报告 `**URL:**` 头（仅当是 http(s) 绝对链接时存在）。 */
+  url?: string;
+  /** 报告薪资；无报告 / 无原文 → null。 */
+  salary: ReportSalary | null;
+  /** 报告 `**Via:**` 头（发帖/代招方）——**仅** `?`（未知雇主）行才取值；其它行
+   *  undefined 表示「不需要」。读不到时是 ""（调用方保持 `?`）。 */
+  via?: string;
+};
+
+/**
+ * 逐行读报告并把三样事实取齐（ADR-0037 决议 9）：`**URL:**` 头（喂 score map）、
+ * Machine Summary 的 `advertised_comp`（报告薪资）、`?` 行的 `**Via:**`。
+ *
+ * 合并 NOT 是为了省事：URL 头原本单独读一趟、Via 再读一趟，薪资列若各自读一趟就是
+ * 三趟全量报告读盘。这里按行只读一次，调用方各自 join。
+ * 报告缺失/读失败不是错误——返回空事实（无 url、薪资 null），`?` 行的 via 退化为 ""，
+ * 与合并前 `readReportVia` 的行为一致。
+ */
+export function readReportFacts(apps: Application[]): Map<string, ReportFacts> {
+  const out = new Map<string, ReportFacts>();
+  for (const app of apps) {
+    const isUnknownEmployer = app.company.trim() === "?";
+    const facts: ReportFacts = { salary: null, ...(isUnknownEmployer ? { via: "" } : null) };
+    const file = resolveReportPathFor(app);
+    if (file) {
+      try {
+        const md = fs.readFileSync(file, "utf8");
+        const fields = parseReport(md).fields;
+        const url = fields.find((f) => f.label === "URL")?.value;
+        if (url && /^https?:\/\//i.test(url)) facts.url = url;
+        facts.salary = parseReportSalary(extractAdvertisedComp(md)) as ReportSalary | null;
+        if (isUnknownEmployer) facts.via = fields.find((f) => f.label === "Via")?.value ?? "";
+      } catch {
+        // 报告不可读：保持空事实（pipelineSummary 的旧行为）
+      }
+    }
+    out.set(app.n, facts);
   }
+  return out;
+}
+
+/** 把报告薪资（+ `?` 行的 reportVia）join 到行上。报告详情页在 `sortKey=salary`
+ *  下用它复现列表页的顺序 —— 不 join 的话每行的薪资都是 null，「下一个」会退化成
+ *  与列表页完全不同的顺序（ADR-0036 的不漂移约束，ADR-0037 决议 9）。 */
+export function withReportSalaries(apps: Application[]): Application[] {
+  const facts = readReportFacts(apps);
+  return apps.map((a) => {
+    const f = facts.get(a.n);
+    return {
+      ...a,
+      reportSalary: f?.salary ?? null,
+      ...(f && f.via !== undefined ? { reportVia: f.via } : null),
+    };
+  });
+}
+
+/** 报告头 `**Via:**`（发帖/代招方），按需读**单行**报告（`?` 行的体检对象判定，
+ *  ADR-0026 决议 6）。走 readReportFacts 而不另写一份解析，via 的语义只有一个实现；
+ *  只传一行，故仍是一次读盘。读不到报告 → ""，调用方保持 `?`。 */
+function readReportVia(app: Application): string {
+  return readReportFacts([app]).get(app.n)?.via ?? "";
 }
 
 export type ReportData = { content: string; file: string };
