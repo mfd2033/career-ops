@@ -5,6 +5,8 @@
 // without an extension, ESM specifiers for plain JS modules must be fully
 // specified.
 import { isReservedReportFile } from "./report-files.mjs";
+import { statSync } from "node:fs";
+import path from "node:path";
 
 /**
  * Dashboard-friendly shape both `parseCodexEvent` and `parseClaudeEvent` return.
@@ -444,20 +446,94 @@ export function checkupLedgerRowCount(text) {
 }
 
 /**
+ * 可核验产物的台账行数 —— 门禁真正该数的那个数（ADR-0030 跟进决议，2026-09-17）。
+ *
+ * WHY: 决议 1 选了「数台账行」而不是「数 reports/ 增量」，因为 HTML 是可选附件
+ * （`--html -` 合法）。但**只数行**会漏掉一整类假落盘：行写进来了，它声明的 HTML
+ * 却不存在 —— 2026-09-17 `#1022`：该行 10 次 run 全是 0–6s 取消，台账里却有一行
+ * 指向从未写出的 `reports/checkups/1022-henan-yijin-yigou-2026-09-17.html`，
+ * 门禁照样记「已落盘」。所以「行」的定义收紧为「可核验产物」：
+ * 未声明 HTML（`-`/空/截断行，ADR-0030 决议 1 的容忍口径不变）→ 计；
+ * 声明了 HTML → 文件必须存在。`--html -` 依然合法，决议 1 不被推翻。
+ *
+ * @param {string | undefined} text - 台账原文（undefined = 读不到 → 0）
+ * @param {(rel: string) => boolean} fileExists - 相对仓库根的 html 路径 → 文件存在？（
+ *   route 传 makeCheckupHtmlProbe(root)；缺失即按「不计入」处理，绝不因探针缺失而放宽）
+ * @returns {number}
+ */
+export function checkupArtifactRowCount(text, fileExists) {
+  if (typeof text !== "string") return 0;
+  const probe = typeof fileExists === "function" ? fileExists : () => false;
+  let n = 0;
+  for (const line of text.split("\n")) {
+    const t = line.replace(/\r$/, "").trim();
+    if (!/^(\d+|\?)\t/.test(t)) continue;
+    const html = (t.split("\t")[6] ?? "").trim();
+    if (!html || html === "-" || probe(html)) n++;
+  }
+  return n;
+}
+
+/**
+ * 门禁用的 HTML 存在性探针：`reports/checkups/` 前缀 + 仓库根容器内 + 真的是文件。
+ * 读方不信任台账（同 /api/checkup-report 的立场）——前缀合规不代表路径没有逃逸，
+ * 目录也不等于报告。
+ *
+ * @param {string} root - 仓库根（careerOpsRoot()）
+ * @returns {(rel: string) => boolean}
+ */
+export function makeCheckupHtmlProbe(root) {
+  return (rel) => {
+    if (typeof rel !== "string" || !rel.startsWith("reports/checkups/")) return false;
+    // `reports/checkups/../../secret.txt` 也满足前缀且落在根内——先按段拒绝逃逸，
+    // 再交给容器判定（读方不信任台账，两层都要）。
+    const segs = rel.split("/");
+    if (segs.includes("..")) return false;
+    const file = path.join(root, ...segs);
+    const within = path.relative(root, file);
+    if (within.startsWith("..") || path.isAbsolute(within)) return false;
+    try {
+      return statSync(file).isFile();
+    } catch {
+      return false;
+    }
+  };
+}
+
+/**
  * The evaluate/checkup honesty gate, extracted from route.ts's close handler.
  *
  * It was inline there, which is why it had no test seam and why checkup could
  * silently drift out from under it (ADR-0030). Pure: the caller snapshots its
  * artifact channel and passes the verdict in as `persisted` — evaluate passes
  * `hasNewCompletedReport(reportsBefore, reportEntries())`, checkup passes
- * `checkupLedgerRowCount(after) > checkupLedgerRowCount(before)`. Branch order
+ * `checkupArtifactRowCount(after, probe) > checkupArtifactRowCount(before, probe)`
+ * (可核验产物行数：声明了 HTML 的行必须有文件，见该函数的 WHY)。Branch order
  * mirrors the original if/else chain exactly; the evaluate message is kept
  * byte-identical.
  *
- * @param {{kind: string, cleanExit: boolean, sawError: boolean, emittedText: boolean, persisted: boolean}} args
+ * @param {{kind: string, cleanExit: boolean, sawError: boolean, emittedText: boolean, persisted: boolean, timedOut?: boolean}} args
+ *   `timedOut` = the harness's own kill timer stopped it (route.ts's `killer`), which is
+ *   NOT the CLI's fault and must be reported as such — see the branch below.
  * @returns {{ok: true} | {ok: false, message: string}}
  */
-export function persistRunOutcome({ kind, cleanExit, sawError, emittedText, persisted }) {
+export function persistRunOutcome({ kind, cleanExit, sawError, emittedText, persisted, timedOut = false }) {
+  // 本地定时器杀的，先于一切判——否则「无 stdout + 非 0 退出」会落进下面的
+  // noOutputError 分支，把 30 分钟体检上限读成安装/登录问题（2026-09-17 #682 实测：
+  // 卡片写着 "is it installed and authenticated?"，真因是撞了 checkup 的 1_800_000ms
+  // 上限）。这类失败该说的是「换个便宜点的做法」，不是「去查装没装 CLI」。
+  if (timedOut) {
+    const limit = kind === "checkup" ? "30-minute checkup limit" : "time limit";
+    const head = `This run hit the harness's ${limit} and was stopped — not an install or auth problem.`;
+    if (PERSISTENCE_GATED_KINDS.has(kind) && !persisted) {
+      const channel = kind === "checkup" ? "data/company-checkups.tsv" : "a report";
+      return { ok: false, message: `${head} Nothing was persisted (no ${channel} entry). Re-run it with a smaller research budget.` };
+    }
+    return {
+      ok: false,
+      message: persisted ? `${head} Its artifact did land — verify it before re-running.` : `${head} Nothing was persisted.`,
+    };
+  }
   // A CLI that produced no output at all is the same failure mode whether it
   // was evaluating or running a checkup — one place for the condition/message
   // pair (formerly route.ts's noOutputError).
@@ -469,7 +545,7 @@ export function persistRunOutcome({ kind, cleanExit, sawError, emittedText, pers
   }
   if (PERSISTENCE_GATED_KINDS.has(kind) && !persisted) {
     const message = kind === "checkup"
-      ? "This checkup finished without adding a row to the checkup ledger (data/company-checkups.tsv) — nothing was persisted, so it's not recorded. Re-run it to verify."
+      ? "This checkup finished without a usable row in the checkup ledger (data/company-checkups.tsv) — no new row landed, or the row it added names an HTML report that isn't there. Nothing was persisted, so it's not recorded. Re-run it to verify."
       : "This evaluation didn't save a report, so it's not in your tracker. Full evaluation is verified on Claude Code.";
     return { ok: false, message };
   }

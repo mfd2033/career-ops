@@ -8,7 +8,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { after } from "next/server";
 import { resolveCli } from "@/lib/clis";
-import { accumulateTokens, checkupLedgerRowCount, failureEvidence, failureLedgerMsg, hasNewCompletedReport, isFatalGenericStderr, persistRunOutcome, PERSISTENCE_GATED_KINDS, withModelFlag } from "@/lib/run-cli-support.mjs";
+import { accumulateTokens, checkupArtifactRowCount, makeCheckupHtmlProbe, failureEvidence, failureLedgerMsg, hasNewCompletedReport, isFatalGenericStderr, persistRunOutcome, PERSISTENCE_GATED_KINDS, withModelFlag } from "@/lib/run-cli-support.mjs";
 import { spawnHeadlessCli, terminateCli } from "@/lib/spawn-cli.mjs";
 import { careerOpsRoot, readMemory, findReportFile, readInbox, readScanDates, findCheckupTarget, rootScript } from "@/lib/career-ops";
 import { checkupDispatchText } from "@/lib/checkup-request.mjs";
@@ -293,8 +293,10 @@ async function runPipeline({
   };
   const reportsBefore = kind === "evaluate" ? reportEntries() : [];
   // checkup 的产物通道是台账（data/company-checkups.tsv，ADR-0025 的唯一机器
-  // 通道；HTML 只是可选附件，--html - 合法），所以快照行数而非 reports/ 增量
+  // 通道；HTML 只是可选附件，--html - 合法），所以快照台账行而非 reports/ 增量
   // —— ADR-0030 决议 1。读失败按 0 行：一个读不出的台账不能反过来豁免门禁。
+  // 2026-09-17 收紧（ADR-0030 跟进决议）：数的是**可核验产物**行——声明了 HTML 的行
+  // 必须有文件。`#1022` 就是「行在、报告不在」却记了落盘的活证据。
   const checkupLedgerPath = path.join(careerOpsRoot(), "data", "company-checkups.tsv");
   const readCheckupLedger = (): string | undefined => {
     try {
@@ -303,7 +305,9 @@ async function runPipeline({
       return undefined;
     }
   };
-  const ledgerRowsBefore = kind === "checkup" ? checkupLedgerRowCount(readCheckupLedger()) : 0;
+  const checkupHtmlExists = makeCheckupHtmlProbe(careerOpsRoot());
+  const countArtifactRows = () => checkupArtifactRowCount(readCheckupLedger(), checkupHtmlExists);
+  const ledgerRowsBefore = kind === "checkup" ? countArtifactRows() : 0;
 
   // Global concurrency: queue for a slot in the global CLI-concurrency pool
   // BEFORE touching the write token or spawning. A full pool keeps the task
@@ -341,6 +345,9 @@ async function runPipeline({
   let runSettled: (() => void) | null = null;
   const settle = () => { runSettled?.(); runSettled = null; };
   let killer: ReturnType<typeof setTimeout> | undefined;
+  // 本地 kill 定时器是否已经开火（超时终态的判据，ADR-0030 跟进决议 2026-09-17）。
+  // 没有它，被定时器杀掉的 run 会以「无 stdout + 非 0 退出」落进安装/登录误诊分支。
+  let timedOut = false;
   // pdf-kind's render+mark work (renderPdf, below) keeps running detached even
   // after the agent child closes — and even after a cancel. Track its promise so
   // cancel() can defer releasing writeToken until that work actually settles,
@@ -576,6 +583,7 @@ async function runPipeline({
       child.stdout.setEncoding("utf8");
       child.stderr.setEncoding("utf8");
       killer = setTimeout(() => {
+        timedOut = true;
         if (child) terminateCli(child);
       }, killMs);
 
@@ -677,6 +685,10 @@ async function runPipeline({
         // all is the same failure mode whether it was evaluating or tailoring
         // a PDF — one place for the condition/message pair instead of two.
         const noOutputError = (): string | null => {
+          // 超时（本地定时器杀的）是 pdf 路径唯一的出口：它不是 CLI 的问题，先说清楚。
+          if (timedOut && !emittedText && !sawError) {
+            return "This run hit the harness's time limit and was stopped — not an install or auth problem.";
+          }
           if (!emittedText && !sawError && !cleanExit) return "The CLI exited with an error — is it installed and authenticated?";
           if (!emittedText && !sawError) return "The CLI produced no output — is it installed and authenticated? (career-ops is best on Claude Code.)";
           return null;
@@ -722,7 +734,7 @@ async function runPipeline({
         const persisted = kind === "evaluate"
           ? hasNewCompletedReport(reportsBefore, reportEntries())
           : kind === "checkup"
-            ? checkupLedgerRowCount(readCheckupLedger()) > ledgerRowsBefore
+            ? countArtifactRows() > ledgerRowsBefore
             : false;
         // Honesty gate (#9, ADR-0030): a green "done" requires a CLEAN exit, real
         // output, AND — for the artifact-persisting kinds — the channel actually
@@ -730,7 +742,7 @@ async function runPipeline({
         // decision lives in persistRunOutcome so it is assertable: an inline copy
         // here is exactly how checkup drifted out from under this gate and two
         // zero-artifact runs got banked as done (2026-09-16, #73/#131).
-        const outcome = persistRunOutcome({ kind, cleanExit, sawError, emittedText, persisted });
+        const outcome = persistRunOutcome({ kind, cleanExit, sawError, emittedText, persisted, timedOut });
         if (outcome.ok) {
           send({ type: "done", tokens: lastTokens, costUsd: lastCostUsd });
         } else {
