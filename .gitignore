@@ -212,9 +212,6 @@ data/intake-state.json
 # Local environment notes (machine-specific paths / PII, never commit)
 MEMORY.md
 
-# OpenCode run-continuation scratchpad (session JSON, machine-local)
-.omo/
-
 # Browser profile cache — may hold cookies / saved passwords; NEVER commit
 .cache/
 
