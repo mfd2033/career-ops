@@ -43,13 +43,19 @@ export type RunEvent = { type: string; seq?: number; [key: string]: unknown };
 type RunRecord = {
   id: string;
   buffer: RunEvent[];
-  subscribers: Set<(runId: string, ev: RunEvent) => void>;
   done: boolean;
   seq: number;
   cancel: (() => void) | null;
 };
 
 const runs = new Map<string, RunRecord>();
+
+// 通道级订阅者（每条 /api/events 长连接一个）。必须与 run 记录解耦：一个页签
+// 在加载时建立通道并终身持有，而 run 是之后才逐个注册的——若把订阅者挂到单条
+// run 的记录上（2026-09-18 之前的实现），连接建立之后才创建的 run 的
+// subscribers 永远是空集，该页签对之后派发的所有任务一帧都收不到（详情页
+// 黑盒的真正根因；卡片靠 ADR-0031 对账治愈掩盖了它）。
+const channelSubscribers = new Set<(runId: string, ev: RunEvent) => void>();
 
 export const MAX_RECORDED_RUNS = 50;
 export const MAX_EVENTS_PER_RUN = 500;
@@ -61,7 +67,7 @@ function record(id: string): RunRecord | undefined {
 /** Create a run's record. Must happen before the client learns the runId. */
 export function registerRun(id: string): void {
   if (record(id)) return;
-  runs.set(id, { id, buffer: [], subscribers: new Set(), done: false, seq: 0, cancel: null });
+  runs.set(id, { id, buffer: [], done: false, seq: 0, cancel: null });
   reapIfOverCap();
 }
 
@@ -87,7 +93,7 @@ export function publish(id: string, ev: Omit<RunEvent, "seq">): void {
   const stamped = { ...ev, seq: ++r.seq } as RunEvent;
   r.buffer.push(stamped);
   if (r.buffer.length > MAX_EVENTS_PER_RUN) r.buffer.shift();
-  for (const fn of r.subscribers) {
+  for (const fn of channelSubscribers) {
     try {
       fn(id, stamped);
     } catch {
@@ -125,11 +131,12 @@ export function isRunDone(id: string): boolean {
   return record(id)?.done ?? false;
 }
 
-/** Live fan-out for the /api/events channel. Returns an unsubscribe fn. */
+/** Live fan-out for the /api/events channel. Returns an unsubscribe fn.
+ *  通道级：订阅后创建的 run 也必须收到（见 channelSubscribers 的说明）。 */
 export function subscribeRuns(fn: (runId: string, ev: RunEvent) => void): () => void {
-  for (const r of runs.values()) r.subscribers.add(fn);
+  channelSubscribers.add(fn);
   return () => {
-    for (const r of runs.values()) r.subscribers.delete(fn);
+    channelSubscribers.delete(fn);
   };
 }
 

@@ -292,7 +292,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
         if (!live) return;
         try {
           const res = await fetch("/api/events", { signal: controller.signal, cache: "no-store" });
-          if (!res.ok || !res.body) throw new Error("events channel unavailable");
+          if (!res.ok || !res.body) throw new Error(`events channel unavailable (${res.status})`);
           const reader = res.body.getReader();
           const dec = new TextDecoder();
           let buf = "";
@@ -306,12 +306,24 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
               buf = buf.slice(nl + 1);
               if (!line) continue;
               try {
-                const frame = JSON.parse(line) as { runId?: string; type?: string; [key: string]: unknown };
+                // 线协议（ADR-0020，见 api/events/route.ts）：每帧 = {runId, ev}，
+                // 事件本体在 frame.ev 里。此前这里按扁平帧读（frame.type/label/…），
+                // 单任务事件自 ADR-0020 起就从未到达过 job-store——卡片全靠
+                // ADR-0031 对账治愈（30–45s 滞后），详情页则永远黑盒（2026-09-18
+                // 诊断：web/qa-events-channel.mjs 服务端 90 工具帧 vs 客户端 0 步骤）。
+                // 通道级心跳（无 runId）保持扁平检查。
+                const frame = JSON.parse(line) as {
+                  runId?: string;
+                  ev?: { type: string; [key: string]: unknown };
+                  type?: string;
+                  [key: string]: unknown;
+                };
                 if (frame.type === "keepalive") continue;
                 if (!frame.runId) continue;
                 const jobId = runIds.current.get(frame.runId);
                 if (!jobId) continue; // another tab's / extension's run — surfaced via the active-runs poll instead
-                handleEvent(jobId, frame as { type: string; [key: string]: unknown });
+                if (!frame.ev) continue;
+                handleEvent(jobId, frame.ev);
               } catch {
                 /* skip malformed frame */
               }
