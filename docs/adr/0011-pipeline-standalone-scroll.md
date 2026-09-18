@@ -1,11 +1,11 @@
 # ADR-0011: 管道页列表独立滚动（整页定高布局）
 
 - **Status:** Accepted (2026-09-10)
-- **Context:** web 端求职管道页 `/pipeline`（`PipelineView`）当前是文档流布局——外层 `mx-auto max-w-6xl` 无高度约束，标题/搜索/tabs 与列表一起随整页滚动。用户需求：滚动列表时**只滚动列表，其它内容（标题、搜索、tabs、过滤条、批量操作栏）固定不动**。左侧栏已有 `sticky h-screen overflow-y-auto` 的独立滚动范式可参照，但主区 `main` 仍随文档滚动。
+- **Context:** web 端求职管道页 `/pipeline`（`PipelineView`）当前是文档流布局——外层 `mx-auto max-w-6xl` 无高度约束，标题/搜索/tabs 与列表一起随整页滚动。用户需求：滚动列表时**只滚动列表，其它内容（标题、搜索、tabs、过滤条、批量条）固定不动**。左侧栏已有 `sticky h-screen overflow-y-auto` 的独立滚动范式可参照，但主区 `main` 仍随文档滚动。
 
 ## Decision
 
-1. **整页定高布局**（方案 a，逐字满足"只滚动列表"）：`/pipeline` 外层容器在 `md:` 及以上（≥768px，与侧栏 `md:flex` 判据一致）设为 `md:h-screen md:flex md:flex-col` —— 页面本身不再滚动，列表填满剩余空间并内部独立 `overflow-y-auto`。标题/搜索/过滤/批量操作栏一律 `md:shrink-0`，永不压缩。
+1. **整页定高布局**（方案 a，逐字满足"只滚动列表"）：`/pipeline` 外层容器在 `md:` 及以上（≥768px，与侧栏 `md:flex` 判据一致）设为 `md:h-screen md:flex md:flex-col` —— 页面本身不再滚动，列表填满剩余空间并内部独立 `overflow-y-auto`。标题/搜索/过滤/批量条一律 `md:shrink-0`，永不压缩。
 
 2. **两个 tab 全部独立滚动**：INBOX（`InboxTriage`）与追踪器表格（ALL/各状态）同样处理。追踪器表格容器在 `overflow-x-auto`（宽表横滚）基础上叠加 `md:overflow-y-auto`（列表纵滚），上下空间由 `md:flex-1 md:min-h-0` 接管。
 
@@ -25,3 +25,4 @@
 - 手机端行为不变（自然滚动 + 底部导航）。
 - 改动集中在 `pipeline-view.tsx`（外层与追踪器分支）与 `inbox-triage.tsx`（根节点 + `ul` 列表区），无数据契约/后端/样式系统层面影响。
 - 追踪器宽表在纵滚容器内保留横滚，x/y 滚动条同元素共存。
+- **延伸（2026-09-18，ADR-0039）**：本 ADR 只约束了顶区「不被压缩」，没约束「不出现/不消失」——条件行的挂载/卸载仍是一次净高度变化，会把列表顶开。列表之上直接相邻的条件行（批量条、分数筛选 chip）现改建**常驻槽位**，见 ADR-0039。

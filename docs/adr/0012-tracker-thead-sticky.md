@@ -1,7 +1,7 @@
 # ADR-0012: 追踪器表格列头固定（sticky thead）
 
 - **Status:** Accepted (2026-09-10)
-- **Context:** ADR-0011 已将 `/pipeline` 整页定高，追踪器表格在 `md:overflow-y-auto` 容器内独立纵向滚动。但列头（`thead`）作为表格首行，随行一起向上滚出视口，长列表滚动后用户失去列含义参照。收件箱无列头（卡片列表），其 FacetChips/批量头/操作栏已在 ADR-0011 中 `md:shrink-0` 固定，无需处理。
+- **Context:** ADR-0011 已将 `/pipeline` 整页定高，追踪器表格在 `md:overflow-y-auto` 容器内独立纵向滚动。但列头（`thead`）作为表格首行，随行一起向上滚出视口，长列表滚动后用户失去列含义参照。收件箱无列头（卡片列表），其 FacetChips/批量头/批量条已在 ADR-0011 中 `md:shrink-0` 固定，无需处理。
 
 ## Decision
 

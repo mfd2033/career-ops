@@ -13,6 +13,9 @@ export const en: Dict = {
   "inbox.matches": "{n} matches",
   "inbox.allRoles": "All roles",
   "inbox.hiddenRestore": "{n} hidden · restore",
+  // Empty-state copy for the batch bar's reserved slot (ADR-0039): the slot is always
+  // there, so it names the two actions checking a card buys you.
+  "inbox.batchHint": "Check postings to save them to the shortlist or skip them in bulk",
   "inbox.selected": "{n} selected",
   "inbox.saveToShortlist": "Save to shortlist",
   "inbox.noMatches": "No matches",
@@ -63,6 +66,7 @@ export const zh: Dict = {
   "inbox.matches": "{n} 个匹配",
   "inbox.allRoles": "全部职位",
   "inbox.hiddenRestore": "{n} 个已隐藏 · 恢复",
+  "inbox.batchHint": "勾选岗位后可批量存入短名单或跳过",
   "inbox.selected": "{n} 个已选",
   "inbox.saveToShortlist": "保存到候选清单",
   "inbox.noMatches": "无匹配结果",

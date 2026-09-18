@@ -15,6 +15,7 @@ import { scoreTone } from "@/lib/format";
 import { scoreNum } from "@/lib/score-num.mjs";
 import { FacetChips } from "./facet-chips";
 import { TriageRow, type RowScore } from "./triage-row";
+import { RowSlot } from "@/components/row-slot";
 import { ShortlistTray, type ShortItem } from "./shortlist-tray";
 import { useI18n } from "@/lib/i18n/context";
 import { cn } from "@/lib/cn";
@@ -409,21 +410,25 @@ export function InboxTriage({ inbox, scoredUrls }: { inbox: InboxJob[]; scoredUr
         )}
       </div>
 
-      {/* multi-select action bar */}
-      {selected.size > 0 && (
-        <div className="mt-2 flex items-center gap-3 rounded-lg border border-brand/30 bg-brand-soft px-3 py-2 text-sm md:shrink-0">
-          <span className="font-medium text-brand tabular-nums">{t("inbox.selected", { n: selected.size })}</span>
-          <button type="button" onClick={saveSelected} className="rounded-md bg-brand px-2.5 py-1 text-xs font-medium text-brand-foreground max-sm:min-h-[44px]">
-            {t("inbox.saveToShortlist")}
-          </button>
-          <button type="button" onClick={skipSelected} className="text-xs text-muted hover:text-foreground max-sm:min-h-[44px]">
-            {t("inbox.skipSelected")}
-          </button>
-          <button type="button" onClick={() => setSelected(new Set())} className="text-xs text-muted hover:text-foreground max-sm:min-h-[44px]">
-            {t("inbox.clear")}
-          </button>
-        </div>
-      )}
+      {/* multi-select action bar —— 常驻槽位（ADR-0039 决议 1/2/3，与管道页同机制）：槽位恒在、
+          高度锁定，勾选/取消不再把卡片列表顶开。空态由 RowSlot 渲染一句提示语。`md:` 以下没有
+          定高布局，槽位不存在，条出现时照旧下推列表（已知残差）。 */}
+      <RowSlot hint={t("inbox.batchHint")} className="md:mt-2 md:h-11">
+        {selected.size > 0 && (
+          <div className="flex items-center gap-3 rounded-lg border border-brand/30 bg-brand-soft px-3 py-2 text-sm max-md:mt-2">
+            <span className="shrink-0 font-medium text-brand tabular-nums">{t("inbox.selected", { n: selected.size })}</span>
+            <button type="button" onClick={saveSelected} className="shrink-0 rounded-md bg-brand px-2.5 py-1 text-xs font-medium text-brand-foreground max-sm:min-h-[44px]">
+              {t("inbox.saveToShortlist")}
+            </button>
+            <button type="button" onClick={skipSelected} className="shrink-0 text-xs text-muted hover:text-foreground max-sm:min-h-[44px]">
+              {t("inbox.skipSelected")}
+            </button>
+            <button type="button" onClick={() => setSelected(new Set())} className="shrink-0 text-xs text-muted hover:text-foreground max-sm:min-h-[44px]">
+              {t("inbox.clear")}
+            </button>
+          </div>
+        )}
+      </RowSlot>
 
       {visible.length > 0 ? (
         <ul className="mt-3 divide-y divide-border overflow-hidden rounded-2xl border border-border bg-surface/40 md:min-h-0 md:flex-1 md:overflow-y-auto">

@@ -194,6 +194,11 @@ export const en: Dict = {
   "pipeline.checkupReport": "Checkup report",
 
   // ── Batch re-evaluate (pipeline-view.tsx) ──
+  // Empty-state copy for the batch bar's reserved slot (ADR-0039): the slot is always
+  // there, so it says what checking a row buys you. Actions are named per tab — only
+  // the EVALUATED tab has a batch skip (ADR-0038).
+  "pipeline.batchHint": "Check rows to re-evaluate them in bulk",
+  "pipeline.batchHintEvaluated": "Check rows to re-evaluate or skip them in bulk",
   "pipeline.batchSelected": "{count} selected",
   "pipeline.batchOffView": "{count} outside the current filter",
   "pipeline.batchReevaluableHint": "{count} of {total} have a posting URL",
@@ -449,6 +454,8 @@ export const zh: Dict = {
   "pipeline.checkupReport": "体检报告",
 
   // ── 批量重新评估（pipeline-view.tsx） ──
+  "pipeline.batchHint": "勾选行后可批量重新评估",
+  "pipeline.batchHintEvaluated": "勾选行后可批量重新评估或跳过",
   "pipeline.batchSelected": "已选 {count} 项",
   "pipeline.batchOffView": "{count} 项在当前筛选之外",
   "pipeline.batchReevaluableHint": "{total} 项中有 {count} 项含职位链接",

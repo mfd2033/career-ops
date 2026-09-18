@@ -7,6 +7,7 @@ import { Search, ChevronsUpDown, X, Compass, ArrowRight, RotateCcw, Loader2, Ski
 import type { Application, InboxJob } from "@/lib/career-ops";
 import { Badge } from "@/components/ui/badge";
 import { CompanyLogo } from "@/components/company-logo";
+import { RowSlot } from "@/components/row-slot";
 import { canonStatus, fmtDuration, scoreTone, statusDot, checkupTone } from "@/lib/format";
 import type { CheckupEntry } from "@/lib/format";
 import { CHECKUP_RISK_LABELS } from "@/lib/company-checkups.mjs";
@@ -358,68 +359,78 @@ export function PipelineView({
             </button>
           );
         })}
-      </div>
-
-      {tab !== "INBOX" && minFilter != null && (
-        <div className="mt-3 flex items-center gap-2 md:shrink-0">
-          <span className="text-xs text-faint">{t("pipeline.filtered")}</span>
-          <button
-            type="button"
-            onClick={() => setParams({ min: null })}
-            className="inline-flex items-center gap-1.5 rounded-full border border-brand/40 bg-brand-soft px-2.5 py-1 text-xs font-medium text-brand transition-colors hover:bg-brand/15"
-            title={t("pipeline.clearScoreFilter")}
-          >
-            {t("pipeline.scoreGte", { min: minFilter.toFixed(1) })}
-            <X className="size-3" />
-          </button>
-        </div>
-      )}
-
-      {tab !== "INBOX" && selected.size > 0 && (
-        <div className="mt-3 flex flex-wrap items-center gap-2 rounded-full border border-brand/30 bg-brand-soft/40 px-3 py-1.5 text-xs md:shrink-0">
-          <span className="font-medium text-brand">{t("pipeline.batchSelected", { count: selected.size })}</span>
-          {selectedOffView > 0 && (
-            <span className="text-muted">{t("pipeline.batchOffView", { count: selectedOffView })}</span>
-          )}
-          {urlMapLoading ? (
-            <span className="inline-flex items-center gap-1 text-muted">
-              <Loader2 className="size-3 animate-spin" /> {t("pipeline.batchUrlsLoading")}
-            </span>
-          ) : urlMap ? (
-            <span className="text-muted">
-              {reevaluableCount === 0
-                ? t("pipeline.batchNoneHasUrl")
-                : t("pipeline.batchReevaluableHint", { count: reevaluableCount, total: selected.size })}
-            </span>
-          ) : null}
-          <button
-            type="button"
-            onClick={reevaluateSelected}
-            disabled={reevaluableCount === 0 || urlMapLoading || urlMap === null}
-            className="inline-flex items-center gap-1.5 rounded-full bg-brand px-3 py-1 font-medium text-brand-foreground transition-colors hover:bg-brand-200 disabled:cursor-not-allowed disabled:opacity-50 max-sm:min-h-[44px]"
-            title={t("pipeline.batchReevaluateTitle", { count: reevaluableCount })}
-          >
-            <RotateCcw className="size-3.5" /> {t("pipeline.batchReevaluate", { count: reevaluableCount })}
-          </button>
-          {tab === "EVALUATED" && (
+        {/* 分数筛选 chip 住进 tabs 行（ADR-0039 决议 5）：它原先是 tabs 下面的独立一行，
+            点 X 清除时整行消失会把列表上跳——同一类位移。tabs 行本就常驻，chip 的挂载/
+            卸载不再改变列表高度。窄屏下它仍可能让 tabs 行多/少折一行：已知残差。 */}
+        {tab !== "INBOX" && minFilter != null && (
+          <div className="ml-auto flex items-center gap-2 pl-2">
+            <span className="text-xs text-faint">{t("pipeline.filtered")}</span>
             <button
               type="button"
-              onClick={skipSelected}
-              disabled={skipBusy}
-              className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1 font-medium text-muted transition-colors hover:border-red-400/50 hover:text-red-400 disabled:cursor-not-allowed disabled:opacity-50 max-sm:min-h-[44px]"
-              title={t("pipeline.batchSkipTitle", { count: selected.size })}
+              onClick={() => setParams({ min: null })}
+              className="inline-flex items-center gap-1.5 rounded-full border border-brand/40 bg-brand-soft px-2.5 py-1 text-xs font-medium text-brand transition-colors hover:bg-brand/15"
+              title={t("pipeline.clearScoreFilter")}
             >
-              {skipBusy ? <Loader2 className="size-3.5 animate-spin" /> : <SkipForward className="size-3.5" />} {t("pipeline.batchSkip", { count: selected.size })}
+              {t("pipeline.scoreGte", { min: minFilter.toFixed(1) })}
+              <X className="size-3" />
             </button>
+          </div>
+        )}
+      </div>
+
+      {/* 批量条的常驻槽位（ADR-0039 决议 1/2/3）：非 INBOX tab 恒在，只切内容——条的出现/
+          消失不再把表格容器顶开，勾选时列表不再下滑。`md:` 以下没有定高布局，槽位不存在
+          （条出现时照旧下推列表：已知残差）。空态那一句提示语由 RowSlot 渲染，按 tab 对齐
+          动作（已评估 tab 才有批量跳过，ADR-0038 决议 2）。 */}
+      {tab !== "INBOX" && (
+        <RowSlot hint={tab === "EVALUATED" ? t("pipeline.batchHintEvaluated") : t("pipeline.batchHint")}>
+          {selected.size > 0 && (
+            <div className="flex flex-wrap items-center gap-2 rounded-full border border-brand/30 bg-brand-soft/40 px-3 py-1.5 text-xs max-md:mt-3 md:flex-nowrap">
+              <span className="shrink-0 font-medium text-brand">{t("pipeline.batchSelected", { count: selected.size })}</span>
+              {selectedOffView > 0 && (
+                <span className="min-w-0 truncate text-muted">{t("pipeline.batchOffView", { count: selectedOffView })}</span>
+              )}
+              {urlMapLoading ? (
+                <span className="inline-flex shrink-0 items-center gap-1 text-muted">
+                  <Loader2 className="size-3 animate-spin" /> {t("pipeline.batchUrlsLoading")}
+                </span>
+              ) : urlMap ? (
+                <span className="min-w-0 truncate text-muted">
+                  {reevaluableCount === 0
+                    ? t("pipeline.batchNoneHasUrl")
+                    : t("pipeline.batchReevaluableHint", { count: reevaluableCount, total: selected.size })}
+                </span>
+              ) : null}
+              <button
+                type="button"
+                onClick={reevaluateSelected}
+                disabled={reevaluableCount === 0 || urlMapLoading || urlMap === null}
+                className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-brand px-3 py-1 font-medium text-brand-foreground transition-colors hover:bg-brand-200 disabled:cursor-not-allowed disabled:opacity-50 max-sm:min-h-[44px]"
+                title={t("pipeline.batchReevaluateTitle", { count: reevaluableCount })}
+              >
+                <RotateCcw className="size-3.5" /> {t("pipeline.batchReevaluate", { count: reevaluableCount })}
+              </button>
+              {tab === "EVALUATED" && (
+                <button
+                  type="button"
+                  onClick={skipSelected}
+                  disabled={skipBusy}
+                  className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border px-3 py-1 font-medium text-muted transition-colors hover:border-red-400/50 hover:text-red-400 disabled:cursor-not-allowed disabled:opacity-50 max-sm:min-h-[44px]"
+                  title={t("pipeline.batchSkipTitle", { count: selected.size })}
+                >
+                  {skipBusy ? <Loader2 className="size-3.5 animate-spin" /> : <SkipForward className="size-3.5" />} {t("pipeline.batchSkip", { count: selected.size })}
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setSelected(new Set())}
+                className="inline-flex shrink-0 items-center gap-1 rounded-full border border-border px-2.5 py-1 text-muted transition-colors hover:text-foreground max-sm:min-h-[44px]"
+              >
+                <X className="size-3" /> {t("pipeline.batchClear")}
+              </button>
+            </div>
           )}
-          <button
-            type="button"
-            onClick={() => setSelected(new Set())}
-            className="inline-flex items-center gap-1 rounded-full border border-border px-2.5 py-1 text-muted transition-colors hover:text-foreground max-sm:min-h-[44px]"
-          >
-            <X className="size-3" /> {t("pipeline.batchClear")}
-          </button>
-        </div>
+        </RowSlot>
       )}
 
       {tab === "INBOX" ? (
