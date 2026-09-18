@@ -37,6 +37,8 @@ import {
 import { permissionFlags } from "@/lib/claude-invocation.mjs";
 import { spawnHeadlessCli, terminateCli } from "@/lib/spawn-cli.mjs";
 import { careerOpsRoot, readMemory, findCheckupTarget } from "@/lib/career-ops";
+import { listLiveCheckups } from "@/lib/checkup-live.mjs";
+import { decideBatchCheckupConflict } from "@/lib/checkup-request.mjs";
 import { readAppConfig } from "@/lib/app-config";
 import { buildPrompt } from "@/lib/run-prompts.mjs";
 import { acquire, release, __setSizeSource, DEFAULT_POOL_SIZE, type PoolHandle } from "@/lib/core/concurrency-pool";
@@ -113,11 +115,11 @@ export async function POST(req: Request) {
   // single checkup path uses) so the worker never re-derives it from the
   // tracker. Rows that don't resolve are failed items up front — they never
   // spawn a worker (ADR-0041 决议 5 的对偶：resolvable 才进批量).
-  const targets: Target[] = [];
+  const resolvable: Target[] = [];
   const unresolvable: { n: string; reason: string }[] = [];
   for (const n of ns) {
     const t = findCheckupTarget(n);
-    if (t.ok) targets.push({ n, company: t.company });
+    if (t.ok) resolvable.push({ n, company: t.company });
     else
       unresolvable.push({
         n,
@@ -126,6 +128,19 @@ export async function POST(req: Request) {
             ? "no tracker row for this report number"
             : "unknown-employer row has no Via company to check up on",
       });
+  }
+  // ADR-0041 决议 5: a row with a checkup ALREADY RUNNING is skipped
+  // (`skipped-running`), never auto-replaced — the batch must not make the
+  // ADR-0033 stop/replace call on the user's behalf. Checked here, once, at
+  // dispatch; a conflict that appears during the batch (check-vs-spawn gap) is
+  // covered by the per-item ledger gate — a double-run adds rows for the same
+  // tracker# and the diff still proves persistence, so no row is lost.
+  const targets: Target[] = [];
+  const skippedRunning: { n: string; company: string }[] = [];
+  for (const t of resolvable) {
+    const verdict = decideBatchCheckupConflict({ live: listLiveCheckups(t.n) });
+    if (verdict.action === "dispatch") targets.push(t);
+    else skippedRunning.push(t);
   }
 
   const checkupLedgerPath = path.join(root, "data", "company-checkups.tsv");
@@ -176,6 +191,20 @@ export async function POST(req: Request) {
           failed++;
           send({ type: "item", n: u.n, company: null, ok: false, star: null, reason: u.reason });
           send({ type: "text", text: `\u26A0\uFE0F not checkable: #${u.n} — ${u.reason}\n` });
+        }
+        // Same for already-running rows — annotated, never spawned, never
+        // counted as failures (ADR-0041 决议 5: skipping is the batch's
+        // conflict answer, not an error).
+        for (const s of skippedRunning) {
+          send({
+            type: "item",
+            n: s.n,
+            company: s.company,
+            ok: false,
+            star: null,
+            reason: "skipped-running: a checkup for this row is already in flight — stop or replace it from the report page first",
+          });
+          send({ type: "text", text: `\u23F8 skipped (already running): #${s.n} ${s.company}\n` });
         }
 
         // Check up one tracker row with its pre-resolved company. Parallel-safe by
@@ -345,10 +374,10 @@ export async function POST(req: Request) {
           // a failed batch, not a green card — same discipline as batch-evaluate's.
           send({
             type: "error",
-            msg: `All ${failed} checkup(s) failed — no checkup ledger rows were written. See the NOT recorded lines above for per-company reasons.`,
+            msg: `All ${failed} checkup(s) failed — no checkup ledger rows were written. See the NOT recorded lines above for per-company reasons.${skippedRunning.length ? ` ${skippedRunning.length} row(s) were skipped as already running (those are not failures).` : ""}`,
           });
         } else {
-          send({ type: "done", ok, failed, skipped });
+          send({ type: "done", ok, failed, skipped, skippedRunning: skippedRunning.length });
         }
       } catch (err) {
         send({ type: "error", msg: (err as Error).message });

@@ -9,7 +9,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { checkupDispatchText, decideCheckupPreflight, checkupReplaceBody } from "../../src/lib/checkup-request.mjs";
+import { checkupDispatchText, decideCheckupPreflight, checkupReplaceBody, decideBatchCheckupConflict } from "../../src/lib/checkup-request.mjs";
 import { buildPrompt } from "../../src/lib/run-prompts.mjs";
 import { toolScopeFor, grantsWriteCapability, KNOWN_KINDS } from "../../src/lib/claude-invocation.mjs";
 
@@ -143,4 +143,27 @@ test("checkup kind: persisting scope (writes report/ledger/appendix) and known",
   assert.ok(KNOWN_KINDS.includes("checkup"));
   const scope = toolScopeFor("checkup");
   assert.equal(grantsWriteCapability(scope), true);
+});
+
+// ── 批量体检的冲突判定（ADR-0041 决议 5）──────────────────────────────────
+// 批量没有交互面板替用户裁决 ADR-0033 的停止/替换——在跑的答案就是跳过+标注。
+
+test("batch conflict: 没有在跑 → 放行", () => {
+  assert.deepEqual(decideBatchCheckupConflict({ live: [] }), { action: "dispatch" });
+  assert.deepEqual(decideBatchCheckupConflict({}), { action: "dispatch" });
+});
+
+test("batch conflict: 有在跑（running 或 queued）→ skip-running，绝不 replace", () => {
+  const d = decideBatchCheckupConflict({ live: RUNNING });
+  assert.equal(d.action, "skip-running");
+  assert.deepEqual(d.running, RUNNING);
+  const q = decideBatchCheckupConflict({ live: QUEUED });
+  assert.equal(q.action, "skip-running");
+});
+
+test("batch conflict: 在跑快照只暴露 runId/state/startedAt（不外泄内部字段）", () => {
+  const d = decideBatchCheckupConflict({
+    live: [{ runId: "run-d", state: "running", startedAt: 2, gone: false, resolveGone: () => {}, gonePromise: Promise.resolve() }],
+  });
+  assert.deepEqual(d.running, [{ runId: "run-d", state: "running", startedAt: 2 }]);
 });

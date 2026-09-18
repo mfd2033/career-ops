@@ -47,3 +47,18 @@ export function checkupReplaceBody({ replaced, outcomes }) {
   const unconfirmed = (outcomes ?? []).some((o) => o === "timeout");
   return unconfirmed ? { ok: true, replaced, unconfirmed: true } : { ok: true, replaced };
 }
+
+/**
+ * 批量体检的冲突判定（纯，ADR-0041 决议 5）：勾选集中某行已有在跑体检 → 该项
+ * 跳过（`skipped-running`）并在结果清单标注，**不**自动 replace —— 批量场景替
+ * 用户做 ADR-0033 的停止/替换决定太激进，冲突决定权留在人（用户可先去处理冲突，
+ * 或稍后对被跳过的行单独复跑）。与单个按钮的 decideCheckupPreflight 并排存在：
+ * 单个路径有交互面板可裁决，批量路径的裁决就是「跳过+标注」。
+ * @param {{live?: Array<{runId: string, state: string, startedAt: number|null}>}} input
+ * @returns {{action: "dispatch"} | {action: "skip-running", running: Array}}
+ */
+export function decideBatchCheckupConflict({ live }) {
+  const running = (live ?? []).map(({ runId, state, startedAt }) => ({ runId, state, startedAt }));
+  if (running.length === 0) return { action: "dispatch" };
+  return { action: "skip-running", running };
+}
