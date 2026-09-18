@@ -198,8 +198,8 @@ export function PipelineView({
   const [lastBatchId, setLastBatchId] = useState<string | null>(null);
   const urlMapFetched = useRef(false);
   // Batch skip (EVALUATED tab only): marks selected rows SKIP — the canonical
-  // "don't apply" state (its own 跳过 tab), distinct from the report-page single
-  // skip which writes Discarded (CONTEXT.md「跳过」).
+  // "don't apply" state (its own 跳过 tab), same write as the report-page single
+  // skip since ADR-0040.
   const [skipBusy, setSkipBusy] = useState(false);
   const selectAllRef = useRef<HTMLInputElement>(null);
 

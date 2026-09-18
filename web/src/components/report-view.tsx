@@ -508,11 +508,11 @@ export function ReportView({
           })()}
           {meta?.legitimacy && <Badge tone={legitimacyTone(meta.legitimacy)}>{translateLegitimacy(meta.legitimacy)}</Badge>}
           {app && <StatusSelect n={id} current={app.status} />}
-          {/* 跳过 = 写盘 Discarded 后前进：落点由 SkipFromTracker 内的
-              skipDestination 决定。next 链接与无下一份时的列表兜底都带上本页的
-              列表上下文（contextQuery）；深链页（position == null）没有列表
-              上下文，落点在其内部退回首页。 */}
-          {app && app.status !== "Discarded" && (
+          {/* 跳过 = 写盘 SKIP 后前进（ADR-0040，与批量跳过同落点）：路径由
+              SkipFromTracker 内的 skipDestination 决定。next 链接与无下一份时的
+              列表兜底都带上本页的列表上下文（contextQuery）；深链页
+              （position == null）没有列表上下文，落点在其内部退回首页。 */}
+          {app && app.status !== "SKIP" && (
             <SkipFromTracker
               n={id}
               nextHref={next ? `/pipeline/${next.n}${contextQuery}` : null}

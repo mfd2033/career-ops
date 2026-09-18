@@ -19,12 +19,12 @@ export function DecisionCard({ app }: { app: Application }) {
   // 未知雇主（代招）行与列表页同一口径：显示「{代招方}（代招）」而不是一个问号。
   const employerPolicy = useUnknownEmployerPolicy();
   const companyLabel = resolveCompanyLabel({ company: app.company, agency: app.reportVia, policy: employerPolicy });
-  const [busy, setBusy] = useState<"" | "Applied" | "Discarded">("");
+  const [busy, setBusy] = useState<"" | "Applied" | "SKIP">("");
   const [done, setDone] = useState<string | null>(null);
   const score = scoreNum(app.score);
   const tone = scoreTone(app.score);
 
-  const setStatus = async (status: "Applied" | "Discarded") => {
+  const setStatus = async (status: "Applied" | "SKIP") => {
     setBusy(status);
     try {
       await fetch("/api/status", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ n: app.n, status }) });
@@ -70,10 +70,10 @@ export function DecisionCard({ app }: { app: Application }) {
         <button
           type="button"
           disabled={!!busy}
-          onClick={() => setStatus("Discarded")}
+          onClick={() => setStatus("SKIP")}
           className="inline-flex items-center justify-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs font-medium text-muted transition hover:text-foreground disabled:opacity-60 max-sm:min-h-[44px] max-sm:px-4"
         >
-          {busy === "Discarded" ? <Loader2 className="size-3.5 animate-spin" /> : <X className="size-3.5" />} {t("home.skip")}
+          {busy === "SKIP" ? <Loader2 className="size-3.5 animate-spin" /> : <X className="size-3.5" />} {t("home.skip")}
         </button>
         <button
           type="button"

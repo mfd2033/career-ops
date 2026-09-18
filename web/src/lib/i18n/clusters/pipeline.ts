@@ -127,7 +127,7 @@ export const en: Dict = {
 
   // ── Skip from tracker (skip-from-tracker.tsx) ──
   "pipeline.skip": "Skip",
-  "pipeline.skipTitle": "Mark this role as skipped (Discarded) — same as the Today page skip",
+  "pipeline.skipTitle": "Mark this role as skipped (SKIP) — same group as the batch skip",
 
   // ── Generate PDF button (generate-pdf-button.tsx) ──
   "pipeline.generatingCv": "Generating CV…",
@@ -387,7 +387,7 @@ export const zh: Dict = {
 
   // ── Skip from tracker (skip-from-tracker.tsx) ──
   "pipeline.skip": "跳过",
-  "pipeline.skipTitle": "将此职位标记为跳过（已放弃）——与今日页面的跳过相同",
+  "pipeline.skipTitle": "将此岗位标记为跳过（SKIP）——归入跳过分组，与批量跳过一致",
 
   // ── Generate PDF button (generate-pdf-button.tsx) ──
   "pipeline.generatingCv": "正在生成简历…",

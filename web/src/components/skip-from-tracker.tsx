@@ -6,11 +6,12 @@ import { X, Loader2 } from "lucide-react";
 import { useI18n } from "@/lib/i18n/context";
 import { skipDestination } from "@/lib/skip-destination.mjs";
 
-// Soft skip: mark a scored-but-not-yet-decided application as Discarded — the
-// same write as the "Skip" action on the Today page's "Awaiting your decision"
-// block. This is the reversible alternative to DeleteFromTracker: the row stays
-// in the tracker, just leaves the active queue. The write goes through the same
-// core write-gate (/api/status → set-status.mjs) so status-log.tsv gets a row.
+// Soft skip: mark a scored-but-not-yet-decided application as SKIP — the
+// canonical terminal "don't apply" state (its own 跳过 tab), same write as the
+// "Skip" action on the Today page's "Awaiting your decision" block and the
+// pipeline EVALUATED-tab batch skip (ADR-0038/0040). The row stays in the
+// tracker, just leaves the active queue. The write goes through the same core
+// write-gate (/api/status → set-status.mjs) so status-log.tsv gets a row.
 //
 // 写盘后前进（不再是回首页）：落点由 skip-destination.mjs 决定——有下一份 replace
 // 到下一份，没有 replace 回列表页；深链页（无列表上下文）维持旧行为 push 回首页。
@@ -32,15 +33,16 @@ export function SkipFromTracker({
   async function skip() {
     setBusy(true);
     try {
-      // Same contract as the Today-page skip (decision-card): /api/status is the
-      // core write-gate, the tracker row moves to Discarded. No res.ok check on
-      // purpose — a rejected HTTP status still means set-status.mjs committed the
-      // write, and landing on the Today page re-reads the tracker from disk so the
-      // decision queue reflects the new state either way.
+      // Same contract as the Today-page skip (decision-card) and the batch skip
+      // (ADR-0038): /api/status is the core write-gate, the tracker row moves to
+      // SKIP. No res.ok check on purpose — a rejected HTTP status still means
+      // set-status.mjs committed the write, and landing on the Today page re-reads
+      // the tracker from disk so the decision queue reflects the new state either
+      // way.
       await fetch("/api/status", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ n, status: "Discarded" }),
+        body: JSON.stringify({ n, status: "SKIP" }),
       });
       // 落点三档（skip-destination.mjs，node --test 锁定）：有下一份 → replace
       // 到下一份；没有 → replace 回列表页（保留 tab/排序/搜索上下文）；深链页
