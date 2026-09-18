@@ -65,6 +65,11 @@ export const en: Dict = {
   "jobs.queuedHint": "Pool is full — will run when a slot frees up.",
   "jobs.evalDuration": "Eval duration",
   "jobs.viewReport": "View report",
+  "jobs.phaseRunning": "Running",
+  "jobs.phaseFinalizing": "Finalizing",
+  "jobs.interrupted": "Interrupted",
+  "jobs.batchProgress": "Processing {i} of {n}",
+  "jobs.batchItems": "Per-item results",
 };
 
 // Simplified Chinese strings. Every key in en must have a matching key here.
@@ -128,4 +133,9 @@ export const zh: Dict = {
   "jobs.queuedHint": "并发已满，空出名额后自动运行。",
   "jobs.evalDuration": "评估用时",
   "jobs.viewReport": "查看报告",
+  "jobs.phaseRunning": "运行中",
+  "jobs.phaseFinalizing": "收尾中",
+  "jobs.interrupted": "已中断",
+  "jobs.batchProgress": "正在处理第 {i}/{n} 项",
+  "jobs.batchItems": "逐项结果",
 };

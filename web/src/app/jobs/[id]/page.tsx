@@ -5,8 +5,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { ArrowLeft, Loader2, Wrench, CircleDot, Check, X, Clock } from "lucide-react";
-import { useJobs } from "@/components/jobs/job-store";
+import { ArrowLeft, Loader2, Wrench, CircleDot, Check, X, Clock, AlertTriangle } from "lucide-react";
+import { useJobs, type JobItem } from "@/components/jobs/job-store";
 import { HeroGlow } from "@/components/hero-glow";
 import { Badge } from "@/components/ui/badge";
 import { useI18n } from "@/lib/i18n/context";
@@ -28,6 +28,19 @@ type RunLedgerEntry = {
   msg?: string;
 };
 
+// ADR-0042 决议 1：运行中每秒走一次的时钟，供「已耗时」显示（不估算、不预测——
+// 只显示真实流逝）。
+function useNow(running: boolean): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!running) return;
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [running]);
+  return now;
+}
+
 export default function JobPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const { jobs } = useJobs();
@@ -37,6 +50,33 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
   // Hooks before the not-found early return; an unknown id just yields nulls.
   const { reportNum, entry } = useJobTiming(job ?? {});
   const subtitleIsNum = !!job?.subtitle && /^#\d+$/.test(job.subtitle);
+  const running = job?.status === "running";
+  const now = useNow(!!running);
+
+  // ADR-0042 决议 6：服务端批量逐项登记的恢复通道——另一个页签打开详情页、或
+  // 本页签流式累积丢失时，凭 open 事件下发的 serverBatchId 每 3s 拉一次登记表。
+  const serverBatchId = job?.serverBatchId;
+  const [serverItems, setServerItems] = useState<JobItem[]>([]);
+  useEffect(() => {
+    if (!serverBatchId || !running) return;
+    let alive = true;
+    const poll = async () => {
+      try {
+        const res = await fetch(`/api/batch-items?batchId=${encodeURIComponent(serverBatchId)}`, { cache: "no-store" });
+        if (!res.ok) return;
+        const data = (await res.json()) as { items?: JobItem[] };
+        if (alive && Array.isArray(data.items)) setServerItems(data.items);
+      } catch {
+        /* transient — next tick retries */
+      }
+    };
+    poll();
+    const timer = setInterval(poll, 3000);
+    return () => {
+      alive = false;
+      clearInterval(timer);
+    };
+  }, [serverBatchId, running]);
 
   // ADR-0027 follow-up: runs dispatched outside this browser (API, another
   // tab) have no localStorage card — their record lives ONLY in the server
@@ -140,6 +180,14 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
     );
   }
 
+  // ADR-0042 决议 5：本地累积 ∪ 服务端登记表（本地优先——流式事件更实时；
+  // 服务端补跨页签/恢复场景）。按 key 幂等合并。
+  const itemMap = new Map<string, JobItem>();
+  for (const it of serverItems) itemMap.set(it.key, it);
+  for (const it of job.items ?? []) itemMap.set(it.key, it);
+  const batchItems = [...itemMap.values()];
+  const showBatchPanel = batchItems.length > 0 || job.batchPos != null;
+
   return (
     <div className="mx-auto max-w-3xl px-6 py-8">
       {/* 返回跟随会话历史（ADR-0019）；无应用内前一页时兜底回工作器列表——
@@ -156,8 +204,20 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
         {job.status === "running" && <HeroGlow />}
         <div className="relative z-10">
           <p className="flex items-center gap-2 font-mono text-xs uppercase tracking-[0.18em] text-faint">
-            {job.status === "running" ? (
-              <><Loader2 className="size-3 animate-spin text-brand" /> {t("jobs.statusWorking")}</>
+            {job.interruptedAt != null ? (
+              // ADR-0042 决议 7：中断残留冻结显示——不转圈，不假装在跑；
+              // 中断发生在收尾段时把最后已知阶段一并说出来。
+              <>
+                <AlertTriangle className="size-3 text-amber-500" /> {t("jobs.interrupted")}
+                {job.phase === "finalizing" && <> · {t("jobs.phaseFinalizing")}</>}
+              </>
+            ) : job.status === "running" ? (
+              <>
+                <Loader2 className="size-3 animate-spin text-brand" /> {t("jobs.statusWorking")}
+                {/* ADR-0042 决议 1：粗阶段徽章 + 真实已耗时（零估算）。 */}
+                {job.phase === "finalizing" && <> · {t("jobs.phaseFinalizing")}</>}
+                <> · {fmtDuration(Math.max(0, Math.round((now - job.startedAt) / 1000)))}</>
+              </>
             ) : job.status === "queued" ? (
               <><Clock className="size-3 text-zinc-400" /> {t("jobs.queued")}{job.queuedPos != null ? ` · ${t("jobs.queuedPos", { n: job.queuedPos })}` : ""}</>
             ) : job.status === "done" ? (
@@ -199,6 +259,38 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
         </div>
       </section>
 
+      {/* ADR-0042 决议 5：批量任务——计数行（来自 [i/n] status）+ 逐项点亮清单 */}
+      {showBatchPanel && (
+        <div className="mt-6">
+          <div className="flex items-center gap-2 text-sm text-muted">
+            {running && job.batchPos != null && <Loader2 className="size-3.5 animate-spin text-brand" />}
+            {job.batchPos != null && (
+              <span>{t("jobs.batchProgress", { i: job.batchPos.i, n: job.batchPos.n })}</span>
+            )}
+          </div>
+          {batchItems.length > 0 && (
+            <>
+              <h2 className="mt-3 text-xs font-semibold uppercase tracking-[0.2em] text-muted">
+                {t("jobs.batchItems")}
+              </h2>
+              <ul className="mt-2 max-h-72 list-none space-y-1.5 overflow-y-auto rounded-2xl border border-border bg-surface/40 p-4">
+                {batchItems.map((it) => (
+                  <li key={it.key} className="flex items-start gap-2 text-sm">
+                    <span className="shrink-0">{it.ok ? "\u2705" : it.skipped ? "\u23F8" : "\u26A0\uFE0F"}</span>
+                    <span className={it.ok ? "" : "text-muted"}>
+                      {it.label}
+                      {it.ok && it.score != null && <span className="text-faint"> · {it.score}/5</span>}
+                      {it.ok && it.star != null && <span className="text-faint"> · {"\u2605"}{it.star}/5</span>}
+                      {!it.ok && it.reason && <span className="text-faint"> — {it.reason}</span>}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+        </div>
+      )}
+
       <ol className="mt-6 space-y-2">
         {job.steps.map((s, i) => (
           <li key={i} className="flex items-start gap-2.5 text-sm">
@@ -212,7 +304,8 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
             </span>
           </li>
         ))}
-        {job.status === "running" && (
+        {/* ADR-0042：「思考中…」退役为最后兜底——仅当运行中且无任何步骤/中断时。 */}
+        {job.status === "running" && job.steps.length === 0 && job.interruptedAt == null && (
           <li className="flex items-center gap-2.5 text-sm text-muted">
             <Loader2 className="size-3.5 animate-spin text-brand" /> {t("jobs.thinking")}
           </li>

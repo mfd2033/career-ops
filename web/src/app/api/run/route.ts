@@ -121,6 +121,10 @@ export async function POST(req: Request) {
   const runId = randomUUID();
   const startedAt = Date.now();
   registerRun(runId);
+  // ADR-0042 决议 1：粗阶段 —— 登记即排队（并发池槽位发放前）。阶段事件走
+  // 既有 status 通道、label 用 `phase:` 前缀约定，前端据此渲染徽章而不入
+  // 步骤流；终态不发阶段（阶段只描述进行中）。
+  publish(runId, { type: "status", label: "phase:queued" });
   // 体检在跑登记（ADR-0033 决议 2）：登记必须在进入并发池**之前**（此时是 queued），
   // 也必须早于 runId 回到客户端——它既是「这一行此刻有没有体检在跑」的唯一权威（前哨
   // 据此拦下按钮），也是「停止」需要的 runId 来源（跨标签页/跨浏览器也成立）。
@@ -515,7 +519,9 @@ async function runPipeline({
         // backend has nothing to save and the 25 KB body floods the run log (#2185).
         sendAgentText(ev.text);
       }
-      if (ev?.tool) send({ type: "tool", name: ev.tool });
+      // ADR-0042 决议 2：detail 是工具主参数的原始透传（仅 claude 的 assistant
+      // 完整块携带），不是业务推断——前端把它并进已有的同名步骤行。
+      if (ev?.tool) send({ type: "tool", name: ev.tool, ...(ev.detail ? { detail: ev.detail } : {}) });
       if (ev?.status) send({ type: "status", label: ev.status });
       // Accumulated, not assigned: usage events are per-turn, so overwriting made a
       // multi-turn run report only its last turn. The authoritative "done" is sent
@@ -551,6 +557,8 @@ async function runPipeline({
       // 拿到槽位 → 登记表从 queued 翻成 running（ADR-0033 决议 2：排队中同样算「在
       // 体检」，它也有权拦下按钮、也同样能被取消）。
       if (kind === "checkup") markCheckupRunning(input, runId);
+      // ADR-0042 决议 1：占槽运行段开始（worker 2~30 分钟的黑盒段由此显式标定）。
+      send({ type: "status", label: "phase:running" });
       // Only NOW, with a slot in hand, hold the tracker-write token (ADR-0014
       // Q4 — a long queue must not keep n write tokens held) and spawn the CLI.
       // Tracker-mutating runs guard the row-delete race (tracker.mjs delete
@@ -629,7 +637,9 @@ async function runPipeline({
       // successful render, not optimistically — same honesty-gate discipline as
       // the evaluate path below.
       const renderPdf = async (paths: PdfPaths, format: "letter" | "a4") => {
-        send({ type: "status", label: "Rendering PDF…" });
+        // ADR-0042 决议 1：渲染并入收尾段（"Rendering PDF…" 文案由阶段徽章取代）；
+        // kind-tail 后缀区分收尾动作（渲染 vs 产物校验）。
+        send({ type: "status", label: "phase:finalizing:render" });
         // renderAndMarkPdf is designed to resolve, never throw — but this is
         // the one place nothing else awaits or catches this promise, so an
         // unexpected exception here must still close the run instead of
@@ -731,6 +741,8 @@ async function runPipeline({
           return close();
         }
 
+        // ADR-0042 决议 1：worker 已结束，进入 route 自己的产物校验/落盘判定段。
+        send({ type: "status", label: "phase:finalizing:persist" });
         const persisted = kind === "evaluate"
           ? hasNewCompletedReport(reportsBefore, reportEntries())
           : kind === "checkup"

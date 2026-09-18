@@ -23,6 +23,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { randomUUID } from "node:crypto";
+import { registerBatchRun, recordBatchItem, completeBatchRun } from "@/lib/batch-items.mjs";
 import { resolveCli } from "@/lib/clis";
 import { withModelFlag, isFatalGenericStderr, parseReservationOutput } from "@/lib/run-cli-support.mjs";
 import { permissionFlags } from "@/lib/claude-invocation.mjs";
@@ -162,6 +164,9 @@ export async function POST(req: Request) {
   };
 
   let cancelled = false;
+  // ADR-0042 决议 6：服务端逐项登记的键。open 事件把它交给客户端（跨页签恢复
+  // 清单用），扩展端忽略未知事件类型不受影响。
+  const batchId = randomUUID();
   const children = new Set<ReturnType<typeof spawnHeadlessCli>>();
   // Every dispatched worker holds a global-pool handle; on batch cancel we
   // dequeue the ones still waiting for a slot so they never spawn.
@@ -200,6 +205,10 @@ export async function POST(req: Request) {
       const okEntries: { num: number; url: string }[] = [];
 
       try {
+        // ADR-0042 决议 6：首个事件宣告 batchId 并登记逐项真相源——之后每个 item
+        // 事件同步写入登记表，GET /api/batch-items 供其他页签/丢失累积的详情页恢复。
+        send({ type: "open", batchId, kind: "batch-evaluate", total: urls.length });
+        registerBatchRun(batchId, { kind: "batch-evaluate", total: urls.length });
         await reserveRange();
 
         // Evaluate one URL with a pre-reserved, exclusively-owned report number.
@@ -331,23 +340,36 @@ export async function POST(req: Request) {
                     okEntries.push({ num, url: urls[i] });
                   }
                   else failed++;
+                  // reason 判定链只算一次，NDJSON item 事件与服务端登记表共用
+                  // （评审修复：两条通道的失败原因必须一致，恢复清单不得比实时
+                  // 流少兜底文案）。
+                  const score = itemOk && outcome.verdict
+                    ? parseFloat((outcome.verdict.match(/([0-5](?:\.\d)?)/) ?? [])[1] ?? "") || null
+                    : null;
+                  const reason = itemOk
+                    ? undefined
+                    : outcome.cancelled
+                      ? "cancelled"
+                      : outcome.errMsg
+                        ? outcome.errMsg.slice(0, 200)
+                        : !outcome.cleanExit || outcome.sawError
+                          ? "the run hit an error before finishing — re-run it to verify"
+                          : "the worker ran but never saved a report/tracker row";
                   send({
                     type: "item",
                     url: urls[i],
                     ok: itemOk,
-                    score:
-                      itemOk && outcome.verdict
-                        ? parseFloat((outcome.verdict.match(/([0-5](?:\.\d)?)/) ?? [])[1] ?? "") || null
-                        : null,
-                    reason: itemOk
-                      ? undefined
-                      : outcome.cancelled
-                        ? "cancelled"
-                        : outcome.errMsg
-                          ? outcome.errMsg.slice(0, 200)
-                          : !outcome.cleanExit || outcome.sawError
-                            ? "the run hit an error before finishing — re-run it to verify"
-                            : "the worker ran but never saved a report/tracker row",
+                    score,
+                    reason,
+                  });
+                  // ADR-0042 决议 6：逐项结论同步入服务端登记表（幂等，事件乱序安全）。
+                  recordBatchItem(batchId, {
+                    key: urls[i],
+                    label: urls[i],
+                    ok: itemOk,
+                    skipped: false,
+                    score,
+                    reason,
                   });
                   send({
                     type: "text",
@@ -435,6 +457,8 @@ export async function POST(req: Request) {
         await releaseReserved();
         send({ type: "error", msg: (err as Error).message });
       } finally {
+        // ADR-0042 决议 6：批量终态（含取消/异常），登记表条目转为淘汰候选。
+        completeBatchRun(batchId);
         releaseTrackerWrite(writeToken);
         close();
       }

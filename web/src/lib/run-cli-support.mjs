@@ -15,8 +15,49 @@ import path from "node:path";
  * co-occur on a Claude `result` event.
  * `costUsd` is `number | null`: null is a REPORTED absence, not a missing field —
  * Codex sends usage with no cost, and callers must not fill that in with a rate.
- * @typedef {{status?: string, tool?: string, text?: string, tokens?: number, costUsd?: number | null, error?: string}} ParsedEvent
+ * `detail` (ADR-0042 决议 2) carries a tool call's primary-parameter summary —
+ * verbatim forwarding of what the agent actually invoked, never a business-phase
+ * interpretation. Claude's `assistant` event carries the completed tool_use
+ * block (the partial `content_block_start` has an empty input), so only that
+ * path can supply one.
+ * @typedef {{status?: string, tool?: string, detail?: string, text?: string, tokens?: number, costUsd?: number | null, error?: string}} ParsedEvent
  */
+
+/**
+ * Pick the one parameter that says what a tool call is doing, verbatim.
+ *
+ * ADR-0042 决议 2 的「原始透传」：只摘参数、不翻译、不推断业务语义 ——
+ * 「WebFetch: https://…」就是全部，绝不写成「正在体检因子3」。每类工具取其
+ * 主参数（Unknown 输入返回 null，调用方就不加摘要）；截断到 120 字符防长
+ * payload 进 UI 与 localStorage。非字符串值（数字、对象）一律跳过——摘要
+ * 只服务人眼，宁缺毋假。
+ *
+ * @param {string} name - Tool name ("WebFetch", "Bash", …).
+ * @param {unknown} input - The completed tool_use block's input object.
+ * @returns {string|null} Primary-parameter summary, or null when nothing safe to show.
+ */
+export function summarizeToolInput(name, input) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return null;
+  const PRIMARY_KEYS = {
+    WebFetch: "url",
+    WebSearch: "query",
+    Bash: "command",
+    Read: "file_path",
+    Write: "file_path",
+    Edit: "file_path",
+    NotebookEdit: "notebook_path",
+    Glob: "pattern",
+    Grep: "pattern",
+    TodoWrite: null,
+    Task: null,
+  };
+  const key = Object.prototype.hasOwnProperty.call(PRIMARY_KEYS, name) ? PRIMARY_KEYS[name] : null;
+  if (!key) return null;
+  const value = input[key];
+  if (typeof value !== "string" || !value.trim()) return null;
+  const text = value.trim().replace(/\s+/g, " ");
+  return text.length > 120 ? `${text.slice(0, 119)}…` : text;
+}
 
 const STATUS_READY = "Agent ready";
 const STATUS_RECONNECTING = "Reconnecting…";
@@ -323,6 +364,21 @@ export function parseClaudeEvent(line) {
 
   if (ev.type === "system" && ev.subtype === "init") {
     return { status: STATUS_READY };
+  }
+
+  // The completed assistant message carries the tool_use block with its FULL
+  // input — the `stream_event` content_block_start this file already parsed
+  // starts with an empty input (the arguments arrive as later deltas), so only
+  // here can the verbatim parameter summary ride along (ADR-0042 决议 2). The
+  // route sends this as a second tool event; the client merges it into the
+  // step it already created from the start event instead of adding a line.
+  if (ev.type === "assistant" && Array.isArray(ev.message?.content)) {
+    const block = ev.message.content.find((b) => b?.type === "tool_use" && typeof b.name === "string");
+    if (block) {
+      const detail = summarizeToolInput(block.name, block.input);
+      return detail ? { tool: block.name, detail } : { tool: block.name };
+    }
+    return null;
   }
 
   if (ev.type === "result") {

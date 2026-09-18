@@ -146,7 +146,8 @@ export function WorkerCard({
           {queued
             ? `${t("jobs.queued")}${job.queuedPos != null ? ` · ${t("jobs.queuedPos", { n: job.queuedPos })}` : ""}`
             : running
-              ? `${last ?? t("jobs.working")} · ${fmtElapsed(elapsed)}`
+              // ADR-0042 决议 1：收尾段比最后一步更「新」——route 已在做落盘/渲染。
+              ? `${job.phase === "finalizing" ? t("jobs.phaseFinalizing") : (last ?? t("jobs.working"))} · ${fmtElapsed(elapsed)}`
               : bottom}
         </div>
       )}

@@ -7,6 +7,20 @@ import { useI18n } from "@/lib/i18n/context";
 import { reconcileJobsWithLedger } from "@/lib/job-ledger-reconcile.mjs";
 
 export type JobStep = { kind: "tool" | "status"; label: string; ts: number };
+// ADR-0042 决议 5：批量逐项结论（batch-evaluate/batch-checkup 的 item 事件）。
+// skipped 单列、不算失败（ADR-0041 决议 5 的对齐）。
+export type JobItem = {
+  key: string;
+  label: string;
+  ok: boolean;
+  skipped?: boolean;
+  score?: number | null;
+  star?: number | null;
+  reason?: string;
+  ts: number;
+};
+// ADR-0042 决议 1：粗阶段——route 层自己真实执行的编排段，终态无阶段。
+export type JobPhase = "queued" | "running" | "finalizing";
 export type JobResult = { score: number | null; summary: string; tone: "good" | "warn" | "bad" | "muted" };
 
 // Server snapshot shape — see /api/active-runs and lib/core/concurrency-pool.ts.
@@ -48,6 +62,14 @@ export type Job = {
   // dismiss action can route to the right cancel path (dequeue via API).
   active?: boolean;
   queuedPos?: number; // 1-based FIFO position while waiting for a pool slot
+  // ADR-0042 决议 1：当前粗阶段（仅进行中任务有；终态清除）。
+  phase?: JobPhase;
+  // ADR-0042 决议 5：批量任务的逐项结论（item 事件累积）与计数行数据
+  // （[i/n] status 事件）。serverBatchId 是服务端 open 事件下发的登记键，
+  // 区别于本地分组的 batchId——凭它 GET /api/batch-items 可跨页签恢复清单。
+  items?: JobItem[];
+  batchPos?: { i: number; n: number };
+  serverBatchId?: string;
   steps: JobStep[];
   text: string;
   result?: JobResult;
@@ -74,6 +96,13 @@ export function useJobs() {
 }
 
 const JOBS_KEY = "career-ops:jobs";
+
+// ADR-0042 决议 3：步骤滚动窗口——内存保留最近 50 条，localStorage 持久化截断
+// 最近 20 条。一个体检任务能发出上百次工具调用，无界增长会刷屏并撑爆存储。
+const STEPS_CAP_MEMORY = 50;
+const STEPS_CAP_PERSIST = 20;
+const capSteps = (steps: JobStep[]): JobStep[] =>
+  steps.length > STEPS_CAP_MEMORY ? steps.slice(-STEPS_CAP_MEMORY) : steps;
 
 function parseVerdict(text: string): JobResult {
   const m = text.match(/VERDICT:\s*([\d.]+)\s*\/\s*5\s*[—:|-]+\s*(.+)/i);
@@ -161,7 +190,8 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
       setJobs((js) =>
         js.map((j) =>
           j.id === id
-            ? { ...j, status, result, cost, endedAt: Date.now(), steps: lastLabel ? [...j.steps, { kind: "status", label: lastLabel, ts: Date.now() }] : j.steps }
+            // 终态清除阶段（ADR-0042 决议 1：阶段只描述进行中）。
+            ? { ...j, status, phase: undefined, result, cost, endedAt: Date.now(), steps: lastLabel ? capSteps([...j.steps, { kind: "status", label: lastLabel, ts: Date.now() }]) : j.steps }
             : j,
         ),
       );
@@ -192,11 +222,52 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
         acc.lastSeq = ev.seq;
       }
       if (ev.type === "tool") {
-        acc.steps.push({ kind: "tool", label: ev.name as string, ts: Date.now() });
-        setJobs((js) => js.map((j) => (j.id === jobId ? { ...j, steps: [...j.steps, { kind: "tool", label: ev.name as string, ts: Date.now() }] } : j)));
+        const name = ev.name as string;
+        const detail = typeof ev.detail === "string" && ev.detail ? ev.detail : undefined;
+        // ADR-0042 决议 2：assistant 完整块的 detail 并进已有的同名步骤行
+        // （content_block_start 已建行），而非追加一条——一次工具调用一行。
+        let merged = false;
+        if (detail) {
+          for (let i = acc.steps.length - 1; i >= 0; i--) {
+            if (acc.steps[i].kind === "tool" && acc.steps[i].label === name) {
+              acc.steps[i] = { ...acc.steps[i], label: `${name}: ${detail}` };
+              merged = true;
+              break;
+            }
+          }
+        }
+        if (!merged) acc.steps.push({ kind: "tool", label: name, ts: Date.now() });
+        if (acc.steps.length > STEPS_CAP_MEMORY) acc.steps.splice(0, acc.steps.length - STEPS_CAP_MEMORY);
+        setJobs((js) =>
+          js.map((j) => {
+            if (j.id !== jobId) return j;
+            if (merged) {
+              const steps = j.steps.slice();
+              for (let i = steps.length - 1; i >= 0; i--) {
+                if (steps[i].kind === "tool" && steps[i].label === name) {
+                  steps[i] = { ...steps[i], label: `${name}: ${detail}` };
+                  break;
+                }
+              }
+              return { ...j, steps };
+            }
+            return { ...j, steps: capSteps([...j.steps, { kind: "tool", label: name, ts: Date.now() }]) };
+          }),
+        );
       } else if (ev.type === "status") {
-        acc.steps.push({ kind: "status", label: ev.label as string, ts: Date.now() });
-        setJobs((js) => js.map((j) => (j.id === jobId ? { ...j, steps: [...j.steps, { kind: "status", label: ev.label as string, ts: Date.now() }] } : j)));
+        const label = ev.label as string;
+        // ADR-0042 决议 1：阶段事件更新徽章字段，不入步骤流。finalizing 可带
+        // kind-tail 后缀（render/persist），解析只取主段。
+        if (typeof label === "string" && label.startsWith("phase:")) {
+          const phase = label.slice("phase:".length).split(":")[0];
+          if (phase === "queued" || phase === "running" || phase === "finalizing") {
+            setJobs((js) => js.map((j) => (j.id === jobId ? { ...j, phase } : j)));
+            return;
+          }
+        }
+        acc.steps.push({ kind: "status", label, ts: Date.now() });
+        if (acc.steps.length > STEPS_CAP_MEMORY) acc.steps.splice(0, acc.steps.length - STEPS_CAP_MEMORY);
+        setJobs((js) => js.map((j) => (j.id === jobId ? { ...j, steps: capSteps([...j.steps, { kind: "status", label, ts: Date.now() }]) } : j)));
       } else if (ev.type === "text") {
         const full = acc.text + (ev.text as string);
         const vm = full.match(/VERDICT:[^\n]*/i);
@@ -373,7 +444,11 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!loaded.current) return;
     try {
-      localStorage.setItem(JOBS_KEY, JSON.stringify(jobs.slice(0, 40)));
+      // ADR-0042 决议 3：持久化时步骤截断到最近 20 条，防 localStorage 膨胀。
+      localStorage.setItem(
+        JOBS_KEY,
+        JSON.stringify(jobs.slice(0, 40).map((j) => ({ ...j, steps: j.steps.slice(-STEPS_CAP_PERSIST) }))),
+      );
     } catch {
       /* quota */
     }
@@ -504,16 +579,17 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
           return;
         }
         const finish = (status: "done" | "error", lastLabel?: string) => {
-          const result = status === "done" ? parseVerdict(acc.verdictLine || acc.text) : undefined;
-          const cost = status === "done" && acc.doneTokens > 0 ? { tokens: acc.doneTokens, usd: acc.doneCostUsd ?? undefined } : undefined;
-          patch(id, (j) => ({
-            ...j,
-            status,
-            result,
-            cost,
-            endedAt: Date.now(),
-            steps: lastLabel ? [...j.steps, { kind: "status", label: lastLabel, ts: Date.now() }] : j.steps,
-          }));
+        const result = status === "done" ? parseVerdict(acc.verdictLine || acc.text) : undefined;
+        const cost = status === "done" && acc.doneTokens > 0 ? { tokens: acc.doneTokens, usd: acc.doneCostUsd ?? undefined } : undefined;
+        patch(id, (j) => ({
+          ...j,
+          status,
+          phase: undefined, // 终态清除阶段（ADR-0042 决议 1）
+          result,
+          cost,
+          endedAt: Date.now(),
+          steps: lastLabel ? capSteps([...j.steps, { kind: "status", label: lastLabel, ts: Date.now() }]) : j.steps,
+        }));
           if (status === "done") {
             fetch("/api/runs/save", {
               method: "POST",
@@ -553,21 +629,45 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
               if (!line) continue;
               try {
                 const ev = JSON.parse(line);
-                if (ev.type === "tool") {
+                if (ev.type === "open") {
+                  // ADR-0042 决议 6：服务端逐项登记键——详情页凭它跨页签恢复清单。
+                  patch(id, (j) => ({ ...j, serverBatchId: typeof ev.batchId === "string" ? ev.batchId : undefined }));
+                } else if (ev.type === "tool") {
                   acc.steps.push({ kind: "tool", label: ev.name, ts: Date.now() });
-                  patch(id, (j) => ({ ...j, steps: [...j.steps, { kind: "tool", label: ev.name, ts: Date.now() }] }));
+                  if (acc.steps.length > STEPS_CAP_MEMORY) acc.steps.splice(0, acc.steps.length - STEPS_CAP_MEMORY);
+                  patch(id, (j) => ({ ...j, steps: capSteps([...j.steps, { kind: "tool", label: ev.name, ts: Date.now() }]) }));
                 } else if (ev.type === "status") {
+                  // ADR-0042 决议 5：[i/n] 计数行入 batchPos（徽章用），原行仍进步骤流。
+                  const m = typeof ev.label === "string" ? ev.label.match(/^\[(\d+)\/(\d+)\]/) : null;
+                  if (m) {
+                    const bp = { i: parseInt(m[1], 10), n: parseInt(m[2], 10) };
+                    patch(id, (j) => ({ ...j, batchPos: bp }));
+                  }
                   acc.steps.push({ kind: "status", label: ev.label, ts: Date.now() });
-                  patch(id, (j) => ({ ...j, steps: [...j.steps, { kind: "status", label: ev.label, ts: Date.now() }] }));
+                  if (acc.steps.length > STEPS_CAP_MEMORY) acc.steps.splice(0, acc.steps.length - STEPS_CAP_MEMORY);
+                  patch(id, (j) => ({ ...j, steps: capSteps([...j.steps, { kind: "status", label: ev.label, ts: Date.now() }]) }));
                 } else if (ev.type === "item") {
                   // 逐项成败（batch-checkup，ADR-0041 决议 6/7）：一个 item 事件 =
                   // 一家公司的验收结论，直接进卡片步骤流。标记用语言中立符号；
                   // reason 是服务端产出的数据（同 batch-evaluate 的 text 行）。
-                  const itemLabel = ev.ok
-                    ? `\u2705 #${ev.n} ${ev.company ?? ""}${typeof ev.star === "number" ? ` \u2605${ev.star}/5` : ""}`
-                    : `\u26A0\uFE0F #${ev.n} ${ev.company ?? ""}${ev.reason ? ` — ${ev.reason}` : ""}`;
+                  const isCheckup = typeof ev.n === "string" || typeof ev.n === "number";
+                  const reason = typeof ev.reason === "string" ? ev.reason : undefined;
+                  const jobItem: JobItem = isCheckup
+                    ? { key: String(ev.n), label: `#${ev.n} ${ev.company ?? ""}`.trim(), ok: !!ev.ok, skipped: reason?.startsWith("skipped-running"), star: typeof ev.star === "number" ? ev.star : null, reason, ts: Date.now() }
+                    : { key: String(ev.url ?? ""), label: String(ev.url ?? ""), ok: !!ev.ok, score: typeof ev.score === "number" ? ev.score : null, reason, ts: Date.now() };
+                  // 标记用语言中立符号；批量评估（url 形）此前渲染成
+                  // "#undefined"——改用 jobItem.label 统一两种形状。
+                  const itemLabel = jobItem.ok
+                    ? `\u2705 ${jobItem.label}${jobItem.star != null ? ` \u2605${jobItem.star}/5` : ""}${jobItem.score != null ? ` ${jobItem.score}/5` : ""}`
+                    : `${jobItem.skipped ? "\u23F8" : "\u26A0\uFE0F"} ${jobItem.label}${reason ? ` — ${reason}` : ""}`;
                   acc.steps.push({ kind: "status", label: itemLabel, ts: Date.now() });
-                  patch(id, (j) => ({ ...j, steps: [...j.steps, { kind: "status", label: itemLabel, ts: Date.now() }] }));
+                  if (acc.steps.length > STEPS_CAP_MEMORY) acc.steps.splice(0, acc.steps.length - STEPS_CAP_MEMORY);
+                  patch(id, (j) => ({
+                    ...j,
+                    // ADR-0042 决议 5：结构化逐项清单（详情页渲染）；按 key 幂等。
+                    items: [...(j.items ?? []).filter((it) => it.key !== jobItem.key), jobItem].slice(-100),
+                    steps: capSteps([...j.steps, { kind: "status", label: itemLabel, ts: Date.now() }]),
+                  }));
                 } else if (ev.type === "text") {
                   const full = acc.text + ev.text;
                   const vm = full.match(/VERDICT:[^\n]*/i);

@@ -27,6 +27,8 @@
 // 2026-09-15 batch-evaluate lesson: 80/80 failures still banked a done card).
 import fs from "node:fs";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
+import { registerBatchRun, recordBatchItem, completeBatchRun } from "@/lib/batch-items.mjs";
 import { resolveCli } from "@/lib/clis";
 import {
   withModelFlag,
@@ -156,6 +158,8 @@ export async function POST(req: Request) {
   const artifactRowsFor = (n: string) => checkupArtifactRowCountForTracker(readCheckupLedger(), n, htmlExists);
 
   let cancelled = false;
+  // ADR-0042 决议 6：服务端逐项登记的键（同 batch-evaluate）。
+  const batchId = randomUUID();
   const children = new Set<ReturnType<typeof spawnHeadlessCli>>();
   // Every dispatched worker holds a global-pool handle; on batch cancel we
   // dequeue the ones still waiting for a slot so they never spawn.
@@ -185,6 +189,9 @@ export async function POST(req: Request) {
       let skipped = 0; // target-resolution failures — reported, never spawned
 
       try {
+        // ADR-0042 决议 6：首个事件宣告 batchId 并登记逐项真相源（同 batch-evaluate）。
+        send({ type: "open", batchId, kind: "batch-checkup", total: ns.length });
+        registerBatchRun(batchId, { kind: "batch-checkup", total: ns.length });
         // Report the unresolvable rows as failed items before any worker starts,
         // so the per-item清单 the card renders accounts for EVERY selected row.
         for (const u of unresolvable) {
@@ -192,6 +199,7 @@ export async function POST(req: Request) {
           failed++;
           send({ type: "item", n: u.n, company: null, ok: false, star: null, reason: u.reason });
           send({ type: "text", text: `\u26A0\uFE0F not checkable: #${u.n} — ${u.reason}\n` });
+          recordBatchItem(batchId, { key: u.n, label: `#${u.n}`, ok: false, skipped: false, reason: u.reason });
         }
         // Same for already-running rows — annotated, never spawned, never
         // counted as failures (ADR-0041 决议 5: skipping is the batch's
@@ -206,6 +214,8 @@ export async function POST(req: Request) {
             reason: "skipped-running: a checkup for this row is already in flight — stop or replace it from the report page first",
           });
           send({ type: "text", text: `\u23F8 skipped (already running): #${s.n} ${s.company}\n` });
+          // skipped-running 单列、不算失败（ADR-0041 决议 5 的登记表侧对齐）。
+          recordBatchItem(batchId, { key: s.n, label: `#${s.n} ${s.company}`, ok: false, skipped: true, reason: "skipped-running" });
         }
 
         // Check up one tracker row with its pre-resolved company. Parallel-safe by
@@ -330,23 +340,27 @@ export async function POST(req: Request) {
                   const itemOk = outcome.persisted && outcome.cleanExit && !outcome.sawError && !outcome.cancelled;
                   if (itemOk) ok++;
                   else failed++;
+                  // reason 判定链只算一次，NDJSON item 事件与服务端登记表共用
+                  // （评审修复：两条通道的失败原因必须一致，登记表不得比实时流
+                  // 少兜底文案）。
+                  const reason = itemOk
+                    ? undefined
+                    : outcome.cancelled
+                      ? "cancelled"
+                      : outcome.timedOut
+                        ? `checkup worker exceeded its ${CHECKUP_WORKER_KILL_MS / 60_000}-minute cap`
+                        : outcome.errMsg
+                          ? outcome.errMsg.slice(0, 200)
+                          : !outcome.cleanExit || outcome.sawError
+                            ? "the run hit an error before finishing — re-run it to verify"
+                            : "the worker ran but never added a checkup ledger row";
                   send({
                     type: "item",
                     n: t.n,
                     company: t.company,
                     ok: itemOk,
                     star: itemOk ? outcome.star : null,
-                    reason: itemOk
-                      ? undefined
-                      : outcome.cancelled
-                        ? "cancelled"
-                        : outcome.timedOut
-                          ? `checkup worker exceeded its ${CHECKUP_WORKER_KILL_MS / 60_000}-minute cap`
-                          : outcome.errMsg
-                            ? outcome.errMsg.slice(0, 200)
-                            : !outcome.cleanExit || outcome.sawError
-                              ? "the run hit an error before finishing — re-run it to verify"
-                              : "the worker ran but never added a checkup ledger row",
+                    reason,
                   });
                   send({
                     type: "text",
@@ -355,6 +369,15 @@ export async function POST(req: Request) {
                       : outcome.cancelled
                         ? `\u2391 cancelled: #${t.n} ${t.company}\n`
                         : `\u26A0\uFE0F NOT recorded: #${t.n} ${t.company}\n`,
+                  });
+                  // ADR-0042 决议 6：逐项结论同步入服务端登记表（幂等，事件乱序安全）。
+                  recordBatchItem(batchId, {
+                    key: t.n,
+                    label: `#${t.n} ${t.company}`,
+                    ok: itemOk,
+                    skipped: false,
+                    star: itemOk ? outcome.star : null,
+                    reason,
                   });
                 })
                 .catch(() => failed++)
@@ -379,6 +402,8 @@ export async function POST(req: Request) {
       } catch (err) {
         send({ type: "error", msg: (err as Error).message });
       } finally {
+        // ADR-0042 决议 6：批量终态，登记表条目转为淘汰候选。
+        completeBatchRun(batchId);
         close();
       }
     },
