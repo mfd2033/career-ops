@@ -7,7 +7,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseCheckupLedger, checkupIndex, CHECKUP_RISK_LABELS } from "../../src/lib/company-checkups.mjs";
+import { parseCheckupLedger, checkupIndex, CHECKUP_RISK_LABELS, suggestsCheckup } from "../../src/lib/company-checkups.mjs";
 
 const TSV = `# tracker#\tdate\tcompany-slug\tcompany\tstar\trisks\thtml\tnote
 917\t2026-09-14\thenan-lanhui\t河南蓝辉人力资源\t2.5\tentity-confusion,social-mismatch\treports/checkups/917-henan-lanhui-2026-09-14.html\t终雇主未披露
@@ -78,4 +78,31 @@ test("risk label map covers the writer's closed vocabulary", () => {
       "tactics",
     ],
   );
+});
+
+// ── 「建议体检」口径（ADR-0041 决议 2 落地 ADR-0025）────────────────────────
+
+test("suggestsCheckup: score ≥ 4.0 且无体检记录 → 建议", () => {
+  assert.equal(suggestsCheckup({ score: 4.0, legitimacy: null, hasCheckup: false }), true);
+  assert.equal(suggestsCheckup({ score: 4.7, legitimacy: "High Confidence", hasCheckup: false }), true);
+});
+
+test("suggestsCheckup: Block G ⚠（caution/suspicious 系关键词）→ 建议", () => {
+  for (const legitimacy of ["Proceed with Caution", "Caution", "Suspicious", "sospechoso", "scam signals", "fake posting"]) {
+    assert.equal(suggestsCheckup({ score: 2.5, legitimacy, hasCheckup: false }), true, legitimacy);
+  }
+});
+
+test("suggestsCheckup: 低分 + Block G 正常/未评估 → 不建议", () => {
+  assert.equal(suggestsCheckup({ score: 3.9, legitimacy: "High Confidence", hasCheckup: false }), false);
+  assert.equal(suggestsCheckup({ score: 3.5, legitimacy: null, hasCheckup: false }), false);
+  assert.equal(suggestsCheckup({ score: null, legitimacy: null, hasCheckup: false }), false);
+});
+
+test("suggestsCheckup: 已有体检记录 → 永不建议（角标是「该体检还没检」的正向提示）", () => {
+  assert.equal(suggestsCheckup({ score: 4.8, legitimacy: "Suspicious", hasCheckup: true }), false);
+});
+
+test("suggestsCheckup: score 4.0 边界恰好算（口径是 ≥ 4.0，闭口）", () => {
+  assert.equal(suggestsCheckup({ score: 3.99, legitimacy: null, hasCheckup: false }), false);
 });

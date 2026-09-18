@@ -84,3 +84,27 @@ export function checkupIndex(text) {
   }
   return out;
 }
+
+/**
+ * 批量体检的「建议体检」口径（纯，ADR-0041 决议 2 落地 ADR-0025 的建议标准）：
+ * score ≥ 4.0 **或** Block G ⚠（Legitimacy 的 warn/bad 档），且该 tracker# 尚无
+ * 体检记录。只提示不强制 —— 返回值唯一消费方是列表角标，绝不参与勾选、评分或
+ * 任何自动决策（ADR-0025 决议 9 零分影响）。
+ *
+ * legitimacy 关键词与 format.ts legitimacyTone 的 warn/bad 分支同源（caution/
+ * precau/suspic/sospech/scam/fake；high/confian/legit 是 good，其余 muted）——
+ * 那边是 .ts 无法被 node --test 直接锁，这里按同一份关键词表独立落一份，改动
+ * 两处必须同步。
+ *
+ * @param {{score?: number | null, legitimacy?: string | null, hasCheckup?: boolean}} args
+ *   score — tracker 行的数字分（parseFloat 结果，无法解析传 null）
+ *   legitimacy — 报告头 Legitimacy 原文（parseReport 的产出，可为 null）
+ *   hasCheckup — checkupIndex 里该 tracker# 是否已有体检记录
+ * @returns {boolean}
+ */
+export function suggestsCheckup({ score, legitimacy, hasCheckup }) {
+  if (hasCheckup) return false;
+  if (typeof score === "number" && Number.isFinite(score) && score >= 4.0) return true;
+  if (typeof legitimacy === "string" && /caution|precau|suspic|sospech|scam|fake/i.test(legitimacy)) return true;
+  return false;
+}

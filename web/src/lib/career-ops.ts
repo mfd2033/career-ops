@@ -27,7 +27,7 @@ import { evalTimingSummary } from "@/lib/eval-timings.mjs";
 import type { EvalTimingEntry } from "@/lib/eval-timing";
 // 公司体检台账 (ADR-0025) — tolerant reader mirror of lib/log-checkup.mjs,
 // keyed by tracker#; display-only, never a scoring input.
-import { checkupIndex } from "@/lib/company-checkups.mjs";
+import { checkupIndex, suggestsCheckup } from "@/lib/company-checkups.mjs";
 import type { CheckupEntry } from "@/lib/format";
 
 /**
@@ -505,6 +505,31 @@ export type CheckupTargetResult = ReturnType<typeof findCheckupTarget>;
 export function readCheckupFor(n: string): CheckupEntry | null {
   const idx = checkupIndex(read("data/company-checkups.tsv")) as Record<string, CheckupEntry>;
   return idx[n] ?? null;
+}
+
+/**
+ * 「建议体检」候选（ADR-0041 决议 2）：逐行解析报告头的 Legitimacy + tracker 分数，
+ * 用 suggestsCheckup 纯函数判定，返回 { [n]: true }。镜像 readApplicationUrls 的
+ * 懒加载供给方式 —— pipeline 普通浏览不做报告头读取，这个读取只发生在已评估 tab
+ * 的客户端拉取（/api/pipeline/checkup-suggest）时。台账整份读一次建索引，不逐行查。
+ */
+export function readCheckupSuggestions(apps: Application[]): Record<string, true> {
+  const ledgerIdx = checkupIndex(read("data/company-checkups.tsv") ?? "") as Record<string, CheckupEntry>;
+  const out: Record<string, true> = {};
+  for (const app of apps) {
+    const file = resolveReportPathFor(app);
+    if (!file) continue;
+    let legitimacy: string | null = null;
+    try {
+      legitimacy = parseReport(fs.readFileSync(file, "utf8")).legitimacy;
+    } catch {
+      continue; // 读不出的报告不产生建议 —— 宁缺毋假
+    }
+    const scoreNum = parseFloat(app.score);
+    if (!suggestsCheckup({ score: Number.isFinite(scoreNum) ? scoreNum : null, legitimacy, hasCheckup: ledgerIdx[app.n] != null })) continue;
+    out[app.n] = true;
+  }
+  return out;
 }
 
 /**

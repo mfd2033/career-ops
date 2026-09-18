@@ -232,6 +232,20 @@ export function PipelineView({
     [applications, filtered, selected],
   );
 
+  // 「建议体检」角标（ADR-0041 决议 2）：已评估 tab 激活时懒加载一次（同
+  // /api/pipeline/urls 的纪律 —— 普通浏览不做报告头读取），co-job-done 后重拉。
+  // 纯提示，不参与勾选或任何自动决策。
+  const [suggests, setSuggests] = useState<Set<string> | null>(null);
+  const fetchSuggests = useCallback(() => {
+    fetch("/api/pipeline/checkup-suggest")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((m) => setSuggests(m && typeof m === "object" ? new Set(Object.keys(m as Record<string, true>)) : new Set()))
+      .catch(() => {});
+  }, []);
+  useEffect(() => {
+    if (tab === "EVALUATED") fetchSuggests();
+  }, [tab, fetchSuggests]);
+
   // Header checkbox checked / indeterminate state tracks the VISIBLE (filtered)
   // rows, not all applications — so "select all" means "all on this tab".
   useEffect(() => {
@@ -248,11 +262,14 @@ export function PipelineView({
     if (!lastBatchId) return;
     const onDone = (e: Event) => {
       const detail = (e as CustomEvent).detail as { kind?: string } | undefined;
-      if (detail?.kind === "evaluate" || detail?.kind === "batch-evaluate" || detail?.kind === "batch-checkup") router.refresh();
+      if (detail?.kind === "evaluate" || detail?.kind === "batch-evaluate" || detail?.kind === "batch-checkup") {
+        router.refresh();
+        fetchSuggests(); // 体检写入后「建议体检」集合会变（新记录的行不再建议）
+      }
     };
     window.addEventListener("co-job-done", onDone);
     return () => window.removeEventListener("co-job-done", onDone);
-  }, [lastBatchId, router]);
+  }, [lastBatchId, router, fetchSuggests]);
 
   const reevaluateSelected = useCallback(() => {
     if (selected.size === 0 || !urlMap || urlMapLoading) return;
@@ -553,6 +570,11 @@ export function PipelineView({
                           </span>
                         );
                       })()}
+                      {suggests?.has(r.n) && (
+                        <span title={t("pipeline.suggestCheckupTitle")} className="inline-flex shrink-0 cursor-help" onClick={(e) => e.stopPropagation()}>
+                          <Badge tone="warn">{t("pipeline.suggestCheckup")}</Badge>
+                        </span>
+                      )}
                     </Link>
                   </td>
                   <td className="px-4 py-3 text-muted">
