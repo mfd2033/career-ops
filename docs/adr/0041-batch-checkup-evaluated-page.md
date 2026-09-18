@@ -32,6 +32,7 @@
 
 ## Consequences
 
+- **非 claude 引擎（opencode）的无头 worker 会因权限 ask 静默死亡（2026-09-18 实测）**：`external_directory` 与 `doom_loop` 默认 `ask`、`.env` 读取在本机表现为 `ask`——无头运行无人应答，进程以 exit 0 零输出静默终止（诚实门禁只能报「ran but never added a ledger row」，根因不可见）。修复在仓库根 `opencode.json`（本地未跟踪用户层文件）：`external_directory/doom_loop: allow` + `read: { .env: deny }`（deny 是干净拒绝，agent 继续跑；不放行 .env 防密钥泄漏）。任何新的 ask 类权限键出现都需同样处理；验证回路：`node local/batch-checkup-repro.mjs <tracker#...>`（本地未跟踪）。oh-my-openagent 插件曾以自身配置掩盖 external_directory 的 ask，卸载后暴露——headless 引擎环境的权限配置是本功能的前置条件。
 - 已评估页具备批量体检能力：勾选 → 一键 → 流式卡片逐项看成败 → 台账/HTML 产物自动落盘 → 星级徽章直接更新。
 - 「建议体检」角标让 ADR-0025 口径在列表上可视化，批量勾选有据可依；不改变任何 gate/score 语义（零分影响原则不变：体检永不改 oferta score/tracker 状态）。
 - 非 claude 引擎跑批量体检 = 无授权限制 agent 的既有风险在批量下被放大（N 个 worker）；已在本 ADR 显式记录并挂 #2507，不在本范围内解决。
