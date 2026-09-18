@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { readReport, findApplication, readApplications, withReportSalaries, trackerCanDelete, readEvalTimings, findCheckupTarget, readCheckupFor } from "@/lib/career-ops";
+import { readReport, findApplication, readApplications, withReportSalaries, trackerCanDelete, readEvalTimings, findCheckupTarget, readCheckupFor, readCheckupSuggestion } from "@/lib/career-ops";
 import { evalTimingKey } from "@/lib/eval-timing-key.mjs";
 import { navNeighbors, buildContextQuery } from "@/lib/pipeline-order.mjs";
 import { ReportView } from "@/components/report-view";
@@ -75,6 +75,8 @@ export default async function ReportPage({
   // （`?` 行 → 招聘主体 Via；不可判定 → 禁用原因码），供操作区按钮渲染。
   const checkup = readCheckupFor(id);
   const checkupTarget = findCheckupTarget(id);
+  // 「建议体检」角标（ADR-0041 决议 2 延伸）：详情页与列表页同一口径判定
+  const suggestedCheckup = readCheckupSuggestion(id);
 
   return (
     <>
@@ -91,6 +93,7 @@ export default async function ReportPage({
         contextQuery={contextQuery}
         checkup={checkup}
         checkupTarget={checkupTarget}
+        suggestedCheckup={suggestedCheckup}
       />
       <div className="mx-auto max-w-3xl px-6 pb-10">
         <EvalTimingPanel entry={timing} />

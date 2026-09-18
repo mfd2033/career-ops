@@ -72,6 +72,7 @@ export function ReportView({
   contextQuery = "",
   checkup = null,
   checkupTarget = null,
+  suggestedCheckup = false,
 }: {
   id: string;
   app: Application | null;
@@ -95,6 +96,9 @@ export function ReportView({
    *  对象判定结果，供操作区的「体检这家/复检」按钮渲染。 */
   checkup?: CheckupEntry | null;
   checkupTarget?: CheckupTarget | null;
+  /** 「建议体检」角标（ADR-0041 决议 2 延伸）：服务端按 suggestsCheckup 口径
+   *  判定（score≥4.0 或 Block G ⚠ 且无体检记录）。纯静态提示，零联动零分影响。 */
+  suggestedCheckup?: boolean;
 }) {
   const { t } = useI18n();
   const router = useRouter();
@@ -507,6 +511,12 @@ export function ReportView({
             return n >= 4.0 ? <Badge tone="good">{t("pipeline.report.recommended")}</Badge> : <Badge tone="muted">{t("pipeline.report.belowApplyLine")}</Badge>;
           })()}
           {meta?.legitimacy && <Badge tone={legitimacyTone(meta.legitimacy)}>{translateLegitimacy(meta.legitimacy)}</Badge>}
+          {/* 「建议体检」角标（ADR-0041 决议 2 延伸）：与列表页同口径同款，纯静态提示 */}
+          {suggestedCheckup && (
+            <span title={t("pipeline.suggestCheckupTitle")} className="inline-flex cursor-help">
+              <Badge tone="warn">{t("pipeline.suggestCheckup")}</Badge>
+            </span>
+          )}
           {app && <StatusSelect n={id} current={app.status} />}
           {/* 跳过 = 写盘 SKIP 后前进（ADR-0040，与批量跳过同落点）：路径由
               SkipFromTracker 内的 skipDestination 决定。next 链接与无下一份时的

@@ -18,8 +18,10 @@ import { fileURLToPath } from "node:url";
 
 const APP = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "src", "app");
 
-/** ReportView 的 props 契约里，体检相关的必传项（形状单一来源 career-ops.ts）。 */
-const REQUIRED_PROPS = ["checkup", "checkupTarget"];
+/** ReportView 的 props 契约里，体检相关的必传项（形状单一来源 career-ops.ts）。
+ *  suggestedCheckup（ADR-0041 决议 2 延伸）也是体检数据：漏传的后果是「建议体检」
+ *  角标在某条报告路由上静默消失，与按钮消失同病同治。 */
+const REQUIRED_PROPS = ["checkup", "checkupTarget", "suggestedCheckup"];
 
 function collectPageFiles(dir) {
   const out = [];

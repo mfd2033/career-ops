@@ -508,6 +508,31 @@ export function readCheckupFor(n: string): CheckupEntry | null {
 }
 
 /**
+ * 单行「建议体检」判定（ADR-0041 决议 2 的详情页延伸）：与 readCheckupSuggestions
+ * 同一口径（suggestsCheckup）。score 优先取 tracker 行值、缺失时回退报告头 Score
+ * （与 ReportView 显示的分数同源），legitimacy 取报告头 —— 详情页两处 RSC 直接调用，
+ * 不经列表页的懒加载 API。
+ */
+export function readCheckupSuggestion(id: string): boolean {
+  const app = findApplication(id);
+  const report = readReport(id);
+  if (!app && !report) return false;
+  let legitimacy: string | null = null;
+  let scoreField: string | undefined;
+  if (report) {
+    const meta = parseReport(report.content);
+    legitimacy = meta.legitimacy;
+    scoreField = meta.fields.find((f) => f.label === "Score")?.value;
+  }
+  const scoreNum = parseFloat(app?.score || scoreField || "");
+  return suggestsCheckup({
+    score: Number.isFinite(scoreNum) ? scoreNum : null,
+    legitimacy,
+    hasCheckup: readCheckupFor(id) != null,
+  });
+}
+
+/**
  * 「建议体检」候选（ADR-0041 决议 2）：逐行解析报告头的 Legitimacy + tracker 分数，
  * 用 suggestsCheckup 纯函数判定，返回 { [n]: true }。镜像 readApplicationUrls 的
  * 懒加载供给方式 —— pipeline 普通浏览不做报告头读取，这个读取只发生在已评估 tab

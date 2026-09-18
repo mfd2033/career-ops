@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { readReport, findApplication, trackerCanDelete, findCheckupTarget, readCheckupFor } from "@/lib/career-ops";
+import { readReport, findApplication, trackerCanDelete, findCheckupTarget, readCheckupFor, readCheckupSuggestion } from "@/lib/career-ops";
 import { ReportView } from "@/components/report-view";
 
 // Deep-link report page for the BOSS直聘 extension: a clicked "已评估" badge
@@ -25,6 +25,8 @@ export default async function ReportPage({ params }: { params: Promise<{ id: str
   // /pipeline/{n} 同源调用（判定逻辑不复制到本路由）。
   const checkup = readCheckupFor(id);
   const checkupTarget = findCheckupTarget(id);
+  // 「建议体检」角标（ADR-0041 决议 2 延伸）：与 /pipeline/{n} 同口径同 prop
+  const suggestedCheckup = readCheckupSuggestion(id);
 
   return (
     <ReportView
@@ -40,6 +42,7 @@ export default async function ReportPage({ params }: { params: Promise<{ id: str
       contextQuery=""
       checkup={checkup}
       checkupTarget={checkupTarget}
+      suggestedCheckup={suggestedCheckup}
     />
   );
 }
