@@ -12,7 +12,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { checkupArtifactRowCountForTracker } from "../../src/lib/run-cli-support.mjs";
+import { checkupArtifactRowCountForTracker, batchCheckupFinalEvent } from "../../src/lib/run-cli-support.mjs";
 
 const HEADER = "tracker\tdate\tslug\tcompany\tstar\trisks\thtml\tnote\n";
 
@@ -71,4 +71,41 @@ test("non-numeric tracker keys count nothing (defensive)", () => {
 test("missing probe function treats declared HTML as missing (never widen)", () => {
   const text = ledgerOf("42\t2026-09-18\ta\tA\t3.0\t-\treports/checkups/42-a.html\tx");
   assert.equal(checkupArtifactRowCountForTracker(text, "42", undefined), 0);
+});
+
+// ── 汇总事件的诚实门禁（ADR-0041 决议 6）──────────────────────────────────
+
+test("final event: 有成功 → done 带全部计数（skippedRunning 单列，不算失败）", () => {
+  assert.deepEqual(batchCheckupFinalEvent({ ok: 2, failed: 1, skipped: 0, skippedRunning: 1 }), {
+    type: "done",
+    ok: 2,
+    failed: 1,
+    skipped: 0,
+    skippedRunning: 1,
+  });
+  assert.deepEqual(batchCheckupFinalEvent({ ok: 1, failed: 0, skippedRunning: 3 }), {
+    type: "done",
+    ok: 1,
+    failed: 0,
+    skipped: 0,
+    skippedRunning: 3,
+  });
+});
+
+test("final event: 全失败（ok=0 且 failed>0）→ error，绝不伪装 done", () => {
+  const ev = batchCheckupFinalEvent({ ok: 0, failed: 5 });
+  assert.equal(ev.type, "error");
+  assert.match(ev.msg, /All 5 checkup\(s\) failed/);
+});
+
+test("final event: 全失败且部分是在跑跳过 → error 文案如实分开陈述", () => {
+  const ev = batchCheckupFinalEvent({ ok: 0, failed: 3, skippedRunning: 2 });
+  assert.equal(ev.type, "error");
+  assert.match(ev.msg, /2 row\(s\) were skipped as already running/);
+  assert.match(ev.msg, /not failures/);
+});
+
+test("final event: 全是跳过（ok=0 failed=0）→ done（跳过不是失败，卡片文本已逐项标注）", () => {
+  const ev = batchCheckupFinalEvent({ ok: 0, failed: 0, skippedRunning: 4 });
+  assert.equal(ev.type, "done");
 });

@@ -559,6 +559,15 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
                 } else if (ev.type === "status") {
                   acc.steps.push({ kind: "status", label: ev.label, ts: Date.now() });
                   patch(id, (j) => ({ ...j, steps: [...j.steps, { kind: "status", label: ev.label, ts: Date.now() }] }));
+                } else if (ev.type === "item") {
+                  // 逐项成败（batch-checkup，ADR-0041 决议 6/7）：一个 item 事件 =
+                  // 一家公司的验收结论，直接进卡片步骤流。标记用语言中立符号；
+                  // reason 是服务端产出的数据（同 batch-evaluate 的 text 行）。
+                  const itemLabel = ev.ok
+                    ? `\u2705 #${ev.n} ${ev.company ?? ""}${typeof ev.star === "number" ? ` \u2605${ev.star}/5` : ""}`
+                    : `\u26A0\uFE0F #${ev.n} ${ev.company ?? ""}${ev.reason ? ` — ${ev.reason}` : ""}`;
+                  acc.steps.push({ kind: "status", label: itemLabel, ts: Date.now() });
+                  patch(id, (j) => ({ ...j, steps: [...j.steps, { kind: "status", label: itemLabel, ts: Date.now() }] }));
                 } else if (ev.type === "text") {
                   const full = acc.text + ev.text;
                   const vm = full.match(/VERDICT:[^\n]*/i);

@@ -503,6 +503,25 @@ export function checkupArtifactRowCountForTracker(text, trackerNo, fileExists) {
 }
 
 /**
+ * 批量体检的汇总事件（纯，ADR-0041 决议 6 诚实门禁）：
+ * ok=0 且 failed>0 → `error`（全失败不得伪装 done —— 2026-09-15 批量评估事故
+ * 的教训：80/80 零产物仍发 done，卡片落账还触发了刷新）；否则 `done` 带逐项
+ * 计数。skippedRunning（在跑跳过）单列，不算失败，error 文案里如实分开陈述。
+ *
+ * @param {{ok: number, failed: number, skipped?: number, skippedRunning?: number}} args
+ * @returns {{type: "done", ok: number, failed: number, skipped: number, skippedRunning: number} | {type: "error", msg: string}}
+ */
+export function batchCheckupFinalEvent({ ok, failed, skipped = 0, skippedRunning = 0 }) {
+  if (ok === 0 && failed > 0) {
+    return {
+      type: "error",
+      msg: `All ${failed} checkup(s) failed — no checkup ledger rows were written. See the NOT recorded lines above for per-company reasons.${skippedRunning ? ` ${skippedRunning} row(s) were skipped as already running (those are not failures).` : ""}`,
+    };
+  }
+  return { type: "done", ok, failed, skipped, skippedRunning };
+}
+
+/**
  * 门禁用的 HTML 存在性探针：`reports/checkups/` 前缀 + 仓库根容器内 + 真的是文件。
  * 读方不信任台账（同 /api/checkup-report 的立场）——前缀合规不代表路径没有逃逸，
  * 目录也不等于报告。

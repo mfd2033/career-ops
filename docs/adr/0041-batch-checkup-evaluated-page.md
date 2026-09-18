@@ -12,9 +12,9 @@
 
 ## Decision
 
-1. **候选 = 用户多选**：不做 ADR-0025 口径的自动预选。用户在已评估 tab 勾选公司，点批量条新按钮「批量体检」启动；一次最多 20 家（沿用批量评估 `MAX_URLS`）。请求体携带勾选的 `r.n` 列表 + `cliId/model`，服务端解析公司名与 tracker#（tracker# 缺失时允许 `?` 键，与台账空键约定一致）。
+1. **候选 = 用户多选**：不做 ADR-0025 口径的自动预选。用户在已评估 tab 勾选公司，点批量条新按钮「批量体检」启动；一次最多 20 家（沿用批量评估 `MAX_URLS`）。请求体携带勾选的 `r.n` 列表 + `cliId/model`，服务端解析公司名与 tracker#；无法解析目标（行不存在、或 `?` 行无 Via）的行作为**失败项**在结果清单中标注原因，不 spawn worker——批量项永远来自 tracker 行号（数字键），台账的 `?` 空键只属 CLI 技能路径。
 2. **「建议体检」轻量角标**：已评估行若满足 ADR-0025 口径（score≥4.0 或 Block G ⚠）且 `checkupIndex` 无该 tracker# 记录，显示小角标提示。只提示不强制——勾选完全由用户决定。
-3. **worker 引擎跟随配置**：与单个体检 `/api/run` 行为一致，`resolveCli(cliId)` 分发。claude worker 附加 `permissionFlags` 的 checkup 工具域（`TOOL_SCOPES` 缺 checkup 档则补一档，复用批量评估「只借 permission tail」的拼法）；非 claude 引擎维持现状（无授权机制运行，风险已知，不在本 ADR 解决）。
+3. **worker 引擎跟随配置**：与单个体检 `/api/run` 行为一致，`resolveCli(cliId)` 分发。claude worker 附加 `permissionFlags` 的 checkup 工具域（checkup 已在 `PERSISTING_KINDS` 中、复用 persisting 域，无需新档；「只借 permission tail」拼法与批量评估一致）；非 claude 引擎维持现状（无授权机制运行，风险已知，不在本 ADR 解决）。
 4. **并发复用批量评估配置**：`MAX_PARALLEL=3` + 全局 `concurrencyPool` 槽位。不为体检单设参数——两个批量功能共享一套并发语义。
 5. **冲突处理——跳过在跑 + 允许复检**：启动时逐项查 `checkup-live.mjs`，该公司已有在跑体检的项**跳过**并在结果流中标注（`skipped-running`），不自动 replace（批量场景替用户做 ADR-0033 的停止/替换决定太激进）；已有台账记录的项允许勾选 = 复检，跑完 append-only 追加一行，徽章取最新。启动后（检查与 spawn 间隙）新出现的冲突由产物门禁兜底：worker 产物验收失败即记 `failed`。
 6. **逐项产物门禁 + 诚实汇总**：spawn 前记录该 tracker# 的台账基线行数；worker 结束后按 ADR-0030 验产物（台账行数增量 + `reports/checkups/` 下 HTML 真实存在）→ `ok` / `failed`（携带 reason，弥补批量评估「逐项 reason 不落盘」的观测性缺口）。全部结束后：`ok=0 && failed>0` → 发 `error`（沿用批量评估诚实门禁，全失败不得伪装 done）；否则发 `done`，附逐项清单（ok/failed/skipped-running 各自列出）。**不自动重试**——失败项进清单，用户稍后可对失败项再跑批量体检（复检语义天然覆盖）。

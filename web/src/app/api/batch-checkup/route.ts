@@ -33,6 +33,7 @@ import {
   isFatalGenericStderr,
   makeCheckupHtmlProbe,
   checkupArtifactRowCountForTracker,
+  batchCheckupFinalEvent,
 } from "@/lib/run-cli-support.mjs";
 import { permissionFlags } from "@/lib/claude-invocation.mjs";
 import { spawnHeadlessCli, terminateCli } from "@/lib/spawn-cli.mjs";
@@ -369,15 +370,11 @@ export async function POST(req: Request) {
 
         if (cancelled) {
           send({ type: "error", msg: "Batch cancelled. Anything already written stays (the checkup ledger only appends)." });
-        } else if (ok === 0 && failed > 0) {
-          // Honesty gate (ADR-0041 决议 6): a batch where NOTHING was persisted is
-          // a failed batch, not a green card — same discipline as batch-evaluate's.
-          send({
-            type: "error",
-            msg: `All ${failed} checkup(s) failed — no checkup ledger rows were written. See the NOT recorded lines above for per-company reasons.${skippedRunning.length ? ` ${skippedRunning.length} row(s) were skipped as already running (those are not failures).` : ""}`,
-          });
         } else {
-          send({ type: "done", ok, failed, skipped, skippedRunning: skippedRunning.length });
+          // Honesty gate (ADR-0041 决议 6): a batch where NOTHING was persisted is
+          // a failed batch, not a green card — pure function, tested in
+          // batch-checkup-gate.test.mjs.
+          send(batchCheckupFinalEvent({ ok, failed, skipped, skippedRunning: skippedRunning.length }));
         }
       } catch (err) {
         send({ type: "error", msg: (err as Error).message });
