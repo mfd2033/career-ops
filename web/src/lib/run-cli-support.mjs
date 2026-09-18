@@ -475,6 +475,34 @@ export function checkupArtifactRowCount(text, fileExists) {
 }
 
 /**
+ * 可核验产物行数，按单个 tracker# 计 —— 批量体检的逐项门禁（ADR-0041 决议 6）。
+ *
+ * `checkupArtifactRowCount` 是全局计数（单个体检一个 worker 独占一次 run，全局
+ * 前后差值就是它的产物）；批量里 N 个 worker 并发写同一份台账，全局差值无法归属
+ * 到具体某家——所以按 key 列（tracker#）过滤后再数。行的「可核验」定义与全局版
+ * 一致：声明了 HTML 的行必须文件存在，`-`/空/截断行容忍，`?` 空键行只属于 `?`。
+ *
+ * @param {string | undefined} text - 台账原文（undefined = 读不到 → 0）
+ * @param {string} trackerNo - 本项的 tracker 行号（数字字符串）
+ * @param {(rel: string) => boolean} fileExists - 同 checkupArtifactRowCount
+ * @returns {number}
+ */
+export function checkupArtifactRowCountForTracker(text, trackerNo, fileExists) {
+  if (typeof text !== "string") return 0;
+  const key = String(trackerNo ?? "").trim();
+  if (!/^\d+$/.test(key)) return 0;
+  const probe = typeof fileExists === "function" ? fileExists : () => false;
+  let n = 0;
+  for (const line of text.split("\n")) {
+    const t = line.replace(/\r$/, "").trim();
+    if (!t.startsWith(`${key}\t`)) continue;
+    const html = (t.split("\t")[6] ?? "").trim();
+    if (!html || html === "-" || probe(html)) n++;
+  }
+  return n;
+}
+
+/**
  * 门禁用的 HTML 存在性探针：`reports/checkups/` 前缀 + 仓库根容器内 + 真的是文件。
  * 读方不信任台账（同 /api/checkup-report 的立场）——前缀合规不代表路径没有逃逸，
  * 目录也不等于报告。

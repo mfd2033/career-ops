@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Search, ChevronsUpDown, X, Compass, ArrowRight, RotateCcw, Loader2, SkipForward } from "lucide-react";
+import { Search, ChevronsUpDown, X, Compass, ArrowRight, RotateCcw, Loader2, SkipForward, HeartPulse } from "lucide-react";
 import type { Application, InboxJob } from "@/lib/career-ops";
 import { Badge } from "@/components/ui/badge";
 import { CompanyLogo } from "@/components/company-logo";
@@ -248,7 +248,7 @@ export function PipelineView({
     if (!lastBatchId) return;
     const onDone = (e: Event) => {
       const detail = (e as CustomEvent).detail as { kind?: string } | undefined;
-      if (detail?.kind === "evaluate" || detail?.kind === "batch-evaluate") router.refresh();
+      if (detail?.kind === "evaluate" || detail?.kind === "batch-evaluate" || detail?.kind === "batch-checkup") router.refresh();
     };
     window.addEventListener("co-job-done", onDone);
     return () => window.removeEventListener("co-job-done", onDone);
@@ -274,6 +274,29 @@ export function PipelineView({
     setUrlMap(null);
     urlMapFetched.current = false;
   }, [selected, urlMap, urlMapLoading, startJob, t]);
+
+  // Batch checkup (EVALUATED tab only, ADR-0041): fire ONE kind:"batch-checkup"
+  // job carrying every selected row number. The backend resolves each row's
+  // checkup target (company / Via) at dispatch and unresolvable rows come back
+  // as failed items — the client does no eligibility filtering of its own, so
+  // the batch bar's count never lies about what was sent. Selection clears on
+  // launch like batch re-evaluate (the card on /jobs carries the progress).
+  const CHECKUP_BATCH_MAX = 20; // same per-batch cap as /api/batch-evaluate
+  const checkupSelected = useCallback(() => {
+    if (selected.size === 0 || selected.size > CHECKUP_BATCH_MAX) return;
+    const targets = [...selected];
+    const batchId = `batch-checkup-${Date.now()}`;
+    setLastBatchId(batchId);
+    startJob({
+      title: t("pipeline.batchCheckup", { count: targets.length }),
+      kind: "batch-checkup",
+      input: targets.join(","),
+      ns: targets,
+      page: "/pipeline",
+      batchId,
+    });
+    setSelected(new Set());
+  }, [selected, startJob, t]);
 
   // Row click toggles selection (the blank area outside the checkbox). Links and
   // the checkbox cell stop propagation so navigation / checkbox toggle are not
@@ -411,15 +434,26 @@ export function PipelineView({
                 <RotateCcw className="size-3.5" /> {t("pipeline.batchReevaluate", { count: reevaluableCount })}
               </button>
               {tab === "EVALUATED" && (
-                <button
-                  type="button"
-                  onClick={skipSelected}
-                  disabled={skipBusy}
-                  className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border px-3 py-1 font-medium text-muted transition-colors hover:border-red-400/50 hover:text-red-400 disabled:cursor-not-allowed disabled:opacity-50 max-sm:min-h-[44px]"
-                  title={t("pipeline.batchSkipTitle", { count: selected.size })}
-                >
-                  {skipBusy ? <Loader2 className="size-3.5 animate-spin" /> : <SkipForward className="size-3.5" />} {t("pipeline.batchSkip", { count: selected.size })}
-                </button>
+                <>
+                  <button
+                    type="button"
+                    onClick={checkupSelected}
+                    disabled={selected.size > CHECKUP_BATCH_MAX}
+                    className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border px-3 py-1 font-medium text-muted transition-colors hover:border-brand/50 hover:text-brand disabled:cursor-not-allowed disabled:opacity-50 max-sm:min-h-[44px]"
+                    title={t(selected.size > CHECKUP_BATCH_MAX ? "pipeline.batchCheckupTooMany" : "pipeline.batchCheckupTitle", { count: selected.size, max: CHECKUP_BATCH_MAX })}
+                  >
+                    <HeartPulse className="size-3.5" /> {t("pipeline.batchCheckup", { count: selected.size })}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={skipSelected}
+                    disabled={skipBusy}
+                    className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border px-3 py-1 font-medium text-muted transition-colors hover:border-red-400/50 hover:text-red-400 disabled:cursor-not-allowed disabled:opacity-50 max-sm:min-h-[44px]"
+                    title={t("pipeline.batchSkipTitle", { count: selected.size })}
+                  >
+                    {skipBusy ? <Loader2 className="size-3.5 animate-spin" /> : <SkipForward className="size-3.5" />} {t("pipeline.batchSkip", { count: selected.size })}
+                  </button>
+                </>
               )}
               <button
                 type="button"

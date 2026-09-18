@@ -56,7 +56,7 @@ export type Job = {
   endedAt?: number;
 };
 
-type StartOpts = { title: string; subtitle?: string; kind: string; input: string; page?: string; batchId?: string; urls?: string[]; reportNum?: string };
+type StartOpts = { title: string; subtitle?: string; kind: string; input: string; page?: string; batchId?: string; urls?: string[]; ns?: string[]; reportNum?: string };
 
 type Ctx = {
   jobs: Job[];
@@ -403,7 +403,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
       setJobs((js) => [job, ...js]);
       removed.current.delete(id);
 
-      if (!opts.urls) {
+      if (!opts.urls && !opts.ns) {
         // Single-run worker (evaluate/pdf/fix-portal): POST returns {runId}
         // immediately (ADR-0020) and the worker's events arrive on the shared
         // /api/events channel — this tab holds NO per-task connection.
@@ -475,11 +475,14 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
         return id;
       }
 
-      // Batch mode (opts.urls) goes to the dedicated batch-evaluate endpoint
-      // — one bounded-concurrency evaluator run for all URLs instead of N
-      // single-evaluate agent runs. It STILL streams NDJSON on its own
-      // response (the BOSS直聘 extension parses this endpoint too, and one
-      // batch = one held connection, well inside the 6-socket budget).
+      // Batch mode goes to the dedicated batch endpoints — one
+      // bounded-concurrency run for all items instead of N single agent runs
+      // (batch-evaluate for URLs; batch-checkup for selected tracker rows,
+      // ADR-0041). It STILL streams NDJSON on its own response (the BOSS直聘
+      // extension parses the evaluate endpoint too, and one batch = one held
+      // connection, well inside the 6-socket budget).
+      const isCheckupBatch = (opts.ns?.length ?? 0) > 0;
+      const batchEndpoint = isCheckupBatch ? "/api/batch-checkup" : "/api/batch-evaluate";
       const acc: RunAcc = { opts, text: "", verdictLine: "", doneTokens: 0, doneCostUsd: null, steps: [], lastSeq: 0 };
       accs.current.set(id, acc);
       // AbortController so a batch card can be truly cancelled (the stream's
@@ -525,10 +528,10 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
         };
 
         try {
-          const res = await fetch("/api/batch-evaluate", {
+          const res = await fetch(batchEndpoint, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ urls: opts.urls, cliId, model }),
+            body: JSON.stringify(isCheckupBatch ? { ns: opts.ns, cliId, model } : { urls: opts.urls, cliId, model }),
             signal: controller.signal,
           });
           if (!res.ok || !res.body) {

@@ -211,6 +211,9 @@ export const en: Dict = {
   "pipeline.batchSkip": "Skip {count}",
   "pipeline.batchSkipTitle": "Mark the {count} selected as SKIP — moves them out of the evaluated queue into the skip group",
   "pipeline.batchSkipConfirm": "Mark {count} selected roles as SKIP? This cannot be undone with one click.",
+  "pipeline.batchCheckup": "Check up {count}",
+  "pipeline.batchCheckupTitle": "Run a company checkup for each of the {count} selected (max {max} per batch) — headless workers, progress on /jobs",
+  "pipeline.batchCheckupTooMany": "Too many selected — a checkup batch runs at most {max} companies",
 
   // ── Section headings (from report markdown) ──
   // Newer oferta.md heading forms (current core): "## C) Level and Strategy",
@@ -468,6 +471,9 @@ export const zh: Dict = {
   "pipeline.batchSkip": "跳过 {count} 项",
   "pipeline.batchSkipTitle": "将所选 {count} 项标记为跳过（SKIP）——移出已评估队列，归入跳过分组",
   "pipeline.batchSkipConfirm": "确认将所选 {count} 项标记为跳过（SKIP）？此操作无法一键撤销。",
+  "pipeline.batchCheckup": "批量体检 {count} 项",
+  "pipeline.batchCheckupTitle": "对所选 {count} 家公司逐一运行公司体检（每批最多 {max} 家）——无头 worker 执行，进度见 /jobs",
+  "pipeline.batchCheckupTooMany": "勾选过多——单批体检最多 {max} 家",
 
   // ── Section headings (from report markdown) ──
   "pipeline.section.roleSummary": "职位概述",
