@@ -14,6 +14,7 @@ import { useJobTiming } from "@/lib/eval-duration-client";
 import { EvalTimingPanel } from "@/components/eval-timing-panel";
 import { ReportNumLink } from "@/components/report-num-link";
 import { goBackOr } from "@/lib/nav-history";
+import { formatRunEngine } from "@/lib/cli-labels.mjs";
 import { fmtDuration } from "@/lib/format";
 
 type RunLedgerEntry = {
@@ -26,6 +27,9 @@ type RunLedgerEntry = {
   startedAt: number;
   finishedAt: number;
   msg?: string;
+  // ADR-0043 运行引擎：本功能前的记录没有这两个字段 → 「未记录」。
+  cliId?: string;
+  model?: string;
 };
 
 // ADR-0042 决议 1：运行中每秒走一次的时钟，供「已耗时」显示（不估算、不预测——
@@ -104,6 +108,7 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
     // Terminal-only ledger view: the live step stream was never persisted, so
     // this renders the honest subset — status, title, duration, reason.
     const e = ledgerEntry;
+    const ledgerEngine = formatRunEngine(e.cliId, e.model);
     return (
       <div className="mx-auto max-w-3xl px-6 py-8">
         <button
@@ -126,6 +131,16 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
             <h1 className="mt-2 font-display text-2xl tracking-tight text-landing">{e.title}</h1>
             <p className="mt-1 text-sm text-muted">
               {e.kind} · {t("jobs.ledgerInput")}: {e.input} · {fmtDuration(Math.round((e.finishedAt - e.startedAt) / 1000))}
+            </p>
+            {/* ADR-0043 决议 4：详情页对缺失明说，不装作知道。 */}
+            <p className="mt-1 text-sm">
+              {ledgerEngine ? (
+                <span className="text-muted" title={t("jobs.runEngineHint")}>
+                  {t("jobs.runEngine", { engine: ledgerEngine })}
+                </span>
+              ) : (
+                <span className="text-faint">{t("jobs.runEngineNotRecorded")}</span>
+              )}
             </p>
             {e.page && (
               <p className="mt-2">
@@ -180,6 +195,8 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
     );
   }
 
+  // ADR-0043 决议 5：所有状态都显示运行引擎；缺失即明说「未记录」。
+  const jobEngine = formatRunEngine(job.cliId, job.model);
   // ADR-0042 决议 5：本地累积 ∪ 服务端登记表（本地优先——流式事件更实时；
   // 服务端补跨页签/恢复场景）。按 key 幂等合并。
   const itemMap = new Map<string, JobItem>();
@@ -250,6 +267,13 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
           ) : (
             job.subtitle && <p className="mt-1 text-sm text-muted">{job.subtitle}</p>
           )}
+          <p className="mt-2 text-xs" title={t("jobs.runEngineHint")}>
+            {jobEngine ? (
+              <span className="text-muted">{t("jobs.runEngine", { engine: jobEngine })}</span>
+            ) : (
+              <span className="text-faint">{t("jobs.runEngineNotRecorded")}</span>
+            )}
+          </p>
           {job.result?.score != null && (
             <div className="mt-3 flex flex-wrap items-center gap-2.5">
               <Badge tone={job.result.tone}>{job.result.score}/5</Badge>

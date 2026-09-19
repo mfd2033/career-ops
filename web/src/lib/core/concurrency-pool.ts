@@ -46,6 +46,13 @@ export type PoolTaskMeta = {
   title: string;
   reportNum?: number;
   source: PoolSource;
+  // ADR-0043 运行引擎: the CLI runtime + model requested at dispatch. Carried
+  // into the /api/active-runs snapshot because an extension-dispatched worker
+  // has NO other channel onto the worker list — without these it would read as
+  // 「未记录」 on a task that was in fact dispatched with a known engine.
+  // Display-only facts: the pool never inspects them, it just holds them.
+  cliId?: string;
+  model?: string;
 };
 
 export type PoolHandle = {
@@ -62,6 +69,8 @@ type Entry = {
   title: string;
   reportNum?: number;
   source: PoolSource;
+  cliId?: string;
+  model?: string;
   enqueuedAt: number;
   running: boolean;
   cancelled: boolean;
@@ -102,6 +111,8 @@ export function acquire(meta: PoolTaskMeta): PoolHandle {
     title: meta.title,
     reportNum: meta.reportNum,
     source: meta.source,
+    cliId: meta.cliId,
+    model: meta.model,
     enqueuedAt: Date.now(),
     running: false,
     cancelled: false,
@@ -162,6 +173,8 @@ export type PoolRunningTask = {
   title: string;
   reportNum?: number;
   source: PoolSource;
+  cliId?: string;
+  model?: string;
   startedAt: number;
 };
 export type PoolQueuedTask = {
@@ -170,6 +183,8 @@ export type PoolQueuedTask = {
   title: string;
   reportNum?: number;
   source: PoolSource;
+  cliId?: string;
+  model?: string;
   enqueuedAt: number;
   position: number; // 1-based slot in the FIFO queue
 };
@@ -183,6 +198,8 @@ export function listPool(): { running: PoolRunningTask[]; queued: PoolQueuedTask
       title: e.title,
       reportNum: e.reportNum,
       source: e.source,
+      cliId: e.cliId,
+      model: e.model,
       startedAt: e.enqueuedAt,
     })),
     queued: queue.map((e, i) => ({
@@ -191,6 +208,8 @@ export function listPool(): { running: PoolRunningTask[]; queued: PoolQueuedTask
       title: e.title,
       reportNum: e.reportNum,
       source: e.source,
+      cliId: e.cliId,
+      model: e.model,
       enqueuedAt: e.enqueuedAt,
       position: i + 1,
     })),

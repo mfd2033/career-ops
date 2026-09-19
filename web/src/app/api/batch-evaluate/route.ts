@@ -225,7 +225,7 @@ export async function POST(req: Request) {
             // 用于让 pipeline 卡片显示真实失败原因,而非误导性的通用双消息。
             let errMsg: string | null = null;
             const url = urls[i];
-            const poolHandle = acquire({ url, title: url, reportNum: num, source: "batch" });
+            const poolHandle = acquire({ url, title: url, reportNum: num, source: "batch", cliId, model: model || undefined });
             poolHandles.add(poolHandle);
             const postedAt = inboxPostedAt.get(url) ?? scanDates.get(url);
             // 内联 JD/雇主名只对唯一 URL(扩展详情页单评估)有意义;多 URL 时

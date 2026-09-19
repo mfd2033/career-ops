@@ -17,18 +17,10 @@ import { AiSearchBox } from "./ai-search-box";
 import { ResultsList, type EnrichedOffer } from "./results-list";
 import { useExplore } from "./explore-provider";
 import { useI18n } from "@/lib/i18n/context";
+import { cliDisplayName } from "@/lib/cli-labels.mjs";
 
 // Same shape as core normalizeTextKey(s, " ") — never [^a-z0-9] (#2666).
 const norm = (s: string) => normalizeTextKey(s, " ");
-const CLI_NAMES: Record<string, string> = {
-  claude: "Claude Code",
-  codex: "Codex",
-  gemini: "Gemini CLI",
-  opencode: "OpenCode",
-  copilot: "Copilot CLI",
-  qwen: "Qwen CLI",
-  antigravity: "Antigravity CLI",
-};
 
 export function ExplorerView({
   seed,
@@ -61,7 +53,7 @@ export function ExplorerView({
   useEffect(() => {
     try {
       const id = JSON.parse(localStorage.getItem("career-ops:config") || "{}").cliId || null;
-      setCli({ id, name: id ? CLI_NAMES[id] || id : undefined });
+      setCli({ id, name: id ? cliDisplayName(id) : undefined });
     } catch {
       setCli({ id: null });
     }

@@ -7,6 +7,7 @@ import { useI18n } from "@/lib/i18n/context";
 import { cn } from "@/lib/cn";
 import { fmtDuration } from "@/lib/format";
 import { doneDurationSeconds, useJobTiming } from "@/lib/eval-duration-client";
+import { formatRunEngine } from "@/lib/cli-labels.mjs";
 import { ReportNumLink } from "@/components/report-num-link";
 
 // Humanize raw agent tool names into what the user actually cares about, so a
@@ -102,6 +103,12 @@ export function WorkerCard({
   // back to the local startedAt→endedAt wall time when no report is resolvable.
   const { reportNum, entry } = useJobTiming(job);
   const doneSecs = job.status === "done" ? doneDurationSeconds(entry, job) : null;
+  // ADR-0043 运行引擎（派发时请求的运行时+模型，不是实际加载的）：有就显示，
+  // 没有就不占位（列表里缺失 = 无记录，只有详情页才明说「未记录」）。
+  const engineText = (() => {
+    const engine = formatRunEngine(job.cliId, job.model);
+    return engine ? t("jobs.runEngine", { engine }) : null;
+  })();
 
   return (
     <div className={cn(inline && "rounded-xl border border-border bg-surface/60 p-2.5")}>
@@ -159,6 +166,14 @@ export function WorkerCard({
       {doneSecs != null && (
         <div className={cn("mt-1 flex items-center gap-1 text-faint tabular-nums", inline ? "text-xs" : "text-[10px]")} title={t("jobs.evalDuration")}>
           <Clock className="size-3 shrink-0" /> {fmtDuration(doneSecs)}
+        </div>
+      )}
+      {engineText && (
+        <div
+          className={cn("mt-1 truncate text-faint", inline ? "text-xs" : "text-[10px]")}
+          title={`${engineText} — ${t("jobs.runEngineHint")}`}
+        >
+          {engineText}
         </div>
       )}
       {tokens > 0 && (

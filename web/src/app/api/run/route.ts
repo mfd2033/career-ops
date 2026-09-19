@@ -151,6 +151,10 @@ export async function POST(req: Request) {
         status,
         startedAt,
         finishedAt: Date.now(),
+        // ADR-0043 运行引擎：派发时请求的运行时 + 模型（不是实际加载的那个）。老记录
+        // 没这两个字段，读取端按「未记录」处理，不回填、不猜测。
+        cliId,
+        model: model || undefined,
         // 800（原 300）：门禁那一句 checkup 文案就 175 字，300 会把 ADR-0034 的证据
         // 段整段截掉——上限不抬，补丁等于没打。
         msg: msg ? String(msg).slice(0, 800) : undefined,
@@ -318,7 +322,8 @@ async function runPipeline({
   // queued (visible as 排队中) instead of spawning another heavyweight agent
   // CLI — ADR-0014 Q1/Q4. Queued tasks no longer hold an HTTP response: their
   // status reaches the client through the /api/events channel (ADR-0020).
-  const poolHandle = acquire({ url: input, title: input, source: "run" });
+  // ADR-0043：cliId/model 随任务入池，扩展派发的卡片凭 /api/active-runs 也能显示引擎。
+  const poolHandle = acquire({ url: input, title: input, source: "run", cliId, model: model || undefined });
 
   // Spawned/guarded only AFTER the pool grants a slot. `child`/`writeToken` are
   // outer lets so cancel() can reach them whether the run is queued

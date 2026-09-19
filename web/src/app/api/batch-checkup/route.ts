@@ -229,7 +229,7 @@ export async function POST(req: Request) {
             let sawError = false;
             let star: number | null = null;
             let timedOut = false;
-            const poolHandle = acquire({ url: `#${t.n}`, title: t.company, reportNum: Number(t.n), source: "batch" });
+            const poolHandle = acquire({ url: `#${t.n}`, title: t.company, reportNum: Number(t.n), source: "batch", cliId, model: model || undefined });
             poolHandles.add(poolHandle);
             const prompt = buildPrompt({
               kind: "checkup",

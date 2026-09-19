@@ -4,6 +4,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { codexStreamArgs, isFatalClaudeStderr, isFatalCodexStderr, isFatalOpenCodeStderr, parseClaudeEvent, parseCodexEvent } from "./run-cli-support.mjs";
 import { loadOpencodeModels, resetOpencodeModelCache } from "./opencode-models.mjs";
+import { cliDisplayName } from "./cli-labels.mjs";
 
 // Server-only (node imports). The agnostic runtimes career-ops can delegate to
 // in headless mode (AGENTS.md). Install URLs from career-ops-docs.
@@ -176,19 +177,23 @@ const MODELS: Record<string, ModelMeta> = {
   },
 };
 
+// `name` comes from cli-labels.mjs (the shared, client-safe source) so the label
+// a user sees here and the one a worker card shows can never drift apart — and
+// every row spells its own id, so a missing label is caught by a test rather
+// than rendering as `undefined` (ADR-0043 决议 7).
 export const KNOWN: CliSpec[] = [
-  { id: "claude", name: "Claude Code", bin: "claude", run: "claude -p", url: "https://claude.ai/code", args: (p) => ["-p", p], model: MODELS.claude, parseEvent: parseClaudeEvent, stderrIsFatal: isFatalClaudeStderr },
-  { id: "codex", name: "Codex", bin: "codex", run: "codex exec", url: "https://github.com/openai/codex", args: (p) => ["exec", p], model: MODELS.codex, streamArgs: codexStreamArgs, parseEvent: parseCodexEvent, stderrIsFatal: isFatalCodexStderr },
-  { id: "gemini", name: "Gemini CLI", bin: "gemini", run: "gemini -p", url: "https://github.com/google-gemini/gemini-cli", args: (p) => ["-p", p], model: MODELS.gemini },
-  { id: "opencode", name: "OpenCode", bin: "opencode", run: "opencode run", url: "https://opencode.ai", args: (p) => ["run", p], model: MODELS.opencode, stderrIsFatal: isFatalOpenCodeStderr },
-  { id: "copilot", name: "GitHub Copilot CLI", bin: "copilot", run: "copilot -p", url: "https://docs.github.com/en/copilot/github-copilot-in-the-cli", args: (p) => ["-p", p], model: MODELS.copilot },
-  { id: "qwen", name: "Qwen CLI", bin: "qwen", run: "qwen -p", url: "https://qwen.ai/qwencode", args: (p) => ["-p", p], model: MODELS.qwen },
-  { id: "antigravity", name: "Antigravity CLI", bin: "agy", run: "agy -p", url: "https://antigravity.google", args: (p) => ["-p", p], model: MODELS.antigravity },
+  { id: "claude", name: cliDisplayName("claude"), bin: "claude", run: "claude -p", url: "https://claude.ai/code", args: (p) => ["-p", p], model: MODELS.claude, parseEvent: parseClaudeEvent, stderrIsFatal: isFatalClaudeStderr },
+  { id: "codex", name: cliDisplayName("codex"), bin: "codex", run: "codex exec", url: "https://github.com/openai/codex", args: (p) => ["exec", p], model: MODELS.codex, streamArgs: codexStreamArgs, parseEvent: parseCodexEvent, stderrIsFatal: isFatalCodexStderr },
+  { id: "gemini", name: cliDisplayName("gemini"), bin: "gemini", run: "gemini -p", url: "https://github.com/google-gemini/gemini-cli", args: (p) => ["-p", p], model: MODELS.gemini },
+  { id: "opencode", name: cliDisplayName("opencode"), bin: "opencode", run: "opencode run", url: "https://opencode.ai", args: (p) => ["run", p], model: MODELS.opencode, stderrIsFatal: isFatalOpenCodeStderr },
+  { id: "copilot", name: cliDisplayName("copilot"), bin: "copilot", run: "copilot -p", url: "https://docs.github.com/en/copilot/github-copilot-in-the-cli", args: (p) => ["-p", p], model: MODELS.copilot },
+  { id: "qwen", name: cliDisplayName("qwen"), bin: "qwen", run: "qwen -p", url: "https://qwen.ai/qwencode", args: (p) => ["-p", p], model: MODELS.qwen },
+  { id: "antigravity", name: cliDisplayName("antigravity"), bin: "agy", run: "agy -p", url: "https://antigravity.google", args: (p) => ["-p", p], model: MODELS.antigravity },
   // Grok Build also speaks `--output-format streaming-json`, but that is its own
   // schema, not Claude's `stream-json` — and the run route only parses the
   // latter. Plain `-p` streams text, which is what every other non-Claude entry
   // here does.
-  { id: "grok", name: "Grok Build CLI", bin: "grok", run: "grok -p", url: "https://docs.x.ai/build/overview", args: (p) => ["-p", p], model: MODELS.grok },
+  { id: "grok", name: cliDisplayName("grok"), bin: "grok", run: "grok -p", url: "https://docs.x.ai/build/overview", args: (p) => ["-p", p], model: MODELS.grok },
 ];
 
 function searchDirs(): string[] {

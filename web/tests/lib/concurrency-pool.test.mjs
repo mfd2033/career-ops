@@ -108,3 +108,28 @@ test("acquire is granted immediately when the pool has free slots", async () => 
   assert.equal(h.isRunning(), true);
   assert.equal(listPool().running.length, 1);
 });
+
+test("ADR-0043: the engine requested at dispatch rides along in the snapshot", async () => {
+  // The extension-dispatched worker has NO other channel onto the worker list —
+  // without these fields /api/active-runs could not show its 运行引擎 at all.
+  __setPoolSizeForTest(1);
+  const running = acquire({ url: "a", title: "a", source: "run", cliId: "claude", model: "agnes-2.5-flash" });
+  const queued = acquire({ url: "b", title: "b", source: "batch", cliId: "opencode" });
+  assert.equal(await running.ready, true);
+
+  const [r] = listPool().running;
+  assert.equal(r.cliId, "claude");
+  assert.equal(r.model, "agnes-2.5-flash");
+  const [q] = listPool().queued;
+  assert.equal(q.cliId, "opencode");
+  assert.equal(q.model, undefined, "no model requested stays undefined, not an empty string");
+});
+
+test("ADR-0043: a task dispatched without an engine carries none (pre-feature callers)", async () => {
+  __setPoolSizeForTest(2);
+  const h = acquire(meta("legacy"));
+  assert.equal(await h.ready, true);
+  const [r] = listPool().running;
+  assert.equal(r.cliId, undefined);
+  assert.equal(r.model, undefined);
+});

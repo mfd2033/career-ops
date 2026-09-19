@@ -64,6 +64,12 @@ export const en: Dict = {
   "jobs.cancelQueued": "Cancel queue item",
   "jobs.queuedHint": "Pool is full — will run when a slot frees up.",
   "jobs.evalDuration": "Eval duration",
+  // ADR-0043 运行引擎：工作器卡片与 /jobs 行的信息行。文案只讲「派发请求值」，
+  // 悬停标题把语义说清。
+  "jobs.runEngine": "Engine: {engine}",
+  "jobs.runEngineNotRecorded": "Engine: not recorded (predates this feature)",
+  "jobs.runEngineHint":
+    "Requested when this worker was dispatched — not a claim about which model actually ran.",
   "jobs.viewReport": "View report",
   "jobs.phaseRunning": "Running",
   "jobs.phaseFinalizing": "Finalizing",
@@ -132,6 +138,9 @@ export const zh: Dict = {
   "jobs.cancelQueued": "取消排队项",
   "jobs.queuedHint": "并发已满，空出名额后自动运行。",
   "jobs.evalDuration": "评估用时",
+  "jobs.runEngine": "运行引擎：{engine}",
+  "jobs.runEngineNotRecorded": "运行引擎：未记录（早于该功能）",
+  "jobs.runEngineHint": "派发该工作器时请求的值 —— 不代表实际执行所用的模型。",
   "jobs.viewReport": "查看报告",
   "jobs.phaseRunning": "运行中",
   "jobs.phaseFinalizing": "收尾中",

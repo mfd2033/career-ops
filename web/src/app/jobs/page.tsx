@@ -10,6 +10,7 @@ import { cn } from "@/lib/cn";
 import { fmtDuration } from "@/lib/format";
 import { doneDurationSeconds, useJobTiming } from "@/lib/eval-duration-client";
 import { ReportNumLink } from "@/components/report-num-link";
+import { formatRunEngine } from "@/lib/cli-labels.mjs";
 import type { Job } from "@/components/jobs/job-store";
 
 const TONE_CHIP = {
@@ -38,6 +39,9 @@ type RunLedgerEntry = {
   startedAt: number;
   finishedAt: number;
   msg?: string;
+  // ADR-0043 运行引擎：本功能前的记录没有这两个字段（按「未记录」处理）。
+  cliId?: string;
+  model?: string;
 };
 
 export default function JobsHistory() {
@@ -67,6 +71,8 @@ export default function JobsHistory() {
       input: r.input,
       kind: r.kind,
       runId: r.id,
+      cliId: r.cliId,
+      model: r.model,
       status: r.status === "done" ? "done" : "error",
       steps: [],
       text: r.msg || "",
@@ -119,6 +125,9 @@ function JobsRow({ job: j }: { job: Job }) {
   // The pool cards carry "#N" as their subtitle — render it as the report jump
   // instead of duplicating it beside the title.
   const subtitleIsNum = !!j.subtitle && /^#\d+$/.test(j.subtitle);
+  // ADR-0043 运行引擎：列表里缺失不占位（详情页才写「未记录」）。
+  const engine = formatRunEngine(j.cliId, j.model);
+  const engineText = engine ? t("jobs.runEngine", { engine }) : null;
   return (
     <li>
       <Link href={`/jobs/${j.id}`} className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-surface-hover">
@@ -151,6 +160,11 @@ function JobsRow({ job: j }: { job: Job }) {
             </div>
           ) : (
             (j.subtitle || j.result?.summary) && <div className="truncate text-xs text-muted">{j.result?.summary || j.subtitle}</div>
+          )}
+          {engineText && (
+            <div className="truncate text-[11px] text-faint" title={`${engineText} — ${t("jobs.runEngineHint")}`}>
+              {engineText}
+            </div>
           )}
         </div>
         {secs != null && (

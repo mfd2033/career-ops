@@ -56,3 +56,19 @@ test("limit caps the read", () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("ADR-0043: a record without an engine reads back without one (pre-feature history)", () => {
+  // The 运行引擎 fields are additive — a row written before the feature must
+  // still read back, and its absence stays absent (callers render 「未记录」).
+  const root = mkdtempSync(join(tmpdir(), "co-ledger-"));
+  try {
+    appendRunRecord(root, { id: "old", kind: "evaluate", input: "u", title: "t", status: "done", startedAt: 1, finishedAt: 2 });
+    appendRunRecord(root, { id: "new", kind: "evaluate", input: "u", title: "t", status: "done", startedAt: 3, finishedAt: 4, cliId: "claude", model: "agnes-2.5-flash" });
+    const [newer, older] = readRunHistory(root);
+    assert.equal(newer.cliId, "claude");
+    assert.equal(newer.model, "agnes-2.5-flash");
+    assert.ok(!("cliId" in older), "an absent engine must not be backfilled");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

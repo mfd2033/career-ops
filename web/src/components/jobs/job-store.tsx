@@ -32,6 +32,9 @@ type PoolEntry = {
   title: string;
   reportNum?: number;
   source: "run" | "batch";
+  // ADR-0043 运行引擎：池快照携带的派发请求值（扩展源卡片唯一的来源）。
+  cliId?: string;
+  model?: string;
 };
 type PoolRunning = PoolEntry & { startedAt: number };
 type PoolQueued = PoolEntry & { enqueuedAt: number; position: number };
@@ -44,6 +47,10 @@ export type Job = {
   page?: string; // route the job was launched from / refers to
   input?: string; // the URL/posting it processed (links inbox rows to their worker)
   kind?: string;
+  // ADR-0043 运行引擎：本工作器派发时请求的 CLI 运行时 + 模型（快照）。缺失 =
+  // 未记录（早于该功能 / 老扩展）——列表不占位，详情页写「未记录」。
+  cliId?: string;
+  model?: string;
   // The report this worker references, when it is known at LAUNCH (pdf). Not
   // every kind can know one: an evaluate worker's number is reserved by the
   // agent mid-run, so that kind resolves via the posting URL instead (ADR-0018).
@@ -367,6 +374,8 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
         page: "/jobs",
         input: r.url,
         kind: "batch-evaluate",
+        cliId: r.cliId,
+        model: r.model,
         status: "running",
         active: true,
         steps: [{ kind: "status", label: t("jobs.working"), ts: r.startedAt }],
@@ -382,6 +391,8 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
         page: "/jobs",
         input: q.url,
         kind: "batch-evaluate",
+        cliId: q.cliId,
+        model: q.model,
         status: "queued",
         active: true,
         queuedPos: q.position,
@@ -506,6 +517,9 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
             }));
             return;
           }
+          // ADR-0043 运行引擎：把「派发给」的引擎记在卡片上——就是下面送进
+          // /api/run 的同一对值，不另取一份、不回读「当前使用」。
+          patch(id, (j) => ({ ...j, cliId, model }));
           accs.current.set(id, { opts, text: "", verdictLine: "", doneTokens: 0, doneCostUsd: null, steps: [], lastSeq: 0 });
           try {
             const res = await fetch("/api/run", {
@@ -590,6 +604,8 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
           }));
           return;
         }
+        // ADR-0043 运行引擎：与送进批量路由的同一对值（批量卡片也在 /jobs 上）。
+        patch(id, (j) => ({ ...j, cliId, model }));
         const finish = (status: "done" | "error", lastLabel?: string) => {
         const result = status === "done" ? parseVerdict(acc.verdictLine || acc.text) : undefined;
         const cost = status === "done" && acc.doneTokens > 0 ? { tokens: acc.doneTokens, usd: acc.doneCostUsd ?? undefined } : undefined;
