@@ -4,7 +4,7 @@
 
 主仓库的 `.gitignore` 把所有个人数据排除在版本控制之外（`data/*`、`reports/*.md`、
 `cv.md`、`config/profile.yml`、`modes/_custom.md`、`portals.yml`、`interview-prep/`、
-`writing-samples/`）。这个分离对 GitHub 推送是正确的，但它意味着**664 条投递记录、
+`writing-samples/`、`todo-list/`）。这个分离对 GitHub 推送是正确的，但它意味着**664 条投递记录、
 700+ 份评估报告、简历与个性化配置只存在于这一块磁盘上，没有任何历史**——误删、
 改坏、批量流程写坏（如 #256 列错位事故）都无法回滚。
 
@@ -36,7 +36,7 @@ local\restore-data.cmd            按快照恢复单个文件
 以 `local\backup-data.cmd` 里的 `git add -Af --` 路径清单为准：
 
 ```
-data/  reports/  interview-prep/  writing-samples/
+data/  reports/  interview-prep/  writing-samples/  todo-list/
 cv.md  portals.yml  modes/_custom.md  modes/_profile.md  config/profile.yml
 ```
 

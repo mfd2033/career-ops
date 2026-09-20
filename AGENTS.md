@@ -82,7 +82,7 @@ If yes → `node update-system.mjs apply --confirm`. If no → `node update-syst
 
 ## 数据层影子备份（fork-local，MANDATORY）
 
-个人数据（`data/`、`reports/`、`cv.md`、`config/profile.yml`、`modes/_custom.md`、`portals.yml`、`interview-prep/`、`writing-samples/`）被主仓库 `.gitignore` 排除、不进版本控制；它们的历史在独立的影子账本 `D:\career-ops-data-history`（裸仓库，**永不推送远端**）。
+个人数据（`data/`、`reports/`、`cv.md`、`config/profile.yml`、`modes/_custom.md`、`portals.yml`、`interview-prep/`、`writing-samples/`、`todo-list/`）被主仓库 `.gitignore` 排除、不进版本控制；它们的历史在独立的影子账本 `D:\career-ops-data-history`（裸仓库，**永不推送远端**）。
 
 规则：任何批量改写数据层的操作（`merge-tracker.mjs --migrate-via`、直编 `data/applications.md`、`set-status.mjs --force`、批量重命名/归档 `reports/` 等）**执行前必须先跑 `local\backup-data.cmd`**；恢复用 `local\restore-data.cmd`，永远先落到新文件比对。完整规程、白名单与维护命令见 [docs/data-backup.md](docs/data-backup.md)。
 
