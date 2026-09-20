@@ -17,6 +17,7 @@ import { goBackOr } from "@/lib/nav-history";
 import { formatRunEngine } from "@/lib/cli-labels.mjs";
 import { fmtStartedAt } from "@/lib/started-at.mjs";
 import { fmtDuration } from "@/lib/format";
+import { BatchItemList } from "@/components/jobs/batch-item-list";
 
 type RunLedgerEntry = {
   id: string;
@@ -31,6 +32,10 @@ type RunLedgerEntry = {
   // ADR-0043 运行引擎：本功能前的记录没有这两个字段 → 「未记录」。
   cliId?: string;
   model?: string;
+  // ADR-0045 决议 2/6：批量台账行的逐项快照与选中总数；旧行/单次 run 无此
+  // 字段，按「无逐项数据」处理，不回填。
+  items?: JobItem[];
+  total?: number;
 };
 
 // ADR-0042 决议 1：运行中每秒走一次的时钟，供「已耗时」显示（不估算、不预测——
@@ -159,6 +164,14 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
             )}
             {e.msg && (
               <p className="mt-3 rounded-lg border border-border bg-surface/60 px-3 py-2 text-sm text-muted">{e.msg}</p>
+            )}
+            {/* ADR-0045：UI 外发起的批量终结后，ledger-only 视图不再只有状态+
+                时长+原因——落盘的逐项快照同口径渲染（本地卡视图零变化）。 */}
+            {e.items && e.items.length > 0 && (
+              <>
+                <h2 className="mt-5 text-xs font-semibold uppercase tracking-[0.2em] text-muted">{t("jobs.batchItems")}</h2>
+                <BatchItemList items={e.items} />
+              </>
             )}
           </div>
         </section>
@@ -323,19 +336,9 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
               <h2 className="mt-3 text-xs font-semibold uppercase tracking-[0.2em] text-muted">
                 {t("jobs.batchItems")}
               </h2>
-              <ul className="mt-2 max-h-72 list-none space-y-1.5 overflow-y-auto rounded-2xl border border-border bg-surface/40 p-4">
-                {batchItems.map((it) => (
-                  <li key={it.key} className="flex items-start gap-2 text-sm">
-                    <span className="shrink-0">{it.ok ? "\u2705" : it.skipped ? "\u23F8" : "\u26A0\uFE0F"}</span>
-                    <span className={it.ok ? "" : "text-muted"}>
-                      {it.label}
-                      {it.ok && it.score != null && <span className="text-faint"> · {it.score}/5</span>}
-                      {it.ok && it.star != null && <span className="text-faint"> · {"\u2605"}{it.star}/5</span>}
-                      {!it.ok && it.reason && <span className="text-faint"> — {it.reason}</span>}
-                    </span>
-                  </li>
-                ))}
-              </ul>
+              {/* ADR-0045：渲染抽成共享组件（与历史列表展开、ledger-only 视图
+                  同一 JobItem 口径），这里不再 inline 重复一份。 */}
+              <BatchItemList items={batchItems} />
             </>
           )}
         </div>
