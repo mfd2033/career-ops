@@ -623,3 +623,43 @@ try {
 } catch (e) {
   fail(`merge-tracker same-run num collision tests crashed: ${e.message}`);
 }
+
+// ── Non-canonical status in the status slot: refuse, never silently default ──
+// A batch worker writing a real job title into the status column (the #256
+// shape: company=`?`, role=<agency>, status=<职位名>) used to fall through
+// validateStatus()'s `console.warn` + `return 'Evaluated'` default. resolveScoreStatus
+// had already cleanly split score from status by content, so the row merged with
+// the agency stuck in Role and a bogus `Evaluated` masking the worker's column
+// error. The contract now matches resolveScoreStatus()'s #1427 precedent: an
+// undecidable status is REFUSED (no row written), loudly, not silently normalized.
+console.log('\nmerge-tracker.mjs — non-canonical status is refused, not defaulted');
+try {
+  const swapped = runMergeDetailed({
+    '256-confidential.tsv': '256\t2026-09-10\t?\t安徽先客（猎头）\t电解铝厂设备安装项目经理\t2.5/5\t❌\t[256](reports/256-confidential-anhui-xianke-2026-09-10.md)\tvia=安徽先客（猎头）\n',
+  });
+  const merged256 = dataRows(swapped.tracker).find(r => /\b256\b/.test(r)) || '';
+  if (merged256 === '') {
+    pass('a job-title-in-status-row is refused (no tracker row written)');
+  } else {
+    fail(`job-title-in-status was silently merged as a row: ${merged256.trim()}`);
+  }
+  if (/Non-canonical status|refusing to merge|unrecognized status/i.test(swapped.output)) {
+    pass('the refusal is loud (surface the offending status value)');
+  } else {
+    fail(`refusal was silent — output had no warning: ${swapped.output.trim().slice(-200)}`);
+  }
+
+  // Control: a legitimate Spanish alias must STILL normalize (the alias table
+  // is intact; only truly-unrecognized values are refused).
+  const aliasOk = runMergeDetailed({
+    '257-acme.tsv': '257\t2026-09-11\tAcme\tML Eng\tevaluada\t4.0/5\t❌\t[257](reports/257-acme-2026-09-11.md)\tnormal\n',
+  });
+  const aliasRow = dataRows(aliasOk.tracker).find(r => /\bAcme\b/.test(r)) || '';
+  if (/\|\s*Evaluated\s*\|/.test(aliasRow)) {
+    pass('a known alias (evaluada) still normalizes to Evaluated');
+  } else {
+    fail(`alias normalization regressed: ${aliasRow.trim() || '(no row merged)'}`);
+  }
+} catch (e) {
+  fail(`merge-tracker non-canonical-status tests crashed: ${e.message}`);
+}

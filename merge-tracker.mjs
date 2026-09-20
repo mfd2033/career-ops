@@ -139,6 +139,14 @@ try {
 // Canonical states and aliases
 const CANONICAL_STATES = ['Evaluated', 'Applied', 'Responded', 'Interview', 'Offer', 'Hired', 'Rejected', 'Discarded', 'SKIP'];
 
+// Sentinel returned by parseTsvContent when a row's status cell is neither a
+// canonical state nor a known alias — e.g. a real job title landed in the
+// status column (the #256 shape). parseTsvContent is otherwise a pure parser
+// (addition | null); this distinct value lets the merge loop route the row to
+// failedAdditions (kept PENDING, non-zero exit) instead of the silent
+// `skipped` path that archives the TSV as if it had landed.
+const STATUS_REJECT = Symbol('status-reject');
+
 /**
  * Convert raw addition status text into one canonical tracker state.
  *
@@ -147,8 +155,15 @@ const CANONICAL_STATES = ['Evaluated', 'Applied', 'Responded', 'Interview', 'Off
  * all of those variants here so applications.md keeps the states defined by
  * templates/states.yml.
  *
+ * A value that matches NO canonical state and NO alias is refused (returns
+ * null) rather than defaulted to "Evaluated". The old silent default masked
+ * worker column errors — a real job title landing in the status slot merged as
+ * an innocuous `Evaluated` row with the agency name stuck in Role (#256). This
+ * mirrors resolveScoreStatus()'s #1427 contract: when the value cannot be
+ * identified, fail loudly and let the caller refuse the row.
+ *
  * @param {string} status - Raw status string from a TSV or pipe-delimited row.
- * @returns {string} Canonical tracker status.
+ * @returns {string|null} Canonical tracker status, or null if unrecognized.
  */
 function validateStatus(status) {
   const clean = status.replace(/\*\*/g, '').replace(/\s+\d{4}-\d{2}-\d{2}.*$/, '').trim();
@@ -178,8 +193,9 @@ function validateStatus(status) {
   // DUPLICADO/Repost → Discarded
   if (/^(duplicado|dup|repost)/i.test(lower)) return 'Discarded';
 
-  console.warn(`⚠️  Non-canonical status "${status}" → defaulting to "Evaluated"`);
-  return 'Evaluated';
+  // Unrecognized — NOT silently defaulted to "Evaluated" (that masked the #256
+  // column error). Return null so the caller refuses the whole row.
+  return null;
 }
 
 // normalizeVia (Unicode-aware Via/agency key, #1596/#1603) lives in
@@ -667,6 +683,11 @@ function parseTsvContent(content, filename) {
       console.warn(`⚠️  Skipping ${filename}: cannot tell score from status in columns 5–6 ("${parts[4]}" | "${parts[5]}") — refusing to merge a possible column swap`);
       return null;
     }
+    const canonicalStatus = validateStatus(resolved.status);
+    if (canonicalStatus === null) {
+      console.error(`❌ Refusing to merge ${filename}: "${resolved.status}" in the status column is not a canonical state or known alias (a job title may have landed in the status slot). Fix the addition or add an alias in validateStatus().`);
+      return STATUS_REJECT;
+    }
     addition = {
       num: parseInt(parts[0]),
       date: parts[1],
@@ -675,7 +696,7 @@ function parseTsvContent(content, filename) {
       // Write-canonical: the tracker stores scores unbolded (verify-pipeline
       // rejects bold scores), so strip any markdown bold from the incoming cell.
       score: resolved.score.replace(/\*\*/g, '').trim(),
-      status: validateStatus(resolved.status),
+      status: canonicalStatus,
       pdf: parts[6],
       report: parts[7],
       notes: parts[8] || '',
@@ -700,13 +721,18 @@ function parseTsvContent(content, filename) {
       console.warn(`⚠️  Skipping ${filename}: cannot tell score from status in columns 5–6 ("${parts[4].trim()}" | "${parts[5].trim()}") — refusing to merge a possible column swap`);
       return null;
     }
+    const canonicalStatus = validateStatus(resolved.status);
+    if (canonicalStatus === null) {
+      console.error(`❌ Refusing to merge ${filename}: "${resolved.status}" in the status column is not a canonical state or known alias (a job title may have landed in the status slot). Fix the addition or add an alias in validateStatus().`);
+      return STATUS_REJECT;
+    }
 
     addition = {
       num: parseInt(parts[0]),
       date: parts[1],
       company: parts[2],
       role: parts[3],
-      status: validateStatus(resolved.status),
+      status: canonicalStatus,
       // Write-canonical: strip any markdown bold so the stored score stays
       // unbolded (verify-pipeline rejects bold scores).
       score: resolved.score.replace(/\*\*/g, '').trim(),
@@ -976,6 +1002,10 @@ function replaceTrackerLine(oldLine, updatedLine) {
 for (const file of tsvFiles) {
   const content = readFileSync(join(ADDITIONS_DIR, file), 'utf-8').trim();
   const addition = parseTsvContent(content, file);
+  // A refused status is NOT a benign skip: the TSV stays pending (kept out of
+  // merged/) and the run exits non-zero, so a worker column error cannot be
+  // archived away as if it had landed (the #256 data-corruption chain).
+  if (addition === STATUS_REJECT) { skipped++; failedAdditions.push(file); continue; }
   if (!addition) { skipped++; continue; }
 
   // A via= tag can only be stored if the tracker has a Via column — warn
