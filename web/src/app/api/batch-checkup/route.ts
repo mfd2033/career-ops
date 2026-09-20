@@ -28,7 +28,9 @@
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import { registerBatchRun, recordBatchItem, completeBatchRun } from "@/lib/batch-items.mjs";
+import { registerBatchRun, recordBatchItem, completeBatchRun, getBatchItems } from "@/lib/batch-items.mjs";
+import { appendRunRecord } from "@/lib/run-ledger.mjs";
+import { buildBatchLedgerRecord } from "@/lib/batch-ledger.mjs";
 import { resolveCli } from "@/lib/clis";
 import {
   withModelFlag,
@@ -167,6 +169,10 @@ export async function POST(req: Request) {
   let cancelled = false;
   // ADR-0042 决议 6：服务端逐项登记的键（同 batch-evaluate）。
   const batchId = randomUUID();
+  // ADR-0045 决议 2/5：终态即落台账（done/error/cancel 都写），ledgerEnd 随终结
+  // 分支更新；默认保守判 error（未走到任何终态分支就被 finally 收场）。
+  const runStartedAt = Date.now();
+  const ledgerEnd: { status: "done" | "error"; msg?: string } = { status: "error", msg: "batch ended before a final status was reported" };
   const children = new Set<ReturnType<typeof spawnHeadlessCli>>();
   // Every dispatched worker holds a global-pool handle; on batch cancel we
   // dequeue the ones still waiting for a slot so they never spawn.
@@ -422,18 +428,45 @@ export async function POST(req: Request) {
         });
 
         if (cancelled) {
-          send({ type: "error", msg: "Batch cancelled. Anything already written stays (the checkup ledger only appends)." });
+          const cancelMsg = "Batch cancelled. Anything already written stays (the checkup ledger only appends).";
+          send({ type: "error", msg: cancelMsg });
+          ledgerEnd.status = "error";
+          ledgerEnd.msg = cancelMsg;
         } else {
           // Honesty gate (ADR-0041 决议 6): a batch where NOTHING was persisted is
           // a failed batch, not a green card — pure function, tested in
           // batch-checkup-gate.test.mjs.
-          send(batchCheckupFinalEvent({ ok, failed, skipped, skippedRunning: skippedRunning.length }));
+          const finalEv = batchCheckupFinalEvent({ ok, failed, skipped, skippedRunning: skippedRunning.length });
+          send(finalEv);
+          ledgerEnd.status = finalEv.type === "done" ? "done" : "error";
+          ledgerEnd.msg = finalEv.type === "done" ? undefined : finalEv.msg;
         }
       } catch (err) {
         send({ type: "error", msg: (err as Error).message });
+        ledgerEnd.status = "error";
+        ledgerEnd.msg = (err as Error).message;
       } finally {
         // ADR-0042 决议 6：批量终态，登记表条目转为淘汰候选。
         completeBatchRun(batchId);
+        // ADR-0045 决议 2/5：终态即落台账，内嵌已完成部分的逐项快照。
+        // fire-and-forget，与 /api/run 的 recordEnd 同纪律：台账失败绝不反噬 run。
+        try {
+          appendRunRecord(root, buildBatchLedgerRecord({
+            batchId,
+            kind: "batch-checkup",
+            title: `批量体检 · ${ns.length} 项`,
+            input: ns.length === 1 ? `#${ns[0]}` : `#${ns[0]} +${ns.length - 1}`,
+            startedAt: runStartedAt,
+            total: ns.length,
+            status: ledgerEnd.status,
+            msg: ledgerEnd.msg,
+            cliId,
+            model,
+            items: getBatchItems(batchId) ?? [],
+          }));
+        } catch (e) {
+          console.error("[run-ledger] batch append failed:", e instanceof Error ? e.message : e);
+        }
         close();
       }
     },

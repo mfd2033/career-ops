@@ -24,7 +24,9 @@ import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { randomUUID } from "node:crypto";
-import { registerBatchRun, recordBatchItem, completeBatchRun } from "@/lib/batch-items.mjs";
+import { registerBatchRun, recordBatchItem, completeBatchRun, getBatchItems } from "@/lib/batch-items.mjs";
+import { appendRunRecord } from "@/lib/run-ledger.mjs";
+import { buildBatchLedgerRecord } from "@/lib/batch-ledger.mjs";
 import { resolveCli } from "@/lib/clis";
 import { withModelFlag, isFatalGenericStderr, parseReservationOutput } from "@/lib/run-cli-support.mjs";
 import { permissionFlags } from "@/lib/claude-invocation.mjs";
@@ -167,6 +169,11 @@ export async function POST(req: Request) {
   // ADR-0042 决议 6：服务端逐项登记的键。open 事件把它交给客户端（跨页签恢复
   // 清单用），扩展端忽略未知事件类型不受影响。
   const batchId = randomUUID();
+  // ADR-0045 决议 2/5：终态即落台账（done/error/cancel 都写）——startedAt 在
+  // 派发前取，ledgerEnd 随终结分支更新（默认保守判 error：没走到任何终态分支
+  // 就被 finally 收场的 run 不是成功）。
+  const runStartedAt = Date.now();
+  const ledgerEnd: { status: "done" | "error"; msg?: string } = { status: "error", msg: "batch ended before a final status was reported" };
   const children = new Set<ReturnType<typeof spawnHeadlessCli>>();
   // Every dispatched worker holds a global-pool handle; on batch cancel we
   // dequeue the ones still waiting for a slot so they never spawn.
@@ -432,6 +439,8 @@ export async function POST(req: Request) {
           await reconcilePipelineRows();
           await releaseReserved();
           send({ type: "error", msg: "Batch cancelled." });
+          ledgerEnd.status = "error";
+          ledgerEnd.msg = "Batch cancelled.";
         } else {
           await mergeTrackerRows();
           await reconcilePipelineRows();
@@ -444,9 +453,14 @@ export async function POST(req: Request) {
           // still sent done — the card banked "done" and fired co-job-done
           // refreshes for data that did not exist.
           if (ok === 0 && failed > 0) {
-            send({ type: "error", msg: `All ${failed} evaluation(s) failed — no reports or tracker rows were written. See the NOT recorded lines above for per-URL reasons.` });
+            const allFailedMsg = `All ${failed} evaluation(s) failed — no reports or tracker rows were written. See the NOT recorded lines above for per-URL reasons.`;
+            send({ type: "error", msg: allFailedMsg });
+            ledgerEnd.status = "error";
+            ledgerEnd.msg = allFailedMsg;
           } else {
             send({ type: "done", ok, failed });
+            ledgerEnd.status = "done";
+            ledgerEnd.msg = undefined;
           }
         }
       } catch (err) {
@@ -456,9 +470,30 @@ export async function POST(req: Request) {
         // sentinels sit until the 4h stale GC. Best-effort, same as everywhere else.
         await releaseReserved();
         send({ type: "error", msg: (err as Error).message });
+        ledgerEnd.status = "error";
+        ledgerEnd.msg = (err as Error).message;
       } finally {
         // ADR-0042 决议 6：批量终态（含取消/异常），登记表条目转为淘汰候选。
         completeBatchRun(batchId);
+        // ADR-0045 决议 2/5：终态即落台账，内嵌已完成部分的逐项快照。
+        // fire-and-forget，与 /api/run 的 recordEnd 同纪律：台账失败绝不反噬 run。
+        try {
+          appendRunRecord(root, buildBatchLedgerRecord({
+            batchId,
+            kind: "batch-evaluate",
+            title: `批量评估 · ${urls.length} 项`,
+            input: urls.length === 1 ? urls[0] : `${urls[0]} +${urls.length - 1}`,
+            startedAt: runStartedAt,
+            total: urls.length,
+            status: ledgerEnd.status,
+            msg: ledgerEnd.msg,
+            cliId,
+            model,
+            items: getBatchItems(batchId) ?? [],
+          }));
+        } catch (e) {
+          console.error("[run-ledger] batch append failed:", e instanceof Error ? e.message : e);
+        }
         releaseTrackerWrite(writeToken);
         close();
       }

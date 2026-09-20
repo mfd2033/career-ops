@@ -77,6 +77,9 @@ export type Job = {
   items?: JobItem[];
   batchPos?: { i: number; n: number };
   serverBatchId?: string;
+  // ADR-0045 决议 2/6：批量选中总数。ledger-only 行从落盘记录带出（items 被
+  // cap 截断时计数仍以此为准）；本地卡暂不填（batchPos.n 已承载同信息）。
+  batchTotal?: number;
   steps: JobStep[];
   text: string;
   result?: JobResult;

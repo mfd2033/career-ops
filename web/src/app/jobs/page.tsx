@@ -12,7 +12,8 @@ import { fmtStartedAt } from "@/lib/started-at.mjs";
 import { doneDurationSeconds, useJobTiming } from "@/lib/eval-duration-client";
 import { ReportNumLink } from "@/components/report-num-link";
 import { formatRunEngine } from "@/lib/cli-labels.mjs";
-import type { Job } from "@/components/jobs/job-store";
+import { ledgerOnlyRuns } from "@/lib/ledger-merge.mjs";
+import type { Job, JobItem } from "@/components/jobs/job-store";
 
 const TONE_CHIP = {
   good: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400",
@@ -43,6 +44,10 @@ type RunLedgerEntry = {
   // ADR-0043 运行引擎：本功能前的记录没有这两个字段（按「未记录」处理）。
   cliId?: string;
   model?: string;
+  // ADR-0045 决议 2/6：批量行的逐项快照与选中总数。功能前的旧行没有这两个
+  // 字段（tolerant reader 照常解析），展示端按「无逐项数据」处理，不回填。
+  items?: JobItem[];
+  total?: number;
 };
 
 export default function JobsHistory() {
@@ -62,24 +67,27 @@ export default function JobsHistory() {
       .catch(() => {});
   }, []);
 
-  const knownRunIds = new Set(jobs.map((j) => j.runId).filter(Boolean));
-  const ledgerOnly: Job[] = ledgerRuns
-    .filter((r) => !knownRunIds.has(r.id))
-    .map((r) => ({
-      id: r.id,
-      title: r.title,
-      page: r.page,
-      input: r.input,
-      kind: r.kind,
-      runId: r.id,
-      cliId: r.cliId,
-      model: r.model,
-      status: r.status === "done" ? "done" : "error",
-      steps: [],
-      text: r.msg || "",
-      startedAt: r.startedAt,
-      endedAt: r.finishedAt,
-    }));
+  // ADR-0045 推定结论：去重键扩展到批量——单次 run 认 runId，批量认
+  // serverBatchId（= 批量台账行的 id），同一批量本地卡胜出、绝不出双行。
+  const ledgerOnly: Job[] = ledgerOnlyRuns(jobs, ledgerRuns).map((r) => ({
+    id: r.id,
+    title: r.title,
+    page: r.page,
+    input: r.input,
+    kind: r.kind,
+    runId: r.id,
+    cliId: r.cliId,
+    model: r.model,
+    status: r.status === "done" ? "done" : "error",
+    steps: [],
+    text: r.msg || "",
+    startedAt: r.startedAt,
+    endedAt: r.finishedAt,
+    // ADR-0045：台账落盘的逐项快照随 ledger-only 行带出，供列表展开/详情页
+    // 消费；旧行无 items 时为 undefined，展示端自行保持诚实空白。
+    items: r.items,
+    batchTotal: r.total,
+  }));
   const merged = [...jobs, ...ledgerOnly].sort((a, b) => b.startedAt - a.startedAt);
 
   return (
