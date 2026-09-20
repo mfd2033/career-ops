@@ -76,6 +76,11 @@ export const en: Dict = {
   "jobs.interrupted": "Interrupted",
   "jobs.batchProgress": "Processing {i} of {n}",
   "jobs.batchItems": "Per-item results",
+  // ADR-0045 决议 9/7：历史列表折叠态计数摘要与展开/收起切换。
+  "jobs.batchCounters": "{n} items · {ok} ok · {failed} failed",
+  "jobs.batchExpand": "Show per-item results",
+  "jobs.batchCollapse": "Hide per-item results",
+  "jobs.batchWaiting": "Waiting for the first result\u2026",
   // ADR-0044 诚实时间链：工作器三处的绝对开始时间。running 三段式只放裸时钟
   // （"14:32 · 阶段 · 1:23"），终态与详情页用带标签的完整文案。
   "jobs.startedAt": "Started {time}",
@@ -153,6 +158,11 @@ export const zh: Dict = {
   "jobs.interrupted": "已中断",
   "jobs.batchProgress": "正在处理第 {i}/{n} 项",
   "jobs.batchItems": "逐项结果",
+  // ADR-0045 决议 9/7：历史列表折叠态计数摘要与展开/收起切换。
+  "jobs.batchCounters": "{n} 项 · {ok} 成功 · {failed} 失败",
+  "jobs.batchExpand": "展开逐项结果",
+  "jobs.batchCollapse": "收起逐项结果",
+  "jobs.batchWaiting": "等待首项结果\u2026",
   "jobs.startedAt": "始于 {time}",
   "jobs.endedAt": "止于 {time}",
   "jobs.queuedAt": "排队于 {time}",

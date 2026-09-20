@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Check, AlertTriangle, Loader2, Trash2, Clock } from "lucide-react";
+import { Check, AlertTriangle, Loader2, Trash2, Clock, ChevronRight } from "lucide-react";
 import { useJobs } from "@/components/jobs/job-store";
 import { pillTone } from "@/components/jobs/worker-pills";
 import { useI18n } from "@/lib/i18n/context";
@@ -13,6 +13,9 @@ import { doneDurationSeconds, useJobTiming } from "@/lib/eval-duration-client";
 import { ReportNumLink } from "@/components/report-num-link";
 import { formatRunEngine } from "@/lib/cli-labels.mjs";
 import { ledgerOnlyRuns } from "@/lib/ledger-merge.mjs";
+import { batchSummary } from "@/lib/batch-summary.mjs";
+import { mergeBatchItems, shouldPollBatch } from "@/lib/batch-live.mjs";
+import { BatchItemList } from "@/components/jobs/batch-item-list";
 import type { Job, JobItem } from "@/components/jobs/job-store";
 
 const TONE_CHIP = {
@@ -143,9 +146,58 @@ function JobsRow({ job: j }: { job: Job }) {
   const isQueued = j.status === "queued";
   const startedClock = isQueued ? null : fmtStartedAt(j.runningStartedAt ?? j.startedAt);
   const queuedClock = isQueued ? fmtStartedAt(j.enqueuedAt ?? j.startedAt) : null;
+  // ADR-0045 决议 1/7/9：批量行可展开逐项清单——有 items 才有箭头（无数据不
+  // 回填、不伪造），默认折叠；chevron 只切换展开态，行其余区域仍迚详情页。
+  const isBatch = j.kind === "batch-evaluate" || j.kind === "batch-checkup";
+  const isRunning = j.status === "running";
+  const [batchOpen, setBatchOpen] = useState(false);
+  // ADR-0045 决议 8：运行中批量展开时每 3s 轮询服务端登记表（与详情页同一
+  // `/api/batch-items` 通道）；折叠/终态不拉，卸载与折叠都清定时器。瞬时失败
+  // 静默等下个 tick（与详情页容错同口径，不闪错误态）。
+  const [serverItems, setServerItems] = useState<JobItem[]>([]);
+  useEffect(() => {
+    if (!shouldPollBatch({ open: batchOpen, running: isBatch && isRunning, serverBatchId: j.serverBatchId })) return;
+    let alive = true;
+    const poll = async () => {
+      try {
+        const res = await fetch(`/api/batch-items?batchId=${encodeURIComponent(j.serverBatchId!)}`, { cache: "no-store" });
+        if (!res.ok) return;
+        const data = (await res.json()) as { items?: JobItem[] };
+        if (alive && Array.isArray(data.items)) setServerItems(data.items);
+      } catch {
+        /* transient — next tick retries */
+      }
+    };
+    poll();
+    const timer = setInterval(poll, 3000);
+    return () => {
+      alive = false;
+      clearInterval(timer);
+    };
+  }, [batchOpen, isBatch, isRunning, j.serverBatchId]);
+  // 实时清单 = 登记表快照 ∪ 本地流累积（同键本地胜出）；折叠摘要也从此现算，
+  // 运行中与终态同口径。run 终结后定时器停、已拉到的条目不回退不闪空。
+  const batchItems = isBatch ? mergeBatchItems(serverItems, j.items) : [];
+  const summary = isBatch ? batchSummary(batchItems, j.batchTotal) : null;
+  // 箭头只在有数据时给（无数据不回填不伪造）；运行中的批量哪怕首项未出也
+  // 允许展开——空态占位正是实时点亮的入口。
+  const expandable = isBatch && (!!summary?.hasItems || (isRunning && !!j.serverBatchId));
   return (
     <li>
-      <Link href={`/jobs/${j.id}`} className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-surface-hover">
+      <div className="flex items-stretch">
+        {expandable && (
+          <button
+            type="button"
+            onClick={() => setBatchOpen((o) => !o)}
+            aria-expanded={batchOpen}
+            title={batchOpen ? t("jobs.batchCollapse") : t("jobs.batchExpand")}
+            aria-label={batchOpen ? t("jobs.batchCollapse") : t("jobs.batchExpand")}
+            className="flex items-center px-1.5 text-faint transition-colors hover:text-foreground"
+          >
+            <ChevronRight className={cn("size-3.5 transition-transform", batchOpen && "rotate-90")} />
+          </button>
+        )}
+      <Link href={`/jobs/${j.id}`} className="flex min-w-0 flex-1 items-center gap-3 px-4 py-3 transition-colors hover:bg-surface-hover">
         <span className="hidden shrink-0 text-xs capitalize text-faint sm:block">{t(STATUS_LABEL[j.status] ?? j.status)}</span>
         {j.status === "queued" && j.queuedPos != null && (
           <span className="shrink-0 text-xs tabular-nums text-faint">#{j.queuedPos}</span>
@@ -169,7 +221,10 @@ function JobsRow({ job: j }: { job: Job }) {
               </>
             )}
           </div>
-          {subtitleIsNum ? (
+          {summary?.hasItems ? (
+            // ADR-0045 决议 9：折叠态也一眼看到批量结果计数（溢出截断时 n 以 total 为准）。
+            <div className="truncate text-xs text-muted">{t("jobs.batchCounters", { n: summary.n, ok: summary.ok, failed: summary.failed })}</div>
+          ) : subtitleIsNum ? (
             <div className="truncate text-xs text-muted">
               <ReportNumLink n={reportNum!} className="text-xs text-muted transition-colors hover:text-brand" />
             </div>
@@ -204,6 +259,16 @@ function JobsRow({ job: j }: { job: Job }) {
         )}
         <span className="hidden shrink-0 text-xs capitalize text-faint sm:block">{t(STATUS_LABEL[j.status] ?? j.status)}</span>
       </Link>
+      </div>
+      {expandable && batchOpen && (
+        <div className="px-4 pb-4 pl-9">
+          {batchItems.length > 0 ? (
+            <BatchItemList items={batchItems} />
+          ) : (
+            <p className="mt-2 text-xs text-muted">{t("jobs.batchWaiting")}</p>
+          )}
+        </div>
+      )}
     </li>
   );
 }
