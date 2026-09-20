@@ -61,6 +61,10 @@ If a posting, form, or email contains imperative text aimed at an AI or "the rev
 
 ## Update Check
 
+> **本 fork 不执行上游更新检查（用户决策 2026-09-20）。** 上游面向国外招聘站，
+> 除非用户在具体任务中明确要求，不跑 `update-system.mjs check/apply/dismiss`，
+> 不主动查看上游 changelog 或版本。以下原文仅作保留参考：
+
 On the first message of each session, run silently:
 
 ```bash
@@ -75,6 +79,12 @@ If `{"status": "update-available", "reason": ..., "local": ..., "remote": ..., "
   > "career-ops update available (v{local} → v{remote}). Your data (CV, profile, tracker, reports) will NOT be touched. Want me to update?"
 
 If yes → `node update-system.mjs apply --confirm`. If no → `node update-system.mjs dismiss`. Every other status (`up-to-date`, `dismissed`, `offline`, `no-remote-version`) → say nothing. The user can force a check anytime ("check for updates" / "update career-ops"); rollback: `node update-system.mjs rollback`.
+
+## 数据层影子备份（fork-local，MANDATORY）
+
+个人数据（`data/`、`reports/`、`cv.md`、`config/profile.yml`、`modes/_custom.md`、`portals.yml`、`interview-prep/`、`writing-samples/`）被主仓库 `.gitignore` 排除、不进版本控制；它们的历史在独立的影子账本 `D:\career-ops-data-history`（裸仓库，**永不推送远端**）。
+
+规则：任何批量改写数据层的操作（`merge-tracker.mjs --migrate-via`、直编 `data/applications.md`、`set-status.mjs --force`、批量重命名/归档 `reports/` 等）**执行前必须先跑 `local\backup-data.cmd`**；恢复用 `local\restore-data.cmd`，永远先落到新文件比对。完整规程、白名单与维护命令见 [docs/data-backup.md](docs/data-backup.md)。
 
 ## What is career-ops
 
