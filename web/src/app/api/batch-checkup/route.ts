@@ -64,6 +64,11 @@ const CHECKUP_WORKER_KILL_MS = 1_800_000;
 const STAR_RE = /VERDICT:[^\n]*?★\s*([0-5](?:\.\d)?)/;
 const STAR_FALLBACK_RE = /VERDICT:[^\n]*?([0-5](?:\.\d)?)\s*\/\s*5/;
 
+// 2026-09-20 (#132/#1027 秒死不可诊)：路由此前只留布尔判定，worker 的死因文本
+// 随流关闭一起丢了 —— NDJSON 流不落盘，job-*.md 里只剩一句通用 reason。每个
+// worker 的 stderr 尾部滚动保留这么长，失败项随 ⚠️ 行进 run 产物。
+const STDERR_TAIL_CHARS = 400;
+
 type Target = { n: string; company: string };
 type CheckupOutcome = {
   cleanExit: boolean;
@@ -73,6 +78,8 @@ type CheckupOutcome = {
   star: number | null;
   errMsg: string | null;
   cancelled: boolean;
+  /** Rolling tail of the worker's stderr (whitespace-collapsed), or null. */
+  stderrTail: string | null;
 };
 
 export async function POST(req: Request) {
@@ -256,10 +263,21 @@ export async function POST(req: Request) {
               release(poolHandle.id);
               resolve(outcome);
             };
+            const plain = (extra: Partial<CheckupOutcome>): CheckupOutcome => ({
+              cleanExit: false,
+              sawError: true,
+              persisted: false,
+              timedOut: false,
+              star: null,
+              errMsg: null,
+              cancelled: false,
+              stderrTail: null,
+              ...extra,
+            });
             void (async () => {
               const started = await poolHandle.ready;
               if (!started) {
-                finish({ cleanExit: false, sawError: true, persisted: false, timedOut: false, star: null, errMsg: null, cancelled: true });
+                finish(plain({ cancelled: true }));
                 return;
               }
               const rowsBefore = artifactRowsFor(t.n);
@@ -280,11 +298,13 @@ export async function POST(req: Request) {
               // match would flag clean runs as failures.
               const isFatalStderr = spec.stderrIsFatal ?? isFatalGenericStderr;
               let stderrBuf = "";
+              let stderrTail = "";
               const flagStderrLine = (line: string) => {
                 if (line.trim() && isFatalStderr(line)) sawError = true;
               };
               child.stderr?.on("data", (chunk: string) => {
                 stderrBuf += chunk;
+                stderrTail = (stderrTail + chunk).slice(-STDERR_TAIL_CHARS);
                 let nl;
                 while ((nl = stderrBuf.indexOf("\n")) !== -1) {
                   const line = stderrBuf.slice(0, nl);
@@ -292,11 +312,17 @@ export async function POST(req: Request) {
                   flagStderrLine(line);
                 }
               });
+              const tailOf = (): string | null => {
+                // stderrTail 在所有 data chunk 里滚动，未消费的行尾也已包含；
+                // 不叠加 stderrBuf，避免 error 路径（尾行未消费）重复同一段字节。
+                const t = stderrTail.replace(/\s+/g, " ").trim();
+                return t ? t.slice(-STDERR_TAIL_CHARS) : null;
+              };
               child.on("error", (err) => {
                 sawError = true;
                 clearTimeout(killer);
                 send({ type: "text", text: `\u274C #${t.n} ${t.company}: ${err.message}\n` });
-                finish({ cleanExit: false, sawError: true, persisted: false, timedOut: false, star, errMsg: err.message.slice(0, 200), cancelled: false });
+                finish(plain({ errMsg: err.message.slice(0, 200), star, stderrTail: tailOf() }));
                 children.delete(child);
               });
               child.on("close", (code) => {
@@ -315,6 +341,7 @@ export async function POST(req: Request) {
                   star,
                   errMsg: timedOut ? `checkup worker exceeded its ${CHECKUP_WORKER_KILL_MS / 60_000}-minute cap and was killed` : null,
                   cancelled: false,
+                  stderrTail: tailOf(),
                 });
                 children.delete(child);
               });
@@ -368,7 +395,10 @@ export async function POST(req: Request) {
                       ? `\u2705 done: #${t.n} ${t.company}${outcome.star != null ? ` — \u2605${outcome.star}/5` : ""}\n`
                       : outcome.cancelled
                         ? `\u2391 cancelled: #${t.n} ${t.company}\n`
-                        : `\u26A0\uFE0F NOT recorded: #${t.n} ${t.company}\n`,
+                        : // 失败项把 stderr 尾部一并落进 run 产物（text 事件进 job-*.md 的
+                          // Output 段）—— 2026-09-20 #132/#1027 秒死后无从查死因。
+                          `\u26A0\uFE0F NOT recorded: #${t.n} ${t.company}` +
+                          (outcome.stderrTail ? `\n\u2139\uFE0F stderr tail: ${outcome.stderrTail}\n` : "\n"),
                   });
                   // ADR-0042 决议 6：逐项结论同步入服务端登记表（幂等，事件乱序安全）。
                   recordBatchItem(batchId, {

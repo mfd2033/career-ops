@@ -25,19 +25,17 @@
  * (check `bsk status`). Nothing else — no Playwright, no cloud, no API keys.
  */
 
-import { execFile } from 'child_process';
+import { spawn } from 'child_process';
 import { pathToFileURL } from 'url';
-import { promisify } from 'util';
 import { rejectPrivateOrInvalid } from './liveness-browser.mjs';
 import { normalizeJd, normalizeListing } from './browser-extract.mjs';
 import { isZhJobDetailUrl, isZhJobHost, looksLikeCaptchaWall } from './lib/zh-jobs.mjs';
 import { CITY_NAMES } from './web/src/lib/browser-search.mjs';
 
-const execFileAsync = promisify(execFile);
-
 const DEFAULT_TIMEOUT_MS = 30_000;
 const NAVIGATE_TIMEOUT_MS = 45_000;
 const CAPTCHA_HELP_TIMEOUT_MS = 3 * 60_000; // user needs a moment to solve the slider
+const DAEMON_PROBE_TIMEOUT_MS = 10_000; // `bsk status` is a local ping, not a fetch
 
 /**
  * Find the first known Chinese city name inside a job-card text blob (方案1:
@@ -183,35 +181,123 @@ const READ_DOM_JS = `(() => {
 
 // ── bsk plumbing ─────────────────────────────────────────────────────────
 
-/** Run a bsk subcommand. Rejects on non-zero exit with a joined message. */
+/**
+ * Run a command and ALWAYS settle within timeoutMs + a short flush grace.
+ *
+ * Why not util.promisify(execFile): its promise resolves on the child's
+ * 'close' event — exit AND every inherited stdio handle closed. When `bsk`
+ * waits on a daemon that isn't up, the daemon/bootstrap child holds the
+ * stdout pipe; the timeout kill takes down the direct child but 'close'
+ * never fires, so the await hangs forever — every timeoutMs below would be
+ * decorative. (Found 2026-09-20: checkup worker #222 stalled 29 minutes
+ * inside a nominally-15s `bsk session start`; the batch harness's 30-minute
+ * cap killed it with zero artifacts.)
+ *
+ * A 'exit'+grace settle is NOT enough either: measured on Windows (Node
+ * 22.x, .scratch probe 2026-09-20), the 'exit' event itself is DELAYED until
+ * every inherited stdio pipe reaches EOF — libuv holds the process handle on
+ * the stdio async loop — so a pipe-holding grandchild silences 'exit' too.
+ * The bound here is the kill timer itself: at timeoutMs it kills the child
+ * and settles STRAIGHT from the buffered output, never waiting for
+ * exit/close. Buffered bytes resolve (a client whose answer arrived but
+ * whose daemon keeps the pipe open must not read as a failure — callers
+ * parse and fail loudly if the JSON isn't there); silence rejects as
+ * timeout. The exit+grace path still delivers the full result of a FAST
+ * child before the timer. Exported for tests/bsk-extract.test.mjs — the
+ * pipe-hold regression is proven there with plain node, no `bsk` install.
+ */
+export function execWithHardTimeout(bin, args, timeoutMs, { graceMs = 250 } = {}) {
+  return new Promise((resolve, reject) => {
+    let child;
+    try {
+      child = spawn(bin, args, { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    } catch (err) {
+      reject(err);
+      return;
+    }
+    let out = '';
+    let errOut = '';
+    let timedOut = false;
+    let exitCode = null;
+    let settled = false;
+    const settle = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(killer);
+      // Output is already buffered; stop streaming so a grandchild that keeps
+      // the inherited pipe open cannot pin our event loop (a long-lived
+      // server — the batch route spawns these — would leak the handles).
+      child.stdout?.destroy();
+      child.stderr?.destroy();
+      const stdout = String(out).trim();
+      const stderr = String(errOut).trim();
+      if (timedOut) {
+        const e = new Error(`${bin} ${args.join(' ')} exceeded ${timeoutMs}ms and was killed`);
+        e.code = 'timeout';
+        reject(e);
+      } else if (exitCode != null && exitCode !== 0) {
+        const e = new Error(`${bin} ${args.join(' ')} failed with exit code ${exitCode}`);
+        e.code = 'exit';
+        e.exitCode = exitCode;
+        e.stdout = stdout;
+        e.stderr = stderr;
+        reject(e);
+      } else {
+        resolve({ stdout, stderr });
+      }
+    };
+    const killer = setTimeout(() => {
+      try {
+        child.kill();
+      } catch {
+        /* already gone */
+      }
+      // Settle from buffered output NOW — on Windows exit/close may never
+      // surface while a grandchild holds the pipes. Bytes in hand count as
+      // an answer; pure silence is the honest timeout.
+      if (!out.trim()) timedOut = true;
+      settle();
+    }, timeoutMs);
+    child.stdout?.on('data', (d) => {
+      out += d;
+    });
+    child.stderr?.on('data', (d) => {
+      errOut += d;
+    });
+    child.on('error', (err) => {
+      // spawn-level failure (ENOENT, EINVAL...) — no exit/close will follow.
+      if (settled) return;
+      settled = true;
+      clearTimeout(killer);
+      reject(err);
+    });
+    child.on('exit', (code) => {
+      exitCode = code ?? 1;
+      // Flush grace for bytes already in flight. A pipe held by a grandchild
+      // can DELAY this event itself — the killer above bounds the wait even
+      // when it never arrives.
+      const t = setTimeout(settle, graceMs);
+      if (typeof t.unref === 'function') t.unref();
+    });
+    child.on('close', (code) => {
+      if (code != null) exitCode = code;
+      settle();
+    });
+  });
+}
+
+/** Run a bsk subcommand. Rejects on non-zero exit / timeout with a joined message. */
 async function runBsk(args, timeoutMs = DEFAULT_TIMEOUT_MS) {
   try {
-    const res = await execFileAsync('bsk', args, {
-      timeout: timeoutMs,
-      windowsHide: true,
-      maxBuffer: 16 * 1024 * 1024,
-    });
-    // util.promisify(execFile)'s resolve shape DRIFTED across Node versions:
-    // modern Node (v22+) resolves to the stdout STRING directly; older Node
-    // resolves {stdout, stderr} (or a [stdout, stderr] array). The former got
-    // silently lost — `const { stdout, stderr } = await …` destructured a
-    // string into two undefineds, and every command looked "empty" (a bsk
-    // session start reported "could not parse a session id from: (empty
-    // output)"). Normalize all three shapes ONCE here.
-    let stdout = '';
-    let stderr = '';
-    if (typeof res === 'string') {
-      stdout = res;
-    } else if (Array.isArray(res)) {
-      stdout = res[0] ?? '';
-      stderr = res[1] ?? '';
-    } else if (res && typeof res === 'object') {
-      stdout = res.stdout ?? '';
-      stderr = res.stderr ?? '';
-    }
-    return { stdout: String(stdout || '').trim(), stderr: String(stderr || '').trim() };
+    const { stdout, stderr } = await execWithHardTimeout('bsk', args, timeoutMs);
+    return { stdout, stderr };
   } catch (err) {
-    const detail = [err.stderr, err.stdout, err.cmd ? `${err.cmd} ${err.args?.join(' ') ?? ''}` : '']
+    if (err.code === 'timeout') {
+      const e = new Error(`bsk ${args.join(' ')} exceeded ${timeoutMs}ms and was killed — daemon or browser-skill connection likely stalled`);
+      e.code = 'bsk_timeout';
+      throw e;
+    }
+    const detail = [err.stderr, err.stdout]
       .filter(Boolean)
       .map((s) => String(s).trim())
       .join(' | ')
@@ -260,6 +346,21 @@ export async function extractWithBsk({ url, mode = 'jd', max = 200, maxChars = 1
   if (!allowNonZh && !isZhJobHost(url)) {
     const e = new Error(`bsk extractor is wired for the Chinese boards (zhipin/liepin/zhaopin); got ${hostOf(url)}`);
     e.code = 'not_zh_job';
+    throw e;
+  }
+
+  // Fail fast when the daemon is not up. A dead daemon is an environment
+  // state no amount of retrying inside the worker's budget fixes — name it
+  // within seconds so the caller marks the dimension 「未获取到」 and moves on
+  // (2026-09-20 #222 burned the whole 30-minute cap on exactly this). Best
+  // effort on purpose: if a future `bsk status` starts answering green while
+  // the daemon is down, execWithHardTimeout still bounds every call after it.
+  try {
+    await runBsk(['status'], DAEMON_PROBE_TIMEOUT_MS);
+  } catch (err) {
+    if (err.code === 'bsk_missing') throw err;
+    const e = new Error('bsk daemon not reachable — start browser-skill (`bsk status`) and re-run; do not retry blindly');
+    e.code = 'bsk_daemon_offline';
     throw e;
   }
 

@@ -24,7 +24,7 @@ import { tmpdir } from 'node:os';
 
 import { pass, fail, ROOT } from './helpers.mjs';
 import { pickExtractor } from '../browser-extract.mjs';
-import { extractWithBsk, parseSessionId, zhListingAnchors, listingWithCities, extractCityFromText, extractSalaryFromText, shouldReloadListing } from '../bsk-extract.mjs';
+import { extractWithBsk, parseSessionId, zhListingAnchors, listingWithCities, extractCityFromText, extractSalaryFromText, shouldReloadListing, execWithHardTimeout } from '../bsk-extract.mjs';
 import { isZhJobDetailUrl } from '../lib/zh-jobs.mjs';
 
 const NODE = process.execPath;
@@ -366,5 +366,91 @@ for (const [desc, args, expected] of reloadCases) {
     pass('listingWithCities re-attaches salary where present, omits where absent');
   } else {
     fail(`listingWithCities(salary) => ${JSON.stringify(listing)}`);
+  }
+}
+
+// ── S11: execWithHardTimeout（2026-09-20 #222 挂死回归锁）────────────────
+// promisify(execFile) resolves on 'close' = exit AND every inherited stdio
+// handle closed. A grandchild that keeps the pipe open (what a bsk daemon
+// bootstrap does when no daemon is up) therefore made every timeoutMs in
+// bsk-extract.mjs decorative — worker #222 stalled 29 minutes inside a
+// nominally-15s `bsk session start`. execWithHardTimeout settles on 'exit'
+// with a short flush grace; these cases pin that contract using plain node
+// (no bsk install needed), so they run anywhere test-all runs.
+{
+  // Happy path: output captured, zero exit.
+  try {
+    const t0 = Date.now();
+    const { stdout } = await execWithHardTimeout(NODE, ['-e', 'console.log("hi")'], 5000);
+    if (stdout === 'hi' && Date.now() - t0 < 4000) pass('execWithHardTimeout captures stdout on clean exit');
+    else fail(`execWithHardTimeout clean exit => stdout=${JSON.stringify(stdout)} ms=${Date.now() - t0}`);
+  } catch (e) {
+    fail(`execWithHardTimeout clean exit threw ${e.code}/${e.message}`);
+  }
+
+  // Non-zero exit rejects with the collected detail.
+  try {
+    await execWithHardTimeout(NODE, ['-e', 'console.error("boom");process.exit(3)'], 5000);
+    fail('execWithHardTimeout should reject on exit 3');
+  } catch (e) {
+    if (e.code === 'exit' && e.exitCode === 3 && String(e.stderr).includes('boom')) {
+      pass('execWithHardTimeout rejects non-zero exit with stderr detail');
+    } else {
+      fail(`execWithHardTimeout exit-3 threw code=${e.code} exitCode=${e.exitCode} stderr=${JSON.stringify(e.stderr || '')}`);
+    }
+  }
+
+  // THE regression, slow variant: parent prints and exits 0 while a
+  // grandchild (alive ~3s, never writing) holds the inherited stdout pipe.
+  // Windows delays the 'exit' event itself until that pipe reaches EOF
+  // (probe 2026-09-20), so the close-driven settle is what carries this one.
+  try {
+    const t0 = Date.now();
+    const hold = 'const{spawn}=require("child_process");spawn(process.execPath,["-e","setTimeout(()=>{},3000)"],{stdio:"inherit"});console.log("held")';
+    const { stdout } = await execWithHardTimeout(NODE, ['-e', hold], 5000, { graceMs: 250 });
+    const ms = Date.now() - t0;
+    if (stdout === 'held' && ms < 4500) pass(`execWithHardTimeout settles despite grandchild holding the pipe (${ms}ms)`);
+    else fail(`execWithHardTimeout pipe-hold => stdout=${JSON.stringify(stdout)} ms=${ms} (expected 'held' well under 5s)`);
+  } catch (e) {
+    fail(`execWithHardTimeout pipe-hold threw ${e.code}/${e.message} — the #222 hang is back`);
+  }
+
+  // THE regression, killer variant: the grandchild outlives the timeout AND
+  // the exit event stays silenced. The kill timer must settle from buffered
+  // bytes — a client answer that fully arrived while its daemon keeps the
+  // pipe open is a RESULT, not a timeout.
+  try {
+    const t0 = Date.now();
+    const hold = 'const{spawn}=require("child_process");spawn(process.execPath,["-e","setTimeout(()=>{},2000)"],{stdio:"inherit"});console.log("held")';
+    const { stdout } = await execWithHardTimeout(NODE, ['-e', hold], 600);
+    const ms = Date.now() - t0;
+    if (stdout === 'held' && ms >= 500 && ms < 1800) pass(`execWithHardTimeout resolves buffered output when the kill timer fires (${ms}ms)`);
+    else fail(`execWithHardTimeout killer-hold => stdout=${JSON.stringify(stdout)} ms=${ms} (expected 'held' at ~600ms)`);
+  } catch (e) {
+    fail(`execWithHardTimeout killer-hold threw ${e.code}/${e.message} — buffered output was mistaken for a timeout`);
+  }
+
+  // Windows nuance (probe 2, 2026-09-20): a DEAD silent child settles fast
+  // even with a live grandchild — pipe EOF is only held when bytes are still
+  // in flight. The #222 shape is the next case instead: a LIVE silent child
+  // (bsk waiting on a daemon that isn't up) — the kill timer must bound it.
+  try {
+    const t0 = Date.now();
+    const hold = 'const{spawn}=require("child_process");spawn(process.execPath,["-e","setTimeout(()=>{},2000)"],{stdio:"inherit"});process.exit(0)';
+    const { stdout } = await execWithHardTimeout(NODE, ['-e', hold], 5000);
+    const ms = Date.now() - t0;
+    if (stdout === '' && ms < 1500) pass(`dead silent child settles without the kill timer (${ms}ms)`);
+    else fail(`dead-silent => stdout=${JSON.stringify(stdout)} ms=${ms} (expected '' well under 5s)`);
+  } catch (e) {
+    fail(`dead-silent threw ${e.code}/${e.message}`);
+  }
+
+  // Timeout still bounds a live child.
+  try {
+    await execWithHardTimeout(NODE, ['-e', 'setTimeout(()=>{},9000)'], 400);
+    fail('execWithHardTimeout should reject on timeout');
+  } catch (e) {
+    if (e.code === 'timeout') pass('execWithHardTimeout kills and rejects a live child past the timeout');
+    else fail(`execWithHardTimeout timeout threw code=${e.code} msg=${e.message}`);
   }
 }
