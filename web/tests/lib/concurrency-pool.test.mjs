@@ -133,3 +133,34 @@ test("ADR-0043: a task dispatched without an engine carries none (pre-feature ca
   assert.equal(r.cliId, undefined);
   assert.equal(r.model, undefined);
 });
+
+test("ADR-0044: a queued-then-granted task reports a startedAt later than its enqueuedAt", async () => {
+  // The honesty fix: while a task waits behind a full pool its execution clock
+  // must not run. Only when the slot is granted does startedAt get stamped —
+  // so it is strictly later than the enqueue time, and the two are distinct.
+  __setPoolSizeForTest(1);
+  const a = acquire(meta("a"));
+  const b = acquire(meta("b")); // b enqueues while the single slot is busy
+  assert.equal(await a.ready, true);
+
+  const [bq] = listPool().queued;
+  assert.ok(bq.enqueuedAt > 0, "queued entry exposes its enqueue time");
+
+  await new Promise((r) => setTimeout(r, 5)); // ensure a measurable gap
+  release(a.id); // b takes the freed slot → dispatch stamps startedAt
+  assert.equal(await b.ready, true);
+
+  const [rb] = listPool().running;
+  assert.ok(rb.startedAt >= bq.enqueuedAt, "startedAt is at or after enqueue");
+  assert.ok(rb.startedAt > bq.enqueuedAt, "a task that waited has a strictly later start");
+  assert.equal(rb.enqueuedAt, bq.enqueuedAt, "enqueue time is preserved alongside the corrected start");
+});
+
+test("ADR-0044: an immediately-granted task has startedAt ~= enqueuedAt (no meaningful queue wait)", async () => {
+  __setPoolSizeForTest(2);
+  const h = acquire(meta("x"));
+  assert.equal(await h.ready, true);
+  const [r] = listPool().running;
+  assert.ok(r.startedAt >= r.enqueuedAt, "start is never before enqueue");
+  assert.ok(r.startedAt - r.enqueuedAt < 1000, "an unqueued task starts within the same tick");
+});

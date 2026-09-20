@@ -6,6 +6,7 @@ import type { Job } from "@/components/jobs/job-store";
 import { useI18n } from "@/lib/i18n/context";
 import { cn } from "@/lib/cn";
 import { fmtDuration } from "@/lib/format";
+import { fmtStartedAt } from "@/lib/started-at.mjs";
 import { doneDurationSeconds, useJobTiming } from "@/lib/eval-duration-client";
 import { formatRunEngine } from "@/lib/cli-labels.mjs";
 import { ReportNumLink } from "@/components/report-num-link";
@@ -89,7 +90,14 @@ export function WorkerCard({
   const tone = TONE[pillTone(job)];
   const running = job.status === "running";
   const queued = job.status === "queued";
-  const elapsed = useElapsed(running, job.startedAt);
+  // ADR-0044: the honest execution start. A local card that waited in the pool
+  // stamps runningStartedAt on its first `phase:running`; a pool-sourced running
+  // card's startedAt is already the real start. Fall back to startedAt (dispatch
+  // time) when neither applies. The tick counts from here so queue wait is not
+  // counted as run time.
+  const execStartMs = job.runningStartedAt ?? job.startedAt;
+  const startedClock = fmtStartedAt(execStartMs);
+  const elapsed = useElapsed(running, execStartMs);
   const { t } = useI18n();
   const rawLast = job.steps[job.steps.length - 1]?.label;
   const last = rawLast ? humanizeStep(rawLast, t) : undefined;
@@ -149,12 +157,19 @@ export function WorkerCard({
         )}
       </div>
       {(bottom || running || queued) && (
-        <div className={cn("mt-1 truncate text-faint", inline ? "text-xs" : "text-[10px]")}>
+        <div className={cn("mt-1 truncate text-faint", inline ? "text-xs" : "text-[10px]")}
+          title={running && startedClock ? t("jobs.startedAt", { time: startedClock }) : undefined}
+        >
           {queued
-            ? `${t("jobs.queued")}${job.queuedPos != null ? ` · ${t("jobs.queuedPos", { n: job.queuedPos })}` : ""}`
+            ? `${t("jobs.queued")}${
+                job.queuedPos != null ? ` · ${t("jobs.queuedPos", { n: job.queuedPos })}` : ""
+              }${fmtStartedAt(job.enqueuedAt ?? job.startedAt) ? ` · ${t("jobs.queuedSince", { time: fmtStartedAt(job.enqueuedAt ?? job.startedAt)! })}` : ""}`
             : running
-              // ADR-0042 决议 1：收尾段比最后一步更「新」——route 已在做落盘/渲染。
-              ? `${job.phase === "finalizing" ? t("jobs.phaseFinalizing") : (last ?? t("jobs.working"))} · ${fmtElapsed(elapsed)}`
+              ? // ADR-0042 决议 1：收尾段比最后一步更「新」。ADR-0044 三段式：
+                // 始于 · 阶段 · tick（裸时钟置于最前，缺失时退回两段）。
+                `${startedClock ? `${startedClock} · ` : ""}${
+                  job.phase === "finalizing" ? t("jobs.phaseFinalizing") : (last ?? t("jobs.working"))
+                } · ${fmtElapsed(elapsed)}`
               : bottom}
         </div>
       )}
@@ -163,9 +178,19 @@ export function WorkerCard({
           {t("jobs.authErrorHint")}
         </div>
       )}
-      {doneSecs != null && (
-        <div className={cn("mt-1 flex items-center gap-1 text-faint tabular-nums", inline ? "text-xs" : "text-[10px]")} title={t("jobs.evalDuration")}>
-          <Clock className="size-3 shrink-0" /> {fmtDuration(doneSecs)}
+      {(doneSecs != null || ((job.status === "done" || job.status === "error") && startedClock)) && (
+        <div
+          className={cn("mt-1 flex items-center gap-1 text-faint tabular-nums", inline ? "text-xs" : "text-[10px]")}
+          title={doneSecs != null ? t("jobs.evalDuration") : undefined}
+        >
+          {startedClock && (job.status === "done" || job.status === "error") && (
+            <span>{t("jobs.startedAt", { time: startedClock })}</span>
+          )}
+          {doneSecs != null && (
+            <>
+              <Clock className="size-3 shrink-0" /> {fmtDuration(doneSecs)}
+            </>
+          )}
         </div>
       )}
       {engineText && (

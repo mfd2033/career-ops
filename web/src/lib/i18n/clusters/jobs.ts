@@ -76,6 +76,12 @@ export const en: Dict = {
   "jobs.interrupted": "Interrupted",
   "jobs.batchProgress": "Processing {i} of {n}",
   "jobs.batchItems": "Per-item results",
+  // ADR-0044 诚实时间链：工作器三处的绝对开始时间。running 三段式只放裸时钟
+  // （"14:32 · 阶段 · 1:23"），终态与详情页用带标签的完整文案。
+  "jobs.startedAt": "Started {time}",
+  "jobs.endedAt": "Ended {time}",
+  "jobs.queuedAt": "Queued {time}",
+  "jobs.queuedSince": "since {time}",
 };
 
 // Simplified Chinese strings. Every key in en must have a matching key here.
@@ -147,4 +153,8 @@ export const zh: Dict = {
   "jobs.interrupted": "已中断",
   "jobs.batchProgress": "正在处理第 {i}/{n} 项",
   "jobs.batchItems": "逐项结果",
+  "jobs.startedAt": "始于 {time}",
+  "jobs.endedAt": "止于 {time}",
+  "jobs.queuedAt": "排队于 {time}",
+  "jobs.queuedSince": "自 {time}",
 };

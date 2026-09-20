@@ -72,6 +72,12 @@ type Entry = {
   cliId?: string;
   model?: string;
   enqueuedAt: number;
+  // ADR-0044: the moment this entry was granted a slot and its CLI spawned.
+  // Distinct from enqueuedAt (dispatch/receive time, which includes any queue
+  // wait) — a task that sat behind a full pool must not report a 40-minute
+  // execution when it only started running 2 minutes ago. Undefined while the
+  // entry is still queued; set by dispatch() the instant the slot is granted.
+  startedAt?: number;
   running: boolean;
   cancelled: boolean;
   resolveReady: (granted: boolean) => void;
@@ -95,6 +101,10 @@ function dispatch(): void {
     const entry = queue.shift()!;
     running.push(entry);
     entry.running = true;
+    // ADR-0044: stamp the real execution start when the slot is granted, NOT at
+    // enqueue. This is the value /api/active-runs reports as startedAt so the
+    // worker UI's 「始于」 and tick reflect actual run time, not queue wait.
+    entry.startedAt = Date.now();
     entry.resolveReady(true);
   }
 }
@@ -176,6 +186,9 @@ export type PoolRunningTask = {
   cliId?: string;
   model?: string;
   startedAt: number;
+  // ADR-0044: enqueue time kept alongside the corrected startedAt so a reader
+  // can tell how long a running task waited for a slot (startedAt - enqueuedAt).
+  enqueuedAt: number;
 };
 export type PoolQueuedTask = {
   id: string;
@@ -200,7 +213,11 @@ export function listPool(): { running: PoolRunningTask[]; queued: PoolQueuedTask
       source: e.source,
       cliId: e.cliId,
       model: e.model,
-      startedAt: e.enqueuedAt,
+      // ADR-0044: real execution start (slot granted). A running entry always
+      // has startedAt set by dispatch(); the enqueuedAt fallback is defensive
+      // for an entry captured mid-transition and keeps the field non-optional.
+      startedAt: e.startedAt ?? e.enqueuedAt,
+      enqueuedAt: e.enqueuedAt,
     })),
     queued: queue.map((e, i) => ({
       id: e.id,

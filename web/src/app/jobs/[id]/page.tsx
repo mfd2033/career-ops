@@ -15,6 +15,7 @@ import { EvalTimingPanel } from "@/components/eval-timing-panel";
 import { ReportNumLink } from "@/components/report-num-link";
 import { goBackOr } from "@/lib/nav-history";
 import { formatRunEngine } from "@/lib/cli-labels.mjs";
+import { fmtStartedAt } from "@/lib/started-at.mjs";
 import { fmtDuration } from "@/lib/format";
 
 type RunLedgerEntry = {
@@ -132,6 +133,13 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
             <p className="mt-1 text-sm text-muted">
               {e.kind} · {t("jobs.ledgerInput")}: {e.input} · {fmtDuration(Math.round((e.finishedAt - e.startedAt) / 1000))}
             </p>
+            {/* ADR-0044：台账行无排队信息，只说始于/止于（与本地卡视图口径一致）。 */}
+            {(fmtStartedAt(e.startedAt) || fmtStartedAt(e.finishedAt)) && (
+              <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs tabular-nums text-faint">
+                {fmtStartedAt(e.startedAt) && <span>{t("jobs.startedAt", { time: fmtStartedAt(e.startedAt)! })}</span>}
+                {fmtStartedAt(e.finishedAt) && <span>{t("jobs.endedAt", { time: fmtStartedAt(e.finishedAt)! })}</span>}
+              </p>
+            )}
             {/* ADR-0043 决议 4：详情页对缺失明说，不装作知道。 */}
             <p className="mt-1 text-sm">
               {ledgerEngine ? (
@@ -197,6 +205,15 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
 
   // ADR-0043 决议 5：所有状态都显示运行引擎；缺失即明说「未记录」。
   const jobEngine = formatRunEngine(job.cliId, job.model);
+  // ADR-0044 诚实时间链：排队于 → 始于 → 止于，缺段省略、不回填。
+  //  - 本地卡 startedAt 是派发时刻（含排队段），占槽后才有 runningStartedAt；
+  //    池源卡 startedAt 本就是真实执行起点，enqueuedAt 另携带入队时刻。
+  //  - 排队态尚无执行起点，只说「排队于」；一旦转 running，两者并列。
+  const isQueued = job.status === "queued";
+  const queuedClock = fmtStartedAt(job.enqueuedAt ?? (isQueued ? job.startedAt : NaN));
+  const execStartMs = job.runningStartedAt ?? job.startedAt;
+  const startedClock = isQueued ? null : fmtStartedAt(execStartMs);
+  const endedClock = job.endedAt != null ? fmtStartedAt(job.endedAt) : null;
   // ADR-0042 决议 5：本地累积 ∪ 服务端登记表（本地优先——流式事件更实时；
   // 服务端补跨页签/恢复场景）。按 key 幂等合并。
   const itemMap = new Map<string, JobItem>();
@@ -231,9 +248,10 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
             ) : job.status === "running" ? (
               <>
                 <Loader2 className="size-3 animate-spin text-brand" /> {t("jobs.statusWorking")}
-                {/* ADR-0042 决议 1：粗阶段徽章 + 真实已耗时（零估算）。 */}
+                {/* ADR-0042 决议 1：粗阶段徽章 + 真实已耗时（零估算）。ADR-0044：
+                    已耗时从真实执行起点起算，排队等待不计入运行时长。 */}
                 {job.phase === "finalizing" && <> · {t("jobs.phaseFinalizing")}</>}
-                <> · {fmtDuration(Math.max(0, Math.round((now - job.startedAt) / 1000)))}</>
+                <> · {fmtDuration(Math.max(0, Math.round((now - execStartMs) / 1000)))}</>
               </>
             ) : job.status === "queued" ? (
               <><Clock className="size-3 text-zinc-400" /> {t("jobs.queued")}{job.queuedPos != null ? ` · ${t("jobs.queuedPos", { n: job.queuedPos })}` : ""}</>
@@ -274,6 +292,14 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
               <span className="text-faint">{t("jobs.runEngineNotRecorded")}</span>
             )}
           </p>
+          {/* ADR-0044：诚实时间链，缺段省略。 */}
+          {(queuedClock || startedClock || endedClock) && (
+            <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs tabular-nums text-faint">
+              {queuedClock && <span>{t("jobs.queuedAt", { time: queuedClock })}</span>}
+              {startedClock && <span>{t("jobs.startedAt", { time: startedClock })}</span>}
+              {endedClock && <span>{t("jobs.endedAt", { time: endedClock })}</span>}
+            </p>
+          )}
           {job.result?.score != null && (
             <div className="mt-3 flex flex-wrap items-center gap-2.5">
               <Badge tone={job.result.tone}>{job.result.score}/5</Badge>

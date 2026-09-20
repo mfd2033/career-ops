@@ -8,6 +8,7 @@ import { pillTone } from "@/components/jobs/worker-pills";
 import { useI18n } from "@/lib/i18n/context";
 import { cn } from "@/lib/cn";
 import { fmtDuration } from "@/lib/format";
+import { fmtStartedAt } from "@/lib/started-at.mjs";
 import { doneDurationSeconds, useJobTiming } from "@/lib/eval-duration-client";
 import { ReportNumLink } from "@/components/report-num-link";
 import { formatRunEngine } from "@/lib/cli-labels.mjs";
@@ -128,6 +129,12 @@ function JobsRow({ job: j }: { job: Job }) {
   // ADR-0043 运行引擎：列表里缺失不占位（详情页才写「未记录」）。
   const engine = formatRunEngine(j.cliId, j.model);
   const engineText = engine ? t("jobs.runEngine", { engine }) : null;
+  // ADR-0044 始于：优先真实执行起点（本地卡排队后落的 runningStartedAt），
+  // 否则回退 startedAt；ledger-only 行的 startedAt 来自服务端台账。缺失不占位。
+  // 排队态尚无执行起点，改说「排队于」（与内联卡/详情页同口径），不谎称「始于」。
+  const isQueued = j.status === "queued";
+  const startedClock = isQueued ? null : fmtStartedAt(j.runningStartedAt ?? j.startedAt);
+  const queuedClock = isQueued ? fmtStartedAt(j.enqueuedAt ?? j.startedAt) : null;
   return (
     <li>
       <Link href={`/jobs/${j.id}`} className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-surface-hover">
@@ -167,6 +174,16 @@ function JobsRow({ job: j }: { job: Job }) {
             </div>
           )}
         </div>
+        {queuedClock && (
+          <span className="hidden shrink-0 items-center gap-1 text-xs tabular-nums text-faint sm:flex" title={t("jobs.queuedAt", { time: queuedClock })}>
+            {t("jobs.queuedAt", { time: queuedClock })}
+          </span>
+        )}
+        {startedClock && (
+          <span className="hidden shrink-0 items-center gap-1 text-xs tabular-nums text-faint sm:flex" title={t("jobs.startedAt", { time: startedClock })}>
+            {t("jobs.startedAt", { time: startedClock })}
+          </span>
+        )}
         {secs != null && (
           <span className="hidden shrink-0 items-center gap-1 text-xs tabular-nums text-faint sm:flex" title={t("jobs.evalDuration")}>
             <Clock className="size-3" /> {fmtDuration(secs)}

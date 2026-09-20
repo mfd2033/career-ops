@@ -36,7 +36,7 @@ type PoolEntry = {
   cliId?: string;
   model?: string;
 };
-type PoolRunning = PoolEntry & { startedAt: number };
+type PoolRunning = PoolEntry & { startedAt: number; enqueuedAt?: number };
 type PoolQueued = PoolEntry & { enqueuedAt: number; position: number };
 type ActiveRunApi = { running: PoolRunning[]; queued: PoolQueued[] };
 
@@ -82,6 +82,14 @@ export type Job = {
   result?: JobResult;
   cost?: { tokens: number; usd?: number }; // per-run token cost (Claude result event) — local only
   startedAt: number;
+  // ADR-0044 诚实时间链：真实执行起点。本地单卡派发即 startedAt（含排队段），
+  // 首次收到 `phase:running`（route 占槽后发出）时才落这个值；缺失 = 未经排队
+  // 或早于该功能，展示回退 startedAt。池源卡片的 startedAt 本就是真实执行起点，
+  // 不另设此字段。
+  runningStartedAt?: number;
+  // ADR-0044：池源卡片的入队时刻（`/api/active-runs` 的 enqueuedAt），详情页据
+  // 此显示「排队于」并算出排队等待时长。仅进行中（池快照）卡片有。
+  enqueuedAt?: number;
   endedAt?: number;
 };
 
@@ -268,9 +276,21 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
         if (typeof label === "string" && label.startsWith("phase:")) {
           const phase = label.slice("phase:".length).split(":")[0];
           if (phase === "queued" || phase === "running" || phase === "finalizing") {
-            setJobs((js) => js.map((j) => (j.id === jobId ? { ...j, phase } : j)));
-            return;
-          }
+          // ADR-0044: the first time a local card reaches its running phase (the
+          // route emits `phase:running` only after the pool granted a slot), latch
+          // the real execution start once. A card that never queued keeps this
+          // undefined and its display falls back to startedAt (dispatch time).
+          setJobs((js) =>
+            js.map((j) =>
+              j.id === jobId
+                ? phase === "running" && j.runningStartedAt == null
+                  ? { ...j, phase, runningStartedAt: Date.now() }
+                  : { ...j, phase }
+                : j,
+            ),
+          );
+          return;
+        }
         }
         acc.steps.push({ kind: "status", label, ts: Date.now() });
         if (acc.steps.length > STEPS_CAP_MEMORY) acc.steps.splice(0, acc.steps.length - STEPS_CAP_MEMORY);
@@ -381,6 +401,10 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
         steps: [{ kind: "status", label: t("jobs.working"), ts: r.startedAt }],
         text: "",
         startedAt: r.startedAt,
+        // ADR-0044: a running pool card's startedAt IS the real execution start
+        // (post-ticket-01); carry its enqueue time so the detail page can show the
+        // 「排队于」 segment and the queue-wait gap.
+        enqueuedAt: r.enqueuedAt,
       })),
     ...activeRuns.queued
       .filter((q) => !(q.source === "run" && jobs.some((j) => j.input === q.url)))
@@ -399,6 +423,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
         steps: [{ kind: "status", label: t("jobs.queued"), ts: q.enqueuedAt }],
         text: "",
         startedAt: q.enqueuedAt,
+        enqueuedAt: q.enqueuedAt,
       })),
   ];
   // Local single-run jobs flip to 排队中 when the pool reports them queued
