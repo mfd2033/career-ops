@@ -81,6 +81,8 @@ export const en: Dict = {
   "jobs.batchExpand": "Show per-item results",
   "jobs.batchCollapse": "Hide per-item results",
   "jobs.batchWaiting": "Waiting for the first result\u2026",
+  // ADR-0046：可点的子任务卡片（成功项 → 独立详情页）的悬停/无障碍提示。
+  "jobs.batchOpenDetail": "Open this sub-task",
   // ADR-0044 诚实时间链：工作器三处的绝对开始时间。running 三段式只放裸时钟
   // （"14:32 · 阶段 · 1:23"），终态与详情页用带标签的完整文案。
   "jobs.startedAt": "Started {time}",
@@ -163,6 +165,7 @@ export const zh: Dict = {
   "jobs.batchExpand": "展开逐项结果",
   "jobs.batchCollapse": "收起逐项结果",
   "jobs.batchWaiting": "等待首项结果\u2026",
+  "jobs.batchOpenDetail": "查看该子任务详情",
   "jobs.startedAt": "始于 {time}",
   "jobs.endedAt": "止于 {time}",
   "jobs.queuedAt": "排队于 {time}",

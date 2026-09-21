@@ -26,6 +26,8 @@
  *   star?: number | null,   // batch-checkup 的体检星级
  *   reportNum?: number,     // ADR-0046：batch-evaluate 成功项预分配的报告号（失败/无报告不带）；
  *                           // 体检侧不需要（报告以 tracker# 为键，已落在 key）
+ *   startedAt?: number,     // ADR-0046：子 worker 真实执行起点（ms），供卡片时长；无则不占位
+ *   finishedAt?: number,    // ADR-0046：子 worker 结束时刻（ms）
  *   reason?: string,        // 失败/跳过原因（服务端产出，ADR-0041 决议 6）
  *   ts?: number,            // 可省略——登记表写入时补当前时刻
  * }} BatchItem
@@ -94,6 +96,8 @@ export function recordBatchItem(batchId, item) {
     // ADR-0046：只有真实报告号才透传（成功判定后路由才带 num），非数值（含字符串）
     // 一律不存，避免读取端拼出打不开的 /report/{num}。缺失不占位（沿 ADR-0043 惯例）。
     reportNum: typeof item.reportNum === "number" ? item.reportNum : undefined,
+    startedAt: typeof item.startedAt === "number" ? item.startedAt : undefined,
+    finishedAt: typeof item.finishedAt === "number" ? item.finishedAt : undefined,
     reason: typeof item.reason === "string" ? item.reason : undefined,
     ts: typeof item.ts === "number" ? item.ts : Date.now(),
   });

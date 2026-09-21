@@ -170,7 +170,7 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
             {e.items && e.items.length > 0 && (
               <>
                 <h2 className="mt-5 text-xs font-semibold uppercase tracking-[0.2em] text-muted">{t("jobs.batchItems")}</h2>
-                <BatchItemList items={e.items} />
+                <BatchItemList items={e.items} batchId={e.id} cliId={e.cliId} model={e.model} />
               </>
             )}
           </div>
@@ -338,7 +338,7 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
               </h2>
               {/* ADR-0045：渲染抽成共享组件（与历史列表展开、ledger-only 视图
                   同一 JobItem 口径），这里不再 inline 重复一份。 */}
-              <BatchItemList items={batchItems} />
+              <BatchItemList items={batchItems} batchId={job.serverBatchId} cliId={job.cliId} model={job.model} />
             </>
           )}
         </div>

@@ -5,7 +5,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { batchChildId, buildBatchChildRecord } from "../../src/lib/batch-child-ledger.mjs";
+import { batchChildId, buildBatchChildRecord, batchItemDetailHref } from "../../src/lib/batch-child-ledger.mjs";
 
 test("batchChildId is deterministic and stable across the two call sites", () => {
   const a = batchChildId("batch-1", "https://x/jobs/1");
@@ -53,4 +53,11 @@ test("checkup child record carries trackerN, not reportNum", () => {
   assert.equal(rec.trackerN, "917");
   assert.equal("reportNum" in rec, false, "checkup child has no report number");
   assert.equal("cliId" in rec, false, "absent engine is not placeholdered");
+});
+
+test("batchItemDetailHref: only a known-batch success item is clickable", () => {
+  assert.equal(batchItemDetailHref("b1", { key: "https://x/1", ok: true }), `/jobs/${batchChildId("b1", "https://x/1")}`);
+  assert.equal(batchItemDetailHref("b1", { key: "https://x/1", ok: false }), null, "failed item has no detail");
+  assert.equal(batchItemDetailHref(undefined, { key: "k", ok: true }), null, "no parent batch id -> not clickable");
+  assert.equal(batchItemDetailHref("b1", null), null);
 });

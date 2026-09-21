@@ -64,3 +64,16 @@ export function buildBatchChildRecord({ batchId, childKind, key, label, startedA
   if (trackerN != null && trackerN !== "") rec.trackerN = String(trackerN);
   return rec;
 }
+
+/**
+ * 子项卡片是否可点、以及目标（ADR-0046，服务端/客户端共用）。
+ * 仅当知道父批量 id 且该子项成功（有子台账行）时，才可点 → /jobs/{childId}；
+ * 否则返回 null（失败/跳过/无报告项不可点）。
+ * @param {string | undefined} batchId - 父 serverBatchId
+ * @param {{ key: string, ok?: boolean } | null | undefined} item
+ * @returns {string | null}
+ */
+export function batchItemDetailHref(batchId, item) {
+  if (!batchId || !item || !item.ok || !item.key) return null;
+  return `/jobs/${batchChildId(batchId, item.key)}`;
+}

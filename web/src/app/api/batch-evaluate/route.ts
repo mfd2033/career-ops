@@ -366,6 +366,9 @@ export async function POST(req: Request) {
                         : !outcome.cleanExit || outcome.sawError
                           ? "the run hit an error before finishing — re-run it to verify"
                           : "the worker ran but never saved a report/tracker row";
+                  // ADR-0046：子项计时（成功项才有真实起点），供卡片「时长」与子台账行同值。
+                  const itemEndedMs = Date.now();
+                  const itemStartedMs = itemOk && outcome.startedMs ? outcome.startedMs : undefined;
                   send({
                     type: "item",
                     url: urls[i],
@@ -373,6 +376,8 @@ export async function POST(req: Request) {
                     score,
                     // ADR-0046：成功项把预分配报告号透出，供卡片跳 /report/{num}（失败无报告不带）。
                     reportNum: itemOk ? num : undefined,
+                    startedAt: itemStartedMs,
+                    finishedAt: itemStartedMs != null ? itemEndedMs : undefined,
                     reason,
                   });
                   // ADR-0042 决议 6：逐项结论同步入服务端登记表（幂等，事件乱序安全）。
@@ -383,6 +388,8 @@ export async function POST(req: Request) {
                     skipped: false,
                     score,
                     reportNum: itemOk ? num : undefined,
+                    startedAt: itemStartedMs,
+                    finishedAt: itemStartedMs != null ? itemEndedMs : undefined,
                     reason,
                   });
                   // ADR-0046：成功子项即时写一条独立子台账行（不等批量终态），
@@ -395,7 +402,7 @@ export async function POST(req: Request) {
                         key: urls[i],
                         label: urls[i],
                         startedAt: outcome.startedMs || runStartedAt,
-                        finishedAt: Date.now(),
+                        finishedAt: itemEndedMs,
                         cliId,
                         model,
                         reportNum: num,

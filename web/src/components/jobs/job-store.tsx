@@ -18,6 +18,9 @@ export type JobItem = {
   star?: number | null;
   // ADR-0046：batch-evaluate 成功项的报告号（跳 /report/{num} 用）；失败/旧数据不带。
   reportNum?: number;
+  // ADR-0046：子 worker 执行起止（ms），供卡片时长；缺任一则卡片不显示时长。
+  startedAt?: number;
+  finishedAt?: number;
   reason?: string;
   ts: number;
 };
@@ -710,9 +713,12 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
                   // reason 是服务端产出的数据（同 batch-evaluate 的 text 行）。
                   const isCheckup = typeof ev.n === "string" || typeof ev.n === "number";
                   const reason = typeof ev.reason === "string" ? ev.reason : undefined;
+                  // ADR-0046：子项起止时刻（服务端仅对成功项下发），卡片据此算时长。
+                  const itemStartedAt = typeof ev.startedAt === "number" ? ev.startedAt : undefined;
+                  const itemFinishedAt = typeof ev.finishedAt === "number" ? ev.finishedAt : undefined;
                   const jobItem: JobItem = isCheckup
-                    ? { key: String(ev.n), label: `#${ev.n} ${ev.company ?? ""}`.trim(), ok: !!ev.ok, skipped: reason?.startsWith("skipped-running"), star: typeof ev.star === "number" ? ev.star : null, reason, ts: Date.now() }
-                    : { key: String(ev.url ?? ""), label: String(ev.url ?? ""), ok: !!ev.ok, score: typeof ev.score === "number" ? ev.score : null, reportNum: typeof ev.reportNum === "number" ? ev.reportNum : undefined, reason, ts: Date.now() };
+                    ? { key: String(ev.n), label: `#${ev.n} ${ev.company ?? ""}`.trim(), ok: !!ev.ok, skipped: reason?.startsWith("skipped-running"), star: typeof ev.star === "number" ? ev.star : null, startedAt: itemStartedAt, finishedAt: itemFinishedAt, reason, ts: Date.now() }
+                    : { key: String(ev.url ?? ""), label: String(ev.url ?? ""), ok: !!ev.ok, score: typeof ev.score === "number" ? ev.score : null, reportNum: typeof ev.reportNum === "number" ? ev.reportNum : undefined, startedAt: itemStartedAt, finishedAt: itemFinishedAt, reason, ts: Date.now() };
                   // 标记用语言中立符号；批量评估（url 形）此前渲染成
                   // "#undefined"——改用 jobItem.label 统一两种形状。
                   const itemLabel = jobItem.ok

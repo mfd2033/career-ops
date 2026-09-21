@@ -393,12 +393,17 @@ export async function POST(req: Request) {
                           : !outcome.cleanExit || outcome.sawError
                             ? "the run hit an error before finishing — re-run it to verify"
                             : "the worker ran but never added a checkup ledger row";
+                  // ADR-0046：子项计时（成功项才有真实起点），供卡片「时长」与子台账行同值。
+                  const itemEndedMs = Date.now();
+                  const itemStartedMs = itemOk && outcome.startedMs ? outcome.startedMs : undefined;
                   send({
                     type: "item",
                     n: t.n,
                     company: t.company,
                     ok: itemOk,
                     star: itemOk ? outcome.star : null,
+                    startedAt: itemStartedMs,
+                    finishedAt: itemStartedMs != null ? itemEndedMs : undefined,
                     reason,
                   });
                   send({
@@ -419,6 +424,8 @@ export async function POST(req: Request) {
                     ok: itemOk,
                     skipped: false,
                     star: itemOk ? outcome.star : null,
+                    startedAt: itemStartedMs,
+                    finishedAt: itemStartedMs != null ? itemEndedMs : undefined,
                     reason,
                   });
                   // ADR-0046：成功子项即时写一条独立子台账行（以 tracker# 为报告键），
@@ -431,7 +438,7 @@ export async function POST(req: Request) {
                         key: t.n,
                         label: `#${t.n} ${t.company}`,
                         startedAt: outcome.startedMs || runStartedAt,
-                        finishedAt: Date.now(),
+                        finishedAt: itemEndedMs,
                         cliId,
                         model,
                         trackerN: t.n,
