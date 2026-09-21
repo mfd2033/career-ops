@@ -26,6 +26,17 @@ test("批量：本地卡 serverBatchId 命中的台账行被去重（同批量�
   assert.deepEqual(out.map((r) => r.id), ["r-other"]);
 });
 
+test("ADR-0046：带 parentId 的子任务行不进列表（仅父行保留）", () => {
+  const runs = [
+    row("b-9", { kind: "batch-evaluate", items: [], total: 2 }),
+    row("bci-aaa", { parentId: "b-9", kind: "batch-evaluate-item" }),
+    row("bci-bbb", { parentId: "b-9", kind: "batch-evaluate-item" }),
+    row("r-single"),
+  ];
+  // 无本地卡时：父批量行与单次行保留，两条子行被排除。
+  assert.deepEqual(ledgerOnlyRuns([], runs).map((r) => r.id), ["b-9", "r-single"]);
+});
+
 test("缺 id / 畸形行不进 ledger-only 结果", () => {
   const runs = [row(""), row(undefined), { kind: "evaluate" }, row("ok")];
   assert.deepEqual(ledgerOnlyRuns([], runs).map((r) => r.id), ["ok"]);

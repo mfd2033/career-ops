@@ -7,7 +7,7 @@
 
 /**
  * 过滤出「本浏览器没见过的」台账行。
- * @template {{id?: string}} T
+ * @template {{id?: string, parentId?: string}} T
  * @param {Array<{runId?: string, serverBatchId?: string}> | undefined} jobs - 本地卡（job-store）
  * @param {Array<T> | undefined} ledgerRuns - GET /api/runs/history 的行
  * @returns {T[]} 去重后的 ledger-only 行（保持入参顺序，即最新在前）
@@ -18,5 +18,6 @@ export function ledgerOnlyRuns(jobs, ledgerRuns) {
     if (j?.runId) knownIds.add(j.runId);
     if (j?.serverBatchId) knownIds.add(j.serverBatchId);
   }
-  return (ledgerRuns ?? []).filter((r) => r && r.id && !knownIds.has(r.id));
+  // ADR-0046：带 parentId 的批量子任务行不进列表（只经父卡片展开进入 /jobs/[id]）。
+  return (ledgerRuns ?? []).filter((r) => r && r.id && !r.parentId && !knownIds.has(r.id));
 }
