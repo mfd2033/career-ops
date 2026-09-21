@@ -47,6 +47,22 @@ test("duplicate key rewrite is idempotent — out-of-order/replayed events merge
   assert.equal(items[0].reason, undefined);
 });
 
+test("reportNum passes through evaluate items; absent/non-number stays undefined (ADR-0046)", () => {
+  __resetBatchItemsForTest();
+  registerBatchRun("b5", { kind: "batch-evaluate", total: 3 });
+  // 成功项带真实报告号（写盘的门禁项，num 已在路由侧确认有报告）。
+  recordBatchItem("b5", { key: "https://a", label: "https://a", ok: true, score: 4, reportNum: 123 });
+  // 失败项无报告，不带 reportNum。
+  recordBatchItem("b5", { key: "https://b", label: "https://b", ok: false, reason: "no report" });
+  // 非数值的 reportNum 不得作为字符串漏进登记表（读取端会拿它拼 /report/{num}）。
+  recordBatchItem("b5", { key: "https://c", label: "https://c", ok: true, reportNum: "bad" });
+
+  const items = getBatchItems("b5");
+  assert.equal(items.find((i) => i.key === "https://a").reportNum, 123);
+  assert.equal(items.find((i) => i.key === "https://b").reportNum, undefined);
+  assert.equal(items.find((i) => i.key === "https://c").reportNum, undefined);
+});
+
 test("unknown batchId reads as null, not an empty list", () => {
   __resetBatchItemsForTest();
   // null lets the API answer 404 — "expired/never registered" — instead of a

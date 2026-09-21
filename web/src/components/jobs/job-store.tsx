@@ -16,6 +16,8 @@ export type JobItem = {
   skipped?: boolean;
   score?: number | null;
   star?: number | null;
+  // ADR-0046：batch-evaluate 成功项的报告号（跳 /report/{num} 用）；失败/旧数据不带。
+  reportNum?: number;
   reason?: string;
   ts: number;
 };
@@ -710,7 +712,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
                   const reason = typeof ev.reason === "string" ? ev.reason : undefined;
                   const jobItem: JobItem = isCheckup
                     ? { key: String(ev.n), label: `#${ev.n} ${ev.company ?? ""}`.trim(), ok: !!ev.ok, skipped: reason?.startsWith("skipped-running"), star: typeof ev.star === "number" ? ev.star : null, reason, ts: Date.now() }
-                    : { key: String(ev.url ?? ""), label: String(ev.url ?? ""), ok: !!ev.ok, score: typeof ev.score === "number" ? ev.score : null, reason, ts: Date.now() };
+                    : { key: String(ev.url ?? ""), label: String(ev.url ?? ""), ok: !!ev.ok, score: typeof ev.score === "number" ? ev.score : null, reportNum: typeof ev.reportNum === "number" ? ev.reportNum : undefined, reason, ts: Date.now() };
                   // 标记用语言中立符号；批量评估（url 形）此前渲染成
                   // "#undefined"——改用 jobItem.label 统一两种形状。
                   const itemLabel = jobItem.ok

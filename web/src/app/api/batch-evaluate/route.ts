@@ -367,6 +367,8 @@ export async function POST(req: Request) {
                     url: urls[i],
                     ok: itemOk,
                     score,
+                    // ADR-0046：成功项把预分配报告号透出，供卡片跳 /report/{num}（失败无报告不带）。
+                    reportNum: itemOk ? num : undefined,
                     reason,
                   });
                   // ADR-0042 决议 6：逐项结论同步入服务端登记表（幂等，事件乱序安全）。
@@ -376,6 +378,7 @@ export async function POST(req: Request) {
                     ok: itemOk,
                     skipped: false,
                     score,
+                    reportNum: itemOk ? num : undefined,
                     reason,
                   });
                   send({
