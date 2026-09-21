@@ -109,3 +109,25 @@ test("final event: 全是跳过（ok=0 failed=0）→ done（跳过不是失败�
   const ev = batchCheckupFinalEvent({ ok: 0, failed: 0, skippedRunning: 4 });
   assert.equal(ev.type, "done");
 });
+
+// ── 服务端墙钟透传（卡片时长不受页签休眠污染，#885 卡显示 1h03m 实为 30m）──
+
+test("final event: done 携带服务端 startedAt/finishedAt（供前端覆盖墙钟 endedAt）", () => {
+  const ev = batchCheckupFinalEvent({ ok: 2, failed: 1, startedAt: 1000, finishedAt: 31000 });
+  assert.equal(ev.type, "done");
+  assert.equal(ev.startedAt, 1000);
+  assert.equal(ev.finishedAt, 31000);
+});
+
+test("final event: error 也携带服务端 startedAt/finishedAt", () => {
+  const ev = batchCheckupFinalEvent({ ok: 0, failed: 3, startedAt: 1000, finishedAt: 31000 });
+  assert.equal(ev.type, "error");
+  assert.equal(ev.startedAt, 1000);
+  assert.equal(ev.finishedAt, 31000);
+});
+
+test("final event: 未传墙钟时不得凭空加 startedAt/finishedAt 键（保持既有形状）", () => {
+  const ev = batchCheckupFinalEvent({ ok: 1, failed: 0 });
+  assert.ok(!("startedAt" in ev), "absent start must not add a key");
+  assert.ok(!("finishedAt" in ev), "absent end must not add a key");
+});

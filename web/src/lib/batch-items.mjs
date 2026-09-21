@@ -29,6 +29,8 @@
  *   startedAt?: number,     // ADR-0046：子 worker 真实执行起点（ms），供卡片时长；无则不占位
  *   finishedAt?: number,    // ADR-0046：子 worker 结束时刻（ms）
  *   reason?: string,        // 失败/跳过原因（服务端产出，ADR-0041 决议 6）
+ *   stderrTail?: string,    // 失败项 stderr 尾部（≤400，路由侧滚动截断）；随快照落
+ *                           // 台账供历史回看查死因（秒死不可诊 #132/#1027）。成功项不带。
  *   ts?: number,            // 可省略——登记表写入时补当前时刻
  * }} BatchItem
  */
@@ -99,6 +101,11 @@ export function recordBatchItem(batchId, item) {
     startedAt: typeof item.startedAt === "number" ? item.startedAt : undefined,
     finishedAt: typeof item.finishedAt === "number" ? item.finishedAt : undefined,
     reason: typeof item.reason === "string" ? item.reason : undefined,
+    // 只有失败项才带 stderrTail；防御性再截一次长度，绝不让整段 stderr 漏进台账行。
+    stderrTail:
+      typeof item.stderrTail === "string" && item.stderrTail
+        ? item.stderrTail.slice(0, 400)
+        : undefined,
     ts: typeof item.ts === "number" ? item.ts : Date.now(),
   });
 }

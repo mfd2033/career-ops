@@ -564,17 +564,27 @@ export function checkupArtifactRowCountForTracker(text, trackerNo, fileExists) {
  * 的教训：80/80 零产物仍发 done，卡片落账还触发了刷新）；否则 `done` 带逐项
  * 计数。skippedRunning（在跑跳过）单列，不算失败，error 文案里如实分开陈述。
  *
- * @param {{ok: number, failed: number, skipped?: number, skippedRunning?: number}} args
- * @returns {{type: "done", ok: number, failed: number, skipped: number, skippedRunning: number} | {type: "error", msg: string}}
+ * 可选透传服务端墙钟 `startedAt`/`finishedAt`：前端卡片据此覆盖本地 `endedAt`，
+ * 使「时长」反映服务端真实执行（#885 卡显示 1h03m 实为 30m：页签休眠污染了前端
+ * 墙钟）。未传时绝不新增这两个键（保持既有事件形状，既有 deepEqual 测试不破）。
+ *
+ * @param {{ok: number, failed: number, skipped?: number, skippedRunning?: number, startedAt?: number, finishedAt?: number}} args
+ * @returns {{type: "done", ok: number, failed: number, skipped: number, skippedRunning: number, startedAt?: number, finishedAt?: number} | {type: "error", msg: string, startedAt?: number, finishedAt?: number}}
  */
-export function batchCheckupFinalEvent({ ok, failed, skipped = 0, skippedRunning = 0 }) {
+export function batchCheckupFinalEvent({ ok, failed, skipped = 0, skippedRunning = 0, startedAt, finishedAt }) {
+  // 只在拿到真数值时才附键，避免 `{startedAt: undefined}` 破坏既有形状。
+  const timing =
+    typeof startedAt === "number" && typeof finishedAt === "number"
+      ? { startedAt, finishedAt }
+      : {};
   if (ok === 0 && failed > 0) {
     return {
       type: "error",
       msg: `All ${failed} checkup(s) failed — no checkup ledger rows were written. See the NOT recorded lines above for per-company reasons.${skippedRunning ? ` ${skippedRunning} row(s) were skipped as already running (those are not failures).` : ""}`,
+      ...timing,
     };
   }
-  return { type: "done", ok, failed, skipped, skippedRunning };
+  return { type: "done", ok, failed, skipped, skippedRunning, ...timing };
 }
 
 /**

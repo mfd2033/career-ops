@@ -427,6 +427,9 @@ export async function POST(req: Request) {
                     startedAt: itemStartedMs,
                     finishedAt: itemStartedMs != null ? itemEndedMs : undefined,
                     reason,
+                    // 秒死不可诊 #132/#1027：失败项的 stderr 尾部随逐项快照落台账，
+                    // 不再只活在流过即逝的 NDJSON text 事件里。
+                    stderrTail: itemOk ? undefined : outcome.stderrTail ?? undefined,
                   });
                   // ADR-0046：成功子项即时写一条独立子台账行（以 tracker# 为报告键），
                   // 使其能被 /jobs/[id] 当独立工作器打开。fire-and-forget，失败不反噬 run。
@@ -461,20 +464,27 @@ export async function POST(req: Request) {
 
         if (cancelled) {
           const cancelMsg = "Batch cancelled. Anything already written stays (the checkup ledger only appends).";
-          send({ type: "error", msg: cancelMsg });
+          send({ type: "error", msg: cancelMsg, startedAt: runStartedAt, finishedAt: Date.now() });
           ledgerEnd.status = "error";
           ledgerEnd.msg = cancelMsg;
         } else {
           // Honesty gate (ADR-0041 决议 6): a batch where NOTHING was persisted is
           // a failed batch, not a green card — pure function, tested in
           // batch-checkup-gate.test.mjs.
-          const finalEv = batchCheckupFinalEvent({ ok, failed, skipped, skippedRunning: skippedRunning.length });
+          const finalEv = batchCheckupFinalEvent({
+            ok,
+            failed,
+            skipped,
+            skippedRunning: skippedRunning.length,
+            startedAt: runStartedAt,
+            finishedAt: Date.now(),
+          });
           send(finalEv);
           ledgerEnd.status = finalEv.type === "done" ? "done" : "error";
           ledgerEnd.msg = finalEv.type === "done" ? undefined : finalEv.msg;
         }
       } catch (err) {
-        send({ type: "error", msg: (err as Error).message });
+        send({ type: "error", msg: (err as Error).message, startedAt: runStartedAt, finishedAt: Date.now() });
         ledgerEnd.status = "error";
         ledgerEnd.msg = (err as Error).message;
       } finally {

@@ -152,6 +152,8 @@ type RunAcc = {
   doneCostUsd: number | null;
   steps: JobStep[];
   lastSeq: number; // bus replay dedup: skip events already applied before a reconnect
+  serverFinishedAt?: number; // 批量终态事件携带的服务端结束时刻；卡片用它算时长，
+                             // 不受页签休眠/断流污染前端墙钟（#885 卡 1h03m 实为 30m）。
 };
 
 export function JobsProvider({ children }: { children: React.ReactNode }) {
@@ -648,7 +650,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
           phase: undefined, // 终态清除阶段（ADR-0042 决议 1）
           result,
           cost,
-          endedAt: Date.now(),
+          endedAt: acc.serverFinishedAt ?? Date.now(),
           steps: lastLabel ? capSteps([...j.steps, { kind: "status", label: lastLabel, ts: Date.now() }]) : j.steps,
         }));
           if (status === "done") {
@@ -742,7 +744,10 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
                 } else if (ev.type === "done") {
                   if (typeof ev.tokens === "number") acc.doneTokens = ev.tokens;
                   if (typeof ev.costUsd === "number") acc.doneCostUsd = ev.costUsd;
+                  // 批量服务端墙钟终点（batchCheckupFinalEvent 透传）：卡片用它算时长。
+                  if (typeof ev.finishedAt === "number") acc.serverFinishedAt = ev.finishedAt;
                 } else if (ev.type === "error") {
+                  if (typeof ev.finishedAt === "number") acc.serverFinishedAt = ev.finishedAt;
                   finish("error", ev.msg || t("jobs.stepError"));
                   return;
                 }

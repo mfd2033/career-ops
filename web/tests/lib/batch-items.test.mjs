@@ -63,6 +63,21 @@ test("reportNum passes through evaluate items; absent/non-number stays undefined
   assert.equal(items.find((i) => i.key === "https://c").reportNum, undefined);
 });
 
+test("失败项 stderrTail 落库、超长截断到 400；成功项不带（秒死可诊 #132/#1027）", () => {
+  __resetBatchItemsForTest();
+  registerBatchRun("b6", { kind: "batch-checkup", total: 3 });
+  recordBatchItem("b6", { key: "889", label: "#889 X", ok: false, reason: "hit an error", stderrTail: "Error: Exa rate limit" });
+  recordBatchItem("b6", { key: "835", label: "#835 Y", ok: false, reason: "boom", stderrTail: "z".repeat(1000) });
+  recordBatchItem("b6", { key: "805", label: "#805 Z", ok: true, star: 2.5 });
+
+  const items = getBatchItems("b6");
+  assert.equal(items.find((i) => i.key === "889").stderrTail, "Error: Exa rate limit");
+  // 非数值/超长不得整段漏进台账行：截断到 400。
+  assert.equal(items.find((i) => i.key === "835").stderrTail.length, 400);
+  // 成功项无 stderrTail（非失败即不占位，沿 ADR-0043 惯例）。
+  assert.equal(items.find((i) => i.key === "805").stderrTail, undefined);
+});
+
 test("unknown batchId reads as null, not an empty list", () => {
   __resetBatchItemsForTest();
   // null lets the API answer 404 — "expired/never registered" — instead of a
