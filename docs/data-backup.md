@@ -38,7 +38,13 @@ local\restore-data.cmd            按快照恢复单个文件
 ```
 data/  reports/  interview-prep/  writing-samples/  todo-list/
 cv.md  portals.yml  modes/_custom.md  modes/_profile.md  config/profile.yml
+local/  tests/local-*.test.mjs        # 2026-09-21 起：gitignored 的 fork-local 代码层
 ```
+
+> `local/`（含 `archive-pipeline.mjs` 等运维脚本与 `backup-data.cmd`/`restore-data.cmd` 自身）
+> 与 `tests/local-*.test.mjs` 是 ADR-0022 的 fork-local **代码**层：主仓库 `.gitignore` 刻意
+> 排除它们以避免 update-system 重放/上游 merge 摩擦，代价是它们在别处无任何历史。自 2026-09-21
+> 起并入影子账本兜底（仍永不推远端）。
 
 **新增数据目录时必须同步改这份清单**（`-Af` 的显式路径就是唯一权威白名单；
 影子账本刻意不使用 exclude 规则，因为项目内各层 `.gitignore` 会穿透进来把
