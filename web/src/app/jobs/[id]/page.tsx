@@ -36,6 +36,11 @@ type RunLedgerEntry = {
   // 字段，按「无逐项数据」处理，不回填。
   items?: JobItem[];
   total?: number;
+  // ADR-0046：批量子任务行的归属与报告目标。parentId 存在 = 这是一条子行，
+  // 列表隐藏、详情页可解析；reportNum（evaluate）/trackerN（checkup）二选一。
+  parentId?: string;
+  reportNum?: number;
+  trackerN?: string;
 };
 
 // ADR-0042 决议 1：运行中每秒走一次的时钟，供「已耗时」显示（不估算、不预测——
@@ -115,6 +120,10 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
     // this renders the honest subset — status, title, duration, reason.
     const e = ledgerEntry;
     const ledgerEngine = formatRunEngine(e.cliId, e.model);
+    // ADR-0046：子任务行（带 parentId）的 kind 读作「子任务」，并给报告跳转与返回父批量。
+    const isChild = !!e.parentId;
+    const kindLabel = isChild ? t("jobs.subtaskKind") : e.kind;
+    const checkupHref = e.trackerN ? `/api/checkup-report?n=${encodeURIComponent(e.trackerN)}` : null;
     return (
       <div className="mx-auto max-w-3xl px-6 py-8">
         <button
@@ -136,7 +145,7 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
             </p>
             <h1 className="mt-2 font-display text-2xl tracking-tight text-landing">{e.title}</h1>
             <p className="mt-1 text-sm text-muted">
-              {e.kind} · {t("jobs.ledgerInput")}: {e.input} · {fmtDuration(Math.round((e.finishedAt - e.startedAt) / 1000))}
+              {kindLabel} · {t("jobs.ledgerInput")}: {e.input} · {fmtDuration(Math.round((e.finishedAt - e.startedAt) / 1000))}
             </p>
             {/* ADR-0044：台账行无排队信息，只说始于/止于（与本地卡视图口径一致）。 */}
             {(fmtStartedAt(e.startedAt) || fmtStartedAt(e.finishedAt)) && (
@@ -159,6 +168,26 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
               <p className="mt-2">
                 <Link href={e.page} className="text-sm text-brand transition-colors hover:underline">
                   {e.page}
+                </Link>
+              </p>
+            )}
+            {/* ADR-0046：子任务行给报告跳转（evaluate 站内 /report/{num}，checkup 新标签
+                /api/checkup-report）与返回父批量入口；无报告目标（异常缺字段）不显示死链。 */}
+            {(e.reportNum != null || checkupHref) && (
+              <p className="mt-3 flex flex-wrap items-center gap-3">
+                {e.reportNum != null && <ReportNumLink n={String(e.reportNum)} className="text-sm" />}
+                {e.reportNum != null && <span className="text-sm text-muted">{t("jobs.viewReport")}</span>}
+                {e.reportNum == null && checkupHref && (
+                  <Link href={checkupHref} target="_blank" rel="noreferrer" className="text-sm text-brand transition-colors hover:underline">
+                    {t("jobs.viewReport")}
+                  </Link>
+                )}
+              </p>
+            )}
+            {isChild && (
+              <p className="mt-3">
+                <Link href={`/jobs/${e.parentId}`} className="inline-flex items-center gap-1 text-sm text-muted transition-colors hover:text-brand">
+                  <ArrowLeft className="size-3.5" /> {t("jobs.batchChildParent")}
                 </Link>
               </p>
             )}
