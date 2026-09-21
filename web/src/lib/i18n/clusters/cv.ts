@@ -1,4 +1,4 @@
-﻿import type { Dict } from "../types";
+import type { Dict } from "../types";
 
 // Cluster: cv
 // English (source) strings. Each key is dotted and namespaced by cluster, e.g.
@@ -40,6 +40,23 @@ export const en: Dict = {
   "cv.ingest.saveFind": "Save & find my matches",
   "cv.ingest.startOver": "Start over",
   "cv.ingest.savedLocally": "Saved locally to cv.md",
+
+  "cv.history.button": "History",
+  "cv.history.title": "Version history",
+  "cv.history.close": "Close",
+  "cv.history.loading": "Loading…",
+  "cv.history.empty": "No saved versions yet — they appear here after your first save.",
+  "cv.history.scope": "Only saves made in this web editor are recorded. CLI or AI edits to cv.md do not create snapshots.",
+  "cv.history.previewHere": "Select a version to preview it.",
+  "cv.history.previewError": "Couldn't load this version.",
+  "cv.history.restore": "Restore this version",
+  "cv.history.confirmTitle": "Restore this version?",
+  "cv.history.confirmBody": "cv.md will be replaced with the selected version. Your current version is saved to history first, so this can be undone.",
+  "cv.history.confirmDirty": "You have unsaved changes in the editor — they will be lost.",
+  "cv.history.confirm": "Restore",
+  "cv.history.cancel": "Cancel",
+  "cv.history.restored": "Restored.",
+  "cv.history.restoreError": "Couldn't restore — try again.",
 };
 
 // Simplified Chinese strings. Every key in en must have a matching key here.
@@ -80,4 +97,21 @@ export const zh: Dict = {
   "cv.ingest.saveFind": "保存并寻找匹配职位",
   "cv.ingest.startOver": "重新开始",
   "cv.ingest.savedLocally": "已保存到本地的 cv.md",
+
+  "cv.history.button": "历史版本",
+  "cv.history.title": "历史版本",
+  "cv.history.close": "关闭",
+  "cv.history.loading": "加载中…",
+  "cv.history.empty": "还没有历史版本 —— 第一次保存后会出现在这里。",
+  "cv.history.scope": "仅记录网页端保存的历史；通过 CLI 或 AI 直接修改 cv.md 不会产生快照。",
+  "cv.history.previewHere": "选择一个版本进行预览。",
+  "cv.history.previewError": "无法加载该版本。",
+  "cv.history.restore": "还原此版本",
+  "cv.history.confirmTitle": "还原到此版本？",
+  "cv.history.confirmBody": "cv.md 将被替换为所选版本。当前版本会先自动存入历史，因此还原可以再撤销。",
+  "cv.history.confirmDirty": "编辑器中有未保存的修改 —— 这些修改将会丢失。",
+  "cv.history.confirm": "还原",
+  "cv.history.cancel": "取消",
+  "cv.history.restored": "已还原。",
+  "cv.history.restoreError": "还原失败 —— 请重试。",
 };
