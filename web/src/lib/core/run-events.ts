@@ -38,7 +38,7 @@
 // (long agent runs emit text deltas — the tail is what a reconnecting client
 // needs, plus its own lastSeq dedup makes partial replay harmless).
 
-export type RunEvent = { type: string; seq?: number; [key: string]: unknown };
+export type RunEvent = { type: string; seq?: number; ts?: number; [key: string]: unknown };
 
 type RunRecord = {
   id: string;
@@ -86,11 +86,14 @@ export function setCancelHandler(id: string, fn: () => void): void {
   if (r) r.cancel = fn;
 }
 
-/** Buffer + fan out one worker event, stamped with the run's next seq. */
-export function publish(id: string, ev: Omit<RunEvent, "seq">): void {
+/** Buffer + fan out one worker event, stamped with the run's next seq and the
+ *  server wall clock (`ts`, ADR-0047 决议 3 — lets a terminal run's step stream
+ *  be folded into the ledger with real times; clients still stamp their own
+ *  receive-time `Date.now()` for live display, so this is purely additive). */
+export function publish(id: string, ev: Omit<RunEvent, "seq" | "ts">): void {
   const r = record(id);
   if (!r || r.done) return;
-  const stamped = { ...ev, seq: ++r.seq } as RunEvent;
+  const stamped = { ...ev, seq: ++r.seq, ts: Date.now() } as RunEvent;
   r.buffer.push(stamped);
   if (r.buffer.length > MAX_EVENTS_PER_RUN) r.buffer.shift();
   for (const fn of channelSubscribers) {

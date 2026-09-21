@@ -51,6 +51,8 @@ type RunLedgerEntry = {
   // 字段（tolerant reader 照常解析），展示端按「无逐项数据」处理，不回填。
   items?: JobItem[];
   total?: number;
+  // ADR-0047：单任务台账行的重建步骤流（列表不渲染，仅类型对齐；详情页读回）。
+  steps?: { kind: "tool" | "status"; label: string; ts?: number }[];
 };
 
 export default function JobsHistory() {

@@ -21,8 +21,9 @@ import { buildPrompt, isShellSafeCompanyName } from "@/lib/run-prompts.mjs";
 import { claudeCliArgs } from "@/lib/claude-invocation.mjs";
 import { acquireTrackerWrite, releaseTrackerWrite } from "@/lib/core/run-registry";
 import { acquire, release, __setSizeSource, DEFAULT_POOL_SIZE } from "@/lib/core/concurrency-pool";
-import { registerRun, setCancelHandler, publish, completeRun } from "@/lib/core/run-events";
+import { registerRun, setCancelHandler, publish, completeRun, getRunBuffer } from "@/lib/core/run-events";
 import { appendRunRecord } from "@/lib/run-ledger.mjs";
+import { buildRunLedgerSteps } from "@/lib/run-steps.mjs";
 
 // Feed the global concurrency pool the live configured size (app-config), re-read
 // on every dispatch so a config-page edit takes effect without restart.
@@ -142,6 +143,10 @@ export async function POST(req: Request) {
     if (endRecorded) return;
     endRecorded = true;
     try {
+      // ADR-0047 决议 1/2：把该 run 缓冲区里的逐工具步骤折叠进台账（与批量 items
+      // 同层落盘），让页签不在线时事后回看也能重建时间线。空步骤不占位（沿
+      // ADR-0043 缺失惯例）。缓冲区此刻仍在（completeRun 之后也保留）。
+      const steps = buildRunLedgerSteps(getRunBuffer(runId));
       appendRunRecord(careerOpsRoot(), {
         id: runId,
         kind,
@@ -158,6 +163,7 @@ export async function POST(req: Request) {
         // 800（原 300）：门禁那一句 checkup 文案就 175 字，300 会把 ADR-0034 的证据
         // 段整段截掉——上限不抬，补丁等于没打。
         msg: msg ? String(msg).slice(0, 800) : undefined,
+        steps: steps.length ? steps : undefined,
       });
     } catch (e) {
       console.error("[run-ledger] append failed:", e instanceof Error ? e.message : e);

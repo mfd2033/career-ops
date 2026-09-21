@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { ArrowLeft, Loader2, Wrench, CircleDot, Check, X, Clock, AlertTriangle } from "lucide-react";
+import { ArrowLeft, Loader2, Check, X, Clock, AlertTriangle } from "lucide-react";
 import { useJobs, type JobItem } from "@/components/jobs/job-store";
 import { HeroGlow } from "@/components/hero-glow";
 import { Badge } from "@/components/ui/badge";
@@ -18,6 +18,7 @@ import { formatRunEngine } from "@/lib/cli-labels.mjs";
 import { fmtStartedAt } from "@/lib/started-at.mjs";
 import { fmtDuration } from "@/lib/format";
 import { BatchItemList } from "@/components/jobs/batch-item-list";
+import { StepTimeline } from "@/components/jobs/step-timeline";
 
 type RunLedgerEntry = {
   id: string;
@@ -36,6 +37,9 @@ type RunLedgerEntry = {
   // 字段，按「无逐项数据」处理，不回填。
   items?: JobItem[];
   total?: number;
+  // ADR-0047：单任务终结时折叠落盘的步骤流（工具/状态行）；旧行/批量行无此
+  // 字段，按「无步骤流」处理，不回填。
+  steps?: { kind: "tool" | "status"; label: string; ts?: number }[];
   // ADR-0046：批量子任务行的归属与报告目标。parentId 存在 = 这是一条子行，
   // 列表隐藏、详情页可解析；reportNum（evaluate）/trackerN（checkup）二选一。
   parentId?: string;
@@ -116,8 +120,9 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
   }, [job, id]);
 
   if (!job && ledgerEntry) {
-    // Terminal-only ledger view: the live step stream was never persisted, so
-    // this renders the honest subset — status, title, duration, reason.
+    // Terminal-only ledger view: renders the honest subset — status, title,
+    // duration, reason — plus, when the ledger carries it, the reconstructed
+    // step stream (ADR-0047: single-run steps now persist at terminal time).
     const e = ledgerEntry;
     const ledgerEngine = formatRunEngine(e.cliId, e.model);
     // ADR-0046：子任务行（带 parentId）的 kind 读作「子任务」，并给报告跳转与返回父批量。
@@ -202,6 +207,8 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
                 <BatchItemList items={e.items} batchId={e.id} cliId={e.cliId} model={e.model} />
               </>
             )}
+            {/* ADR-0047：单任务台账行携带重建的步骤流时，与 live 视图同口径渲染。 */}
+            {e.steps && e.steps.length > 0 && <StepTimeline steps={e.steps} />}
           </div>
         </section>
         <p className="mt-4 text-xs text-faint">{t("jobs.ledgerNote")}</p>
@@ -373,31 +380,22 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
         </div>
       )}
 
-      <ol className="mt-6 space-y-2">
-        {job.steps.map((s, i) => (
-          <li key={i} className="flex items-start gap-2.5 text-sm">
-            {s.kind === "tool" ? (
-              <Wrench className="mt-0.5 size-3.5 shrink-0 text-brand" />
-            ) : (
-              <CircleDot className="mt-0.5 size-3.5 shrink-0 text-faint" />
-            )}
-            <span className={s.kind === "tool" ? "font-medium" : "text-muted"}>
-              {s.kind === "tool" ? t("jobs.usingTool", { label: s.label }) : s.label}
-            </span>
-          </li>
-        ))}
-        {/* ADR-0042：「思考中…」退役为最后兜底——仅当运行中且无任何步骤/中断时。 */}
-        {job.status === "running" && job.steps.length === 0 && job.interruptedAt == null && (
+      <StepTimeline steps={job.steps} />
+      {/* ADR-0042：「思考中…」退役为最后兜底——仅当运行中且无任何步骤/中断时。 */}
+      {job.status === "running" && job.steps.length === 0 && job.interruptedAt == null && (
+        <ol className="mt-6 space-y-2">
           <li className="flex items-center gap-2.5 text-sm text-muted">
             <Loader2 className="size-3.5 animate-spin text-brand" /> {t("jobs.thinking")}
           </li>
-        )}
-        {job.status === "queued" && (
+        </ol>
+      )}
+      {job.status === "queued" && (
+        <ol className="mt-6 space-y-2">
           <li className="flex items-center gap-2.5 text-sm text-faint">
             <Clock className="size-3.5" /> {t("jobs.queuedHint")}
           </li>
-        )}
-      </ol>
+        </ol>
+      )}
 
       <EvalTimingPanel entry={entry} />
 

@@ -141,3 +141,78 @@ test("reconcile: a REAL error card (no interruptedAt) is never touched", () => {
   assert.deepEqual(healed, []);
   assert.equal(out[0], realError, "errors reached via the live SSE path are terminal, not guesses");
 });
+
+// --- ADR-0047: durable step reconstruction on heal --------------------------
+
+test("reconcile: ledger steps rebuild the timeline (seed + reconstruction + Done)", () => {
+  const rec = {
+    ...REC_DONE,
+    steps: [
+      { kind: "tool", label: "WebFetch: https://x.com/jobs/1", ts: 100 },
+      { kind: "status", label: "正在评分", ts: 200 },
+    ],
+  };
+  const card = { ...zombie("job-12", REC_DONE.id), steps: [{ kind: "status", label: "正在启动…", ts: NOW - 60000 }] };
+  const { jobs: out } = reconcileJobsWithLedger([card], [rec], { now: NOW, doneLabel: "Done", errorLabel: "error" });
+
+  assert.deepEqual(
+    out[0].steps.map((s) => s.label),
+    ["正在启动…", "WebFetch: https://x.com/jobs/1", "正在评分", "Done"],
+    "本地种子在前，台账重建填充中间，终态在后",
+  );
+});
+
+test("reconcile: no ledger steps → byte-for-byte the old behaviour (local + terminal)", () => {
+  const card = { ...zombie("job-13", REC_DONE.id), steps: [{ kind: "status", label: "正在启动…", ts: NOW - 60000 }] };
+  const { jobs: out } = reconcileJobsWithLedger([card], [REC_DONE], { now: NOW, doneLabel: "Done", errorLabel: "error" });
+
+  assert.deepEqual(out[0].steps.map((s) => s.label), ["正在启动…", "Done"]);
+});
+
+test("reconcile: local partial steps dedupe against the reconstruction (by kind:label)", () => {
+  const rec = {
+    ...REC_DONE,
+    steps: [
+      { kind: "tool", label: "Read: cv.md", ts: 100 },
+      { kind: "tool", label: "Write: reports/1.md", ts: 200 },
+    ],
+  };
+  // Local tab was half-live: it saw the Read step (its own clock) but missed Write.
+  const card = { ...zombie("job-14", REC_DONE.id), steps: [{ kind: "tool", label: "Read: cv.md", ts: NOW - 500 }] };
+  const { jobs: out } = reconcileJobsWithLedger([card], [rec], { now: NOW, doneLabel: "Done", errorLabel: "error" });
+
+  assert.deepEqual(
+    out[0].steps.map((s) => s.label),
+    ["Read: cv.md", "Write: reports/1.md", "Done"],
+    "同名同步骤降不重复（ts 不同仍去重）",
+  );
+});
+
+test("reconcile: 长 label 本地全串 vs 台账截断串仍去重（Major#1 回归）", () => {
+  const full = `Bash: ${"x".repeat(300)}`; // > RUN_STEP_LABEL_MAX
+  const clipped = `${full.slice(0, 199)}…`;
+  const rec = { ...REC_DONE, steps: [{ kind: "tool", label: clipped, ts: 100 }] };
+  const card = { ...zombie("job-15", REC_DONE.id), steps: [{ kind: "tool", label: full, ts: NOW - 500 }] };
+  const { jobs: out } = reconcileJobsWithLedger([card], [rec], { now: NOW, doneLabel: "Done", errorLabel: "error" });
+
+  const bashRows = out[0].steps.filter((s) => s.kind === "tool");
+  assert.equal(bashRows.length, 1, "同一步骤不得因裁剪口径不一致而露两行");
+});
+
+test("reconcile: 台账重建保留真实重复的工具调用（不自去重）", () => {
+  const rec = {
+    ...REC_DONE,
+    steps: [
+      { kind: "tool", label: "Read: cv.md", ts: 100 },
+      { kind: "tool", label: "Read: cv.md", ts: 150 },
+    ],
+  };
+  const card = { ...zombie("job-16", REC_DONE.id), steps: [{ kind: "status", label: "正在启动…", ts: NOW - 60000 }] };
+  const { jobs: out } = reconcileJobsWithLedger([card], [rec], { now: NOW, doneLabel: "Done", errorLabel: "error" });
+
+  assert.deepEqual(
+    out[0].steps.map((s) => s.label),
+    ["正在启动…", "Read: cv.md", "Read: cv.md", "Done"],
+    "重建段内的合法重复保留，与 ledger-only 视图同口径",
+  );
+});

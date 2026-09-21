@@ -72,3 +72,20 @@ test("ADR-0043: a record without an engine reads back without one (pre-feature h
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("ADR-0047: 单任务步骤流内嵌台账，append → read 原样往返；旧行无 steps 不回填", () => {
+  const root = mkdtempSync(join(tmpdir(), "co-ledger-"));
+  try {
+    const steps = [
+      { kind: "tool", label: "WebFetch: https://x.com/jobs/1", ts: 100 },
+      { kind: "status", label: "正在评分", ts: 200 },
+    ];
+    appendRunRecord(root, { id: "old", kind: "checkup", input: "869", title: "t", status: "done", startedAt: 1, finishedAt: 2 });
+    appendRunRecord(root, { id: "new", kind: "checkup", input: "869", title: "t", status: "done", startedAt: 3, finishedAt: 4, steps });
+    const [newer, older] = readRunHistory(root);
+    assert.deepEqual(newer.steps, steps);
+    assert.ok(!("steps" in older), "功能前的旧行不得被回填 steps");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
