@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execSync } from "node:child_process";
+import { resolveVersionChannels } from "@/lib/version-info.mjs";
 
 // The WEB build's own version + channel (NOT the user's data checkout) — read from
 // the repo's VERSION (parent of the web/ cwd). The channel is derived from a
@@ -36,7 +37,7 @@ function shortSha(): string {
 // must WIN over the runtime git call below — the exe's cwd sits inside the
 // user's checkout, where `git rev-parse` would report the working tree's CURRENT
 // commit, making a stale exe look fresh. Dev mode has no build-info.json → git.
-type BuildInfo = { sha?: string; builtAt?: string; cacheVersion?: string };
+type BuildInfo = { sha?: string; builtAt?: string; cacheVersion?: string; coreVersion?: string };
 function readBuildInfo(): BuildInfo | null {
   try {
     return JSON.parse(fs.readFileSync(path.join(process.cwd(), "build-info.json"), "utf8")) as BuildInfo;
@@ -55,16 +56,14 @@ function webVersion(): string {
 }
 
 export async function GET() {
-  const coreVersion = readVersion();
-  const web = webVersion();
-  const m = coreVersion.match(/-(rc|beta|alpha|next)\b/i);
-  // Channel precedence: an explicit core pre-release suffix wins (RC installs);
-  // otherwise the web component's own maturity decides — pre-1.0 on main IS the
-  // alpha (release-please versions web/ independently), and the banner/bug-report
-  // stay visible until the web graduates to 1.0.
-  const channel = m ? m[1].toLowerCase() : web && /^0\./.test(web) ? "alpha" : "stable";
-  const version = web ? `web ${web}` : coreVersion;
   const buildInfo = readBuildInfo();
+  // coreVersion / channel / version folding lives in a pure module so the
+  // packaged-vs-dev precedence is unit-tested without booting a server (#8).
+  const { version, coreVersion, channel } = resolveVersionChannels({
+    fileVersion: readVersion(),
+    buildInfoCoreVersion: buildInfo?.coreVersion,
+    webVersion: webVersion(),
+  });
   return Response.json({
     version,
     coreVersion,

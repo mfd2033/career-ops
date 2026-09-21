@@ -105,7 +105,19 @@ const dirty = (() => {
 })();
 const builtAt = new Date().toISOString().replace("T", " ").slice(0, 16) + " UTC";
 const cacheVersion = buildSha ? `${buildSha}${dirty ? "-dirty" : ""}` : `dev-${Date.now()}`;
-fs.writeFileSync(path.join(uiDir, "app", "build-info.json"), JSON.stringify({ sha: buildSha, builtAt, cacheVersion }, null, 2));
+// The core (repo-root) VERSION frozen at pack time. The standalone bundle
+// carries no VERSION file, so /api/version's on-disk read returns "" in a
+// packaged build — without this the UI's bug report loses the core version and
+// an RC pack would mis-derive its channel (#8). Parsed the same way the API
+// reads the file: first whitespace-delimited token.
+const coreVersion = (() => {
+  try {
+    return fs.readFileSync(path.join(root, "VERSION"), "utf8").split(/\s+/)[0].trim();
+  } catch {
+    return "";
+  }
+})();
+fs.writeFileSync(path.join(uiDir, "app", "build-info.json"), JSON.stringify({ sha: buildSha, builtAt, cacheVersion, coreVersion }, null, 2));
 
 // 5c. Prepare the extracted-runtime layout the launcher reads: launcher.go
 // resolves node.exe + app/server.js from a `.dashboard-runtime\v{cacheVersion}\`
