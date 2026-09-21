@@ -31,6 +31,7 @@ import { randomUUID } from "node:crypto";
 import { registerBatchRun, recordBatchItem, completeBatchRun, getBatchItems } from "@/lib/batch-items.mjs";
 import { appendRunRecord } from "@/lib/run-ledger.mjs";
 import { buildBatchLedgerRecord } from "@/lib/batch-ledger.mjs";
+import { buildBatchChildRecord } from "@/lib/batch-child-ledger.mjs";
 import { resolveCli } from "@/lib/clis";
 import {
   withModelFlag,
@@ -82,6 +83,8 @@ type CheckupOutcome = {
   cancelled: boolean;
   /** Rolling tail of the worker's stderr (whitespace-collapsed), or null. */
   stderrTail: string | null;
+  /** ADR-0046: real execution start (ms) once the worker spawned; 0 if never spawned. */
+  startedMs: number;
 };
 
 export async function POST(req: Request) {
@@ -278,6 +281,7 @@ export async function POST(req: Request) {
               errMsg: null,
               cancelled: false,
               stderrTail: null,
+              startedMs: 0,
               ...extra,
             });
             void (async () => {
@@ -287,6 +291,7 @@ export async function POST(req: Request) {
                 return;
               }
               const rowsBefore = artifactRowsFor(t.n);
+              const startedMs = Date.now();
               const child = spawnHeadlessCli(binPath, args, { cwd: root, env: process.env });
               children.add(child);
               const killer = setTimeout(() => {
@@ -348,6 +353,7 @@ export async function POST(req: Request) {
                   errMsg: timedOut ? `checkup worker exceeded its ${CHECKUP_WORKER_KILL_MS / 60_000}-minute cap and was killed` : null,
                   cancelled: false,
                   stderrTail: tailOf(),
+                  startedMs,
                 });
                 children.delete(child);
               });
@@ -415,6 +421,25 @@ export async function POST(req: Request) {
                     star: itemOk ? outcome.star : null,
                     reason,
                   });
+                  // ADR-0046：成功子项即时写一条独立子台账行（以 tracker# 为报告键），
+                  // 使其能被 /jobs/[id] 当独立工作器打开。fire-and-forget，失败不反噬 run。
+                  if (itemOk) {
+                    try {
+                      appendRunRecord(root, buildBatchChildRecord({
+                        batchId,
+                        childKind: "batch-checkup-item",
+                        key: t.n,
+                        label: `#${t.n} ${t.company}`,
+                        startedAt: outcome.startedMs || runStartedAt,
+                        finishedAt: Date.now(),
+                        cliId,
+                        model,
+                        trackerN: t.n,
+                      }));
+                    } catch (e) {
+                      console.error("[run-ledger] batch child append failed:", e instanceof Error ? e.message : e);
+                    }
+                  }
                 })
                 .catch(() => failed++)
                 .finally(() => {

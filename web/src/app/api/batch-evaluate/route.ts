@@ -27,6 +27,7 @@ import { randomUUID } from "node:crypto";
 import { registerBatchRun, recordBatchItem, completeBatchRun, getBatchItems } from "@/lib/batch-items.mjs";
 import { appendRunRecord } from "@/lib/run-ledger.mjs";
 import { buildBatchLedgerRecord } from "@/lib/batch-ledger.mjs";
+import { buildBatchChildRecord } from "@/lib/batch-child-ledger.mjs";
 import { resolveCli } from "@/lib/clis";
 import { withModelFlag, isFatalGenericStderr, parseReservationOutput } from "@/lib/run-cli-support.mjs";
 import { permissionFlags } from "@/lib/claude-invocation.mjs";
@@ -225,9 +226,11 @@ export async function POST(req: Request) {
         // of which worker grabs a slot first. A worker dequeued while queued is
         // counted `cancelled` and never spawns.
         const evaluateOne = (i: number, num: number) =>
-          new Promise<{ cleanExit: boolean; sawError: boolean; verdict: string | null; errMsg: string | null; cancelled: boolean }>((resolve) => {
+          new Promise<{ cleanExit: boolean; sawError: boolean; verdict: string | null; errMsg: string | null; cancelled: boolean; startedMs: number }>((resolve) => {
             let sawError = false;
             let verdict: string | null = null;
+            // ADR-0046：子 worker 真实执行起点（获槽后、spawn 前），供子台账行时长。
+            let startedMs = 0;
             // 代理显式输出的错误行(如登录墙 `ERROR: cannot extract JD ...`)。
             // 用于让 pipeline 卡片显示真实失败原因,而非误导性的通用双消息。
             let errMsg: string | null = null;
@@ -268,7 +271,7 @@ export async function POST(req: Request) {
             const finish = (outcome: { cleanExit: boolean; sawError: boolean; verdict: string | null; errMsg: string | null; cancelled?: boolean }) => {
               poolHandles.delete(poolHandle);
               release(poolHandle.id);
-              resolve(outcome as { cleanExit: boolean; sawError: boolean; verdict: string | null; errMsg: string | null; cancelled: boolean });
+              resolve(outcome as { cleanExit: boolean; sawError: boolean; verdict: string | null; errMsg: string | null; cancelled: boolean; startedMs: number });
             };
             // Queue in the global pool; spawn only once a slot is granted. If the
             // task is dequeued (queued-cancel) while waiting, grant=false → skip.
@@ -278,6 +281,7 @@ export async function POST(req: Request) {
                 finish({ cleanExit: false, sawError: true, verdict: null, errMsg: null, cancelled: true });
                 return;
               }
+              startedMs = Date.now();
               const child = spawnHeadlessCli(binPath, args, { cwd: root, env: process.env });
               children.add(child);
               child.stdout?.setEncoding("utf-8");
@@ -381,6 +385,25 @@ export async function POST(req: Request) {
                     reportNum: itemOk ? num : undefined,
                     reason,
                   });
+                  // ADR-0046：成功子项即时写一条独立子台账行（不等批量终态），
+                  // 使其能被 /jobs/[id] 当独立工作器打开。fire-and-forget，失败不反噬 run。
+                  if (itemOk) {
+                    try {
+                      appendRunRecord(root, buildBatchChildRecord({
+                        batchId,
+                        childKind: "batch-evaluate-item",
+                        key: urls[i],
+                        label: urls[i],
+                        startedAt: outcome.startedMs || runStartedAt,
+                        finishedAt: Date.now(),
+                        cliId,
+                        model,
+                        reportNum: num,
+                      }));
+                    } catch (e) {
+                      console.error("[run-ledger] batch child append failed:", e instanceof Error ? e.message : e);
+                    }
+                  }
                   send({
                     type: "text",
                     text: itemOk
