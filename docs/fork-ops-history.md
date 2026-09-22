@@ -1,6 +1,6 @@
 # Fork 操作史（fork ops history）
 
-> 索引与常驻规则在 `modes/_custom.md`「迁移自全局记忆」。内容为历史排查/修复快照，已脱敏（真实公司名去除）。§ 编号括注原全局记忆 ID 供追溯。
+> 场景索引在 `modes/_custom.md`「按需文档索引」。内容为历史排查/修复快照 + 迁出的长规则，已脱敏（真实公司名去除）。
 
 ## §1 巨型残留目录根因与清理（原 [16316241]）
 
@@ -23,11 +23,12 @@
 - 诊断：opencode 日志 `~/.local/share/opencode/log/opencode.log`（run=<id>，grep creating instance/asking/permission=）；复现回路 `node local/batch-checkup-repro.mjs <tracker#...>`。
 - 模型/环境坑：agnes-2.5-flash 有「研究完不落盘」的非确定性毛病（重跑可全过）；engine=opencode 配置在 `~/.career-ops-web/config.json`；opencode 无消息体持久化、只有日志（claude 的 transcript 在 ~/.claude/projects，两者不同）。
 
-## §4 fork 锚点补充（原 [39635169]；权威规则 = _custom.md House Rules「Fork 系统更新走 git merge」）
+## §4 Fork 系统更新规则与锚点（ADR-0022，原 House Rules 迁入 + 原 [39635169] 补充）
 
+- **更新规则权威**：本 fork（上游 santifer/career-ops，无上游写权限）系统更新一律 `git fetch upstream && git merge upstream/main`——三方合并自动融合 fork-local 锚点与本地提交，冲突显式暴露。**禁 `update-system.mjs apply`**（checkout 覆盖会抹掉锚点）；`check` 报 `system-files-changed` 属预期（fork 本有系统层差异），不执行 Re-apply to restore。
 - 系统文件锚点位置：`scan.mjs` 三处 + `url-key.mjs` 尾部（FORK-LOCAL anchor）；`local/` 缺失时 warn + 降级为上游行为。
 - tripwire `tests/local-scan-dedup.test.mjs`（gitignored，test-all 自动发现）每次 merge 后必跑，红 = 锚点被切断或 local/ 缺失。
-- 加新站去重参数只改 `local/dedup-params.mjs`；文档 docs/adr/0022、local/README.md。
+- 加新站去重参数只改 `local/dedup-params.mjs`；扩展逻辑住 gitignored `local/`；文档 docs/adr/0022、local/README.md。
 
 ## §5 体检台账细节与 test-all 纪律（原 [44419701] 非重叠部分；编排权威 = _custom.md Custom Workflows「公司体检」）
 
@@ -36,3 +37,9 @@
 - 消费方：web pipeline 星级徽章（`web/src/lib/company-checkups.mjs` 读取镜像）+ `analyze-patterns.mjs` checkupAnalysis（? 键只进星级分布）。
 - test-all 纪律：discovered 套件禁止调用 `finish()`（连注释里出现该字样都会被裸正则误杀）；本机已知 24 个既有测试失败（opencode CLI/Playwright MCP/bash 套件等环境原因）。
 - 脱敏记录：首个真实体检 #917 ★1.5 高危（同名双主体 + 宣称与工商不符）——公司名已从记录中去除。
+
+## §6 test-all 运行纪律（2026-09-14，原 House Rules 迁入）
+
+- `node test-all.mjs` 前必须在**同一条 shell 命令内**先清 safe-delete shim：`Get-ChildItem Env: | Where-Object Name -like "*SAFE_DELETE*" | ForEach-Object { Remove-Item "Env:$($_.Name)" }; $env:NODE_OPTIONS=$null`，再跑 test-all（IDE 每条新命令都重新注入，单独清一次无效）。
+- 不清的后果：结尾临时目录清理被 shim 拦截（批量确认/ETIMEDOUT），崩在打印汇总前且退出码 1，酷似回归实为环境。
+- 基线：2026-09-15 起本机全绿（5544 passed / 0 failed）——再出现 ❌ 即真回归。

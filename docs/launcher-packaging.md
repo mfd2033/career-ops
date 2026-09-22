@@ -67,9 +67,9 @@
   1.1 **主命令**：
     - **命令（2026-09-11 更新，两版写法都显式注入环境变量绕过 APPDATA 空陷阱）：**
       - **PowerShell 写法（当前环境首选）**：
-        `$env:APPDATA='C:\Users\75186\AppData\Roaming'; $env:GOPROXY='https://goproxy.cn,direct'; node dashboard-ui/build-dashboard-ui.mjs`
-      - **Bash / Git Bash 写法**：
-        `APPDATA='C:\Users\75186\AppData\Roaming' GOPROXY=https://goproxy.cn,direct node dashboard-ui/build-dashboard-ui.mjs`
+        `$env:APPDATA="$env:USERPROFILE\AppData\Roaming"; $env:GOPROXY='https://goproxy.cn,direct'; node dashboard-ui/build-dashboard-ui.mjs`
+      - **Bash / Git Bash 写法**（APPDATA 用当前用户目录绝对路径，如 `$HOME/AppData/Roaming` 的实际值）：
+        `APPDATA="$APPDATA_REAL_ROAMING" GOPROXY=https://goproxy.cn,direct node dashboard-ui/build-dashboard-ui.mjs`
     - **关键：命令行必须与所在 shell 匹配**。PowerShell 会话里跑 Bash 写法（`VAR=x cmd` 命令前缀）**不会注入 env**——PowerShell 只认 `$env:VAR=` 前缀,命令会回退官方源挂起（workbuddy 卡在 1.1 的根因之一）。先判用哪个 shell（见执行约定「PS 探针」）,再选对应写法。
     - 说明：`APPDATA` 必须指向含 `go\env` 的实路径（`C:\Users\<user>\AppData\Roaming`）；只用 `go env -w` 写盘不够——子进程继承空 APPDATA 会读不到 env 文件，回退官方源 Bad Gateway；显式进程级注入 `GOPROXY=https://goproxy.cn,direct` 直走国内镜像,`go install go-winres` 几秒装完,无官方源挂起窗口。
     - **预期结果**：命令退出码 0，无报错；仓库根出现新 `career-dashboard-launcher.exe`（约 9 MB，mtime 为本次时间），`.dashboard-runtime\v{cacheVersion}\` 重建。
