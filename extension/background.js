@@ -111,6 +111,66 @@ async function ensureLivePort() {
   return p;
 }
 
+// ---- toolbar connection-status badge (ADR-0050) ---------------------------
+//
+// 把「本地 web 服务是否在线」外显到工具栏图标，不用点开 popup。连接状态是全局
+// 属性，故 setBadge* 不带 tabId（全局常显）。二值：连上=绿✓、未连=红!（版本校验
+// 失败按未连处理，无第三态；probing 不单独显示）。节流与视觉映射的纯逻辑抽到
+// badge-pure.js（可单测），此处只做 chrome 接线。
+importScripts("badge-pure.js");
+const BADGE = self.__careerOpsBadgePure;
+if (!BADGE) throw new Error("[bg] badge-pure.js 未加载:扩展文件不完整");
+
+let lastBadgeAt = 0;
+let lastBadgeConnected = null; // null=尚未确定（首次必探）
+
+/**
+ * 依当前连接状态重绘徽章。force=true 绕过 5s 节流（reprobe / 批量结束等明确信号）。
+ * 节流命中时复用上次结果，不重新扫 3000-3040。
+ */
+async function updateBadge(force) {
+  const d = BADGE.decideBadge({
+    now: Date.now(),
+    lastAt: lastBadgeAt,
+    lastConnected: lastBadgeConnected,
+    force: !!force,
+  });
+  if (!d.probe) {
+    await paintBadge(d.connected);
+    return;
+  }
+  lastBadgeAt = Date.now();
+  const port = await ensureLivePort().catch(() => null);
+  lastBadgeConnected = port != null;
+  await paintBadge(lastBadgeConnected);
+}
+
+/** 落徽章（不含探测，供 updateBadge / get-state 复用）。 */
+async function paintBadge(connected) {
+  const v = BADGE.badgeVisual(connected);
+  try {
+    await chrome.action.setBadgeBackgroundColor({ color: v.color });
+    await chrome.action.setBadgeText({ text: v.text });
+  } catch {
+    /* 无 action API / 极端环境：忽略，下次事件再刷 */
+  }
+}
+
+// 冷启动即点亮：安装/更新、浏览器启动各探一次（不依赖用户先开 popup）。
+chrome.runtime.onInstalled.addListener(() => {
+  updateBadge(true).catch(() => {});
+});
+chrome.runtime.onStartup.addListener(() => {
+  updateBadge(true).catch(() => {});
+});
+// 浏览中保持实时：切标签页、页面加载完成各刷一次（5s 节流兜底防端口扫描风暴）。
+chrome.tabs.onActivated.addListener(() => {
+  updateBadge().catch(() => {});
+});
+chrome.tabs.onUpdated.addListener((_tabId, changeInfo) => {
+  if (changeInfo && changeInfo.status === "complete") updateBadge().catch(() => {});
+});
+
 // ---- cliId / model resolution ---------------------------------------------
 
 /** Reuse the CLI + model picked on the web config page; fall back to sole installed. */
@@ -518,6 +578,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         if (msg && msg.force) invalidatePort();
         const port = await ensureLivePort().catch(() => null);
         sendResponse({ ok: true, connected: port != null, port });
+        // 徽章与 popup 读同一状态：复用刚探到的 port 立即重绘（不重复扫描），
+        // 并同步节流缓存。force（手动 reprobe）因上方已 invalidatePort 会重扫真值。
+        lastBadgeAt = Date.now();
+        lastBadgeConnected = port != null;
+        await paintBadge(port != null);
         break;
       }
       case "get-evaluated": {
@@ -998,6 +1063,8 @@ async function runBatch(urls, cliId, model, opts) {
     // Freshly evaluated → reload map and refresh badges on every zhipin tab.
     await loadEvaluated(base);
     await notifyContentScripts();
+    // 评估结束：服务必然在线，强制刷新徽章（绕过节流，纠正评估期间的任何陈旧态）。
+    await updateBadge(true).catch(() => {});
   } finally {
     clearInterval(keepalive);
   }

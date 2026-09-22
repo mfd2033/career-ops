@@ -34,5 +34,6 @@
 ## 本地服务与安全
 
 - **web 端口探测**：background 对 `localhost:3000-3040` 逐个 `GET /api/version` 找本地 web 服务端口（与 launcher `pickFreePort` 区间一致），命中缓存、失活重探。
+- **工具栏连接状态徽章（connection-status badge）**：`background.js` 用 `chrome.action.setBadgeText`/`setBadgeBackgroundColor` 在插件图标上外显本地 web 服务在线状态——绿底 `✓`=已连接、红底 `!`=未连接，全局常显（不带 `tabId`），事件驱动 + 5s 短缓存刷新。决策见 `docs/adr/0050-toolbar-connection-status-badge.md`。
 - **origin-guard 放行口**：对 loopback + 固定扩展 ID 的 `chrome-extension://{id}` Origin 放行并回 CORS 头；其余跨站请求仍 403。扩展 ID 由 `manifest.json` 的 `key` 固定。
 - **扩展 ID（extension id）**：MV3 由扩展 `key` 派生的稳定标识，后端据此识别可信来源。
