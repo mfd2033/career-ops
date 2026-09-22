@@ -26,11 +26,12 @@ import { promisify } from "node:util";
 import { randomUUID } from "node:crypto";
 import { registerBatchRun, recordBatchItem, completeBatchRun, getBatchItems } from "@/lib/batch-items.mjs";
 import { appendRunRecord } from "@/lib/run-ledger.mjs";
+import { buildRunLedgerSteps } from "@/lib/run-steps.mjs";
 import { buildBatchLedgerRecord } from "@/lib/batch-ledger.mjs";
 import { buildBatchChildRecord } from "@/lib/batch-child-ledger.mjs";
 import { resolveCli } from "@/lib/clis";
-import { withModelFlag, isFatalGenericStderr, parseReservationOutput } from "@/lib/run-cli-support.mjs";
-import { permissionFlags } from "@/lib/claude-invocation.mjs";
+import { withModelFlag, isFatalGenericStderr, parseReservationOutput, parseClaudeEvent } from "@/lib/run-cli-support.mjs";
+import { claudeCliArgs } from "@/lib/claude-invocation.mjs";
 import { isReservedReportFile } from "@/lib/report-files.mjs";
 import { spawnHeadlessCli, terminateCli } from "@/lib/spawn-cli.mjs";
 import { careerOpsRoot, readMemory, readInbox, readScanDates } from "@/lib/career-ops";
@@ -225,8 +226,10 @@ export async function POST(req: Request) {
         // Q1/Q7): report numbers are still handed out in array order regardless
         // of which worker grabs a slot first. A worker dequeued while queued is
         // counted `cancelled` and never spawns.
+        // ADR-0049: Claude workers switch to stream-json argv, enabling per-tool
+        // event passthrough for real-time progress monitoring.
         const evaluateOne = (i: number, num: number) =>
-          new Promise<{ cleanExit: boolean; sawError: boolean; verdict: string | null; errMsg: string | null; cancelled: boolean; startedMs: number }>((resolve) => {
+          new Promise<{ cleanExit: boolean; sawError: boolean; verdict: string | null; errMsg: string | null; cancelled: boolean; startedMs: number; collectedEvents: Array<{type: string, name?: string, detail?: string, ts?: number}> }>((resolve) => {
             let sawError = false;
             let verdict: string | null = null;
             // ADR-0046：子 worker 真实执行起点（获槽后、spawn 前），供子台账行时长。
@@ -234,6 +237,8 @@ export async function POST(req: Request) {
             // 代理显式输出的错误行(如登录墙 `ERROR: cannot extract JD ...`)。
             // 用于让 pipeline 卡片显示真实失败原因,而非误导性的通用双消息。
             let errMsg: string | null = null;
+            // ADR-0049：收集逐工具事件供子台账持久化（T03 消费）。
+            const collectedEvents: Array<{type: string, name?: string, detail?: string, ts?: number}> = [];
             const url = urls[i];
             const poolHandle = acquire({ url, title: url, reportNum: num, source: "batch", cliId, model: model || undefined });
             poolHandles.add(poolHandle);
@@ -249,21 +254,12 @@ export async function POST(req: Request) {
               jdText: jdText.trim() || undefined,
               company: company.trim() || undefined,
             });
-            // Plain-text argv (spec.args), not streamArgs: the batch route reads
-            // the agent's output as text and extracts the VERDICT line — per-event
-            // parsing is /api/run's single-run concern.
-            // Tool policy comes from claude-invocation.mjs (the NO-RUNTIME-GRANTS
-            // rule in clis.ts) — never spelled here. Without it a headless
-            // `claude -p` runs on default permissions: Bash needs approval, so the
-            // FIRST browser-extract call (Chinese boards serve JDs behind a login
-            // wall) dead-ends on "This command requires approval" and the worker
-            // exits without writing anything (2026-09-15: 80 workers, ~77 min,
-            // zero reports — the batch card still went green, see the done gate).
-            // Batch reads plain text, not stream-json, so claudeCliArgs can't be
-            // reused wholesale — only its permission tail.
+            // ADR-0049: Claude gets the full stream-json argv (includes permission
+            // flags via claudeCliArgs); non-Claude CLIs keep plain-text argv.
+            const isClaude = spec.id === "claude";
             const args = withModelFlag(
-              spec.id === "claude"
-                ? [...spec.args(prompt), ...permissionFlags("evaluate")]
+              isClaude
+                ? claudeCliArgs({ kind: "evaluate", prompt })
                 : spec.args(prompt),
               spec.model,
               model,
@@ -271,7 +267,7 @@ export async function POST(req: Request) {
             const finish = (outcome: { cleanExit: boolean; sawError: boolean; verdict: string | null; errMsg: string | null; cancelled?: boolean }) => {
               poolHandles.delete(poolHandle);
               release(poolHandle.id);
-              resolve(outcome as { cleanExit: boolean; sawError: boolean; verdict: string | null; errMsg: string | null; cancelled: boolean; startedMs: number });
+              resolve({ ...outcome, startedMs, collectedEvents } as { cleanExit: boolean; sawError: boolean; verdict: string | null; errMsg: string | null; cancelled: boolean; startedMs: number; collectedEvents: typeof collectedEvents });
             };
             // Queue in the global pool; spawn only once a slot is granted. If the
             // task is dequeued (queued-cancel) while waiting, grant=false → skip.
@@ -286,13 +282,53 @@ export async function POST(req: Request) {
               children.add(child);
               child.stdout?.setEncoding("utf-8");
               child.stderr?.setEncoding("utf-8");
-              child.stdout?.on("data", (chunk: string) => {
-                const vm = chunk.match(/VERDICT:[^\n]*/i);
-                if (vm) verdict = vm[0];
-                // 捕捉显式错误行;多行时保留最后一条(最贴近失败处)。
-                const em = chunk.match(/ERROR:[^\n]*/i);
-                if (em) errMsg = em[0];
-              });
+              // ADR-0049 决议 5：spawn 后立即宣告 item-running，让客户端建立
+              // reportNum→行映射，后续 tool 事件凭 itemKey 路由到正确卡片。
+              send({ type: "item-running", reportNum: num, url });
+              if (isClaude) {
+                // stream-json: buffer lines, parse each event, forward tool events
+                // and extract VERDICT/ERROR from parsed text.
+                let textBuf = "";
+                let lineBuf = "";
+                const processLine = (line: string) => {
+                  const ev = parseClaudeEvent(line);
+                  if (ev?.text) {
+                    textBuf += ev.text;
+                    // 取最后一条匹配（与原逐 chunk 覆盖语义一致：多条时最贴近失败处的胜出）。
+                    const vms = textBuf.match(/VERDICT:[^\n]*/gi);
+                    if (vms?.length) verdict = vms[vms.length - 1];
+                    const ems = textBuf.match(/ERROR:[^\n]*/gi);
+                    if (ems?.length) errMsg = ems[ems.length - 1];
+                  }
+                  if (ev?.tool) {
+                    const detail = ev.detail || undefined;
+                    send({ type: "tool", itemKey: num, name: ev.tool, ...(detail ? { detail } : {}) });
+                    collectedEvents.push({ type: "tool", name: ev.tool, ...(detail ? { detail } : {}), ts: Date.now() });
+                  }
+                  if (ev?.error) sawError = true;
+                };
+                child.stdout?.on("data", (chunk: string) => {
+                  lineBuf += chunk;
+                  let nl: number;
+                  while ((nl = lineBuf.indexOf("\n")) !== -1) {
+                    const line = lineBuf.slice(0, nl).trim();
+                    lineBuf = lineBuf.slice(nl + 1);
+                    if (line) processLine(line);
+                  }
+                });
+                // Flush any trailing line the CLI didn't newline-terminate.
+                child.on("close", () => {
+                  if (lineBuf.trim()) { processLine(lineBuf.trim()); lineBuf = ""; }
+                });
+              } else {
+                // Non-Claude: plain text stdout, regex-sniff VERDICT/ERROR (legacy path).
+                child.stdout?.on("data", (chunk: string) => {
+                  const vm = chunk.match(/VERDICT:[^\n]*/i);
+                  if (vm) verdict = vm[0];
+                  const em = chunk.match(/ERROR:[^\n]*/i);
+                  if (em) errMsg = em[0];
+                });
+              }
               // 逐行分类 stderr,而非裸嗅探 "error|fatal":openCode/Claude 会把进度
               // 遥测(横幅、模型行、MCP 透传)写到 stderr,裸词会误判干净运行为失败 —
               // 与 /api/run 同一套 per-CLI 分类器(spec.stderrIsFatal,回退 generic)。
@@ -380,6 +416,10 @@ export async function POST(req: Request) {
                     finishedAt: itemStartedMs != null ? itemEndedMs : undefined,
                     reason,
                   });
+                  // ADR-0049：折叠收集到的逐工具事件为步骤时间线（供子台账 + 登记表）。
+                  const itemSteps = itemOk && outcome.collectedEvents.length > 0
+                    ? buildRunLedgerSteps(outcome.collectedEvents)
+                    : undefined;
                   // ADR-0042 决议 6：逐项结论同步入服务端登记表（幂等，事件乱序安全）。
                   recordBatchItem(batchId, {
                     key: urls[i],
@@ -391,6 +431,7 @@ export async function POST(req: Request) {
                     startedAt: itemStartedMs,
                     finishedAt: itemStartedMs != null ? itemEndedMs : undefined,
                     reason,
+                    ...(itemSteps?.length ? { steps: itemSteps } : {}),
                   });
                   // ADR-0046：成功子项即时写一条独立子台账行（不等批量终态），
                   // 使其能被 /jobs/[id] 当独立工作器打开。fire-and-forget，失败不反噬 run。
@@ -406,6 +447,7 @@ export async function POST(req: Request) {
                         cliId,
                         model,
                         reportNum: num,
+                        steps: itemSteps,
                       }));
                     } catch (e) {
                       console.error("[run-ledger] batch child append failed:", e instanceof Error ? e.message : e);

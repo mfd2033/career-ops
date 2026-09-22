@@ -22,6 +22,8 @@ export type JobItem = {
   startedAt?: number;
   finishedAt?: number;
   reason?: string;
+  // ADR-0049：per-item 逐工具步骤（批量运行中实时更新，终态后保留供展开查看）。
+  steps?: Array<{ kind: "tool" | "status"; label: string; ts: number }>;
   ts: number;
 };
 // ADR-0042 决议 1：粗阶段——route 层自己真实执行的编排段，终态无阶段。
@@ -695,10 +697,46 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
                 if (ev.type === "open") {
                   // ADR-0042 决议 6：服务端逐项登记键——详情页凭它跨页签恢复清单。
                   patch(id, (j) => ({ ...j, serverBatchId: typeof ev.batchId === "string" ? ev.batchId : undefined }));
+                } else if (ev.type === "item-running") {
+                  // ADR-0049：worker spawn 即时宣告，建立 reportNum→key 映射并创建占位 item。
+                  const rNum = typeof ev.reportNum === "number" ? ev.reportNum : 0;
+                  const itemUrl = typeof ev.url === "string" ? ev.url : "";
+                  patch(id, (j) => ({
+                    ...j,
+                    items: [
+                      ...(j.items ?? []).filter((it) => it.key !== itemUrl),
+                      { key: itemUrl, label: itemUrl, ok: false, reportNum: rNum, steps: [], ts: Date.now() },
+                    ].slice(-100),
+                  }));
                 } else if (ev.type === "tool") {
-                  acc.steps.push({ kind: "tool", label: ev.name, ts: Date.now() });
-                  if (acc.steps.length > STEPS_CAP_MEMORY) acc.steps.splice(0, acc.steps.length - STEPS_CAP_MEMORY);
-                  patch(id, (j) => ({ ...j, steps: capSteps([...j.steps, { kind: "tool", label: ev.name, ts: Date.now() }]) }));
+                  // ADR-0049：带 itemKey 的 tool 事件路由到对应 item 的 steps；无 itemKey 则走批量级步骤流（旧行为）。
+                  if (typeof ev.itemKey === "number") {
+                    const name = String(ev.name ?? "");
+                    const detail = typeof ev.detail === "string" && ev.detail ? String(ev.detail).slice(0, 80) : undefined;
+                    patch(id, (j) => ({
+                      ...j,
+                      items: (j.items ?? []).map((it) => {
+                        if (it.reportNum !== ev.itemKey) return it;
+                        const prev = it.steps ?? [];
+                        // detail 事件就地并入最近同名裸行（与 buildRunLedgerSteps 同口径）。
+                        if (detail) {
+                          for (let si = prev.length - 1; si >= 0; si--) {
+                            if (prev[si].kind === "tool" && prev[si].label === name) {
+                              const next = prev.slice();
+                              next[si] = { ...next[si], label: `${name}: ${detail}` };
+                              return { ...it, steps: next };
+                            }
+                          }
+                        }
+                        const label = detail ? `${name}: ${detail}` : name;
+                        return { ...it, steps: [...prev, { kind: "tool" as const, label, ts: Date.now() }].slice(-50) };
+                      }),
+                    }));
+                  } else {
+                    acc.steps.push({ kind: "tool", label: ev.name, ts: Date.now() });
+                    if (acc.steps.length > STEPS_CAP_MEMORY) acc.steps.splice(0, acc.steps.length - STEPS_CAP_MEMORY);
+                    patch(id, (j) => ({ ...j, steps: capSteps([...j.steps, { kind: "tool", label: ev.name, ts: Date.now() }]) }));
+                  }
                 } else if (ev.type === "status") {
                   // ADR-0042 决议 5：[i/n] 计数行入 batchPos（徽章用），原行仍进步骤流。
                   const m = typeof ev.label === "string" ? ev.label.match(/^\[(\d+)\/(\d+)\]/) : null;
@@ -731,7 +769,13 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
                   patch(id, (j) => ({
                     ...j,
                     // ADR-0042 决议 5：结构化逐项清单（详情页渲染）；按 key 幂等。
-                    items: [...(j.items ?? []).filter((it) => it.key !== jobItem.key), jobItem].slice(-100),
+                    // ADR-0049：保留 item-running 占位时累积的 steps。
+                    items: [...(j.items ?? []).filter((it) => {
+                      if (it.key !== jobItem.key) return true;
+                      // 同 key 的旧行是 item-running 占位——把它的 steps 带入最终结果。
+                      if (it.steps?.length && !jobItem.steps) jobItem.steps = it.steps;
+                      return false;
+                    }), jobItem].slice(-100),
                     steps: capSteps([...j.steps, { kind: "status", label: itemLabel, ts: Date.now() }]),
                   }));
                 } else if (ev.type === "text") {

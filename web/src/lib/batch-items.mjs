@@ -31,6 +31,7 @@
  *   reason?: string,        // 失败/跳过原因（服务端产出，ADR-0041 决议 6）
  *   stderrTail?: string,    // 失败项 stderr 尾部（≤400，路由侧滚动截断）；随快照落
  *                           // 台账供历史回看查死因（秒死不可诊 #132/#1027）。成功项不带。
+ *   steps?: Array<{kind: string, label: string, ts?: number}>, // ADR-0049：折叠后的逐工具步骤
  *   ts?: number,            // 可省略——登记表写入时补当前时刻
  * }} BatchItem
  */
@@ -106,6 +107,8 @@ export function recordBatchItem(batchId, item) {
       typeof item.stderrTail === "string" && item.stderrTail
         ? item.stderrTail.slice(0, 400)
         : undefined,
+    // ADR-0049：逐工具步骤透传（有则存，无则不设）。
+    steps: Array.isArray(item.steps) && item.steps.length > 0 ? item.steps : undefined,
     ts: typeof item.ts === "number" ? item.ts : Date.now(),
   });
 }

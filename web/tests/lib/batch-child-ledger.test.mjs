@@ -61,3 +61,30 @@ test("batchItemDetailHref: only a known-batch success item is clickable", () => 
   assert.equal(batchItemDetailHref(undefined, { key: "k", ok: true }), null, "no parent batch id -> not clickable");
   assert.equal(batchItemDetailHref("b1", null), null);
 });
+
+// ADR-0049: steps persistence on child ledger records.
+test("buildBatchChildRecord: non-empty steps array is persisted", () => {
+  const steps = [
+    { kind: "tool", label: "WebFetch: https://x.com", ts: 100 },
+    { kind: "tool", label: "Read", ts: 200 },
+  ];
+  const rec = buildBatchChildRecord({
+    batchId: "b1", childKind: "batch-evaluate-item",
+    key: "https://x/1", label: "x", startedAt: 1, finishedAt: 9,
+    reportNum: 10, steps,
+  });
+  assert.deepEqual(rec.steps, steps);
+});
+
+test("buildBatchChildRecord: empty or absent steps field is omitted", () => {
+  const rec1 = buildBatchChildRecord({
+    batchId: "b1", childKind: "batch-evaluate-item",
+    key: "k", label: "k", startedAt: 1, finishedAt: 2, steps: [],
+  });
+  assert.equal("steps" in rec1, false, "empty array -> no steps field");
+  const rec2 = buildBatchChildRecord({
+    batchId: "b1", childKind: "batch-evaluate-item",
+    key: "k", label: "k", startedAt: 1, finishedAt: 2,
+  });
+  assert.equal("steps" in rec2, false, "undefined -> no steps field");
+});

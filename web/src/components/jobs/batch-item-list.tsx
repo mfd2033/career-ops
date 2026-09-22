@@ -67,6 +67,14 @@ export function BatchItemList({
               )}
             </div>
             {!it.ok && it.reason && <div className="mt-1 truncate pl-5 text-[11px] text-faint" title={it.reason}>— {it.reason}</div>}
+            {/* ADR-0049：运行中项内联显示最后 5 步工具动作。 */}
+            {it.steps && it.steps.length > 0 && (
+              <div className="mt-1 pl-5 text-[10px] leading-tight text-faint/80">
+                {it.steps.slice(-5).map((s, i) => (
+                  <div key={i} className="truncate" title={s.label}>{s.kind === "tool" ? "\u25B8" : "\u00B7"} {s.label}</div>
+                ))}
+              </div>
+            )}
           </>
         );
         return (

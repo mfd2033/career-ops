@@ -42,10 +42,11 @@ export function batchChildId(batchId, key) {
  *   model?: string,
  *   reportNum?: number,       // evaluate 报告号（跳 /report/{num}）
  *   trackerN?: string | number, // checkup 报告键（跳 /api/checkup-report?n=）
+ *   steps?: Array<{kind: string, label: string, ts?: number}>, // ADR-0049：折叠后的逐工具步骤
  * }} p
  * @returns {object} 可直接交给 appendRunRecord 的子记录
  */
-export function buildBatchChildRecord({ batchId, childKind, key, label, startedAt, finishedAt, cliId, model, reportNum, trackerN }) {
+export function buildBatchChildRecord({ batchId, childKind, key, label, startedAt, finishedAt, cliId, model, reportNum, trackerN, steps }) {
   const rec = {
     id: batchChildId(batchId, key),
     parentId: batchId,
@@ -62,6 +63,8 @@ export function buildBatchChildRecord({ batchId, childKind, key, label, startedA
   // 报告目标二选一。
   if (typeof reportNum === "number") rec.reportNum = reportNum;
   if (trackerN != null && trackerN !== "") rec.trackerN = String(trackerN);
+  // ADR-0049：逐工具步骤折叠后写入（同 ADR-0047 单任务 steps 格式）。
+  if (Array.isArray(steps) && steps.length > 0) rec.steps = steps;
   return rec;
 }
 
