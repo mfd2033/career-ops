@@ -9,10 +9,11 @@
 // Post-fix (ADR-0020): POST /api/run returns {runId} immediately and all
 // worker events flow through ONE multiplexed /api/events connection per tab.
 // This harness now asserts the fix holds:
-//   1. start `next start` on 127.0.0.1:3100 (PRODUCTION build — run `npm run build`
+//   1. start `next start` on :3100 (PRODUCTION build — run `npm run build`
 //      in web/ first; production because turbopack dev never hydrates headless
 //      here, and it matches the launcher's standalone-server form)
-//   2. reverse-proxy on 127.0.0.1:4100 -> 3100; POST /api/run with kind
+//   2. reverse-proxy on localhost:4100 -> 3100 (the proxy connects upstream over
+//      127.0.0.1 — bind-side literal, see _custom.md localhost rule); POST /api/run with kind
 //      "__hold__" is stubbed by the proxy as an immediate {runId} (transport
 //      stub: simulates task starts without spawning a real CLI). The proxy
 //      COUNTS currently-held forwarded connections to /api/events.
@@ -35,7 +36,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WEB_DIR = path.resolve(__dirname, "..", "..");
 const DEV_PORT = 3100;
 const PROXY_PORT = 4100;
-const ORIGIN = `http://127.0.0.1:${PROXY_PORT}`;
+// The origin the browser loads — access address, so localhost per _custom.md.
+const ORIGIN = `http://localhost:${PROXY_PORT}`;
 const FETCH_TIMEOUT_MS = 15_000;
 const FAST_MS = 2_000; // verdict threshold: a click/fetch slower than this = stalled
 const N_TASKS = 8; // > 6: would saturate the old per-task-stream transport
@@ -145,7 +147,7 @@ async function startTasks(page, n) {
 // --- main ---------------------------------------------------------------------
 try {
   log("waiting for dev server on :" + DEV_PORT + " (cold compile can take a while)…");
-  await waitReady(`http://127.0.0.1:${DEV_PORT}/api/version`, 240_000);
+  await waitReady(`http://localhost:${DEV_PORT}/api/version`, 240_000);
   await startProxy();
   log("proxy ready on :" + PROXY_PORT);
 

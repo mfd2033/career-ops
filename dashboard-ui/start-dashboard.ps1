@@ -195,7 +195,7 @@ public class TrayApp {
         psi.RedirectStandardError = true;
         psi.EnvironmentVariables["CAREER_OPS_ROOT"] = careerOpsRoot;
         psi.EnvironmentVariables["PORT"] = port.ToString();
-        psi.EnvironmentVariables["HOSTNAME"] = "127.0.0.1";
+        psi.EnvironmentVariables["HOSTNAME"] = "127.0.0.1";  // bind address only - always an explicit IPv4 literal, never "localhost" (Windows resolves localhost to ::1 first and the standalone server would bind the IPv6 loopback only)
         psi.EnvironmentVariables["NODE_ENV"] = "production";
         
         _serverProcess = new Process();
@@ -233,7 +233,8 @@ public class TrayApp {
         for (int i = 0; i < maxAttempts; i++) {
             Thread.Sleep(500);
             try {
-                HttpWebRequest request = (HttpWebRequest)WebRequest.Create("http://127.0.0.1:" + port + "/api/version");
+                // Access URL uses "localhost" per the house rule; .NET falls back to 127.0.0.1 when ::1 is unanswered.
+                HttpWebRequest request = (HttpWebRequest)WebRequest.Create("http://localhost:" + port + "/api/version");
                 request.Timeout = 1000;
                 WebResponse response = request.GetResponse();
                 HttpWebResponse hr = (HttpWebResponse)response;

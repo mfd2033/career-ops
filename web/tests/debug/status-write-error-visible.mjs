@@ -19,7 +19,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WEB_DIR = path.resolve(__dirname, "..", "..");
 const REPO_DIR = path.resolve(WEB_DIR, "..");
 const PORT = Number(process.env.PORT ?? 3000);
-const ORIGIN = `http://127.0.0.1:${PORT}`;
+const ORIGIN = `http://localhost:${PORT}`;
 const SHOT = path.join(REPO_DIR, ".scratch", "status-error-header.png");
 const TAG = "[DEBUG-a4f2]";
 const log = (...a) => console.log(TAG, ...a);

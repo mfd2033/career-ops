@@ -17,6 +17,9 @@ func startServer(nodePath, serverDir, careerRoot string, port int) *exec.Cmd {
 	cmd.Env = append(os.Environ(),
 		"CAREER_OPS_ROOT="+careerRoot,
 		"PORT="+strconv.Itoa(port),
+		// Bind address, not an access URL — same rationale as platform_windows.go:
+		// bind the explicit IPv4 loopback, hand the user an http://localhost:<port>
+		// URL (the openBrowser call sites in launcher.go).
 		"HOSTNAME=127.0.0.1",
 	)
 	if err := cmd.Start(); err != nil {

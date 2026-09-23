@@ -16,7 +16,7 @@
 // both surfaces show 12m34s after ONE extra fetch per index, no reload).
 //
 // Loop shape (no real CLI, no tokens spent):
-//   1. `next dev --webpack` on 127.0.0.1:3100 from web/, with distDir=.next-dbg so the
+//   1. `next dev --webpack` on localhost:3100 from web/, with distDir=.next-dbg so the
 //      live .next / the packaged standalone runtime on :3000 is never touched.
 //   2. Playwright page.routes stub the whole worker backend:
 //        POST /api/run            → { runId }   (its body names the posting URL)
@@ -50,7 +50,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WEB_DIR = path.resolve(__dirname, "..", "..");
 const DIST_DIR = ".next-dbg";
 const PORT = 3100;
-const ORIGIN = `http://127.0.0.1:${PORT}`;
+const ORIGIN = `http://localhost:${PORT}`;
 
 const RUN_ID = "repro-eval-run";
 const TRUE_DURATION = 754; // seconds → fmtDuration → 12m34s

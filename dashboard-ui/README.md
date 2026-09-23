@@ -29,11 +29,18 @@ Once a runtime is found it:
    `cv.md` / `data/` / `reports/` from wherever the exe sits (like the Go TUI),
 2. picks a free port (3000+), starts the server with `CAREER_OPS_ROOT` / `PORT` /
    `HOSTNAME` set, and waits until it answers,
-3. opens the default browser at `http://localhost:<port>` (the server binds
-   127.0.0.1, but the browser opens "localhost" so the origin matches the dev
-   workflow's `http://localhost:3000` and localStorage prefs are shared), then stays alive
-   (reusing an already-running instance if one is up — double-clicking again
-   just re-opens the browser).
+3. opens the default browser at `http://localhost:<port>` — **every access URL
+   handed to the user or to a health poll in this launcher is `localhost`, never
+   `127.0.0.1`** (fork house rule in `modes/_custom.md`; the browser extension
+   still probes `127.0.0.1` — see `extension/background.js`). `HOSTNAME` is the
+   *bind* address and stays an explicit
+   IPv4 literal: Windows resolves `localhost` to `::1` first, so binding
+   `localhost` would put the server on the IPv6 loopback only. Binding `127.0.0.1`
+   is still reachable as `localhost` — Chromium, .NET and Node (autoSelectFamily)
+   all fall back — and the origin matches the dev workflow's
+   `http://localhost:3000`, so localStorage prefs are shared. Then the launcher
+   stays alive (reusing an already-running instance if one is up — double-clicking
+   again just re-opens the browser).
 
 Once up, the process lives in the **system tray** (not the taskbar). Right-click
 the tray icon for a menu:
@@ -125,7 +132,7 @@ Get-Item career-dashboard-launcher.exe
 # 3. Launch and verify the API answers (the port is written to
 #    .dashboard-runtime\v{N}\LOCK):
 .\career-dashboard-launcher.exe
-Invoke-WebRequest "http://127.0.0.1:3000/api/version"   # expect HTTP 200
+Invoke-WebRequest "http://localhost:3000/api/version"   # expect HTTP 200
 
 # 4. Diagnostics: if anything looks wrong, read the tray log
 Get-Content .dashboard-runtime\v{N}\tray-debug.log

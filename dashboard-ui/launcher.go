@@ -186,6 +186,9 @@ func setupTrayLog(dir string) {
 // forever), so when every port in the range is taken we must NOT fall back to an
 // OS-assigned port; the caller surfaces the collision instead.
 func pickFreePort() (int, error) {
+	// Availability is probed on the IPv4 loopback — the same address the server
+	// binds (HOSTNAME in platform_windows.go / platform_other.go), so "free here"
+	// and "bindable there" agree.
 	for p := 3000; p <= 3040; p++ {
 		ln, err := net.Listen("tcp", "127.0.0.1:"+strconv.Itoa(p))
 		if err == nil {
@@ -198,7 +201,9 @@ func pickFreePort() (int, error) {
 
 func httpAlive(port int) bool {
 	c := http.Client{Timeout: 1500 * time.Millisecond}
-	resp, err := c.Get(fmt.Sprintf("http://127.0.0.1:%d/api/version", port))
+	// Access URL uses localhost per the house rule (_custom.md); Go's dialer
+	// walks the resolved address list, so ::1 refusing falls back to 127.0.0.1.
+	resp, err := c.Get(fmt.Sprintf("http://localhost:%d/api/version", port))
 	if err != nil {
 		return false
 	}

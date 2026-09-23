@@ -17,6 +17,10 @@ func startServer(nodePath, serverDir, careerRoot string, port int) *exec.Cmd {
 	cmd.Env = append(os.Environ(),
 		"CAREER_OPS_ROOT="+careerRoot,
 		"PORT="+strconv.Itoa(port),
+		// Bind address, not an access URL: keep the IPv4 loopback literal. Windows
+		// resolves localhost to ::1 first, so HOSTNAME=localhost would bind the
+		// wrong stack. Everything user-facing opens http://localhost:<port> instead
+		// (clients fall back to 127.0.0.1), see the openBrowser call sites in launcher.go.
 		"HOSTNAME=127.0.0.1",
 	)
 	cmd.SysProcAttr = &syscall.SysProcAttr{

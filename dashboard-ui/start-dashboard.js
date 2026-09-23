@@ -136,6 +136,9 @@ function startServer() {
     ...process.env,
     CAREER_OPS_ROOT: careerOpsRoot,
     PORT: port.toString(),
+    // Bind address, not an access URL: keep the explicit IPv4 loopback literal.
+    // Windows resolves `localhost` to ::1 first, so HOSTNAME=localhost would
+    // bind the IPv6 loopback and break the 127.0.0.1 clients (extension probe).
     HOSTNAME: '127.0.0.1',
     NODE_ENV: 'production'
   };
@@ -177,7 +180,9 @@ function waitForServerReady(targetPort, maxAttempts = 30) {
 
   const check = () => {
     attempts++;
-    const req = http.get(`http://127.0.0.1:${targetPort}/api/version`, (res) => {
+    // Access URL uses `localhost` per the house rule (_custom.md); Node's
+    // autoSelectFamily falls back to 127.0.0.1 when ::1 refuses the connect.
+    const req = http.get(`http://localhost:${targetPort}/api/version`, (res) => {
       if (res.statusCode === 200) {
         log(`server ready: port=${targetPort}`);
         openBrowser();

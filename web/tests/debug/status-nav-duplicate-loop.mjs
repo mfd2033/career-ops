@@ -21,7 +21,7 @@ import { chromium } from "playwright-core";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WEB_DIR = path.resolve(__dirname, "..", "..");
 const PORT = Number(process.env.PORT ?? 3000);
-const ORIGIN = `http://127.0.0.1:${PORT}`;
+const ORIGIN = `http://localhost:${PORT}`;
 const TAG = "[DEBUG-a4f2]";
 const log = (...a) => console.log(TAG, ...a);
 const norm = (t) => String(t ?? "").replace(/\s+/g, " ").trim();

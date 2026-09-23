@@ -18,7 +18,7 @@ career-ops **网页版 dashboard** 的 Windows 启动器——把 web UI（`web/
 
 1. 以**自身可执行文件目录**为锚点确定 career-ops 根目录——从 exe 所在位置读取 `cv.md` / `data/` / `reports/`（与 Go TUI 一致），
 2. 选取空闲端口（3000+），设置 `CAREER_OPS_ROOT` / `PORT` / `HOSTNAME` 后启动服务器，并等待其响应，
-3. 在 `http://localhost:<port>` 打开默认浏览器（服务器绑定 127.0.0.1，但浏览器打开的是 "localhost"，使其与调试工作流 `http://localhost:3000` 同源，localStorage 偏好共享），然后保持常驻（若已有实例在运行则复用之——再次双击只会重新打开浏览器）。
+3. 在 `http://localhost:<port>` 打开默认浏览器（**本启动器交给用户或用于健康轮询的访问地址一律 `localhost`，不用 `127.0.0.1`**——fork 家规见 `modes/_custom.md`；浏览器扩展仍探测 `127.0.0.1`，见 `extension/background.js`）。`HOSTNAME` 是**监听**地址，保持显式 IPv4 字面量：Windows 下 `localhost` 先解析到 `::1`，绑成 `localhost` 会只监听 IPv6 回环。绑 `127.0.0.1` 仍可用 `localhost` 访问——Chromium / .NET / Node（autoSelectFamily）都会回退——且与调试工作流 `http://localhost:3000` 同源，localStorage 偏好共享。然后保持常驻（若已有实例在运行则复用之——再次双击只会重新打开浏览器）。
 
 进程启动后驻留在**系统托盘**（不在任务栏）。右键托盘图标有菜单：
 
@@ -91,7 +91,7 @@ Get-Item career-dashboard-launcher.exe
 
 # 3. 启动并验证 API 是否应答（端口号写在 .dashboard-runtime\v{N}\LOCK 里）：
 .\career-dashboard-launcher.exe
-Invoke-WebRequest "http://127.0.0.1:3000/api/version"   # 期望 HTTP 200
+Invoke-WebRequest "http://localhost:3000/api/version"   # 期望 HTTP 200
 
 # 4. 诊断：若行为异常，查看托盘日志
 Get-Content .dashboard-runtime\v{N}\tray-debug.log
