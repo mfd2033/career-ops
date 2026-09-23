@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import Script from "next/script";
 import { inter, instrumentSerif, instrumentSerifItalic } from "@/lib/fonts";
 import { AppShell } from "@/components/app-shell";
+import { ExtNavBridge } from "@/components/ext-nav-bridge";
 import { LangProvider } from "@/lib/i18n/context";
 import "./globals.css";
 
@@ -43,6 +44,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <Script id="career-ops-theme" strategy="beforeInteractive" dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
         <Script id="career-ops-lang" strategy="beforeInteractive" dangerouslySetInnerHTML={{ __html: LANG_SCRIPT }} />
         <LangProvider>
+          {/* 扩展点击徽章 → web 端前端路由跳转（不刷新），挂全局见 ADR-0055 修订。 */}
+          <ExtNavBridge />
           <AppShell>{children}</AppShell>
         </LangProvider>
       </body>

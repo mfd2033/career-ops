@@ -1,6 +1,6 @@
 # Glossary — 浏览器扩展（BOSS直聘 + 猎聘，就地评估）
 
-协同阅读：`docs/adr/0002-boss-zhipin-extension-inline-evaluation.md`、`docs/adr/0005-liepin-extension-adaptation.md`
+协同阅读：`docs/adr/0002-boss-zhipin-extension-inline-evaluation.md`、`docs/adr/0005-liepin-extension-adaptation.md`、`docs/adr/0055-report-jump-reuses-open-web-tab.md`
 
 ## 扩展本体
 
@@ -37,3 +37,6 @@
 - **工具栏连接状态徽章（connection-status badge）**：`background.js` 用 `chrome.action.setBadgeText`/`setBadgeBackgroundColor` 在插件图标上外显本地 web 服务在线状态——绿底 `✓`=已连接、红底 `!`=未连接，全局常显（不带 `tabId`），事件驱动 + 5s 短缓存刷新。决策见 `docs/adr/0050-toolbar-connection-status-badge.md`。
 - **origin-guard 放行口**：对 loopback + 固定扩展 ID 的 `chrome-extension://{id}` Origin 放行并回 CORS 头；其余跨站请求仍 403。扩展 ID 由 `manifest.json` 的 `key` 固定。
 - **扩展 ID（extension id）**：MV3 由扩展 `key` 派生的稳定标识，后端据此识别可信来源。
+- **web 端标签页复用（reuse open web tab）**：`open-report` 的目标解析策略——已开着 web 端标签页时不再新建标签页，而是激活它并把报告开在它里面（前端路由跳转，不刷新）；目标标签页已在同一报告 URL 时只聚焦不跳转；解析不到任何 web 端标签页才退回 `chrome.tabs.create`；端口探测失败则维持报错 toast、不做任何跳转。决策见 `docs/adr/0055-report-jump-reuses-open-web-tab.md`（含 2026-09-23 修订）。
+- **报告跳转目标解析（report target resolution）**：从浏览器已开标签页里挑出跳转目标的纯逻辑——候选筛选（协议 http + 主机 `localhost`/`127.0.0.1` + 端口落在 3000-3040 的粗判，不做身份握手）、优先级排序（存活端口优先 → 当前窗口 active → 当前窗口首个 → 全库首个）、同 URL 幂等判定、无候选兜底判定，并产出成对的 `path`（前端路由目标）与 `url`（回退整页导航目标）。抽在 `*-pure.js`（不引用 `chrome`/`window`/`document`）供 node 单测，`chrome.tabs`/`chrome.windows` 调用层仅手工验证。
+- **扩展 → web 前端路由跳转（extension→web route navigation）**：SW 请 web 端自己跳到某张报告、避免整页刷新的反向通道（ADR-0055 修订；ADR-0007 的桥自此双向）。链路：SW `chrome.tabs.sendMessage({type:"career-navigate", path})` → web-bridge.js 转成页面消息 `__careerExt:nav` → 根 layout 的 `ExtNavBridge` 监听后 `router.push(path)` → 回 `__careerExt:nav-ack` → web-bridge 据此应答 SW。页面 800ms 不应答（旧版 web / 未 hydrate）时 SW 回退整页导航；页面只接受 `/report/{数字}` 目标，白名单外不应答。

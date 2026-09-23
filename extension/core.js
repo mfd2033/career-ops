@@ -172,11 +172,15 @@
     return b;
   }
 
-  function openReport(num) {
+  // 跳转落点（复用已打开的 web 端 / 新开标签页）由 background 解析（ADR-0055）：
+  // 成功时把结果交给 onDone，调用方据此按实际落点写文案；失败仍是同一句 toast。
+  function openReport(num, onDone) {
     sendMsg({ type: "open-report", num }, (res) => {
       if (chrome.runtime.lastError || !res || !res.ok) {
         showToast(res && res.error ? res.error : "本地报告打不开：本地 web 服务可能未运行", true);
+        return;
       }
+      if (onDone) onDone(res);
     });
   }
 
@@ -492,10 +496,17 @@
     settleButtons();
     stopEvalPoll();
     if (entry) {
-      showToast(`已评估 ${entry.score || ""}，报告 #${entry.reportNum}，已打开`.trim());
       // 评估完成自动打开报告页（用户确认过的手势：单职位评估结束后直接看报告，
       // 不再弹 confirm 让用户多点一次；confirm 在后台标签页还可能被浏览器拦截）。
-      setTimeout(() => openReport(entry.reportNum), 400);
+      // 文案按实际落点写：复用已打开的 web 端，或没找到 web 端标签页而新开（ADR-0055）。
+      setTimeout(
+        () =>
+          openReport(entry.reportNum, (res) => {
+            const where = res.mode === "created" ? "已在新标签页打开" : "已在本地 web 端打开";
+            showToast(`已评估 ${entry.score || ""}，报告 #${entry.reportNum}，${where}`.trim());
+          }),
+        400
+      );
     }
   }
 

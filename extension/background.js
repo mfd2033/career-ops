@@ -567,6 +567,36 @@ async function relayScanBatch(scanId, offers) {
   return j;
 }
 
+// ---- 报告跳转目标解析（ADR-0055）------------------------------------------
+//
+// 点击「已评估」徽章不再无条件新开标签页：先在已开标签页里找一个本项目 web 端，
+// 命中就激活它并把报告开在它里面，找不到才退回 chrome.tabs.create。候选筛选、端口
+// 优先、「最近活跃」近似规则、同 URL 幂等、兜底与报错分支全在 report-target-pure.js
+// （可单测），此处只做 chrome 接线。
+importScripts("report-target-pure.js");
+const REPORT_TARGET = self.__careerOpsReportTargetPure;
+if (!REPORT_TARGET) throw new Error("[bg] report-target-pure.js 未加载:扩展文件不完整");
+
+// 前端路由跳转应声窗口:页面 hydrate 后是同步应答的;这段只用来兜住「还没 hydrate /
+// 老版本 web 没有监听器」——那时必须回退整页导航,不能让点击悬空。
+const NAV_ROUTE_TIMEOUT_MS = 1200;
+
+/**
+ * 请 web 端在自己页面里前端路由跳到 path（不刷新，ADR-0055 修订）。
+ * 经 web-bridge.js 的 career-navigate 入口转发给页面,页面 ExtNavBridge 跳转后回 ack。
+ * 没 ack（旧版 web / 未 hydrate / content script 不在）→ 用 url 整页导航兜底。
+ * @returns {Promise<"routed"|"reloaded">}
+ */
+async function navigateInWebTab(tabId, path, url) {
+  const ack = await Promise.race([
+    chrome.tabs.sendMessage(tabId, { type: "career-navigate", path }).catch(() => null),
+    new Promise((resolve) => setTimeout(() => resolve(null), NAV_ROUTE_TIMEOUT_MS)),
+  ]);
+  if (ack && ack.ok) return "routed";
+  await chrome.tabs.update(tabId, { url, active: true });
+  return "reloaded";
+}
+
 // ---- message routing ------------------------------------------------------
 
 const selectionByTab = new Map(); // tabId → string[] (selected posting URLs)
@@ -635,17 +665,46 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       }
       case "open-report": {
         try {
-          const port = await ensureLivePort();
-          const num = String(msg.num || "").replace(/[^0-9]/g, "");
-          if (!num) {
-            sendResponse({ ok: false, error: "无效报告号" });
+          // 端口探测失败即报错、不跳转：把一个已经连不上的页面推到用户面前，比直说
+          // 「web 服务没跑」更困惑（ADR-0055 决策 8）。注意探测与 API base 走
+          // 127.0.0.1，而打开给用户看的页面一律用 localhost——两者是不同 origin，
+          // 勿「顺手统一」（见 report-target-pure.js 的 reportUrl）。
+          const port = await ensureLivePort().catch(() => null);
+          // 候选池来自全库标签页；「当前窗口」取最近聚焦窗口，取不到则退化用发起本次
+          // 点击的招聘站 tab 所在窗口（content script 的 sender.tab 就是它）。
+          const tabs = await chrome.tabs.query({}).catch(() => []);
+          let currentWindowId = null;
+          try {
+            const w = await chrome.windows.getLastFocused({});
+            currentWindowId = w && typeof w.id === "number" ? w.id : null;
+          } catch {
+            /* 窗口接口不可用：退到 sender.tab（下面兜） */
+          }
+          if (currentWindowId == null && sender && sender.tab) {
+            currentWindowId = typeof sender.tab.windowId === "number" ? sender.tab.windowId : null;
+          }
+
+          const target = REPORT_TARGET.pickReportTarget({ livePort: port, tabs, currentWindowId, num: msg.num });
+          if (target.action === "error") {
+            sendResponse({ ok: false, error: target.error });
             break;
           }
-          // 打开给用户看的页面一律用 localhost（modes/_custom.md）；上面的端口探测与
-          // API base 仍走 127.0.0.1——两者是不同 origin，探测依赖 IP 字面量，勿“顺手统一”。
-          const reportUrl = `http://localhost:${port}/report/${num}`;
-          await chrome.tabs.create({ url: reportUrl });
-          sendResponse({ ok: true, reportUrl });
+          if (target.action === "create") {
+            // 服务活着但没有任何 web 端标签页：退回今天的行为，别让用户点不动徽章。
+            await chrome.tabs.create({ url: target.url });
+            sendResponse({ ok: true, reportUrl: target.url, mode: "created" });
+            break;
+          }
+          // 复用：先把 web 端标签页提到前台，再请它自己前端路由跳过去（不刷新页面，
+          // ADR-0055 修订）；web 端没应声才回退整页导航。不 tabs.move 搬家，也不关
+          // 不动招聘站页面——用户切回去仍在原职位页。
+          await chrome.tabs.update(target.tabId, { active: true });
+          if (target.windowId != null) {
+            await chrome.windows.update(target.windowId, { focused: true }).catch(() => {});
+          }
+          // 已在同一报告页（navigate=false）就只聚焦，连消息都不发。
+          const mode = target.navigate ? await navigateInWebTab(target.tabId, target.path, target.url) : "focused";
+          sendResponse({ ok: true, reportUrl: target.url, mode });
         } catch (err) {
           sendResponse({ ok: false, error: err.message });
         }
