@@ -294,16 +294,23 @@ async function runPipeline({
   // claude-invocation.mjs — see its header for the policy and for why it is asserted on
   // built values rather than on this file's source. NEVER auto-submits; that
   // remains a prompt-level guarantee.
-  // Non-Claude CLIs get no tool flags from spec.args() at all, so their agents
-  // stay unrestricted here. That gap is route-wide (it applies to 'evaluate' too),
-  // not specific to pdf, and each CLI needs its own mechanism researched — tracked
-  // as #2507 rather than half-fixed here. On those CLIs the backend is the only
-  // INTENDED writer — the agent is not asked to write — but that is mitigation, not
-  // enforcement: the capability is still there for an injected posting to reach.
+  // CLIs with no scope of their own get no tool flags from spec.args() at all, so
+  // their agents stay unrestricted here. That gap is route-wide (it applies to
+  // 'evaluate' too), not specific to pdf, and each CLI needs its own mechanism
+  // researched — tracked as #2507 rather than half-fixed here. On those CLIs the
+  // backend is the only INTENDED writer — the agent is not asked to write — but
+  // that is mitigation, not enforcement: the capability is still there for an
+  // injected posting to reach. TWO runtimes now carry an audited scope of their
+  // own — claude (the branch below) and anything declaring spec.streamArgsFor,
+  // which is where the qoder-cn per-kind policy lives rather than here.
   // A CLI with its own structured stream gets the argv that turns it on, so its
   // stdout matches spec.parseEvent below; spec.args stays the plain-text argv the
   // envelope-parsing routes rely on.
-  const baseArgs = isClaude ? claudeCliArgs({ kind, prompt }) : (spec.streamArgs ?? spec.args)(prompt);
+  const baseArgs = spec.streamArgsFor
+    ? spec.streamArgsFor({ kind, prompt })
+    : isClaude
+      ? claudeCliArgs({ kind, prompt })
+      : (spec.streamArgs ?? spec.args)(prompt);
   // The config page's model picker applies to EVERY CLI uniformly. Absent a saved
   // model (or a CLI with no model flag), withModelFlag returns the args untouched
   // and the CLI keeps its own default.

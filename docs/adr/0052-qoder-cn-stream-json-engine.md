@@ -25,7 +25,7 @@ CodeBuddy 本机只有桌面端与配置目录，**没有 `cbc`/`codebuddy` 可�
 1. **范围**：只接 Qoder CN。`id: "qoder-cn"`、label `"Qoder (CN)"`、`bin: "qoderclicn"`、`url: "https://qoder.com.cn/"`。只接 CN 二进制（`qoderclicn.exe`），不接国际版 `qodercli.exe`。
 2. **argv 归属**：新建 `web/src/lib/qoder-invocation.mjs`，导出 `qoderCliArgs({kind, prompt})` 与 `parseQoderEvent(line)`。Qoder 与 Claude 的参数面差异集中在这一处，不在路由里分支。
 3. **argv 形状**：`-p --output-format stream-json --include-partial-messages <权限 flags> <prompt>`，**不带 `--verbose`**。`-p` 是无值布尔，prompt 走位置参数（实测可用）。
-4. **权限域单一来源**：工具 allow/deny 复用 `claude-invocation.mjs` 的 `toolScopeFor(kind)`，这里只做 flag 拼写映射（`--permission-mode accept_edits`、`--allowed-tools` / `--disallowed-tools`）。`clis.ts` 顶部「不许任何 runtime 给自己超出被审计者的权限」的约束由此落到第二个引擎。
+4. **权限域单一来源 + 超集补齐**：工具 allow/deny 复用 `claude-invocation.mjs` 的 `toolScopeFor(kind)`，只做 flag 拼写映射（`--permission-mode accept_edits`、`--allowed-tools` / `--disallowed-tools`）。**在此基础上叠加一层 Qoder 专属拒绝名单**（`Monitor`、`Agent`、`TaskCreate/Get/List/Stop/Update`、`CronCreate/Delete/List`、`ScheduleWakeup`、`Workflow`、`EnterWorktree/ExitWorktree`、`ImageGen`、`CreateGoal/GetGoal/UpdateGoal`）—— 因为 Qoder 的工具集是 Claude 的**超集**，而 `claude-invocation.mjs` 的规则是「能写/能执行的工具必须显式拒绝，绝不能只是不提」。实测依据（2026-09-23）：`--disallowed-tools Bash` 下 `Monitor` 仍把 `echo PERM-OK` 跑通并回报 stdout（tool_use 实测 `[Monitor, Read]`）；把 `Monitor` 一并拒掉后，同一 prompt 回答「会话里没有 shell 执行工具」（tool_use 实测 `[]`）。顺带实测：逗号拼接的 allow 与 deny 列表都被正确解析，且 deny 压过 allow。`clis.ts` 顶部「不许任何 runtime 给自己超出被审计者的权限」的约束由此落到第二个引擎；名单由测试逐字锁定。
 5. **权限守卫测试**：新增测试逐字断言 `qoderCliArgs` 在每个 kind 下携带的 allow/deny 与 `toolScopeFor(kind)` 的产物相等 —— 把约定变成不变式，接住「随手改了一份副本」这个漂移形态（与 #10 同源）。
 6. **事件解析**：`parseQoderEvent` 是薄包装，逐行委托 `parseClaudeEvent`；**唯一差异**是屏蔽 `result` 分支的 `tokens` / `costUsd`（Qoder CN 不申报用量；沿用 `run-cli-support.mjs` 自己那句「Null over an empty object: nothing to report must not look like an event」的口径）。
 7. **模型清单动态化**：新建 `web/src/lib/qoder-models.mjs`：`execFileSync(bin, ["--list-models"])` + 15s 超时 + 模块级 60s 缓存 + `resetQoderModelCache()`，并挂到 `detectClisCached({ refresh: true })`（与 opencode 完全同构；ADR-0015 的「手动重检必须真查」在两个引擎上是同一个意思）。
@@ -55,3 +55,5 @@ CodeBuddy 本机只有桌面端与配置目录，**没有 `cbc`/`codebuddy` 可�
 - 正面：Qoder CN 成为第 3 个有逐工具步骤的运行时；权限域仍是单一来源并被测试锁住；模型下拉跟 CLI 的真实清单走，不写静态副本。
 - 已知缺口（明示，非缺陷）：run 结束不显示用量（Qoder CN 只报 credits）；每次运行会执行用户的 Qoder SessionStart 钩子（含 Qoder Security）；批量评估里 Qoder 仍无步骤；`--list-models` 需登录，未登录时下拉为空（有文案提示）。
 - 后续：CodeBuddy 接入拆成阻塞式待办（前件：本机装 `cbc`/`codebuddy` 并实测行形状）；batch 泛化（`isClaude` → `spec.streamArgs + spec.parseEvent`）另立待办。
+- **维护点（决议 4 的代价）**：那份 Qoder 专属拒绝名单是对着 v1.1.41 `system/init` 列出的 29 个内置工具逐个核对出来的。测试只能锁住我们写下的名字，锁不住未来新增的名字——CLI 升级后若多出能执行/写入/改状态的工具，需要重新核对这份名单（与 #2507 同一类隐患）。
+- 相关未清事项：`/api/run` 之外还有 5 个路由各自手写 `isClaude ? [工具 flag] : spec.args(prompt)`（cv-ingest、batch-evaluate、assistant、apply-prefill、explore-ai）。本轮只给 `/api/run` 开了统一的 `streamArgsFor` 入口，其余仍属 #2507/#10 那条线。

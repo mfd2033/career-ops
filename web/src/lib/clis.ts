@@ -6,6 +6,7 @@ import { codexStreamArgs, isFatalClaudeStderr, isFatalCodexStderr, isFatalOpenCo
 import { loadOpencodeModels, resetOpencodeModelCache } from "./opencode-models.mjs";
 import { cliDisplayName } from "./cli-labels.mjs";
 import { cliSearchDirs } from "./cli-bin-dirs.mjs";
+import { parseQoderEvent, qoderCliArgs } from "./qoder-invocation.mjs";
 
 // Server-only (node imports). The agnostic runtimes career-ops can delegate to
 // in headless mode (AGENTS.md). Install URLs from career-ops-docs.
@@ -48,6 +49,12 @@ export type CliSpec = {
    * `--output-format stream-json`). Pairing one CLI's parser with a plain-text
    * invocation yields a silent stream of unparseable lines. */
   streamArgs?: (prompt: string) => string[];
+  /** Structured-output CLIs whose stream argv depends on the run's KIND: the
+   * per-kind permission flags (`evaluate` may write, `pdf` may not) come from
+   * the engine's own builder, e.g. qoder-invocation.mjs's `qoderCliArgs`.
+   * Paired with `parseEvent` exactly like `streamArgs`; /api/run prefers this
+   * over `streamArgs`, and over the plain-text `args`. */
+  streamArgsFor?: (ctx: { kind: string; prompt: string }) => string[];
   /** Structured-output CLIs only: parse one stdout line into dashboard events.
    * Absent → the route streams stdout as raw text (the default for every CLI
    * without its own structured output format). */
@@ -214,11 +221,11 @@ export const KNOWN: CliSpec[] = [
   // here does.
   { id: "grok", name: cliDisplayName("grok"), bin: "grok", run: "grok -p", url: "https://docs.x.ai/build/overview", args: (p) => ["-p", p], model: MODELS.grok },
   // Qoder CN. `binDirs` because its installer puts the binary nowhere the
-  // shared search dirs look; `args` is the PLAIN-TEXT invocation every
-  // output-reading caller uses. The structured/step path (its own argv builder
-  // + event parser) is a separate slice on purpose: this row first makes the
-  // engine detectable, selectable and dispatchable (ADR-0052 决议 1, 10).
-  { id: "qoder-cn", name: cliDisplayName("qoder-cn"), bin: "qoderclicn", binDirs: ["~/.qodersec/bin"], run: "qoderclicn -p", url: "https://qoder.com.cn/", args: (p) => ["-p", p], model: MODELS["qoder-cn"] },
+  // shared search dirs look. `args` stays the PLAIN-TEXT invocation the
+  // envelope-parsing callers need; `/api/run` takes `streamArgsFor` instead,
+  // which is where this engine's per-kind tool policy lives — the second
+  // runtime with an audited scope, after Claude (ADR-0052 决议 2-4).
+  { id: "qoder-cn", name: cliDisplayName("qoder-cn"), bin: "qoderclicn", binDirs: ["~/.qodersec/bin"], run: "qoderclicn -p", url: "https://qoder.com.cn/", args: (p) => ["-p", p], streamArgsFor: qoderCliArgs, parseEvent: parseQoderEvent, model: MODELS["qoder-cn"] },
 ];
 
 function searchDirs(): string[] {
