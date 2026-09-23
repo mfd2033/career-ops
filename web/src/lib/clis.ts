@@ -4,6 +4,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { codexStreamArgs, isFatalClaudeStderr, isFatalCodexStderr, isFatalOpenCodeStderr, parseClaudeEvent, parseCodexEvent } from "./run-cli-support.mjs";
 import { loadOpencodeModels, resetOpencodeModelCache } from "./opencode-models.mjs";
+import { loadQoderModels, resetQoderModelCache } from "./qoder-models.mjs";
 import { cliDisplayName } from "./cli-labels.mjs";
 import { cliSearchDirs } from "./cli-bin-dirs.mjs";
 import { claudeCliArgs } from "./claude-invocation.mjs";
@@ -192,10 +193,11 @@ const MODELS: Record<string, ModelMeta> = {
   },
   // Deliberately EMPTY, not a snapshot of `qoderclicn --list-models`: the CLI
   // owns that catalogue and it moves (ADR-0052 决议 9). This entry exists so the
-  // config page can find the picker's metadata at all; the empty option list
-  // makes it render no picker rather than a phantom one. Fetching the real list
-  // at detection time (the way `opencode` does) is a SEPARATE, not-yet-landed
-  // slice — do not read this entry as evidence that it exists (ADR-0052 后续).
+  // guard can check the shape and so the config page can find the picker's
+  // metadata at all; `detectClis` replaces it with the real list read from the
+  // CLI (qoder-models.mjs). It stays empty only when that query cannot answer —
+  // not signed in, offline, or not installed — and the config page says so
+  // instead of offering a copied list that may no longer exist.
   // (The key must be quoted: `qoder-cn` is not an identifier.)
   "qoder-cn": {
     flag: "--model",
@@ -414,6 +416,19 @@ export function detectClis(): DetectedCli[] {
         model = { ...c.model, options: dynamic, default: dynamic[0].id };
       }
     }
+    // Qoder CN's catalogue is read from the CLI the same way (ADR-0052 决议 7).
+    // `found` is required, not merely preferred: with no resolved binary there
+    // is nothing to ask, and spawning a bare `qoderclicn` would only add a
+    // pointless subprocess per TTL. When the query cannot answer — not signed
+    // in, offline — the static entry stays empty on purpose: the config page
+    // then says it could not list the models, rather than offering a copied
+    // list that may no longer exist.
+    if (c.id === "qoder-cn" && found) {
+      const dynamic = loadQoderModels(found);
+      if (dynamic.length > 0) {
+        model = { ...c.model, options: dynamic, default: dynamic[0].id };
+      }
+    }
     return { id: c.id, name: c.name, run: c.run, url: c.url, installed: !!found, path: found, usable, model };
   });
 }
@@ -430,7 +445,10 @@ let cachedDetection: DetectedCli[] | null = null;
 
 export function detectClisCached({ refresh = false }: { refresh?: boolean } = {}): DetectedCli[] {
   if (cachedDetection && !refresh) return cachedDetection;
-  if (refresh) resetOpencodeModelCache();
+  if (refresh) {
+    resetOpencodeModelCache();
+    resetQoderModelCache();
+  }
   cachedDetection = detectClis();
   return cachedDetection;
 }

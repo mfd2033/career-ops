@@ -491,6 +491,15 @@ export function ConfigForm() {
                     )}
                   </div>
                 )}
+                {/* ADR-0052: a runtime whose catalogue is read from the CLI can
+                    legitimately have none to show (not signed in / offline). Say
+                    so instead of rendering nothing at all — a missing picker
+                    with no explanation reads as a broken page. */}
+                {selectedCli && selectedCli.model?.options.length === 0 && (
+                  <p className="mt-4 rounded-xl border border-border bg-surface/50 p-4 text-[11px] leading-relaxed text-faint">
+                    {t("config.modelUnavailable")}
+                  </p>
+                )}
               </div>
             )}
             {/* 检测状态行：cli 模式三态（检测中/空/列表）都渲染——空态（一个都没

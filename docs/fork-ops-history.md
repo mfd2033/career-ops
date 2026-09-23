@@ -43,3 +43,14 @@
 - `node test-all.mjs` 前必须在**同一条 shell 命令内**先清 safe-delete shim：`Get-ChildItem Env: | Where-Object Name -like "*SAFE_DELETE*" | ForEach-Object { Remove-Item "Env:$($_.Name)" }; $env:NODE_OPTIONS=$null`，再跑 test-all（IDE 每条新命令都重新注入，单独清一次无效）。
 - 不清的后果：结尾临时目录清理被 shim 拦截（批量确认/ETIMEDOUT），崩在打印汇总前且退出码 1，酷似回归实为环境。
 - 基线：2026-09-15 起本机全绿（5544 passed / 0 failed）——再出现 ❌ 即真回归。
+
+## §7 接入 Qoder CN 为可派发运行时（ADR-0052，2026-09-23，工单 #6-#10）
+
+- **接的是 CN 版二进制 `qoderclicn`**（用户指定），不是国际版 `qodercli`；id `qoder-cn`、标签「Qoder (CN)」、官网 `https://qoder.com.cn/`。可执行文件在 `%USERPROFILE%\.qodersec\bin`，PATH 与 npm global 都查不到 → `CliSpec.binDirs`（厂商目录，PATH 之后兜底）；`detectClis` 与 `resolveCli` 共用同一份目录列表（只改一处会造成「列表里已安装、派发时找不到」的静默分叉）。
+- **stream-json 逐行与 Claude 同形**（`system/init`、`assistant` + `tool_use`、`stream_event`、`result`），`parseClaudeEvent` 可直接复用；差异集中在 `qoder-invocation.mjs`：`-p` 是无值布尔（prompt 走位置参数）、**不认 `--verbose`**（Claude 的 stream-json 反而要求它）、权限模式取值 `accept_edits`（下划线）、工具 flag 用连字符。
+- **权限面（实测教训）**：Qoder 的工具集是 Claude 的**超集**（29 个内置工具）。`--disallowed-tools Bash` 下 `Monitor` 仍能把 `echo` 跑通并回报 stdout；把 `Monitor` 等 18 个 Qoder 自有工具显式加进 deny 后才真正堵住执行路径。逗号拼接的 allow 与 deny 都被正确解析，deny 压过 allow。
+- **不申报用量**：`result.usage` 全为 0、`total_cost_usd: 0`，真实消耗只出现在逐轮 `message_delta.usage.credits`。解析器屏蔽 tokens/costUsd，run 路由也不再发 `tokens: 0`（不报比报 0 诚实）。
+- **模型清单动态化**：`qoderclicn --list-models` 是权威（本机 14 个），失败（未登录/离线）返回空清单 + 配置页提示，不写静态副本；缓存 60s，手动重检强制失效。已知无害坑：`--model` 传无效名字**不会失败**，CLI 只写一句 stderr 并回落到 `auto`——所以一份会过期的静态清单会静默换掉模型。
+- 未登录表现：任务走 `result.is_error` + `result:"Not logged in · Please run /login"`（现成的人话错误通道），`--list-models` 则 stderr 报登录提示、stdout 为空。不给 Qoder 加 `stderrIsFatal`：cwd 在仓库根时 stderr 会出现 7 行 `Skill conflict:` 噪声，通用致命正则不匹配它们。
+- 验证口径：单测 + typecheck + **dev 真跑**已过（34 个 tool 事件实时到达、台账 20 条步骤、`/api/runs/history` 可回看）。「打包版真跑一条并落报告」留给 #10，且**必须用确认在招的职位**——首次真跑那条第 2026-08-25 的 ACS 链接被 Qoder 自己按 Liveness Gate 判为下线（活板 66 个在招 req 中 0 命中、详情接口 403、页面渲染为空），它如实不产报告，route 的门禁也如实判 error。
+- 未清事项：批量评估与 `cv-ingest`/`assistant`/`apply-prefill`/`explore-ai` 四个路由仍各自手写 `isClaude ? [工具 flag] : spec.args(prompt)`；统一它们属 #2507/#10 那条线。

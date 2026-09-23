@@ -13,4 +13,5 @@ Career-ops is AI-agnostic and runs on several command-line agent tools. The core
 | Qwen | `AGENTS.md` | Interactive: `qwen`. Headless/Batch: `qwen -p "prompt"` |
 | Kimi | `KIMI.md` | Interactive: `kimi` |
 | GitHub Copilot CLI | `AGENTS.md` | Headless/Batch: `copilot -p "prompt"` |
+| Qoder CN | — (not verified as an entrypoint) | Headless/Batch: `qoderclicn -p "prompt"` (the CN build's binary; the dashboard drives it over `--output-format stream-json`, see [ADR-0052](adr/0052-qoder-cn-stream-json-engine.md)) |
 | Gemini | `GEMINI.md` | Legacy wrapper redirecting to `AGENTS.md` (transitioned to Antigravity CLI). |
