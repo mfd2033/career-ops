@@ -14,4 +14,5 @@ Career-ops is AI-agnostic and runs on several command-line agent tools. The core
 | Kimi | `KIMI.md` | Interactive: `kimi` |
 | GitHub Copilot CLI | `AGENTS.md` | Headless/Batch: `copilot -p "prompt"` |
 | Qoder CN | — (not verified as an entrypoint) | Headless/Batch: `qoderclicn -p "prompt"` (the CN build's binary; the dashboard drives it over `--output-format stream-json`, see [ADR-0052](adr/0052-qoder-cn-stream-json-engine.md)) |
+| CodeBuddy | — (not verified as an entrypoint) | Headless/Batch: `codebuddy -p "prompt"` (the dashboard drives it over `--output-format stream-json`, see [ADR-0053](adr/0053-codebuddy-cli-engine-and-vendor-bundle-discovery.md)). Ships as an extensionless `#!/usr/bin/env node` script in both of its channels — the vendor's own installer (`%USERPROFILE%\AppData\Local\codebuddy\bin`) and the copy WorkBuddy bundles inside its install tree — so the dashboard resolves it and runs it through the interpreter. Permissions travel as `--settings`, not as tool flags: the flag forms were measured to fail here |
 | Gemini | `GEMINI.md` | Legacy wrapper redirecting to `AGENTS.md` (transitioned to Antigravity CLI). |

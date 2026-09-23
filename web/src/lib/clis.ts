@@ -6,7 +6,8 @@ import { codexStreamArgs, isFatalClaudeStderr, isFatalCodexStderr, isFatalOpenCo
 import { loadOpencodeModels, resetOpencodeModelCache } from "./opencode-models.mjs";
 import { loadQoderModels, resetQoderModelCache } from "./qoder-models.mjs";
 import { cliDisplayName } from "./cli-labels.mjs";
-import { cliSearchDirs } from "./cli-bin-dirs.mjs";
+import { cliSearchDirs, workbuddyBundledCliDirs } from "./cli-bin-dirs.mjs";
+import { spawnTargetFor } from "./spawn-cli.mjs";
 import { claudeCliArgs } from "./claude-invocation.mjs";
 import { parseQoderEvent, qoderCliArgs } from "./qoder-invocation.mjs";
 import { codebuddyCliArgs, parseCodebuddyEvent } from "./codebuddy-invocation.mjs";
@@ -37,6 +38,13 @@ export type CliSpec = {
    * `%USERPROFILE%\.qodersec\bin` — and the engine then reports "not
    * installed" with nothing for the user to act on. Supports `~`. */
   binDirs?: string[];
+  /** Dirs to try ONLY after everything `binDirs` covers came up empty — for a
+   * binary that another product bundles inside its own install tree, at a path
+   * that depends on where the user installed THAT product (WorkBuddy ships the
+   * CodeBuddy CLI; ADR-0053). Declared as a function because locating it costs a
+   * subprocess, and a detection sweep must not pay that for an engine that is
+   * already resolvable. Must never throw: a failure means "no such dir". */
+  fallbackDirs?: () => string[];
   run: string;
   url: string;
   /** headless invocation args for a single prompt, emitting PLAIN TEXT on stdout.
@@ -270,15 +278,14 @@ export const KNOWN: CliSpec[] = [
   // which is where this engine's per-kind tool policy lives — the second
   // runtime with an audited scope, after Claude (ADR-0052 决议 2-4).
   { id: "qoder-cn", name: cliDisplayName("qoder-cn"), bin: "qoderclicn", binDirs: ["~/.qodersec/bin"], run: "qoderclicn -p", url: "https://qoder.com.cn/", args: (p) => ["-p", p], streamArgsFor: qoderCliArgs, parseEvent: parseQoderEvent, model: MODELS["qoder-cn"] },
-  // CodeBuddy Code. Its binary comes from the vendor's OWN native installer
-  // (documented Windows target: %USERPROFILE%\AppData\Local\codebuddy\bin), so
-  // `binDirs` carries the one channel the shared search dirs cannot reach
-  // (ADR-0053). Deliberately NOT wired: the copy WorkBuddy ships inside its app
-  // bundle, and npm's global copy. Both are extensionless `#!/usr/bin/env node`
-  // scripts, and spawn-cli.mjs requires a DIRECTLY spawnable executable — an
-  // engine that resolves but cannot be spawned is exactly the state this list
-  // must never report as installed (ADR-0052).
-  { id: "codebuddy", name: cliDisplayName("codebuddy"), bin: "codebuddy", binDirs: ["~/AppData/Local/codebuddy/bin"], run: "codebuddy -p", url: "https://www.codebuddy.cn/", args: (p) => ["-p", p], streamArgsFor: codebuddyCliArgs, parseEvent: parseCodebuddyEvent, model: MODELS.codebuddy },
+  // CodeBuddy Code. Two channels reach it, neither on PATH by default: the
+  // vendor's own installer (documented Windows target
+  // %USERPROFILE%\AppData\Local\codebuddy\bin) declared as `binDirs`, and the
+  // copy WorkBuddy bundles inside its install tree, located lazily by
+  // `fallbackDirs` (ADR-0053). Both are extensionless `#!/usr/bin/env node`
+  // scripts — spawn-cli.mjs runs those through the interpreter, so "resolvable"
+  // and "spawnable" agree, which is the invariant this list must keep.
+  { id: "codebuddy", name: cliDisplayName("codebuddy"), bin: "codebuddy", binDirs: ["~/AppData/Local/codebuddy/bin"], fallbackDirs: workbuddyBundledCliDirs, run: "codebuddy -p", url: "https://www.codebuddy.cn/", args: (p) => ["-p", p], streamArgsFor: codebuddyCliArgs, parseEvent: parseCodebuddyEvent, model: MODELS.codebuddy },
 ];
 
 function searchDirs(): string[] {
@@ -418,6 +425,12 @@ export type DetectedCli = {
    *  unauthenticated opencode) or the probe errored. undefined = not probed
    *  (not installed). */
   usable?: boolean;
+  /** What the CLI printed for `--version` — the same probe ADR-0028 already
+   *  runs, kept rather than discarded (ADR-0053 决议 10). An engine whose
+   *  binary can arrive from more than one place (CodeBuddy: the vendor's
+   *  installer, or the copy another product bundles) has to be answerable from
+   *  the UI: which binary, and which version of it. */
+  version?: string;
   model: ModelMeta;
 };
 
@@ -426,12 +439,27 @@ export type DetectedCli = {
 // worker results — the honesty gate then eats the run and the user never
 // learns why. `--version` is the cheapest probe with no side effects; a run
 // probe is deliberately NOT used (cost + real side effects).
-function probeHeadlessUsable(binPath: string): boolean {
+function probeCli(binPath: string): { usable: boolean; version?: string } {
   try {
-    const out = spawnSync(binPath, ["--version"], { encoding: "utf8", timeout: 15_000, stdio: ["ignore", "pipe", "pipe"] });
-    return Boolean(out.stdout?.trim());
+    // Through the shared spawn target, so a resolved node-script entry is
+    // probed the same way it will later be run (ADR-0053) — probing the bare
+    // path would report `usable: false` for a CLI that spawns fine.
+    const target = spawnTargetFor(binPath);
+    const out = spawnSync(target.command, [...target.args, "--version"], {
+      encoding: "utf8",
+      timeout: 15_000,
+      stdio: ["ignore", "pipe", "pipe"],
+      env: { ...process.env, ...target.env },
+    });
+    const firstLine = String(out.stdout ?? "")
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .find(Boolean);
+    // Still ADR-0028's rule: an exit-0 probe with no output means the tool is
+    // installed but headless-broken, not usable.
+    return firstLine ? { usable: true, version: firstLine } : { usable: false };
   } catch {
-    return false;
+    return { usable: false };
   }
 }
 
@@ -441,11 +469,32 @@ function dirsFor(spec: CliSpec, shared: string[]): string[] {
   return cliSearchDirs(shared, spec.binDirs, os.homedir());
 }
 
+/**
+ * Resolve one engine's binary: the shared/vendor dirs first, and — only when
+ * nothing was found — the engine's lazy `fallbackDirs`, at most once.
+ *
+ * Both detection and dispatch go through here on purpose. An engine the config
+ * page reports as installed must also be resolvable for an actual dispatch, or
+ * it is selectable and then fails at spawn (ADR-0052); the reverse — resolvable
+ * but reported missing — is the same bug wearing a different hat.
+ */
+function findBinFor(spec: CliSpec): string | null {
+  const found = findBin(spec.bin, dirsFor(spec, searchDirs()));
+  if (found || !spec.fallbackDirs) return found;
+  try {
+    // Only the fallback dirs are searched here: the primary list already came
+    // up empty, and `~` expansion / dedupe still apply (ADR-0053).
+    return findBin(spec.bin, cliSearchDirs([], spec.fallbackDirs(), os.homedir()));
+  } catch {
+    return null; // a broken locator must not take the whole sweep down
+  }
+}
+
 export function detectClis(): DetectedCli[] {
-  const shared = searchDirs();
   return KNOWN.map((c) => {
-    const found = findBin(c.bin, dirsFor(c, shared));
-    const usable = found ? probeHeadlessUsable(found) : undefined;
+    const found = findBinFor(c);
+    const probe = found ? probeCli(found) : null;
+    const usable = probe ? probe.usable : undefined;
     let model = c.model;
     // opencode's model list is user-config-driven (opencode.jsonc providers),
     // so a static list would diverge from what the opencode TUI/desktop shows.
@@ -476,7 +525,7 @@ export function detectClis(): DetectedCli[] {
         model = { ...c.model, options: dynamic, default: dynamic[0].id };
       }
     }
-    return { id: c.id, name: c.name, run: c.run, url: c.url, installed: !!found, path: found, usable, model };
+    return { id: c.id, name: c.name, run: c.run, url: c.url, installed: !!found, path: found, usable, version: probe?.version, model };
   });
 }
 
@@ -506,7 +555,7 @@ export function resolveCli(id: string): { spec: CliSpec; binPath: string } | nul
   // Same dir list as detection: a runtime the config page reports as installed
   // must also be resolvable for an actual dispatch, or the engine is selectable
   // and then fails at spawn (ADR-0052).
-  const binPath = findBin(spec.bin, dirsFor(spec, searchDirs()));
+  const binPath = findBinFor(spec);
   if (!binPath) return null;
   return { spec, binPath };
 }

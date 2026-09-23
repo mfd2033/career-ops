@@ -6,7 +6,95 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { spawnHeadlessCli, terminateCli } from "../../src/lib/spawn-cli.mjs";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { spawnHeadlessCli, spawnTargetFor, terminateCli } from "../../src/lib/spawn-cli.mjs";
+
+// --- running a resolved entry that is a SCRIPT, not an executable -----------
+//
+// Windows `spawn()` maps to CreateProcess, which needs an executable extension:
+// handing it an extensionless `#!/usr/bin/env node` script fails with ENOENT.
+// Both of CodeBuddy Code's channels ship exactly that (npm's `bin` map and
+// WorkBuddy's bundle — ADR-0053), so the spawn path, not each caller, has to
+// know how to start one.
+
+/** Write a file into a throwaway dir and hand back its path. */
+function fixtureDir() {
+  return fs.mkdtempSync(path.join(os.tmpdir(), "spawn-target-"));
+}
+
+function cleanup(dir) {
+  try {
+    fs.rmSync(dir, { recursive: true, force: true });
+  } catch {
+    /* Windows may still hold a handle on a just-exited child's files */
+  }
+}
+
+test("spawnTargetFor runs an extensionless node script through the interpreter", () => {
+  const dir = fixtureDir();
+  try {
+    const script = path.join(dir, "codebuddy");
+    fs.writeFileSync(script, "#!/usr/bin/env node\nprocess.stdout.write('OK');\n");
+    const target = spawnTargetFor(script);
+    if (process.platform === "win32") {
+      assert.equal(target.command, process.execPath, "a node script must go through the interpreter");
+      assert.deepEqual(target.args, [script]);
+      // Ignored by a real node; required when the dashboard runs under Electron.
+      assert.equal(target.env.ELECTRON_RUN_AS_NODE, "1");
+    } else {
+      assert.equal(target.command, script, "POSIX runs a shebang script directly");
+      assert.deepEqual(target.args, []);
+    }
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("spawnTargetFor leaves anything that is not a node script alone", () => {
+  const dir = fixtureDir();
+  try {
+    // An extensionless sh shim: handing this to node would fail differently and
+    // more quietly than letting spawn report it.
+    const sh = path.join(dir, "shim");
+    fs.writeFileSync(sh, "#!/bin/sh\necho hi\n");
+    assert.equal(spawnTargetFor(sh).command, sh);
+
+    // A `.cmd` shim: the name says Windows already has a way to run it, and the
+    // spawn contract forbids routing prompts through cmd.exe.
+    const cmd = path.join(dir, "codebuddy.cmd");
+    fs.writeFileSync(cmd, "@echo off\r\nnode \"%~dp0codebuddy\" %*\r\n");
+    assert.equal(spawnTargetFor(cmd).command, cmd);
+
+    // A missing path: report it through spawn, don't guess.
+    assert.equal(spawnTargetFor(path.join(dir, "nope")).command, path.join(dir, "nope"));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("spawnHeadlessCli actually runs an extensionless node-script entry", async () => {
+  const dir = fixtureDir();
+  try {
+    const script = path.join(dir, "codebuddy");
+    fs.writeFileSync(script, "#!/usr/bin/env node\nprocess.stdout.write('SCRIPT-RAN');\n");
+    if (process.platform !== "win32") fs.chmodSync(script, 0o755);
+
+    const child = spawnHeadlessCli(script, [], { cwd: dir, env: process.env });
+    let stdout = "";
+    child.stdout.on("data", (chunk) => { stdout += chunk; });
+    const code = await new Promise((resolve, reject) => {
+      child.once("error", reject);
+      child.once("close", resolve);
+    });
+
+    assert.equal(code, 0);
+    assert.equal(stdout, "SCRIPT-RAN");
+  } finally {
+    cleanup(dir);
+  }
+});
 
 test("spawnHeadlessCli closes stdin so a headless CLI can start", async () => {
   // Given: a child that only speaks once its stdin has reached EOF — a stand-in

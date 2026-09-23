@@ -54,3 +54,13 @@
 - 未登录表现：任务走 `result.is_error` + `result:"Not logged in · Please run /login"`（现成的人话错误通道），`--list-models` 则 stderr 报登录提示、stdout 为空。不给 Qoder 加 `stderrIsFatal`：cwd 在仓库根时 stderr 会出现 7 行 `Skill conflict:` 噪声，通用致命正则不匹配它们。
 - 验证口径：单测 + typecheck + **dev 真跑**已过（34 个 tool 事件实时到达、台账 20 条步骤、`/api/runs/history` 可回看）。「打包版真跑一条并落报告」留给 #10，且**必须用确认在招的职位**——首次真跑那条第 2026-08-25 的 ACS 链接被 Qoder 自己按 Liveness Gate 判为下线（活板 66 个在招 req 中 0 命中、详情接口 403、页面渲染为空），它如实不产报告，route 的门禁也如实判 error。
 - 未清事项：批量评估与 `cv-ingest`/`assistant`/`apply-prefill`/`explore-ai` 四个路由仍各自手写 `isClaude ? [工具 flag] : spec.args(prompt)`；统一它们属 #2507/#10 那条线。
+
+## §8 接入 CodeBuddy 为可派发运行时（ADR-0053，2026-09-23，本地工单 .scratch/codebuddy-engine/01-04）
+
+- **接的是官方 agent CLI `codebuddy`**（id `codebuddy`、标签「CodeBuddy」、官网 `https://www.codebuddy.cn/`），**不是** IDE 自带的 `buddycn`——后者实测是 VS Code 式启动器（`--version` 回 VS Code 版本串、`--help` 回 `--diff`/`--merge`/`--goto`，无 `-p`、无 `--output-format`）。
+- **二进制是 node 脚本，不是可执行体**（本会话最贵的一条教训）：WorkBuddy 桌面端把完整 CLI 装在自己包里（`<安装目录>\resources\app.asar.unpacked\cli\`，本机 `D:\workbuddy\…`，v2.137.1），官方 npm 包的 `bin` 同样指向无扩展名脚本 —— 直接 spawn 实测 `ENOENT`，整包内也没有 `codebuddy.exe`（官方 Windows 原生安装的 zip 里才有，落点 `%USERPROFILE%\AppData\Local\codebuddy\bin`）。修法放在 `spawn-cli.mjs`（拥有「跑 headless CLI」职责的那一层）：`spawnTargetFor(binPath)` 按**文件内容**识别 `#!…node…` 无扩展名脚本并前置解释器，9 个 spawn 点与 `probeHeadlessUsable` 因此一次到位、无人需要记住它。
+- **非 PATH 且机器相关的位置**：捆绑副本的目录取决于用户把 WorkBuddy 装在哪儿，不能写成 `binDirs`（那会把一台机器的盘符冻进代码）。改用新字段 `CliSpec.fallbackDirs?: () => string[]`，**只在主查找失败后调用一次**（定位要 spawn `reg query`），从 Windows 卸载注册表取安装目录（实测 `InstallLocation` 为空，`DisplayIcon`/`UninstallString` 才带真实路径）。
+- **权限传输不能照抄 Claude，这是安全项**：`--allowedTools "Read,Bash"` 授权失败；`--disallowedTools "…,PowerShell,…"` 下 **PowerShell 仍然执行成功**（明确写进 deny 被静默忽略）。改用 `--settings {permissions:{allow,deny}}`（两个方向都实测有效，deny 是真把工具移除：零工具调用）。另实测 **allow 不是白名单**——`allow:["Read"]` 且 deny 未提 PowerShell 时它会跑，所以安全完全依赖 deny 完备性：`CODEBUDDY_EXTRA_DENIED` 覆盖超集 26 项，头号项 `PowerShell`（与 Qoder 的 `Monitor` 同类）。
+- 解析：`parseCodebuddyEvent` 复用 `parseClaudeEvent`（4 份真样本 167 行零异常），仅剔除恒为 0 的 `total_cost_usd`，**保留真实 token**（与 Qoder 相反：Qoder 是真假都假，CodeBuddy 只有费用假）。CodeBuddy 自有行类型 `system/status`、`file-history-snapshot` 靠默认 null 丢弃。
+- argv 坑：`--allowedTools` 是变参，会把写在它后面的位置参数 prompt 一起吞掉（实测退化成 2 行、`model:"unknown"`、`result:""` 且 exit 0）——prompt 必须紧随 `-p`。模型默认值实测为 `cmcc:auto`（不是 `auto`）。
+- 验证：typecheck 干净 + web 单测 1050 全过（新增 13 项引擎守卫、2 项 binDirs 守卫、5 项注册表解析守卫、3 项 spawn 目标守卫）；dev 模式 `/api/clis` 实测 `codebuddy: installed=true usable=true`，path 指向捆绑副本。

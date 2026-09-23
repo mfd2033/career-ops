@@ -54,6 +54,8 @@ type Cli = {
   path: string | null;
   /** ADR-0028: installed ≠ usable（headless `--version` 探针），见 clis.ts。 */
   usable?: boolean;
+  /** ADR-0053 决议 10：探测到的二进制自报的版本。 */
+  version?: string;
   model: ModelMeta;
 };
 
@@ -407,6 +409,17 @@ export function ConfigForm() {
                     <span className="text-muted">{t("config.currentTool")}</span>
                     <span className="min-w-0 truncate font-medium text-foreground">{currentCli.name}</span>
                   </div>
+                )}
+
+                {/* ADR-0053 决议 10：探测来源可见。同一个引擎的二进制可能来自
+                    不止一处（CodeBuddy：厂商安装器，或另一个产品捆绑的副本），
+                    而它们会各自升级——路径 + `--version` 让「这次用的是哪一个」
+                    在界面上可回答，而不是只能靠进程表反推。 */}
+                {currentCli?.path && (
+                  <p className="mt-1.5 truncate font-mono text-[11px] text-faint" title={currentCli.path}>
+                    {currentCli.path}
+                    {currentCli.version ? ` · ${currentCli.version}` : ""}
+                  </p>
                 )}
 
                 {/* ADR-0028：installed ≠ usable——headless 无输出的工具派发必败，就地警告。 */}

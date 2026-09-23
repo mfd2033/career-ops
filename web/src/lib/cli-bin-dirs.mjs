@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import path from "node:path";
 
 // Where a runtime's binary may live, per engine (ADR-0052).
@@ -57,4 +58,142 @@ export function cliSearchDirs(sharedDirs, vendorDirs, home) {
     out.push(dir);
   }
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// Vendor products that BUNDLE a runtime's CLI inside their own install tree.
+//
+// WorkBuddy (Tencent's desktop agent) ships the complete CodeBuddy Code CLI at
+// `<install dir>\resources\app.asar.unpacked\cli\` — `bin\codebuddy` plus the
+// 22 MB bundle and its own node_modules. That copy is dispatched through the
+// interpreter (spawn-cli.mjs's spawnTargetFor), which makes it usable with no
+// install step at all (ADR-0053).
+//
+// The directory cannot be declared as a `binDirs` entry: it is wherever the
+// user installed that product (`D:\workbuddy` here), which is one machine's
+// layout and must never be frozen into shipped code. So it is located at
+// runtime from the Windows uninstall registry — the standard, drive-independent
+// way to ask "where is this product installed". `InstallLocation` is empty for
+// WorkBuddy, but `DisplayIcon`/`UninstallString` carry the real path.
+// ---------------------------------------------------------------------------
+
+/** Where the bundled CLI sits inside the product's install dir. */
+const WORKBUDDY_CLI_SUBPATH = ["resources", "app.asar.unpacked", "cli", "bin"];
+
+/** The registry keys a per-user vs per-machine install can land in. */
+const UNINSTALL_ROOTS = [
+  "HKCU\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall",
+  "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall",
+  "HKLM\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall",
+];
+
+/**
+ * Expand `%VAR%` references against an injected environment. Unknown variables
+ * make the value unusable, and the caller drops it — a path we cannot resolve
+ * is worse than no path, because it would be handed to findBin as a directory
+ * that silently does not exist.
+ *
+ * @param {string} value
+ * @param {Record<string, string|undefined>} env
+ * @returns {string|null}
+ */
+function expandVars(value, env) {
+  if (!value.includes("%")) return value;
+  let unresolved = false;
+  const out = value.replace(/%([^%]+)%/g, (_, name) => {
+    const found = env[name] ?? env[name.toUpperCase()] ?? env[name.toLowerCase()];
+    if (!found) {
+      unresolved = true;
+      return "";
+    }
+    return found;
+  });
+  return unresolved ? null : out;
+}
+
+/**
+ * The install directory a registry key block points at, taken from the paths it
+ * records. Both value shapes that appear in the wild are handled:
+ * `D:\dir\App.exe,0` (DisplayIcon, comma-indexed) and
+ * `"D:\dir\Uninstall App.exe" /currentuser` (quoted, with switches).
+ *
+ * @param {Record<string, string>} values - lowercased value names → raw data
+ * @param {Record<string, string|undefined>} env
+ * @returns {string|null}
+ */
+function installDirFrom(values, env) {
+  for (const raw of [values.displayicon, values.uninstallstring]) {
+    if (!raw) continue;
+    const expanded = expandVars(raw.trim(), env);
+    if (!expanded) continue;
+    const quoted = /^"([^"]+)"/.exec(expanded);
+    const candidate = (quoted ? quoted[1] : expanded.replace(/,\d+\s*$/, "").split(/\s+\//)[0]).trim();
+    if (!candidate || !/\.exe$/i.test(candidate)) continue;
+    const dir = path.dirname(candidate);
+    if (dir && dir !== ".") return dir;
+  }
+  return null;
+}
+
+/**
+ * The bundled-CLI directories a `reg query` dump names, in the order the keys
+ * appear. Pure: the registry text and the environment are both injected, so the
+ * rule is testable without touching this machine's registry.
+ *
+ * @param {string} regOutput - stdout of a `reg query … /s /f WorkBuddy /d`
+ * @param {Record<string, string|undefined>} [env]
+ * @returns {string[]}
+ */
+export function parseWorkbuddyCliDirs(regOutput, env = {}) {
+  const blocks = [];
+  let current = null;
+  for (const line of String(regOutput ?? "").split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (/^HKEY_/i.test(trimmed)) {
+      current = { key: trimmed, values: {} };
+      blocks.push(current);
+      continue;
+    }
+    if (!current) continue;
+    const m = /^\s+(\S+)\s+REG_(?:SZ|EXPAND_SZ)\s+(.*)$/.exec(line);
+    if (m) current.values[m[1].toLowerCase()] = m[2];
+  }
+
+  const out = [];
+  for (const block of blocks) {
+    const haystack = [block.values.displayname, block.values.displayicon, block.values.uninstallstring]
+      .filter(Boolean)
+      .join(" ");
+    if (!/workbuddy/i.test(haystack)) continue;
+    const dir = installDirFrom(block.values, env);
+    if (dir) out.push(path.join(dir, ...WORKBUDDY_CLI_SUBPATH));
+  }
+  return [...new Set(out)];
+}
+
+/**
+ * Locate the CodeBuddy CLI bundled inside WorkBuddy, if this machine has it.
+ *
+ * Synchronous (like every other lookup in detection) and never throws: the
+ * product may be absent, `reg` may be unavailable, or the key may hold nothing
+ * usable — all of which simply mean "no fallback directory".
+ *
+ * @returns {string[]}
+ */
+export function workbuddyBundledCliDirs() {
+  if (process.platform !== "win32") return [];
+  const found = [];
+  for (const root of UNINSTALL_ROOTS) {
+    try {
+      const out = execFileSync("reg", ["query", root, "/s", "/f", "WorkBuddy", "/d"], {
+        encoding: "utf8",
+        timeout: 15_000,
+        stdio: ["ignore", "pipe", "ignore"],
+      });
+      found.push(...parseWorkbuddyCliDirs(out, process.env));
+    } catch {
+      /* key absent, no match, or reg unavailable — nothing to add */
+    }
+  }
+  return [...new Set(found)];
 }

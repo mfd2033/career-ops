@@ -11,7 +11,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path, { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { cliSearchDirs, expandHome } from "../../src/lib/cli-bin-dirs.mjs";
+import { cliSearchDirs, expandHome, parseWorkbuddyCliDirs } from "../../src/lib/cli-bin-dirs.mjs";
 
 const HOME = path.join(path.sep, "home", "tester");
 
@@ -93,11 +93,11 @@ test("the qoder-cn row declares the vendor dir its installer actually uses", () 
   assert.match(row[0], /binDirs:\s*\["~\/\.qodersec\/bin"\]/, "the row must declare ~/.qodersec/bin");
 });
 
-test("the codebuddy row declares the vendor native-installer dir", () => {
-  // ADR-0053: the vendor's native installer is the ONLY channel whose
-  // `codebuddy` is a directly spawnable executable. The WorkBuddy-bundled copy
-  // and npm's global copy are extensionless node scripts — wiring either would
-  // report an engine as installed and then fail at spawn.
+test("the codebuddy row declares both of its channels", () => {
+  // ADR-0053: the vendor's own installer target, plus the copy WorkBuddy
+  // bundles inside its install tree. The second cannot be a `binDirs` entry —
+  // it depends on where that product was installed — so it is located at
+  // runtime and searched only as a fallback.
   const row = /id:\s*"codebuddy"[^\n]*/.exec(clisSrc);
   assert.ok(row, "KNOWN has no codebuddy row");
   assert.match(row[0], /bin:\s*"codebuddy"/, "the row must spawn the codebuddy binary");
@@ -106,6 +106,81 @@ test("the codebuddy row declares the vendor native-installer dir", () => {
     /binDirs:\s*\["~\/AppData\/Local\/codebuddy\/bin"\]/,
     "the row must declare the vendor native-installer bin dir",
   );
+  assert.match(row[0], /fallbackDirs:\s*workbuddyBundledCliDirs/, "the row must wire the bundled-cli locator");
+});
+
+test("the fallback dirs are consulted only after the primary lookup failed", () => {
+  // The laziness is the point: locating the bundled copy spawns `reg query`,
+  // and a sweep must not pay that for an engine that already resolved. Pinned
+  // as source order, because that is what laziness means here — no test can
+  // observe a subprocess that must not happen.
+  const body = /function findBinFor[\s\S]*?\n}/.exec(clisSrc);
+  assert.ok(body, "findBinFor is gone — has the resolution path changed shape?");
+  const primary = body[0].indexOf("findBin(spec.bin, dirsFor(");
+  const fallback = body[0].indexOf("spec.fallbackDirs()");
+  assert.ok(primary !== -1 && fallback !== -1, "findBinFor no longer looks like itself");
+  assert.ok(primary < fallback, "the fallback dirs must be searched after the primary dirs");
+  assert.match(body[0], /if \(found \|\| !spec\.fallbackDirs\) return found;/, "a found binary must short-circuit the fallback");
+});
+
+// --- the WorkBuddy-bundled CLI locator ---------------------------------------
+//
+// Pure parser, injected registry text: the shapes below are trimmed copies of
+// what `reg query HKCU\…\Uninstall /s /f WorkBuddy /d` really prints on the
+// machine this was built on (whose `InstallLocation` is empty — only
+// DisplayIcon/UninstallString carry the path).
+
+const BUNDLED = path.join("D:\\", "workbuddy", "resources", "app.asar.unpacked", "cli", "bin");
+
+test("parseWorkbuddyCliDirs reads the install dir out of DisplayIcon", () => {
+  const dump = [
+    "",
+    "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\BFD312E9-1019-4F57-9F44-F86246833B50",
+    "    DisplayName    REG_SZ    WorkBuddy 5.5.6",
+    "    UninstallString    REG_SZ    \"D:\\workbuddy\\Uninstall WorkBuddy.exe\" /currentuser",
+    "    DisplayIcon    REG_SZ    D:\\workbuddy\\WorkBuddy.exe,0",
+    "",
+    "End of search: 5 match(es) found.",
+  ].join("\r\n");
+  assert.deepEqual(parseWorkbuddyCliDirs(dump), [BUNDLED]);
+});
+
+test("parseWorkbuddyCliDirs survives a quoted path with switches and spaces", () => {
+  const dump = [
+    "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\WorkBuddy",
+    "    DisplayName    REG_SZ    WorkBuddy 5.5.6",
+    "    UninstallString    REG_SZ    \"C:\\Program Files\\WorkBuddy\\Uninstall WorkBuddy.exe\" /currentuser /S",
+  ].join("\n");
+  assert.deepEqual(parseWorkbuddyCliDirs(dump), [
+    path.join("C:\\Program Files\\WorkBuddy", "resources", "app.asar.unpacked", "cli", "bin"),
+  ]);
+});
+
+test("parseWorkbuddyCliDirs expands variables, and drops what it cannot resolve", () => {
+  const withEnv = [
+    "HKEY_CURRENT_USER\\…\\Uninstall\\WorkBuddy",
+    "    DisplayName    REG_SZ    WorkBuddy 5.5.6",
+    "    DisplayIcon    REG_SZ    %USERPROFILE%\\workbuddy\\WorkBuddy.exe,0",
+  ].join("\n");
+  assert.deepEqual(parseWorkbuddyCliDirs(withEnv, { USERPROFILE: "C:\\Users\\tester" }), [
+    path.join("C:\\Users\\tester\\workbuddy", "resources", "app.asar.unpacked", "cli", "bin"),
+  ]);
+  assert.deepEqual(parseWorkbuddyCliDirs(withEnv, {}), [], "an unresolved variable must not become a path");
+});
+
+test("parseWorkbuddyCliDirs ignores keys that are not that product", () => {
+  const dump = [
+    "HKEY_CURRENT_USER\\…\\Uninstall\\SomethingElse",
+    "    DisplayName    REG_SZ    Something Else 1.0",
+    "    DisplayIcon    REG_SZ    D:\\other\\other.exe,0",
+  ].join("\n");
+  assert.deepEqual(parseWorkbuddyCliDirs(dump), []);
+});
+
+test("parseWorkbuddyCliDirs tolerates empty and junk input", () => {
+  assert.deepEqual(parseWorkbuddyCliDirs(""), []);
+  assert.deepEqual(parseWorkbuddyCliDirs("ERROR: The system was unable to find the specified registry key or value."), []);
+  assert.deepEqual(parseWorkbuddyCliDirs(null), []);
 });
 
 test("no engine smuggles a machine-specific path into binDirs", () => {
