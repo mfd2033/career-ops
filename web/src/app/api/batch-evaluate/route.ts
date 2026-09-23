@@ -30,8 +30,8 @@ import { buildRunLedgerSteps } from "@/lib/run-steps.mjs";
 import { buildBatchLedgerRecord } from "@/lib/batch-ledger.mjs";
 import { buildBatchChildRecord } from "@/lib/batch-child-ledger.mjs";
 import { resolveCli } from "@/lib/clis";
-import { withModelFlag, isFatalGenericStderr, parseReservationOutput, parseClaudeEvent } from "@/lib/run-cli-support.mjs";
-import { claudeCliArgs } from "@/lib/claude-invocation.mjs";
+import { withModelFlag, isFatalGenericStderr, parseReservationOutput } from "@/lib/run-cli-support.mjs";
+import { resolveWorkerInvocation } from "@/lib/worker-invocation.mjs";
 import { isReservedReportFile } from "@/lib/report-files.mjs";
 import { spawnHeadlessCli, terminateCli } from "@/lib/spawn-cli.mjs";
 import { careerOpsRoot, readMemory, readInbox, readScanDates } from "@/lib/career-ops";
@@ -226,8 +226,9 @@ export async function POST(req: Request) {
         // Q1/Q7): report numbers are still handed out in array order regardless
         // of which worker grabs a slot first. A worker dequeued while queued is
         // counted `cancelled` and never spawns.
-        // ADR-0049: Claude workers switch to stream-json argv, enabling per-tool
-        // event passthrough for real-time progress monitoring.
+        // ADR-0049/0054: structured workers (spec-driven — was Claude-only in
+        // ADR-0049) switch to stream-json argv, enabling per-tool event
+        // passthrough for real-time progress monitoring.
         const evaluateOne = (i: number, num: number) =>
           new Promise<{ cleanExit: boolean; sawError: boolean; verdict: string | null; errMsg: string | null; cancelled: boolean; startedMs: number; collectedEvents: Array<{type: string, name?: string, detail?: string, ts?: number}> }>((resolve) => {
             let sawError = false;
@@ -254,13 +255,14 @@ export async function POST(req: Request) {
               jdText: jdText.trim() || undefined,
               company: company.trim() || undefined,
             });
-            // ADR-0049: Claude gets the full stream-json argv (includes permission
-            // flags via claudeCliArgs); non-Claude CLIs keep plain-text argv.
-            const isClaude = spec.id === "claude";
+            // ADR-0054: worker argv comes from the shared spec-driven selector —
+            // streamArgsFor (claude/qoder-cn/codebuddy audited per-kind flags) >
+            // streamArgs (codex --json) > plain args — never spelled in the route.
+            // `structured` engines get JSONL parsing + per-tool event passthrough
+            // (ADR-0049's chain, now engine-agnostic); the rest stay plain text.
+            const invocation = resolveWorkerInvocation(spec, { kind: "evaluate", prompt });
             const args = withModelFlag(
-              isClaude
-                ? claudeCliArgs({ kind: "evaluate", prompt })
-                : spec.args(prompt),
+              invocation.args,
               spec.model,
               model,
             );
@@ -285,13 +287,14 @@ export async function POST(req: Request) {
               // ADR-0049 决议 5：spawn 后立即宣告 item-running，让客户端建立
               // reportNum→行映射，后续 tool 事件凭 itemKey 路由到正确卡片。
               send({ type: "item-running", reportNum: num, url });
-              if (isClaude) {
-                // stream-json: buffer lines, parse each event, forward tool events
+              if (invocation.structured) {
+                // Structured engines (ADR-0054): JSONL-buffer stdout, parse each
+                // event via the engine's OWN spec.parseEvent, forward tool events
                 // and extract VERDICT/ERROR from parsed text.
                 let textBuf = "";
                 let lineBuf = "";
                 const processLine = (line: string) => {
-                  const ev = parseClaudeEvent(line);
+                  const ev = spec.parseEvent!(line);
                   if (ev?.text) {
                     textBuf += ev.text;
                     // 取最后一条匹配（与原逐 chunk 覆盖语义一致：多条时最贴近失败处的胜出）。
@@ -321,7 +324,8 @@ export async function POST(req: Request) {
                   if (lineBuf.trim()) { processLine(lineBuf.trim()); lineBuf = ""; }
                 });
               } else {
-                // Non-Claude: plain text stdout, regex-sniff VERDICT/ERROR (legacy path).
+                // Non-structured engines (ADR-0054): plain text stdout, regex-sniff
+                // VERDICT/ERROR (legacy path, byte-identical to pre-0054 behavior).
                 child.stdout?.on("data", (chunk: string) => {
                   const vm = chunk.match(/VERDICT:[^\n]*/i);
                   if (vm) verdict = vm[0];

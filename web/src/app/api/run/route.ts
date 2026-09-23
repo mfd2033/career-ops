@@ -8,6 +8,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { after } from "next/server";
 import { resolveCli } from "@/lib/clis";
+import { resolveWorkerInvocation } from "@/lib/worker-invocation.mjs";
 import { accumulateTokens, checkupArtifactRowCount, checkupArtifactTodayForTracker, makeCheckupHtmlProbe, failureEvidence, failureLedgerMsg, hasNewCompletedReport, isFatalGenericStderr, persistRunOutcome, PERSISTENCE_GATED_KINDS, withModelFlag } from "@/lib/run-cli-support.mjs";
 import { spawnHeadlessCli, terminateCli } from "@/lib/spawn-cli.mjs";
 import { careerOpsRoot, readMemory, findReportFile, readInbox, readScanDates, findCheckupTarget, rootScript } from "@/lib/career-ops";
@@ -304,7 +305,9 @@ async function runPipeline({
   // A CLI with its own structured stream gets the argv that turns it on, so its
   // stdout matches spec.parseEvent below; spec.args stays the plain-text argv the
   // envelope-parsing routes rely on.
-  const baseArgs = spec.streamArgsFor ? spec.streamArgsFor({ kind, prompt }) : (spec.streamArgs ?? spec.args)(prompt);
+  // ADR-0054: the selection itself lives in the shared worker-invocation helper —
+  // batch-evaluate must pick worker argv the same way this route does.
+  const { args: baseArgs } = resolveWorkerInvocation(spec, { kind, prompt });
   // The config page's model picker applies to EVERY CLI uniformly. Absent a saved
   // model (or a CLI with no model flag), withModelFlag returns the args untouched
   // and the CLI keeps its own default.

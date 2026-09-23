@@ -15176,6 +15176,8 @@ try {
       'cv-envelope.mjs': join(webLib, 'cv-envelope.mjs'),
       'run-prompts.mjs': join(webLib, 'run-prompts.mjs'),
       'api/run/route.ts': runRoutePath,
+      'worker-invocation.mjs': join(webLib, 'worker-invocation.mjs'),
+      'api/batch-evaluate/route.ts': join(ROOT, 'web', 'src', 'app', 'api', 'batch-evaluate', 'route.ts'),
     };
     const missing = Object.entries(required).filter(([, f]) => !existsSync(f)).map(([name]) => name);
     if (missing.length > 0) {
@@ -15328,27 +15330,46 @@ try {
           }
           return out;
         };
-        const routeCode = stripJsComments(readFileSync(runRoutePath, 'utf-8'))
+        const stripImportFree = (p) => stripJsComments(readFileSync(p, 'utf-8'))
           .split('\n')
           .filter((l) => !/^\s*import\b/.test(l))
           .join('\n');
-        const spelledFlags = ['--allowedTools', '--disallowedTools', '--permission-mode']
-          .filter((flag) => routeCode.includes(flag));
-        const argvCallSites = (routeCode.match(/claudeCliArgs\s*\(/g) ?? []).length;
-        // `kind` must reach claudeCliArgs as a SHORTHAND property. Property order
-        // and line wrapping are free, but `{ kind: <anything> }` is refused:
-        // `claudeCliArgs({ kind: kind === "pdf" ? "evaluate" : kind, prompt })`
-        // once passed every check while pdf received the persisting scope.
-        const passesKindVerbatim = /claudeCliArgs\s*\(\s*\{(?:[^{}]*,)?\s*kind\s*[,}]/.test(routeCode);
-        if (spelledFlags.length === 0 && argvCallSites === 1 && passesKindVerbatim) {
-          pass('web run route delegates its whole argv, spelling no tool flag and remapping no kind (#2185)');
+        // ADR-0054: BOTH headless routes take worker argv from the shared
+        // worker-invocation selector. The route-level freeze sharpens: a route
+        // spells NO tool flag and references NO engine builder at all — an inline
+        // argv can no longer hide beside a "legitimate" builder call because
+        // there are none left in either route. The #2185 anti-remap rule (kind
+        // must reach the per-kind builder verbatim, as a SHORTHAND property)
+        // moved with the call site into the helper and is asserted there — that
+        // is now the single pass-through point for every route and every engine.
+        const routeCode = stripImportFree(runRoutePath);
+        const batchCode = stripImportFree(required['api/batch-evaluate/route.ts']);
+        const helperCode = stripImportFree(required['worker-invocation.mjs']);
+        const spelledFlags = ['--allowedTools', '--disallowedTools', '--permission-mode'];
+        const ENGINE_BUILDERS_RE = /claudeCliArgs|codexStreamArgs|qoderCliArgs|codebuddyCliArgs/;
+        const routeSpelled = spelledFlags.filter((flag) => routeCode.includes(flag));
+        const routeBuilderSites = (routeCode.match(new RegExp(ENGINE_BUILDERS_RE.source, 'g')) ?? []).length;
+        const usesHelper = routeCode.includes('resolveWorkerInvocation(');
+        const helperKindVerbatim = /streamArgsFor\(\{\s*kind,\s*prompt\s*\}\)/.test(helperCode);
+        const helperSpelled = spelledFlags.some((flag) => helperCode.includes(flag));
+        const batchClean = !spelledFlags.some((flag) => batchCode.includes(flag))
+          && !ENGINE_BUILDERS_RE.test(batchCode)
+          && batchCode.includes('resolveWorkerInvocation(');
+        if (routeSpelled.length === 0 && routeBuilderSites === 0 && usesHelper && helperKindVerbatim && !helperSpelled && batchClean) {
+          pass('run + batch routes delegate worker argv via the shared selector, spelling no tool flag and remapping no kind (#2185, ADR-0054)');
         } else {
-          const why = spelledFlags.length > 0
-            ? `it spells ${spelledFlags.join(', ')} itself`
-            : argvCallSites !== 1
-              ? `it builds argv at ${argvCallSites} site(s), expected exactly 1`
-              : 'it does not pass `kind` through verbatim (a remapped kind hands pdf another kind\'s scope)';
-          fail(`web run route no longer delegates its argv — ${why}, so the value checks above may not describe what pdf actually ships (#2185)`);
+          const why = routeSpelled.length > 0
+            ? `the run route spells ${routeSpelled.join(', ')} itself`
+            : routeBuilderSites !== 0
+              ? `the run route references engine builders at ${routeBuilderSites} site(s)`
+              : !usesHelper
+                ? 'the run route does not pick worker argv via resolveWorkerInvocation'
+                : !helperKindVerbatim
+                  ? 'worker-invocation.mjs does not pass `kind` through verbatim as a shorthand property (a remapped kind hands pdf another kind\'s scope)'
+                  : !batchClean
+                    ? 'the batch-evaluate route self-spells argv or bypasses the shared selector'
+                    : 'worker-invocation.mjs spells a tool flag itself';
+          fail(`headless routes no longer delegate worker argv — ${why}, so the value checks above may not describe what pdf actually ships (#2185, ADR-0054)`);
         }
       }
     }
