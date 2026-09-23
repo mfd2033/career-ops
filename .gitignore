@@ -247,6 +247,9 @@ package-build.log
 # Local session memory (workbuddy)
 .workbuddy/
 
+# Qoder IDE local state (agent/scratch artifacts, machine-specific)
+.qoder/
+
 # Session-scoped working docs (handoff / pack run logs, ephemeral)
 docs/handoff-*.md
 docs/pack-*.md
