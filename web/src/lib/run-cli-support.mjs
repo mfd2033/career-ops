@@ -559,6 +559,47 @@ export function checkupArtifactRowCountForTracker(text, trackerNo, fileExists) {
 }
 
 /**
+ * 本 tracker# 当天是否已有「可核验产物」行 —— 体检重复派发门禁的正向判据
+ * （approach B，2026-09-23）。
+ *
+ * WHY: `checkupArtifactRowCount` 是全局增量判据（「本次 run 是否比开跑前多一条
+ * 产物」）。当同一 tracker# 当天已被更早的一次体检写过（例如 codebuddy 先成功，
+ * 用户随后换 qoder 复检），diligent worker 会发现当天 HTML + 台账行已在 → 正确地
+ * 不重复落盘；但全局增量仍是 0 → 旧门禁报「零产物失败」，误导用户以为体检彻底
+ * 没成。这里给门禁一个可以区分的信号：本 tracker# 在 `today` 是否已有一条声明了
+ * HTML 且文件真实存在（或 `-`/空合法）的行。命中返回该行星级（多条取最后一条，
+ * append-only 语义下即最新），否则 null。与 `checkupArtifactRowCount` 同一套「可核
+ * 验」定义：声明了 HTML 而探针说不存在 → 不算，绝不因探针缺失而放宽。
+ *
+ * @param {string | undefined} text - 台账原文（undefined = 读不到 → null）
+ * @param {string} trackerNo - 本行的 tracker 行号（数字字符串；非数字键 `?` 返回 null）
+ * @param {string} today - 当日 ISO 日期（YYYY-MM-DD）；非法日期 → null
+ * @param {(rel: string) => boolean} fileExists - HTML 路径 → 文件存在？
+ * @returns {number | null} 当天可核验行的星级，无则 null
+ */
+export function checkupArtifactTodayForTracker(text, trackerNo, today, fileExists) {
+  if (typeof text !== "string") return null;
+  const key = String(trackerNo ?? "").trim();
+  if (!/^\d+$/.test(key)) return null;
+  const date = String(today ?? "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+  const probe = typeof fileExists === "function" ? fileExists : () => false;
+  let star = null;
+  for (const line of text.split("\n")) {
+    const t = line.replace(/\r$/, "").trim();
+    if (!t.startsWith(`${key}\t`)) continue;
+    const cols = t.split("\t");
+    if (cols.length < 8) continue;
+    if (cols[1].trim() !== date) continue;
+    const html = (cols[6] ?? "").trim();
+    if (html && html !== "-" && !probe(html)) continue;
+    const s = parseFloat(cols[4]);
+    if (Number.isFinite(s)) star = s;
+  }
+  return star;
+}
+
+/**
  * 批量体检的汇总事件（纯，ADR-0041 决议 6 诚实门禁）：
  * ok=0 且 failed>0 → `error`（全失败不得伪装 done —— 2026-09-15 批量评估事故
  * 的教训：80/80 零产物仍发 done，卡片落账还触发了刷新）；否则 `done` 带逐项
@@ -625,12 +666,17 @@ export function makeCheckupHtmlProbe(root) {
  * mirrors the original if/else chain exactly; the evaluate message is kept
  * byte-identical.
  *
- * @param {{kind: string, cleanExit: boolean, sawError: boolean, emittedText: boolean, persisted: boolean, timedOut?: boolean}} args
+ * @param {{kind: string, cleanExit: boolean, sawError: boolean, emittedText: boolean, persisted: boolean, timedOut?: boolean, checkupAlreadyCurrentStar?: number | null}} args
  *   `timedOut` = the harness's own kill timer stopped it (route.ts's `killer`), which is
  *   NOT the CLI's fault and must be reported as such — see the branch below.
- * @returns {{ok: true} | {ok: false, message: string}}
+ *   `checkupAlreadyCurrentStar` = the star of a verifiable checkup row for THIS tracker#
+ *   already dated today (route.ts passes `checkupArtifactTodayForTracker(...)`). A cleanly-
+ *   finished checkup that persisted nothing but finds today's report already there is NOT a
+ *   failure — the user's data is current — so it reports ok with an `alreadyCurrent` note
+ *   instead of the misleading "zero artifacts" error (2026-09-23, approach B).
+ * @returns {{ok: true, alreadyCurrent?: boolean, message?: string} | {ok: false, message: string}}
  */
-export function persistRunOutcome({ kind, cleanExit, sawError, emittedText, persisted, timedOut = false }) {
+export function persistRunOutcome({ kind, cleanExit, sawError, emittedText, persisted, timedOut = false, checkupAlreadyCurrentStar = null }) {
   // 本地定时器杀的，先于一切判——否则「无 stdout + 非 0 退出」会落进下面的
   // noOutputError 分支，把 30 分钟体检上限读成安装/登录问题（2026-09-17 #682 实测：
   // 卡片写着 "is it installed and authenticated?"，真因是撞了 checkup 的 1_800_000ms
@@ -657,6 +703,24 @@ export function persistRunOutcome({ kind, cleanExit, sawError, emittedText, pers
     return { ok: false, message: "The CLI produced no output — is it installed and authenticated? (career-ops is best on Claude Code.)" };
   }
   if (PERSISTENCE_GATED_KINDS.has(kind) && !persisted) {
+    // approach B (2026-09-23): a checkup that ran to completion (clean exit, real
+    // output, no error) but wrote nothing new, because this tracker# already has a
+    // verifiable report from TODAY, is not a failure — it's redundant. Only a
+    // cleanly-finished run qualifies: a crashed/non-clean run must never be laundered
+    // into done by a pre-existing report.
+    if (
+      kind === "checkup" &&
+      cleanExit &&
+      !sawError &&
+      emittedText &&
+      typeof checkupAlreadyCurrentStar === "number"
+    ) {
+      return {
+        ok: true,
+        alreadyCurrent: true,
+        message: `★${checkupAlreadyCurrentStar} 今日已体检 — nothing new was persisted, so the existing report stands. A re-checkup only pays off after the data changes or on a later day.`,
+      };
+    }
     const message = kind === "checkup"
       ? "This checkup finished without a usable row in the checkup ledger (data/company-checkups.tsv) — no new row landed, or the row it added names an HTML report that isn't there. Nothing was persisted, so it's not recorded. Re-run it to verify."
       : "This evaluation didn't save a report, so it's not in your tracker. Full evaluation is verified on Claude Code.";

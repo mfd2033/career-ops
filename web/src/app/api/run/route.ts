@@ -8,7 +8,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { after } from "next/server";
 import { resolveCli } from "@/lib/clis";
-import { accumulateTokens, checkupArtifactRowCount, makeCheckupHtmlProbe, failureEvidence, failureLedgerMsg, hasNewCompletedReport, isFatalGenericStderr, persistRunOutcome, PERSISTENCE_GATED_KINDS, withModelFlag } from "@/lib/run-cli-support.mjs";
+import { accumulateTokens, checkupArtifactRowCount, checkupArtifactTodayForTracker, makeCheckupHtmlProbe, failureEvidence, failureLedgerMsg, hasNewCompletedReport, isFatalGenericStderr, persistRunOutcome, PERSISTENCE_GATED_KINDS, withModelFlag } from "@/lib/run-cli-support.mjs";
 import { spawnHeadlessCli, terminateCli } from "@/lib/spawn-cli.mjs";
 import { careerOpsRoot, readMemory, findReportFile, readInbox, readScanDates, findCheckupTarget, rootScript } from "@/lib/career-ops";
 import { checkupDispatchText } from "@/lib/checkup-request.mjs";
@@ -831,13 +831,21 @@ async function runPipeline({
           : kind === "checkup"
             ? countArtifactRows() > ledgerRowsBefore
             : false;
+        // approach B (2026-09-23): a checkup that wrote nothing new may simply have
+        // found today's report already there (a redundant re-checkup of a row already
+        // checked up today), which is NOT a failure. Only ask the ledger when the gate
+        // would otherwise fire — a persisted run needs no reinterpretation.
+        const checkupAlreadyCurrentStar =
+          kind === "checkup" && !persisted
+            ? checkupArtifactTodayForTracker(readCheckupLedger(), String(input), today, checkupHtmlExists)
+            : null;
         // Honesty gate (#9, ADR-0030): a green "done" requires a CLEAN exit, real
         // output, AND — for the artifact-persisting kinds — the channel actually
         // written (evaluate: a completed report; checkup: a ledger row). The
         // decision lives in persistRunOutcome so it is assertable: an inline copy
         // here is exactly how checkup drifted out from under this gate and two
         // zero-artifact runs got banked as done (2026-09-16, #73/#131).
-        const outcome = persistRunOutcome({ kind, cleanExit, sawError, emittedText, persisted, timedOut });
+        const outcome = persistRunOutcome({ kind, cleanExit, sawError, emittedText, persisted, timedOut, checkupAlreadyCurrentStar });
         if (outcome.ok && kind === "evaluate") {
           // Archiving the inbox row is route work after the CLI is gone, and it
           // outlives this handler — the `finally` below must not close the run out
@@ -846,6 +854,12 @@ async function runPipeline({
           return;
         }
         if (outcome.ok) {
+          if (outcome.alreadyCurrent) {
+            // Surface why this "done" produced no new artifact, so the job card and
+            // transcript say "already checked up today" instead of looking like a
+            // silent no-op (the misleading zero-artifact error is what this replaces).
+            send({ type: "text", text: `\n\u2139\uFE0F ${outcome.message}\n` });
+          }
           send(doneEvent());
         } else {
           send({ type: "error", msg: outcome.message });
