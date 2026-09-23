@@ -641,8 +641,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             sendResponse({ ok: false, error: "无效报告号" });
             break;
           }
-          await chrome.tabs.create({ url: `http://127.0.0.1:${port}/report/${num}` });
-          sendResponse({ ok: true, reportUrl: `http://127.0.0.1:${port}/report/${num}` });
+          // 打开给用户看的页面一律用 localhost（modes/_custom.md）；上面的端口探测与
+          // API base 仍走 127.0.0.1——两者是不同 origin，探测依赖 IP 字面量，勿“顺手统一”。
+          const reportUrl = `http://localhost:${port}/report/${num}`;
+          await chrome.tabs.create({ url: reportUrl });
+          sendResponse({ ok: true, reportUrl });
         } catch (err) {
           sendResponse({ ok: false, error: err.message });
         }
