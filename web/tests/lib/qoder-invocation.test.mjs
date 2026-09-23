@@ -11,11 +11,13 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { KNOWN_KINDS, toolNames, toolScopeFor } from "../../src/lib/claude-invocation.mjs";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { KNOWN_KINDS, argValue, toolNames, toolScopeFor } from "../../src/lib/claude-invocation.mjs";
 import { QODER_EXTRA_DENIED, parseQoderEvent, qoderCliArgs, qoderPermissionFlags } from "../../src/lib/qoder-invocation.mjs";
 
 const argv = qoderCliArgs({ kind: "evaluate", prompt: "PROMPT" });
-const flagValue = (args, flag) => args[args.indexOf(flag) + 1];
 const json = (o) => JSON.stringify(o);
 
 // --- argv -------------------------------------------------------------------
@@ -35,7 +37,7 @@ test("the prompt is a positional, so a model flag can still be appended after it
 test("no kind may ask for a blanker permission mode than the audited one", () => {
   for (const kind of KNOWN_KINDS) {
     const args = qoderCliArgs({ kind, prompt: "p" });
-    assert.equal(flagValue(args, "--permission-mode"), "accept_edits", `${kind} must not change the mode`);
+    assert.equal(argValue(args, "--permission-mode"), "accept_edits", `${kind} must not change the mode`);
     for (const blanket of ["--dangerously-skip-permissions", "--yolo", "--always-approve", "--yes"]) {
       assert.ok(!args.includes(blanket), `${kind} must not carry ${blanket}`);
     }
@@ -47,18 +49,31 @@ test("no kind may ask for a blanker permission mode than the audited one", () =>
 test("every kind's allow list is the audited source, verbatim", () => {
   for (const kind of KNOWN_KINDS) {
     assert.equal(
-      flagValue(qoderPermissionFlags(kind), "--allowed-tools"),
+      argValue(qoderPermissionFlags(kind), "--allowed-tools"),
       toolScopeFor(kind).allowed,
       `${kind}: the allow list must BE toolScopeFor(kind).allowed`,
     );
   }
 });
 
+test("read-only kinds ship the exact deny list this policy promises", () => {
+  // A LITERAL, deliberately not recomputed from the same expression the
+  // implementation uses: a derived expectation would keep passing while both
+  // sides rotted together, which is the one failure a policy guard must not have.
+  assert.equal(
+    argValue(qoderPermissionFlags("pdf"), "--disallowed-tools"),
+    "Write,Edit,MultiEdit,NotebookEdit,Bash,Task," +
+      "Monitor,Agent,TaskCreate,TaskGet,TaskList,TaskStop,TaskUpdate," +
+      "CronCreate,CronDelete,CronList,ScheduleWakeup,Workflow,EnterWorktree,ExitWorktree," +
+      "ImageGen,CreateGoal,GetGoal,UpdateGoal",
+  );
+});
+
 test("every kind's deny list is the audited source plus Qoder's own superset", () => {
   for (const kind of KNOWN_KINDS) {
     const expected = [...toolNames(toolScopeFor(kind).disallowed), ...QODER_EXTRA_DENIED].join(",");
     assert.equal(
-      flagValue(qoderPermissionFlags(kind), "--disallowed-tools"),
+      argValue(qoderPermissionFlags(kind), "--disallowed-tools"),
       expected,
       `${kind}: the deny list must equal toolScopeFor(kind).disallowed ∪ QODER_EXTRA_DENIED`,
     );
@@ -78,7 +93,7 @@ test("the deny list covers the execution path the probe actually found", () => {
   // (`echo PERM-OK` came back on stdout); with Monitor also denied, the CLI
   // reported it had no shell tool at all.
   assert.ok(QODER_EXTRA_DENIED.includes("Monitor"), "Monitor can execute commands — it must stay denied");
-  const denied = new Set(toolNames(flagValue(qoderPermissionFlags("pdf"), "--disallowed-tools")));
+  const denied = new Set(toolNames(argValue(qoderPermissionFlags("pdf"), "--disallowed-tools")));
   assert.ok(denied.has("Monitor"), "the pdf kind must not keep an execution path open");
   assert.ok(denied.has("Bash") && denied.has("Write") && denied.has("Edit"), "pdf keeps its denials");
 });
@@ -146,4 +161,31 @@ test("parser: junk and non-JSON lines are ignored", () => {
   assert.equal(parseQoderEvent("not json"), null);
   assert.equal(parseQoderEvent(""), null);
   assert.equal(parseQoderEvent("null"), null);
+});
+
+// --- wiring -----------------------------------------------------------------
+//
+// clis.ts is TypeScript and this suite is .mjs, so the row is asserted as text
+// (the repo's other clis.ts guards do the same). Without this, the engine could
+// keep a plain-text argv and a dropped stderr classifier while every unit above
+// still passes — the widget would simply never show a step.
+
+const CLIS_TS = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "src", "lib", "clis.ts");
+const clisSrc = readFileSync(CLIS_TS, "utf8");
+
+test("the qoder-cn row is wired to this module's builder and parser", () => {
+  const row = /id:\s*"qoder-cn"[^\n]*/.exec(clisSrc);
+  assert.ok(row, "KNOWN has no qoder-cn row");
+  assert.match(row[0], /streamArgsFor:\s*qoderCliArgs/, "the row must take its stream argv from qoderCliArgs");
+  assert.match(row[0], /parseEvent:\s*parseQoderEvent/, "the row must parse with parseQoderEvent");
+});
+
+test("the qoder-cn row declares no stderr classifier", () => {
+  // Measured: cwd in the repo root makes the CLI write "Skill conflict:" lines
+  // to stderr on a run that succeeds, so the generic classifier must stay in
+  // charge — it does not match those, and the real failure (not logged in)
+  // arrives on the result event instead.
+  const row = /id:\s*"qoder-cn"[^\n]*/.exec(clisSrc);
+  assert.ok(row, "KNOWN has no qoder-cn row");
+  assert.ok(!/stderrIsFatal/.test(row[0]), "Qoder must not get a stderr classifier");
 });

@@ -6,6 +6,7 @@ import { codexStreamArgs, isFatalClaudeStderr, isFatalCodexStderr, isFatalOpenCo
 import { loadOpencodeModels, resetOpencodeModelCache } from "./opencode-models.mjs";
 import { cliDisplayName } from "./cli-labels.mjs";
 import { cliSearchDirs } from "./cli-bin-dirs.mjs";
+import { claudeCliArgs } from "./claude-invocation.mjs";
 import { parseQoderEvent, qoderCliArgs } from "./qoder-invocation.mjs";
 
 // Server-only (node imports). The agnostic runtimes career-ops can delegate to
@@ -208,7 +209,10 @@ const MODELS: Record<string, ModelMeta> = {
 // every row spells its own id, so a missing label is caught by a test rather
 // than rendering as `undefined` (ADR-0043 决议 7).
 export const KNOWN: CliSpec[] = [
-  { id: "claude", name: cliDisplayName("claude"), bin: "claude", run: "claude -p", url: "https://claude.ai/code", args: (p) => ["-p", p], model: MODELS.claude, parseEvent: parseClaudeEvent, stderrIsFatal: isFatalClaudeStderr },
+  // `streamArgsFor` is the shared contract for "this engine's argv depends on the
+  // run's kind" — claudeCliArgs already has that shape, so the route no longer
+  // carries a second, claude-only mechanism beside the engine-declared one.
+  { id: "claude", name: cliDisplayName("claude"), bin: "claude", run: "claude -p", url: "https://claude.ai/code", args: (p) => ["-p", p], streamArgsFor: claudeCliArgs, model: MODELS.claude, parseEvent: parseClaudeEvent, stderrIsFatal: isFatalClaudeStderr },
   { id: "codex", name: cliDisplayName("codex"), bin: "codex", run: "codex exec", url: "https://github.com/openai/codex", args: (p) => ["exec", p], model: MODELS.codex, streamArgs: codexStreamArgs, parseEvent: parseCodexEvent, stderrIsFatal: isFatalCodexStderr },
   { id: "gemini", name: cliDisplayName("gemini"), bin: "gemini", run: "gemini -p", url: "https://github.com/google-gemini/gemini-cli", args: (p) => ["-p", p], model: MODELS.gemini },
   { id: "opencode", name: cliDisplayName("opencode"), bin: "opencode", run: "opencode run", url: "https://opencode.ai", args: (p) => ["run", p], model: MODELS.opencode, stderrIsFatal: isFatalOpenCodeStderr },

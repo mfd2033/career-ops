@@ -19,7 +19,6 @@ import { renderAndMarkPdf, writeCvHtml, pdfRunOutcome } from "@/lib/pdf-render.m
 import { createCvEnvelopeFilter, type CvEnvelope } from "@/lib/cv-envelope.mjs";
 import { buildPrompt, isShellSafeCompanyName, clampInlineJd, clampInlineEmployer } from "@/lib/run-prompts.mjs";
 import { deriveRunReportNum, buildReconcileArgs } from "@/lib/run-reconcile.mjs";
-import { claudeCliArgs } from "@/lib/claude-invocation.mjs";
 import { acquireTrackerWrite, releaseTrackerWrite } from "@/lib/core/run-registry";
 import { acquire, release, __setSizeSource, DEFAULT_POOL_SIZE } from "@/lib/core/concurrency-pool";
 import { registerRun, setCancelHandler, publish, completeRun, getRunBuffer } from "@/lib/core/run-events";
@@ -289,28 +288,23 @@ async function runPipeline({
       : undefined;
   const prompt = buildPrompt({ kind, input, memory: readMemory(), today, postedAt, unknownEmployer: readAppConfig().unknownEmployer, checkupCompany, jdText, company: employer });
 
-  const isClaude = cliId === "claude";
-  // Which tools each kind gets, and the whole claude argv, live in
-  // claude-invocation.mjs — see its header for the policy and for why it is asserted on
-  // built values rather than on this file's source. NEVER auto-submits; that
-  // remains a prompt-level guarantee.
+  // Which tools each kind gets, and the whole argv for every runtime that HAS an
+  // audited scope, live with those runtimes: claude-invocation.mjs (declared on
+  // claude's CliSpec row) and qoder-invocation.mjs (on qoder-cn's). See their
+  // headers for the policy and for why it is asserted on built values rather
+  // than on this file's source. NEVER auto-submits; that remains a prompt-level
+  // guarantee.
   // CLIs with no scope of their own get no tool flags from spec.args() at all, so
   // their agents stay unrestricted here. That gap is route-wide (it applies to
   // 'evaluate' too), not specific to pdf, and each CLI needs its own mechanism
   // researched — tracked as #2507 rather than half-fixed here. On those CLIs the
   // backend is the only INTENDED writer — the agent is not asked to write — but
   // that is mitigation, not enforcement: the capability is still there for an
-  // injected posting to reach. TWO runtimes now carry an audited scope of their
-  // own — claude (the branch below) and anything declaring spec.streamArgsFor,
-  // which is where the qoder-cn per-kind policy lives rather than here.
+  // injected posting to reach.
   // A CLI with its own structured stream gets the argv that turns it on, so its
   // stdout matches spec.parseEvent below; spec.args stays the plain-text argv the
   // envelope-parsing routes rely on.
-  const baseArgs = spec.streamArgsFor
-    ? spec.streamArgsFor({ kind, prompt })
-    : isClaude
-      ? claudeCliArgs({ kind, prompt })
-      : (spec.streamArgs ?? spec.args)(prompt);
+  const baseArgs = spec.streamArgsFor ? spec.streamArgsFor({ kind, prompt }) : (spec.streamArgs ?? spec.args)(prompt);
   // The config page's model picker applies to EVERY CLI uniformly. Absent a saved
   // model (or a CLI with no model flag), withModelFlag returns the args untouched
   // and the CLI keeps its own default.
@@ -494,6 +488,14 @@ async function runPipeline({
     };
     let lastTokens = 0; // per-run token cost from the CLI's structured usage event (#6) — local only
     let lastCostUsd: number | null = null;
+    // ADR-0052 决议 6: a runtime that reports NO usage (Qoder CN sends every
+    // counter as 0) must not have a `tokens: 0` put in its mouth — "0 tokens ·
+    // $0.00" asserts the run was free. The done event carries the figure only
+    // when a usage event actually arrived. The client already renders a cost
+    // only above zero (`doneTokens > 0`), so an absent figure changes nothing
+    // it shows; it only stops the wire from stating a number nobody reported.
+    let sawUsage = false;
+    const doneEvent = () => ({ type: "done" as const, ...(sawUsage ? { tokens: lastTokens } : {}), costUsd: lastCostUsd });
     // pdf-mode's agent only tailors content now (rendering moved to the
     // backend, #2172) — but its killMs still has to leave real headroom
     // inside the route's overall maxDuration (800s): the render+mark phase
@@ -564,6 +566,7 @@ async function runPipeline({
       // Accumulated, not assigned: usage events are per-turn, so overwriting made a
       // multi-turn run report only its last turn. The authoritative "done" is sent
       // on close, so the honesty gate decides done-vs-error first.
+      if (typeof ev?.tokens === "number") sawUsage = true;
       lastTokens = accumulateTokens(lastTokens, ev);
       if (typeof ev?.costUsd === "number") lastCostUsd = ev.costUsd;
       if (ev?.error) {
@@ -700,7 +703,7 @@ async function runPipeline({
           sendWarnings(result.warnings);
           // Confirmed successful render → close the pdf step's timing (评估耗时埋点).
           logEvalTiming(String(input), "end");
-          send({ type: "done", tokens: lastTokens, costUsd: lastCostUsd });
+          send(doneEvent());
         } catch (e) {
           send({ type: "error", msg: `PDF rendering crashed unexpectedly: ${e instanceof Error ? e.message : String(e)}`.slice(0, 200) });
         } finally {
@@ -745,7 +748,7 @@ async function runPipeline({
         } catch (e) {
           send({ type: "text", text: `\u26A0\uFE0F reconcile-pipeline: ${e instanceof Error ? e.message : String(e)}\n` });
         } finally {
-          send({ type: "done", tokens: lastTokens, costUsd: lastCostUsd });
+          send(doneEvent());
           close();
         }
       };
@@ -843,7 +846,7 @@ async function runPipeline({
           return;
         }
         if (outcome.ok) {
-          send({ type: "done", tokens: lastTokens, costUsd: lastCostUsd });
+          send(doneEvent());
         } else {
           send({ type: "error", msg: outcome.message });
         }
