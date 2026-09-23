@@ -9,6 +9,7 @@ import { cliDisplayName } from "./cli-labels.mjs";
 import { cliSearchDirs } from "./cli-bin-dirs.mjs";
 import { claudeCliArgs } from "./claude-invocation.mjs";
 import { parseQoderEvent, qoderCliArgs } from "./qoder-invocation.mjs";
+import { codebuddyCliArgs, parseCodebuddyEvent } from "./codebuddy-invocation.mjs";
 
 // Server-only (node imports). The agnostic runtimes career-ops can delegate to
 // in headless mode (AGENTS.md). Install URLs from career-ops-docs.
@@ -204,6 +205,43 @@ const MODELS: Record<string, ModelMeta> = {
     default: "",
     options: [],
   },
+  // Source: `codebuddy --help` on v2.137.1 (the CLI printed this list itself).
+  // `default` is not a guess either — with no `--model` at all, `system/init`
+  // echoes `model: "cmcc:auto"` back, so that is what the CLI would use.
+  codebuddy: {
+    flag: "--model",
+    default: "cmcc:auto",
+    options: [
+      { id: "cmcc:auto", label: "cmcc:auto (default)" },
+      { id: "cmcc:ydy-deepseek-v4-flash-0731", label: "cmcc:ydy-deepseek-v4-flash-0731" },
+      { id: "cmcc:Deepseek-V4-pro", label: "cmcc:Deepseek-V4-pro" },
+      { id: "cmcc:Kimi-2.6", label: "cmcc:Kimi-2.6" },
+      { id: "cmcc:Kimi-K2.7-code", label: "cmcc:Kimi-K2.7-code" },
+      { id: "cmcc:ydy-kimi-K3", label: "cmcc:ydy-kimi-K3" },
+      { id: "cmcc:ydy-minimax-m3", label: "cmcc:ydy-minimax-m3" },
+      { id: "cmcc:Glm-5.2", label: "cmcc:Glm-5.2" },
+      { id: "auto", label: "auto" },
+      { id: "hy4-preview", label: "hy4-preview" },
+      { id: "hy3", label: "hy3" },
+      { id: "hy3-x", label: "hy3-x" },
+      { id: "deepseek-v4.1-flash", label: "deepseek-v4.1-flash" },
+      { id: "deepseek-v4-pro", label: "deepseek-v4-pro" },
+      { id: "glm-5.3", label: "glm-5.3" },
+      { id: "glm-5.3-flash", label: "glm-5.3-flash" },
+      { id: "glm-5.2", label: "glm-5.2" },
+      { id: "glm-5.1", label: "glm-5.1" },
+      { id: "glm-5v-turbo", label: "glm-5v-turbo" },
+      { id: "minimax-m3", label: "minimax-m3" },
+      { id: "kimi-k3-1", label: "kimi-k3-1" },
+      { id: "kimi-k2.8-preview", label: "kimi-k2.8-preview" },
+      { id: "kimi-k2.7", label: "kimi-k2.7" },
+      { id: "kimi-k2.6", label: "kimi-k2.6" },
+      { id: "custom-local:agnes-image-2.1-flash", label: "custom-local:agnes-image-2.1-flash" },
+      { id: "custom-local:agnes-2.5-flash", label: "custom-local:agnes-2.5-flash" },
+      { id: "custom-local:deepseek-v4-flash", label: "custom-local:deepseek-v4-flash" },
+      { id: "custom-local:z-ai/glm-5.3-free", label: "custom-local:z-ai/glm-5.3-free" },
+    ],
+  },
 };
 
 // `name` comes from cli-labels.mjs (the shared, client-safe source) so the label
@@ -232,6 +270,15 @@ export const KNOWN: CliSpec[] = [
   // which is where this engine's per-kind tool policy lives — the second
   // runtime with an audited scope, after Claude (ADR-0052 决议 2-4).
   { id: "qoder-cn", name: cliDisplayName("qoder-cn"), bin: "qoderclicn", binDirs: ["~/.qodersec/bin"], run: "qoderclicn -p", url: "https://qoder.com.cn/", args: (p) => ["-p", p], streamArgsFor: qoderCliArgs, parseEvent: parseQoderEvent, model: MODELS["qoder-cn"] },
+  // CodeBuddy Code. Its binary comes from the vendor's OWN native installer
+  // (documented Windows target: %USERPROFILE%\AppData\Local\codebuddy\bin), so
+  // `binDirs` carries the one channel the shared search dirs cannot reach
+  // (ADR-0053). Deliberately NOT wired: the copy WorkBuddy ships inside its app
+  // bundle, and npm's global copy. Both are extensionless `#!/usr/bin/env node`
+  // scripts, and spawn-cli.mjs requires a DIRECTLY spawnable executable — an
+  // engine that resolves but cannot be spawned is exactly the state this list
+  // must never report as installed (ADR-0052).
+  { id: "codebuddy", name: cliDisplayName("codebuddy"), bin: "codebuddy", binDirs: ["~/AppData/Local/codebuddy/bin"], run: "codebuddy -p", url: "https://www.codebuddy.cn/", args: (p) => ["-p", p], streamArgsFor: codebuddyCliArgs, parseEvent: parseCodebuddyEvent, model: MODELS.codebuddy },
 ];
 
 function searchDirs(): string[] {

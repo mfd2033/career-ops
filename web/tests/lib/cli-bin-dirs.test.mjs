@@ -92,3 +92,32 @@ test("the qoder-cn row declares the vendor dir its installer actually uses", () 
   assert.match(row[0], /bin:\s*"qoderclicn"/, "the row must spawn the qoderclicn binary");
   assert.match(row[0], /binDirs:\s*\["~\/\.qodersec\/bin"\]/, "the row must declare ~/.qodersec/bin");
 });
+
+test("the codebuddy row declares the vendor native-installer dir", () => {
+  // ADR-0053: the vendor's native installer is the ONLY channel whose
+  // `codebuddy` is a directly spawnable executable. The WorkBuddy-bundled copy
+  // and npm's global copy are extensionless node scripts — wiring either would
+  // report an engine as installed and then fail at spawn.
+  const row = /id:\s*"codebuddy"[^\n]*/.exec(clisSrc);
+  assert.ok(row, "KNOWN has no codebuddy row");
+  assert.match(row[0], /bin:\s*"codebuddy"/, "the row must spawn the codebuddy binary");
+  assert.match(
+    row[0],
+    /binDirs:\s*\["~\/AppData\/Local\/codebuddy\/bin"\]/,
+    "the row must declare the vendor native-installer bin dir",
+  );
+});
+
+test("no engine smuggles a machine-specific path into binDirs", () => {
+  // A drive letter or UNC root is one machine's layout, frozen into shipped
+  // code: correct on the author's box, silently wrong on every other
+  // (ADR-0053 决议 4). Vendor dirs must stay `~`-relative or POSIX-absolute.
+  const lists = [...clisSrc.matchAll(/binDirs:\s*\[([^\]]*)\]/g)].map((m) => m[1]);
+  assert.ok(lists.length >= 2, "no binDirs lists parsed — has the row shape changed?");
+  for (const list of lists) {
+    for (const entry of [...list.matchAll(/"([^"]+)"/g)].map((m) => m[1])) {
+      assert.doesNotMatch(entry, /^[A-Za-z]:/, `machine-specific drive path in binDirs: ${entry}`);
+      assert.doesNotMatch(entry, /^\\\\/, `machine-specific UNC path in binDirs: ${entry}`);
+    }
+  }
+});

@@ -25,6 +25,11 @@ export const CLI_LABELS = {
   // run-ledger entry recorded today must not turn ambiguous if the
   // international one is ever added beside it (ADR-0052).
   "qoder-cn": "Qoder (CN)",
+  // CodeBuddy Code (Tencent). The id names the CLI, not the IDE that shares
+  // its name: `CodeBuddy CN` is a VS Code fork whose own command-line entry
+  // (`buddycn`) is a window launcher, not an agent runtime — so it is not an
+  // engine and never appears here (ADR-0053).
+  codebuddy: "CodeBuddy",
 };
 
 /**
