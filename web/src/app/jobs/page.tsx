@@ -160,6 +160,13 @@ function JobsRow({ job: j }: { job: Job }) {
   // `/api/batch-items` 通道）；折叠/终态不拉，卸载与折叠都清定时器。瞬时失败
   // 静默等下个 tick（与详情页容错同口径，不闪错误态）。
   const [serverItems, setServerItems] = useState<JobItem[]>([]);
+  // 待办 #14 防御性清理：serverBatchId 变化（防未来一键多批/卡片复用）时清空
+  // 上一批的登记表快照，避免 mergeBatchItems 把旧批 items 并进新批展示。仅键控
+  // 于 batchId 本身——运行态/折叠切换不触发，保持「终态已拉条目不回退不闪空」
+  // 的既定口径；已空时原引用返回让 React bail-out，mount 不产生多余重渲染。
+  useEffect(() => {
+    setServerItems((prev) => (prev.length > 0 ? [] : prev));
+  }, [j.serverBatchId]);
   useEffect(() => {
     if (!shouldPollBatch({ open: batchOpen, running: isBatch && isRunning, serverBatchId: j.serverBatchId })) return;
     let alive = true;
