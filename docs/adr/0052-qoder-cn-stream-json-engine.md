@@ -18,7 +18,7 @@ web dashboard 的 `KNOWN` 有 8 个可派发运行时，其中只有 claude / co
 - 可执行文件在 `%USERPROFILE%\.qodersec\bin\`，既不在 PATH 也不在 npm global —— `findBin` 的两条通路都覆盖不到。
 - 真正的致命错误不落在 stderr：实测 cwd 在仓库根时 stderr 会有 7 行 `Skill conflict:` 噪声，不匹配通用致命正则；未登录的判定来自 `result` 事件。
 
-CodeBuddy 本机只有桌面端与配置目录，**没有 `cbc`/`codebuddy` 可执行文件**，行形状无法实测 → 本轮不接，拆成阻塞式待办。
+CodeBuddy 有官方 agent CLI，且**本机已经具备**——只是既不在 PATH、也不是 npm 全局包：它由 **WorkBuddy 桌面端 5.5.6 捆绑在自己安装包里**（`D:\WorkBuddy\resources\app.asar.unpacked\cli\`，`package.json` 为 `@genie/agent-cli`，`bin` 声明 `codebuddy`/`cbc`/`codebuddy-code` → `./bin/codebuddy`，另有 `dist/codebuddy.js` 22.7 MB 与 `dist/codebuddy-headless.js`，自带 `node_modules`/`vendor`）。实测（系统 node v22.23.2 跑 `node bin/codebuddy`）：`--version` → `2.137.1`；`--help` → `codebuddy|cbc [options] [command] [prompt]`，含 `-p/--print`、`--output-format text|json|stream-json`、`--include-partial-messages`、`--allowedTools`/`--disallowedTools`、`--permission-mode acceptEdits|default|plan|dontAsk|auto|bypassPermissions`、`-y`。行形状仍未实测（未获实跑授权）→ 本轮不接，拆成阻塞式待办。（2026-09-23 三轮排查留痕，避免后人重走：① 按 `cbc`/`codebuddy` 找 PATH 与 npm 全局——名字没错，那里确实没有；② `D:\CodeBuddy CN\bin\buddycn.cmd` 是 IDE 的 VS Code 式启动器（`--diff`/`--merge`/`--goto`），**不是** agent CLI；③ `~/.workbuddy` 是 WorkBuddy 的**数据目录**（内含它自带的 node/python/PortableGit 运行时，供其内置 agent 用），CLI 本体不在那儿，而在 WorkBuddy 的**安装目录**里。**2026-09-23 已实测跑通**（hy3 模型，4 份真实样本）：`-y` **不是**必需（`--settings '{"permissions":{"allow":["Bash"]}}'` 与 `--allowedTools 'Bash(echo:*)'` 两条合规路径都能让工具真执行，裸名 `--allowedTools=Bash,Read` 反而被拒），且现有 `parseClaudeEvent` 对这些行**零改动即可解析**（0 异常；`file-history-snapshot`/`system/status` 静默丢弃）；与 Qoder 不同，它报真实 token。细节见待办 #18。）
 
 ## 决策
 
@@ -54,6 +54,6 @@ CodeBuddy 本机只有桌面端与配置目录，**没有 `cbc`/`codebuddy` 可�
 
 - 正面：Qoder CN 成为第 3 个有逐工具步骤的运行时；权限域仍是单一来源并被测试锁住；模型下拉跟 CLI 的真实清单走，不写静态副本。
 - 已知缺口（明示，非缺陷）：run 结束不显示用量（Qoder CN 只报 credits）；每次运行会执行用户的 Qoder SessionStart 钩子（含 Qoder Security）；批量评估里 Qoder 仍无步骤；`--list-models` 需登录，未登录时下拉为空（有文案提示）。
-- 后续：CodeBuddy 接入拆成阻塞式待办（前件：本机装 `cbc`/`codebuddy` 并实测行形状）；batch 泛化（`isClaude` → `spec.streamArgs + spec.parseEvent`）另立待办。
+- 后续：CodeBuddy 接入拆成阻塞式待办（**阻塞已清除**：CLI 本机已有（WorkBuddy 捆绑 2.137.1）、参数面 Claude 同形、`-y` 非必需、解析层零改动可复用——可直接实现，见待办 #18）；batch 泛化（`isClaude` → `spec.streamArgs + spec.parseEvent`）另立待办。
 - **维护点（决议 4 的代价）**：那份 Qoder 专属拒绝名单是对着 v1.1.41 `system/init` 列出的 29 个内置工具逐个核对出来的。测试只能锁住我们写下的名字，锁不住未来新增的名字——CLI 升级后若多出能执行/写入/改状态的工具，需要重新核对这份名单（与 #2507 同一类隐患）。
 - 相关未清事项：`/api/run` 之外还有 5 个路由各自手写 `isClaude ? [工具 flag] : spec.args(prompt)`（cv-ingest、batch-evaluate、assistant、apply-prefill、explore-ai）。本轮只给 `/api/run` 开了统一的 `streamArgsFor` 入口，其余仍属 #2507/#10 那条线。
