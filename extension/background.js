@@ -660,10 +660,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         break;
       }
       case "single-evaluate": {
-        // Detail-page single evaluation — same engine as the popup batch
-        // (runBatch → /api/batch-evaluate with one URL). Progress streams to any
-        // attached popup eval port; on completion the map refreshes and content
-        // scripts re-render badges (the detail button reads it via evaluated-updated).
+        // Detail-page single evaluation (ADR-0051): one job goes through the
+        // single-task channel — POST /api/run + the /api/events bus — so it lands
+        // in /jobs as an `evaluate` card with its own step timeline and report jump,
+        // exactly like a URL pasted into the web UI. A server too old to accept the
+        // inline JD on /api/run is detected once per dispatch (capability flag) and
+        // falls back to the batch endpoint, which is what this button always did.
+        // Progress still streams to any attached popup eval port; on completion the
+        // map refreshes and content scripts re-render badges (the detail button
+        // reads it via evaluated-updated, with its 3s poll as the safety net).
         const url = typeof msg.url === "string" ? msg.url.trim() : "";
         if (!/^https?:\/\//i.test(url)) {
           sendResponse({ ok: false, error: "无效职位 URL" });
@@ -674,17 +679,37 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         // 内联 JD/雇主名(详情页 DOM 提取,猎聘等登录墙站点绕开服务端抓取)。
         const jdText = typeof msg.jdText === "string" && msg.jdText.trim() ? msg.jdText.trim() : "";
         const company = typeof msg.company === "string" && msg.company.trim() ? msg.company.trim() : "";
-        runBatch([url], msg.cliId, msg.model, { jdText, company }).catch(async (err) => {
-          announce({ stage: "error", error: err.message });
-          // The action popup auto-closes when the user clicks the page button, so
-          // `announce`'s eval port is usually gone. Route the failure back to the
-          // detail tab instead so the page can toast it and reset the button.
-          if (tabId != null) {
-            try {
-              await chrome.tabs.sendMessage(tabId, { type: "single-eval-error", error: err.message });
-            } catch {
-              /* tab closed or content not injected — ignore */
+        (async () => {
+          const base = `http://127.0.0.1:${await ensureLivePort()}`;
+          const cfg = await resolveEvalConfig(base);
+          const cliId = msg.cliId || cfg.cliId;
+          const model = msg.model || cfg.model || null;
+          if ((await probeEvalRoute(base)) === "run") {
+            await runSingleViaApi({ base, url, cliId, model, jdText, company, tabId });
+            return;
+          }
+          // 回落路径逐字保留：老 exe / 老 dev 服务上这个按钮的行为与 ADR-0051 之前一致。
+          try {
+            await runBatch([url], cliId, model, { jdText, company });
+          } catch (err) {
+            announce({ stage: "error", error: err.message });
+            // The action popup auto-closes when the user clicks the page button, so
+            // `announce`'s eval port is usually gone. Route the failure back to the
+            // detail tab instead so the page can toast it and reset the button.
+            if (tabId != null) {
+              try {
+                await chrome.tabs.sendMessage(tabId, { type: "single-eval-error", error: err.message });
+              } catch {
+                /* tab closed or content not injected — ignore */
+              }
             }
+          }
+        })().catch((err) => {
+          // Nothing else catches this promise: a dead local server must not fail
+          // silently and leave the button stuck on "评估中".
+          announce({ stage: "error", error: err instanceof Error ? err.message : String(err) });
+          if (tabId != null) {
+            chrome.tabs.sendMessage(tabId, { type: "single-eval-error", error: err instanceof Error ? err.message : String(err) }).catch(() => {});
           }
         });
         break;
@@ -988,6 +1013,112 @@ function emit(ev, port) {
 
 function announce(ev) {
   for (const port of evalPorts) emit(ev, port);
+}
+
+// ---- 单职位评估：/api/run + /api/events（ADR-0051）---------------------
+//
+// 「评估本职位」以前也走批量端点（一个 URL 也吃批量编排），任务在 /jobs 里就被
+// 记成「批量评估 · 1 项」。改走单任务链路后它与网页粘贴 URL 评估同形（单卡 +
+// 报告跳转 + 台账步骤时间线）。事件折叠/选路这些判断全在 single-eval-pure.js，
+// 此处只做 fetch 与 chrome 接线。
+importScripts("single-eval-pure.js");
+const SINGLE = self.__careerOpsSingleEvalPure;
+if (!SINGLE) throw new Error("[bg] single-eval-pure.js 未加载:扩展文件不完整");
+
+// 能力探测只是一次本机 GET，4s 足够；超时就当不支持（回落批量路）。
+const CAPABILITY_TIMEOUT_MS = 4000;
+
+/** 这台服务端的 /api/run 认不认 jdText？读不到就算不支持。 */
+async function probeEvalRoute(base) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), CAPABILITY_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${base}/api/version`, { signal: ctrl.signal, cache: "no-store" });
+    if (!res.ok) return "batch";
+    return SINGLE.pickEvalRoute(await res.json());
+  } catch {
+    return "batch";
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * 单职位评估的单任务链路：POST /api/run 拿 runId → 订阅 /api/events 按 runId 过滤。
+ *
+ * 对详情页而言这与批量路无差异：收尾靠 evaluated-updated 与 3s 轮询，失败靠
+ * `single-eval-error`。popup 也只认它已有的 stage 形状（事件由纯函数折叠而来）。
+ */
+async function runSingleViaApi({ base, url, cliId, model, jdText, company, tabId }) {
+  announce({ stage: "start", total: 1, url });
+  const failToTab = (message) => {
+    announce({ stage: "error", error: message });
+    if (tabId != null) {
+      chrome.tabs.sendMessage(tabId, { type: "single-eval-error", error: message }).catch(() => {});
+    }
+  };
+  // SW 保活：读流不算活动事件，空闲 30s 就被 Chrome 终止（同 runBatch 里那段教训）。
+  const keepalive = setInterval(() => chrome.runtime.getPlatformInfo().catch(() => {}), 20000);
+  const ctrl = new AbortController();
+  let state = SINGLE.createRunState(url);
+  try {
+    const res = await fetch(`${base}/api/run`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        kind: "evaluate",
+        input: url,
+        cliId,
+        model: model || undefined,
+        // 内联 JD/雇主名（详情页 DOM 提取）：登录墙站靠它绕开服务端抓取。
+        jdText: jdText || undefined,
+        company: company || undefined,
+      }),
+      signal: ctrl.signal,
+    });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok || !j || !j.runId) throw new Error((j && j.error) || `评估接口返回 ${res.status}`);
+    const eres = await fetch(`${base}/api/events`, { signal: ctrl.signal, cache: "no-store" });
+    if (!eres.ok || !eres.body) throw new Error(`事件通道不可用（${eres.status}）`);
+
+    const reader = eres.body.getReader();
+    const dec = new TextDecoder();
+    let buf = "";
+    outer: for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let nl;
+      while ((nl = buf.indexOf("\n")) !== -1) {
+        const line = buf.slice(0, nl).trim();
+        buf = buf.slice(nl + 1);
+        if (!line) continue;
+        let frame;
+        try {
+          frame = JSON.parse(line);
+        } catch {
+          continue;
+        }
+        // 总线是多任务复用的：只取自己这一路（帧层 keepalive 无 runId，自然落掉）。
+        if (!frame || frame.runId !== j.runId || !frame.ev) continue;
+        const step = SINGLE.consumeRunEvent(state, frame.ev);
+        state = step.state;
+        for (const ev of step.events) announce(ev);
+        if (state.finished) break outer;
+      }
+    }
+    // 没看到终态就断流，是连接问题不是评估失败（评估可能仍在后台跑完）——说清楚两者区别。
+    if (!state.finished) throw new Error("事件通道提前结束（评估可能仍在后台运行，完成后徽章会刷新）");
+    await loadEvaluated(base);
+    await notifyContentScripts();
+    // 评估结束：服务必然在线，强制刷新徽章（绕过节流，纠正评估期间的任何陈旧态）。
+    await updateBadge(true).catch(() => {});
+  } catch (err) {
+    if (!state.finished) failToTab(err instanceof Error ? err.message : String(err));
+  } finally {
+    clearInterval(keepalive);
+    ctrl.abort();
+  }
 }
 
 /** Stream /api/batch-evaluate NDJSON to the popup, then refresh the map. */

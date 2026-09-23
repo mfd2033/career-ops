@@ -13,6 +13,7 @@ import { doneDurationSeconds, useJobTiming } from "@/lib/eval-duration-client";
 import { ReportNumLink } from "@/components/report-num-link";
 import { formatRunEngine } from "@/lib/cli-labels.mjs";
 import { ledgerOnlyRuns } from "@/lib/ledger-merge.mjs";
+import { ledgerCardFields } from "@/lib/ledger-display.mjs";
 import { batchSummary } from "@/lib/batch-summary.mjs";
 import { mergeBatchItems, shouldPollBatch } from "@/lib/batch-live.mjs";
 import { BatchItemList } from "@/components/jobs/batch-item-list";
@@ -76,8 +77,10 @@ export default function JobsHistory() {
   // serverBatchId（= 批量台账行的 id），同一批量本地卡胜出、绝不出双行。
   const ledgerOnly: Job[] = ledgerOnlyRuns(jobs, ledgerRuns).map((r) => ({
     id: r.id,
-    title: r.title,
-    page: r.page,
+    // ADR-0051 补丁（方案 A）：ledger-only 行是扩展/CLI/脚本发起的任务，没有
+    // 本地卡，只能用服务端那个 `${kind} ${input}` 兜底标题。在读取端派生成与
+    // 派发端同一个 i18n 标签，两种来源的历史卡才长得一样（不回填台账、不改记录）。
+    ...ledgerCardFields({ kind: r.kind, input: r.input, title: r.title, page: r.page, t }),
     input: r.input,
     kind: r.kind,
     runId: r.id,

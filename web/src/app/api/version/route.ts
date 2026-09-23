@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execSync } from "node:child_process";
-import { resolveVersionChannels } from "@/lib/version-info.mjs";
+import { resolveVersionChannels, SERVER_CAPABILITIES } from "@/lib/version-info.mjs";
 
 // The WEB build's own version + channel (NOT the user's data checkout) — read from
 // the repo's VERSION (parent of the web/ cwd). The channel is derived from a
@@ -72,5 +72,8 @@ export async function GET() {
     sha: buildInfo?.sha ?? shortSha(),
     builtAt: buildInfo?.builtAt,
     packaged: !!buildInfo,
+    // ADR-0051 决议 11：能力协商走这里，不走 /api/config（那个是用户可变存储）。
+    // 老服务端没这个键 → 扩展读不到能力 → 自己回落批量路。
+    capabilities: SERVER_CAPABILITIES,
   });
 }

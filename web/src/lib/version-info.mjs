@@ -33,3 +33,15 @@ export function resolveVersionChannels({ fileVersion, buildInfoCoreVersion, webV
   const version = web ? `web ${web}` : coreVersion;
   return { version, coreVersion, channel };
 }
+
+/**
+ * 这台服务端的能力清单（ADR-0051 决议 11）：build 期常量，不是用户配置。
+ *
+ * WHY HERE, NOT IN /api/config: 那个端点背后的 store 是用户可改的
+ * `~/.career-ops-web/config.json`——拿它做协议协商就是把「用户设了啥」当成
+ * 「代码能干什么」；常量放这里，老服务端没这个字段就是不支持，无需额外版本比较。
+ *
+ * - `single-eval-inline-jd`：`/api/run` 认 `jdText`/`company`（内联 JD 已下沉到
+ *   `buildPrompt`），所以浏览器扩展的单职位评估可以走 `/api/run` + `/api/events`。
+ */
+export const SERVER_CAPABILITIES = Object.freeze(["single-eval-inline-jd"]);

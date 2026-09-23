@@ -9,7 +9,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildPrompt, buildBatchPrompt, isShellSafeCompanyName } from "../../src/lib/run-prompts.mjs";
+import { buildPrompt, buildBatchPrompt, isShellSafeCompanyName, clampInlineJd, INLINE_JD_MAX } from "../../src/lib/run-prompts.mjs";
 import { OPEN_MARK, CLOSE_MARK } from "../../src/lib/cv-envelope.mjs";
 import { grantsWriteCapability, toolScopeFor } from "../../src/lib/claude-invocation.mjs";
 
@@ -304,6 +304,9 @@ test("buildBatchPrompt: company injects an exact-name directive", () => {
   });
   assert.match(p, /EMPLOYER \(provided by the browser extension, DOM-extracted\)/);
   assert.match(p, /某科技（北京）有限公司/);
+  // ADR-0051 决议 5：公司名来自招聘站页，属不可信内容——按 ADR-0035 口径当 DATA 键声明
+  assert.match(p, /「某科技（北京）有限公司」/);
+  assert.match(p, /untrusted/i);
 });
 
 test("buildPrompt: has BLOCKED BOARDS instruction for headless evaluation", () => {
@@ -361,4 +364,62 @@ test("buildBatchPrompt: swaps in the pre-assigned-number timing block", () => {
   // would leave both behind.
   assert.ok(!/log-eval-timing\.mjs \{num\}/.test(p), "unpinned {num} in the timing block");
   assert.ok(!p.includes("leave them unlogged"), "single-run timing note must not survive the swap");
+});
+
+// ── 内联 JD 下沉到单任务 prompt（ADR-0051 决议 3/4/5）───────────────────────
+//
+// 扩展详情页单职位评估改走 /api/run，内联 JD（DOM 提取、绕登录墙）因此必须在
+// 单任务 prompt 里也成立。批量侧保留自己“改写 → 钉号 → 追加”的顺序：内联段
+// 必须晚于 {num} 钉号，否则用户粘的 JD 正文会被 replaceAll 改写。
+
+test("buildPrompt: evaluate with jdText skips WebFetch and appends the posting text", () => {
+  const p = buildPrompt({
+    kind: "evaluate",
+    input: "https://www.liepin.com/job/1998394056.shtml",
+    memory: "",
+    today: "2026-08-14",
+    jdText: "资深前端工程师\n岗位职责：负责核心业务开发。",
+  });
+  assert.ok(!/Use WebFetch to read the posting/i.test(p), "must not ask for WebFetch when jdText is given");
+  assert.match(p, /Verification: inline \(DOM\)/);
+  assert.ok(!/Verification: unconfirmed \(batch mode\)/.test(p), "batch-mode header must not survive an inline run");
+  assert.match(p, /=== POSTING TEXT \(inline, provided by the browser extension\) ===/);
+  assert.match(p, /资深前端工程师\n岗位职责：负责核心业务开发。/);
+  assert.match(p, /=== END POSTING TEXT ===/);
+});
+
+test("buildPrompt: whitespace-only jdText changes not one byte of the evaluate prompt", () => {
+  // The single-run path is what every CLI/web evaluation already sends; a blank
+  // inline JD must not perturb it at all.
+  const base = { kind: "evaluate", input: "https://acme.com/jobs/7", memory: "", today: "2026-08-14" };
+  assert.equal(buildPrompt({ ...base, jdText: "   \n " }), buildPrompt(base));
+  assert.equal(buildPrompt({ ...base, company: "" }), buildPrompt(base));
+  assert.equal(buildPrompt({ ...base, jdText: null, company: undefined }), buildPrompt(base));
+});
+
+test("buildPrompt: an inline JD does not smuggle batch persistence into a single run", () => {
+  // The worker still reserves its own number and merges itself — only the JD
+  // source changed. Rewriting the wrong step here is how a single run would
+  // silently stop writing the tracker.
+  const p = buildPrompt({ kind: "evaluate", input: "https://acme.com/jobs/7", memory: "", today: "2026-08-14", jdText: "JD 全文" });
+  assert.match(p, /Reserve a report number: run `node reserve-report-num\.mjs`/);
+  assert.match(p, /d\. Merge into the tracker: run `node merge-tracker\.mjs`/);
+  assert.ok(!/batch orchestrator merges/i.test(p));
+});
+
+test("buildBatchPrompt: a literal {num} inside the inline JD survives number pinning", () => {
+  // ADR-0051 决议 4 的回归锁：JD 正文里出现模板占位字面量时，钉号不得改写它。
+  const jd = "职位要求：能把 {num} 这类模板占位讲清楚。";
+  const p = buildBatchPrompt("042", { input: "https://acme.com/jobs/7", memory: "", today: "2026-08-14", jdText: jd });
+  assert.ok(p.includes(jd), "inline JD body must reach the prompt verbatim");
+  // 而模板自己的 {num} 仍然被钉住
+  assert.match(p, /reports\/042-\{company-slug\}-2026-08-14\.md/);
+});
+
+test("clampInlineJd: clamps to the extension's own budget and tolerates junk", () => {
+  assert.equal(clampInlineJd("  abc\n"), "abc");
+  assert.equal(clampInlineJd("x".repeat(INLINE_JD_MAX + 500)).length, INLINE_JD_MAX);
+  for (const junk of [undefined, null, 42, {}, []]) {
+    assert.equal(clampInlineJd(junk), "", `junk input ${JSON.stringify(junk)} must yield ""`);
+  }
 });

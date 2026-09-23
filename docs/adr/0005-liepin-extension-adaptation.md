@@ -3,6 +3,7 @@
 - 状态：已接受（Accepted）
 - 日期：2026-09-07
 - 相关：ADR-0002（BOSS 直聘扩展）、ADR-0001（浏览器全量采集）、`/api/batch-evaluate`、`extension/*`、`web/src/lib/core/url-key.mjs`
+- 后续：**D4/D5 的传输部分被 [ADR-0051](0051-extension-single-eval-via-run.md) 部分取代** —— 内联 JD（`jdText`/`company`）的语义与「DOM 提取优先于 LLM 猜测」的结论仍然有效，但单职位评估不再经 `/api/batch-evaluate`，改写规则也从 `buildBatchPrompt` 下沉到 `buildPrompt`。本篇正文按 ADR 不可变惯例不改。
 
 ## 背景
 

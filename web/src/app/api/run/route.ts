@@ -17,7 +17,8 @@ import { readAppConfig } from "@/lib/app-config";
 import { resolvePdfPaths, type PdfPaths } from "@/lib/pdf-paths.mjs";
 import { renderAndMarkPdf, writeCvHtml, pdfRunOutcome } from "@/lib/pdf-render.mjs";
 import { createCvEnvelopeFilter, type CvEnvelope } from "@/lib/cv-envelope.mjs";
-import { buildPrompt, isShellSafeCompanyName } from "@/lib/run-prompts.mjs";
+import { buildPrompt, isShellSafeCompanyName, clampInlineJd, clampInlineEmployer } from "@/lib/run-prompts.mjs";
+import { deriveRunReportNum, buildReconcileArgs } from "@/lib/run-reconcile.mjs";
 import { claudeCliArgs } from "@/lib/claude-invocation.mjs";
 import { acquireTrackerWrite, releaseTrackerWrite } from "@/lib/core/run-registry";
 import { acquire, release, __setSizeSource, DEFAULT_POOL_SIZE } from "@/lib/core/concurrency-pool";
@@ -65,13 +66,20 @@ export const maxDuration = 800; // a real oferta evaluation / pdf-mode CV tailor
 // through POST /api/run/cancel (the worker card's X button).
 
 export async function POST(req: Request) {
-  let body: { kind?: string; input?: string; cliId?: string; model?: string };
+  let body: { kind?: string; input?: string; cliId?: string; model?: string; jdText?: string; company?: string };
   try {
     body = await req.json();
   } catch {
     return new Response(JSON.stringify({ error: "bad json" }), { status: 400 });
   }
   const { kind = "evaluate", input, cliId, model } = body;
+  // ADR-0051: the browser extension hands over the posting text it read out of
+  // the logged-in page's DOM (the Chinese boards wall off server-side fetching).
+  // Clamped HERE at the edge — the extension already trims to this budget, but it
+  // is not the only caller, and an unclamped body buys a megabyte of prompt with
+  // the user's tokens. Kinds that do not score an offer ignore both fields.
+  const jdText = clampInlineJd(body.jdText);
+  const employer = clampInlineEmployer(body.company);
   if (!input || !cliId) {
     return new Response(JSON.stringify({ error: "input and cliId required" }), { status: 400 });
   }
@@ -195,6 +203,9 @@ export async function POST(req: Request) {
         spec,
         binPath,
         recordEnd,
+        // ADR-0051：内联 JD/雇主名（扩展从已登录页 DOM 提取）随任务进 prompt。
+        jdText,
+        employer,
         // ADR-0035：体检的目标公司在派发时已解析（同一份就是审计行用的那个），
         // 直接带进 prompt，省掉 worker 自解析 tracker 的那一步易错查表。
         checkupCompany: checkupTarget?.ok ? checkupTarget.company : undefined,
@@ -228,6 +239,8 @@ async function runPipeline({
   binPath,
   recordEnd,
   checkupCompany,
+  jdText,
+  employer,
 }: {
   runId: string;
   kind: string;
@@ -239,6 +252,10 @@ async function runPipeline({
   /** ADR-0035: the checkup's resolved target company (absent when the dispatch
    *  bypassed the report-page pre-flight — the prompt then self-resolves). */
   checkupCompany?: string;
+  /** ADR-0051: DOM-extracted posting text, already clamped at the edge. */
+  jdText?: string;
+  /** ADR-0051: DOM-extracted employer name, already clamped at the edge. */
+  employer?: string;
   /** Server run-ledger recorder (once per run; passed in from POST scope). */
   recordEnd: (status: "done" | "error", msg?: string) => void;
 }) {
@@ -270,7 +287,7 @@ async function runPipeline({
     kind === "evaluate"
       ? readInbox().find((j) => j.url === input)?.postedAt ?? readScanDates().get(input)
       : undefined;
-  const prompt = buildPrompt({ kind, input, memory: readMemory(), today, postedAt, unknownEmployer: readAppConfig().unknownEmployer, checkupCompany });
+  const prompt = buildPrompt({ kind, input, memory: readMemory(), today, postedAt, unknownEmployer: readAppConfig().unknownEmployer, checkupCompany, jdText, company: employer });
 
   const isClaude = cliId === "claude";
   // Which tools each kind gets, and the whole claude argv, live in
@@ -369,6 +386,9 @@ async function runPipeline({
   // instead of releasing the tracker-delete guard while mark-pdf-ready.mjs is
   // still actively writing applications.md.
   let pdfRenderPromise: Promise<void> | null = null;
+  // ADR-0051 决议 9：evaluate 的 pipeline.md 归档同样在本作用域之外收尾（见
+  // finishAfterReconcile），它未落定前 finally 不能替 run 叫停。
+  let reconcilePromise: Promise<void> | null = null;
   let writeTokenReleased = false;
   const releaseWriteTokenOnce = () => {
     if (writeToken !== null && !writeTokenReleased) {
@@ -681,6 +701,48 @@ async function runPipeline({
         }
       };
 
+      /**
+       * ADR-0051 决议 9/10 — move this run's posting out of data/pipeline.md's
+       * pending chapter, the step the batch orchestrator has always done and a
+       * single run never did. Best-effort by design: the report and the tracker row
+       * are already on disk, so a failing archive may only be narrated, never turn
+       * a persisted evaluation red. Same phrasing as the batch route's status line.
+       *
+       * The run's own `done` is sent AFTER this, so the ledger's `finishedAt` means
+       * "persisted and archived", not "the CLI stopped talking".
+       */
+      const finishAfterReconcile = async () => {
+        try {
+          const num = deriveRunReportNum({ beforeEntries: reportsBefore, afterEntries: reportEntries() });
+          const args = buildReconcileArgs({ kind, input, num });
+          if (args) {
+            send({ type: "status", label: "Reconciling pipeline.md..." });
+            await new Promise<void>((resolve) => {
+              execFile(
+                process.execPath,
+                [path.join(careerOpsRoot(), "reconcile-pipeline.mjs"), ...args],
+                { cwd: careerOpsRoot(), timeout: 30_000 },
+                (err, stdout) => {
+                  if (err) send({ type: "text", text: `\u26A0\uFE0F reconcile-pipeline: ${err.message}\n` });
+                  else if (String(stdout ?? "").trim()) send({ type: "text", text: `${String(stdout).trim()}\n` });
+                  resolve();
+                },
+              );
+            });
+          } else if (num == null && /^https?:\/\//i.test(String(input))) {
+            // Ambiguous (another evaluate landed its report in this window) or no
+            // report at all. Say so instead of silently skipping: the script's own
+            // `--from-tracker` sweep is the documented catch-all for these rows.
+            send({ type: "text", text: "\u26A0\uFE0F could not attribute one report number to this run — its inbox row (if any) stays pending; `node reconcile-pipeline.mjs --from-tracker` sweeps it up.\n" });
+          }
+        } catch (e) {
+          send({ type: "text", text: `\u26A0\uFE0F reconcile-pipeline: ${e instanceof Error ? e.message : String(e)}\n` });
+        } finally {
+          send({ type: "done", tokens: lastTokens, costUsd: lastCostUsd });
+          close();
+        }
+      };
+
       child.on("error", (e) => { send({ type: "error", msg: e.message }); close(); });
       child.on("close", (code) => {
         // A cancel can fire (killing `child`) before this event finally arrives —
@@ -766,6 +828,13 @@ async function runPipeline({
         // here is exactly how checkup drifted out from under this gate and two
         // zero-artifact runs got banked as done (2026-09-16, #73/#131).
         const outcome = persistRunOutcome({ kind, cleanExit, sawError, emittedText, persisted, timedOut });
+        if (outcome.ok && kind === "evaluate") {
+          // Archiving the inbox row is route work after the CLI is gone, and it
+          // outlives this handler — the `finally` below must not close the run out
+          // from under it (same shape as the pdf render path above).
+          reconcilePromise = finishAfterReconcile();
+          return;
+        }
         if (outcome.ok) {
           send({ type: "done", tokens: lastTokens, costUsd: lastCostUsd });
         } else {
@@ -783,9 +852,10 @@ async function runPipeline({
       // a thrown parse/spawn error must not leave a zombie "running" entry or
       // a held pool slot / write token (the old stream transport relied on the
       // response dying with the request; the background pipeline has no such
-      // safety net and needs this explicitly). EXCEPT the pdf render path: it
-      // deliberately outlives this scope and its own finally calls close().
-      if (!pdfRenderPromise) close();
+      // safety net and needs this explicitly). EXCEPT the pdf render path and the
+      // evaluate archive: both deliberately outlive this scope and call close()
+      // themselves.
+      if (!pdfRenderPromise && !reconcilePromise) close();
     }
   }
 }

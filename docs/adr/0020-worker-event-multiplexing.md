@@ -1,6 +1,7 @@
 # ADR-0020: 工作器事件多路复用——每任务不再独占一条 HTTP 连接
 
 - **Status:** Accepted (2026-09-13)
+- **后续：** 决议 4 仍有效（`/api/batch-evaluate` 形状不改，popup 多选评估还在读它），但 Alternative 里「等扩展有需求时让它也消费事件通道」已在 [ADR-0051](0051-extension-single-eval-via-run.md) 部分兑现：扩展的单职位评估从此常驻 `/api/events`。
 - **Context:** 用户报告「工作区有多个任务在进行时，点击页面其他功能没有反应」。诊断（复现回路 `web/tests/debug/ui-freeze-multiple-tasks.mjs`，Playwright + 反向代理实测）：旧传输下每个任务——**运行中或排队中**（`/api/run` 在池发放槽位前就返回流式响应，靠 10s keepalive 保活）——都持有自己的流式 HTTP 响应；HTTP/1.1 浏览器对同源主机上限 6 条连接，约 6 个并发任务后所有**新**请求（点击其他功能触发的页面数据 fetch、worker 列表自身的 3s 轮询）在 socket 队列中排队，页面表现为「点了没反应」，直到任务结束连接释放才恢复。实测：同源 fetch 延迟 基线 87ms → 持 5 条流 19ms → 持 6 条流 >15s 停滞，阈值恰为浏览器硬限制，确定性复现。前端没有全局遮罩/禁用（`apply-backdrop` 明确 `pointer-events:none`），点击事件本身正常——是请求发不出去。
 
 ## Decision

@@ -16,6 +16,7 @@ import { ReportNumLink } from "@/components/report-num-link";
 import { goBackOr } from "@/lib/nav-history";
 import { formatRunEngine } from "@/lib/cli-labels.mjs";
 import { fmtStartedAt } from "@/lib/started-at.mjs";
+import { ledgerCardFields } from "@/lib/ledger-display.mjs";
 import { fmtDuration } from "@/lib/format";
 import { BatchItemList } from "@/components/jobs/batch-item-list";
 import { StepTimeline } from "@/components/jobs/step-timeline";
@@ -125,6 +126,9 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
     // step stream (ADR-0047: single-run steps now persist at terminal time).
     const e = ledgerEntry;
     const ledgerEngine = formatRunEngine(e.cliId, e.model);
+    // ADR-0051 补丁（方案 A）：同历史页——服务端兜底标题在读取端派生成可读标题，
+    // 否则扩展/CLI 发起的任务页会拿「evaluate <url>」当 H1，而下面一行又重复一遍 url。
+    const display = ledgerCardFields({ kind: e.kind, input: e.input, title: e.title, page: e.page, t });
     // ADR-0046：子任务行（带 parentId）的 kind 读作「子任务」，并给报告跳转与返回父批量。
     const isChild = !!e.parentId;
     const kindLabel = isChild ? t("jobs.subtaskKind") : e.kind;
@@ -148,7 +152,7 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
                 <><X className="size-3 text-red-400" /> {t("jobs.statusError")}</>
               )}
             </p>
-            <h1 className="mt-2 font-display text-2xl tracking-tight text-landing">{e.title}</h1>
+            <h1 className="mt-2 font-display text-2xl tracking-tight text-landing">{display.title}</h1>
             <p className="mt-1 text-sm text-muted">
               {kindLabel} · {t("jobs.ledgerInput")}: {e.input} · {fmtDuration(Math.round((e.finishedAt - e.startedAt) / 1000))}
             </p>
@@ -169,10 +173,10 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
                 <span className="text-faint">{t("jobs.runEngineNotRecorded")}</span>
               )}
             </p>
-            {e.page && (
+            {display.page && (
               <p className="mt-2">
-                <Link href={e.page} className="text-sm text-brand transition-colors hover:underline">
-                  {e.page}
+                <Link href={display.page} className="text-sm text-brand transition-colors hover:underline">
+                  {display.page}
                 </Link>
               </p>
             )}

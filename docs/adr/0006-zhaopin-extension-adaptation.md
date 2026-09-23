@@ -3,6 +3,7 @@
 - 状态：已接受（Accepted）
 - 日期：2026-09-07
 - 相关：ADR-0005（猎聘扩展）、ADR-0002（BOSS 扩展）、`extension/core.js`、`extension/site-boss.js`、`extension/site-liepin.js`、`lib/zh-jobs.mjs`、`lib/url-key.mjs`（web 镜像 `web/src/lib/core/url-key.mjs`）
+- 后续：本篇沿用 ADR-0005 D4 的内联 JD 通道（右栏「评估本职位」也带 `jdText`）。该通道的**传输部分已被 [ADR-0051](0051-extension-single-eval-via-run.md) 部分取代**：三站（含智联右栏）的单职位评估改走 `/api/run`，提取文本与雇主名的语义不变。
 
 ## 背景
 
