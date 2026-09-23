@@ -834,10 +834,9 @@ async function runPipeline({
           : kind === "checkup"
             ? countArtifactRows() > ledgerRowsBefore
             : false;
-        // approach B (2026-09-23): a checkup that wrote nothing new may simply have
-        // found today's report already there (a redundant re-checkup of a row already
-        // checked up today), which is NOT a failure. Only ask the ledger when the gate
-        // would otherwise fire — a persisted run needs no reinterpretation.
+        // approach B（2026-09-23）：一个没写新东西的体检，很可能只是发现本行当天
+        // 已有报告（对已体检行的重复复检），这不是失败。只在门禁本来会报 error 时才
+        // 去查台账——已落盘的 run 无需重新判。
         const checkupAlreadyCurrentStar =
           kind === "checkup" && !persisted
             ? checkupArtifactTodayForTracker(readCheckupLedger(), String(input), today, checkupHtmlExists)
@@ -858,9 +857,8 @@ async function runPipeline({
         }
         if (outcome.ok) {
           if (outcome.alreadyCurrent) {
-            // Surface why this "done" produced no new artifact, so the job card and
-            // transcript say "already checked up today" instead of looking like a
-            // silent no-op (the misleading zero-artifact error is what this replaces).
+            // 说明这个 done 为何没产出新产物，让任务卡片和轨迹显示「当天已体检」，
+            // 而不是看起来像静默空跑（这正是用来替换掉那条误导性的零产物 error 的）。
             send({ type: "text", text: `\n\u2139\uFE0F ${outcome.message}\n` });
           }
           send(doneEvent());

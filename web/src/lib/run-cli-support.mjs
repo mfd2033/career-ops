@@ -669,11 +669,10 @@ export function makeCheckupHtmlProbe(root) {
  * @param {{kind: string, cleanExit: boolean, sawError: boolean, emittedText: boolean, persisted: boolean, timedOut?: boolean, checkupAlreadyCurrentStar?: number | null}} args
  *   `timedOut` = the harness's own kill timer stopped it (route.ts's `killer`), which is
  *   NOT the CLI's fault and must be reported as such — see the branch below.
- *   `checkupAlreadyCurrentStar` = the star of a verifiable checkup row for THIS tracker#
- *   already dated today (route.ts passes `checkupArtifactTodayForTracker(...)`). A cleanly-
- *   finished checkup that persisted nothing but finds today's report already there is NOT a
- *   failure — the user's data is current — so it reports ok with an `alreadyCurrent` note
- *   instead of the misleading "zero artifacts" error (2026-09-23, approach B).
+ *   `checkupAlreadyCurrentStar` = 本 tracker# 当天已有一条可核验体检行时的星级
+ *   （route.ts 传入 `checkupArtifactTodayForTracker(...)`）。一次干净结束、没写新东西
+ *   但发现当天报告已在的体检，不是失败（用户数据已是最新）——所以报 ok + `alreadyCurrent`
+ *   提示，而非误导性的「零产物」error（2026-09-23，approach B）。
  * @returns {{ok: true, alreadyCurrent?: boolean, message?: string} | {ok: false, message: string}}
  */
 export function persistRunOutcome({ kind, cleanExit, sawError, emittedText, persisted, timedOut = false, checkupAlreadyCurrentStar = null }) {
@@ -703,11 +702,9 @@ export function persistRunOutcome({ kind, cleanExit, sawError, emittedText, pers
     return { ok: false, message: "The CLI produced no output — is it installed and authenticated? (career-ops is best on Claude Code.)" };
   }
   if (PERSISTENCE_GATED_KINDS.has(kind) && !persisted) {
-    // approach B (2026-09-23): a checkup that ran to completion (clean exit, real
-    // output, no error) but wrote nothing new, because this tracker# already has a
-    // verifiable report from TODAY, is not a failure — it's redundant. Only a
-    // cleanly-finished run qualifies: a crashed/non-clean run must never be laundered
-    // into done by a pre-existing report.
+    // approach B（2026-09-23）：一次跑到结束（干净退出、有真实输出、无 error）的体检，
+    // 之所以没写新东西，是因为本 tracker# 当天已有一条可核验报告——它不是失败，而是
+    // 重复。只有干净结束的 run 才算数：崩退/非正常退出的 run 绝不能靠一份已存在的报告被洗成 done。
     if (
       kind === "checkup" &&
       cleanExit &&
@@ -718,7 +715,7 @@ export function persistRunOutcome({ kind, cleanExit, sawError, emittedText, pers
       return {
         ok: true,
         alreadyCurrent: true,
-        message: `★${checkupAlreadyCurrentStar} 今日已体检 — nothing new was persisted, so the existing report stands. A re-checkup only pays off after the data changes or on a later day.`,
+        message: `★${checkupAlreadyCurrentStar} 今日已体检 — 本次没有新增产物，报告页已有当天的体检结果，无需重复体检；只有数据发生变化或改天再跑才会产出新结果。`,
       };
     }
     const message = kind === "checkup"
