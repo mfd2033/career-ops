@@ -5,6 +5,7 @@ import { spawnSync } from "node:child_process";
 import { codexStreamArgs, isFatalClaudeStderr, isFatalCodexStderr, isFatalOpenCodeStderr, parseClaudeEvent, parseCodexEvent } from "./run-cli-support.mjs";
 import { loadOpencodeModels, resetOpencodeModelCache } from "./opencode-models.mjs";
 import { cliDisplayName } from "./cli-labels.mjs";
+import { cliSearchDirs } from "./cli-bin-dirs.mjs";
 
 // Server-only (node imports). The agnostic runtimes career-ops can delegate to
 // in headless mode (AGENTS.md). Install URLs from career-ops-docs.
@@ -26,6 +27,12 @@ export type CliSpec = {
   id: string;
   name: string;
   bin: string;
+  /** Vendor dirs to look for `bin` in, AFTER PATH and the shared search dirs
+   * (clis.ts's `searchDirs()`), and only for THIS engine. Some installers put
+   * the binary nowhere the shared list looks — Qoder CN unpacks into
+   * `%USERPROFILE%\.qodersec\bin` — and the engine then reports "not
+   * installed" with nothing for the user to act on. Supports `~`. */
+  binDirs?: string[];
   run: string;
   url: string;
   /** headless invocation args for a single prompt, emitting PLAIN TEXT on stdout.
@@ -175,6 +182,18 @@ const MODELS: Record<string, ModelMeta> = {
       { id: "grok-build-0.1", label: "grok-build-0.1" },
     ],
   },
+  // Deliberately EMPTY, not a snapshot of `qoderclicn --list-models`: the CLI
+  // owns that catalogue and it moves (ADR-0052 决议 9). This entry exists so the
+  // config page can find the picker's metadata at all; the empty option list
+  // makes it render no picker rather than a phantom one. Fetching the real list
+  // at detection time (the way `opencode` does) is a SEPARATE, not-yet-landed
+  // slice — do not read this entry as evidence that it exists (ADR-0052 后续).
+  // (The key must be quoted: `qoder-cn` is not an identifier.)
+  "qoder-cn": {
+    flag: "--model",
+    default: "",
+    options: [],
+  },
 };
 
 // `name` comes from cli-labels.mjs (the shared, client-safe source) so the label
@@ -194,6 +213,12 @@ export const KNOWN: CliSpec[] = [
   // latter. Plain `-p` streams text, which is what every other non-Claude entry
   // here does.
   { id: "grok", name: cliDisplayName("grok"), bin: "grok", run: "grok -p", url: "https://docs.x.ai/build/overview", args: (p) => ["-p", p], model: MODELS.grok },
+  // Qoder CN. `binDirs` because its installer puts the binary nowhere the
+  // shared search dirs look; `args` is the PLAIN-TEXT invocation every
+  // output-reading caller uses. The structured/step path (its own argv builder
+  // + event parser) is a separate slice on purpose: this row first makes the
+  // engine detectable, selectable and dispatchable (ADR-0052 决议 1, 10).
+  { id: "qoder-cn", name: cliDisplayName("qoder-cn"), bin: "qoderclicn", binDirs: ["~/.qodersec/bin"], run: "qoderclicn -p", url: "https://qoder.com.cn/", args: (p) => ["-p", p], model: MODELS["qoder-cn"] },
 ];
 
 function searchDirs(): string[] {
@@ -350,10 +375,16 @@ function probeHeadlessUsable(binPath: string): boolean {
   }
 }
 
+/** The dirs one engine's binary is looked up in: the shared search dirs first
+ * (PATH precedence), then that engine's own vendor dirs (ADR-0052). */
+function dirsFor(spec: CliSpec, shared: string[]): string[] {
+  return cliSearchDirs(shared, spec.binDirs, os.homedir());
+}
+
 export function detectClis(): DetectedCli[] {
-  const dirs = searchDirs();
+  const shared = searchDirs();
   return KNOWN.map((c) => {
-    const found = findBin(c.bin, dirs);
+    const found = findBin(c.bin, dirsFor(c, shared));
     const usable = found ? probeHeadlessUsable(found) : undefined;
     let model = c.model;
     // opencode's model list is user-config-driven (opencode.jsonc providers),
@@ -396,7 +427,10 @@ export function detectClisCached({ refresh = false }: { refresh?: boolean } = {}
 export function resolveCli(id: string): { spec: CliSpec; binPath: string } | null {
   const spec = KNOWN.find((c) => c.id === id);
   if (!spec) return null;
-  const binPath = findBin(spec.bin);
+  // Same dir list as detection: a runtime the config page reports as installed
+  // must also be resolvable for an actual dispatch, or the engine is selectable
+  // and then fails at spawn (ADR-0052).
+  const binPath = findBin(spec.bin, dirsFor(spec, searchDirs()));
   if (!binPath) return null;
   return { spec, binPath };
 }

@@ -20,6 +20,11 @@ export const CLI_LABELS = {
   qwen: "Qwen CLI",
   antigravity: "Antigravity CLI",
   grok: "Grok Build CLI",
+  // The CN build is a separate product from the international Qoder CLI (own
+  // binary, own site, own model catalogue), so the id names the build — a
+  // run-ledger entry recorded today must not turn ambiguous if the
+  // international one is ever added beside it (ADR-0052).
+  "qoder-cn": "Qoder (CN)",
 };
 
 /**

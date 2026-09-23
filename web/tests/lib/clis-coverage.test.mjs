@@ -36,6 +36,32 @@ function documentedHeadlessBins(md) {
 const src = readFileSync(CLIS_TS, "utf8");
 const md = readFileSync(SUPPORTED_MD, "utf8");
 
+/** A regex-escaped id. An id may contain `-` (`qoder-cn`), which is not legal
+ *  in a TS identifier — so its MODELS key is quoted and its accessor is
+ *  bracketed. The guards below must tolerate both spellings or a hyphenated
+ *  engine slips past them (it did: `qoder-cn`, ADR-0052). */
+function escapeRe(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** The MODELS object key for an engine, bare (`claude:`) or quoted
+ *  (`"qoder-cn":`), followed by the given property. */
+function modelEntryRe(id, tail) {
+  return new RegExp(`"?${escapeRe(id)}"?:\\s*\\{[\\s\\S]*?${tail}`);
+}
+
+/** How a KNOWN row reaches its MODELS entry: `MODELS.claude`, or
+ *  `MODELS["qoder-cn"]` when the id is not an identifier. */
+function modelAccessRe(id) {
+  return `MODELS(?:\\.${escapeRe(id)}|\\["${escapeRe(id)}"\\])`;
+}
+
+/** The engine ids KNOWN declares, in file order. An `id:` immediately followed
+ *  by `name:` is a KNOWN row; MODELS options carry `id:` + `label:` instead. */
+function knownIds(src) {
+  return [...src.matchAll(/id:\s*"([^"]+)",\s*name:/g)].map((m) => m[1]);
+}
+
 test("the fixtures this guard reads still look like themselves", () => {
   // If either file is refactored past these regexes, the checks below would
   // pass vacuously over empty sets. Fail loudly instead.
@@ -59,23 +85,30 @@ test("Grok Build CLI is wired up", () => {
 test("no CLI is listed twice", () => {
   // id followed by name: distinguishes KNOWN rows from the model options inside
   // MODELS, which also carry `id:` keys (opus, sonnet, auto, …).
-  const ids = [...src.matchAll(/id:\s*"([^"]+)",\s*name:/g)].map((m) => m[1]);
+  const ids = knownIds(src);
   assert.equal(new Set(ids).size, ids.length, `duplicate id in KNOWN: ${ids.join(", ")}`);
 });
 
-test("every KNOWN CLI carries model metadata (flag + non-empty options)", () => {
+test("every KNOWN CLI carries model metadata (flag + default + options list)", () => {
   // The config page's model picker is keyed by id → MODELS entry. A CLI that
   // reaches KNOWN without model metadata silently disappears from the picker,
   // and its runs never get a --model — the same drift that hid Grok.
-  const ids = [...src.matchAll(/id:\s*"([^"]+)",\s*name:/g)].map((m) => m[1]);
+  //
+  // The option list itself may legitimately be EMPTY: an engine whose catalogue
+  // is owned by the CLI gets it fetched at detection time (qoder-cn →
+  // qoder-models.mjs, ADR-0052 决议 9), and an empty list makes the page render
+  // no picker rather than an unselectable phantom. What this guard pins is that
+  // the entry exists and is shaped like a ModelMeta — not that a human
+  // transcribed the list.
+  const ids = knownIds(src);
   for (const id of ids) {
-    assert.match(src, new RegExp(`${id}:\\s*\\{\\s*flag:`), `MODELS is missing a '${id}' entry (modelFlag)`);
-    assert.match(src, new RegExp(`${id}:\\s*\\{[\\s\\S]*?default:`), `MODELS['${id}'] is missing a default model`);
-    assert.match(src, new RegExp(`${id}:\\s*\\{[\\s\\S]*?options:\\s*\\[`), `MODELS['${id}'] is missing a non-empty options list`);
+    assert.match(src, new RegExp(`"?${escapeRe(id)}"?:\\s*\\{\\s*flag:`), `MODELS is missing a '${id}' entry (modelFlag)`);
+    assert.match(src, modelEntryRe(id, "default:"), `MODELS['${id}'] is missing a default model`);
+    assert.match(src, modelEntryRe(id, "options:\\s*\\["), `MODELS['${id}'] is missing an options list`);
   }
   // And each KNOWN row wires the model field to its MODELS entry.
   for (const id of ids) {
-    assert.match(src, new RegExp(`id: "${id}"[\\s\\S]*?model: MODELS\\.${id}`), `KNOWN row for '${id}' must set model: MODELS.${id}`);
+    assert.match(src, new RegExp(`id: "${escapeRe(id)}"[\\s\\S]*?model: ${modelAccessRe(id)}`), `KNOWN row for '${id}' must set model: MODELS.${id}`);
   }
 });
 
@@ -83,12 +116,15 @@ test("the default model of every CLI is one of its own options", () => {
   // The "current model" readout falls back to MODELS[id].default when nothing
   // is saved. A default that is not in options renders as an unselectable
   // phantom in the dropdown — detect that here.
-  const defaultRe = /(\w+):\s*\{\s*flag:\s*"[^"]*",\s*default:\s*"([^"]*)"/g;
+  // Quoted keys included (`"qoder-cn":`): an id that is not a TS identifier can
+  // only be spelled that way, and skipping those keys would leave the newest
+  // engines silently uncovered.
+  const defaultRe = /"?([\w-]+)"?:\s*\{\s*flag:\s*"[^"]*",\s*default:\s*"([^"]*)"/g;
   let m;
   while ((m = defaultRe.exec(src))) {
     const [, id, def] = m;
-    if (!def) continue; // antigravity's default is deliberately empty (account-dependent)
-    const optionsRe = new RegExp(`${id}:\\s*\\{[\\s\\S]*?options:\\s*\\[([\\s\\S]*?)\\]`);
+    if (!def) continue; // antigravity and qoder-cn: deliberately empty (account/CLI-dependent)
+    const optionsRe = modelEntryRe(id, "options:\\s*\\[([\\s\\S]*?)\\]");
     const optsMatch = optionsRe.exec(src);
     assert.ok(optsMatch, `no options parsed for ${id}`);
     const optionIds = [...optsMatch[1].matchAll(/id:\s*"([^"]+)"/g)].map((x) => x[1]);
