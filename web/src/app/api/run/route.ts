@@ -701,7 +701,10 @@ async function runPipeline({
             root: careerOpsRoot(),
             pdfPaths: paths,
             format,
-            reportNum: input,
+            // The report number the row actually links (re-evals repoint the Report
+            // cell to a new file), not the tracker `#` the run was keyed by —
+            // mark-pdf-ready.mjs / the pdf-index manifest resolve by report number.
+            reportNum: paths.reportNum,
           });
           if (result.kind === "render-failed") {
             send({ type: "error", msg: result.error.slice(0, 200) });

@@ -114,6 +114,46 @@ test("resolvePdfPaths: malformed profile.yml falls back to the default candidate
   }
 });
 
+test("resolvePdfPaths: a re-evaluated row threads the LINKED report number, not the tracker #", () => {
+  // Given findReportFile resolves the tracker `#` (1079) to its re-eval report
+  // file (1086-…) — the row's Report cell was repointed on re-evaluation, so the
+  // two numbers diverge by design.
+  const root = makeRoot();
+  const findReportFile = (input) =>
+    input === "1079" ? join(root, "reports", "1086-xchujibian-software-pm-reval-2026-09-23.md") : null;
+  try {
+    // When resolving paths for the tracker `#` 1079
+    const result = resolvePdfPaths("1079", "2026-09-24", root, findReportFile);
+
+    // Then the report number handed to mark-pdf-ready / the manifest is the ACTUAL
+    // report (1086): mark-pdf-ready resolves by report number, so the tracker `#`
+    // would match no row and leave the PDF column ❌ (the 「打开定制简历」 bug).
+    assert.equal(result.ok, true);
+    assert.equal(result.paths.reportNum, "1086");
+    // Scratch HTML is named by the same resolved number so renderAndMarkPdf's
+    // cleanup prefix (cv-web-${reportNum}.) still finds and removes it.
+    assert.equal(result.paths.html, join(root, ".career-ops-web", "pdf-tmp", "cv-web-1086.html"));
+    assert.equal(result.paths.finalPdf, join(root, "output", "cv-jane-smith-xchujibian-software-pm-reval-2026-09-24.pdf"));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("resolvePdfPaths: a normal row (tracker # == report number) is unchanged", () => {
+  // Given findReportFile resolves 018 to its own report file (no re-eval)
+  const root = makeRoot();
+  const findReportFile = (input) => (input === "018" ? join(root, "reports", "018-acme-2026-07-01.md") : null);
+  try {
+    const result = resolvePdfPaths("018", "2026-07-26", root, findReportFile);
+    // Then reportNum echoes the tracker # (they match), keeping the common path intact.
+    assert.equal(result.ok, true);
+    assert.equal(result.paths.reportNum, "018");
+    assert.equal(result.paths.html, join(root, ".career-ops-web", "pdf-tmp", "cv-web-018.html"));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("resolvePdfPaths: report filename that doesn't match the expected pattern falls back to the default company slug", () => {
   // Given findReportFile resolves to a filename that doesn't match ^\d+-(.+)-YYYY-MM-DD.md$
   const root = makeRoot();

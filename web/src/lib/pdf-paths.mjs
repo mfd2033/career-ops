@@ -21,6 +21,7 @@ export function slugify(s) {
 
 /**
  * @typedef {Object} PdfPaths
+ * @property {string} reportNum - The report number the row's Report cell actually links (== the tracker `#` for a never-re-evaluated row, the re-eval's number otherwise). Handed to mark-pdf-ready.mjs / the pdf-index manifest, which resolve by report number.
  * @property {string} html - Where the backend writes the tailored HTML it parsed out of the agent's envelope (#2185).
  * @property {string} finalPdf - Where the backend renders the final PDF (output/cv-{candidate}-{company}-{date}.pdf).
  */
@@ -58,8 +59,16 @@ export function resolvePdfPaths(input, today, root, findReportFile) {
   if (!reportFile) {
     return { ok: false, error: `No report #${input} found — evaluate this posting first.` };
   }
-  const companyMatch = path.basename(reportFile).match(/^\d+-(.+)-\d{4}-\d{2}-\d{2}\.md$/);
+  const reportBase = path.basename(reportFile);
+  const companyMatch = reportBase.match(/^\d+-(.+)-\d{4}-\d{2}-\d{2}\.md$/);
   const companySlug = companyMatch ? companyMatch[1] : "company";
+  // The tracker `#` (input) diverges from the report number the row links after a
+  // re-evaluation (row #1079 repointed to report 1086). mark-pdf-ready.mjs and the
+  // pdf-index manifest resolve BY REPORT NUMBER, so thread the number the report
+  // file actually carries — passing the tracker `#` matches no row and leaves the
+  // PDF column ❌ (the 「打开定制简历所在位置」 button never appears). Falls back to
+  // the raw selector when the filename carries no leading number.
+  const reportNum = reportBase.match(/^(\d+)-/)?.[1] ?? String(input);
   let candidateSlug = "candidate";
   try {
     // js-yaml v4's load() uses the safe default schema (no arbitrary type
@@ -81,7 +90,8 @@ export function resolvePdfPaths(input, today, root, findReportFile) {
   return {
     ok: true,
     paths: {
-      html: path.join(scratchDir, `cv-web-${input}.html`),
+      reportNum,
+      html: path.join(scratchDir, `cv-web-${reportNum}.html`),
       finalPdf: path.join(root, "output", `cv-${candidateSlug}-${companySlug}-${today}.pdf`),
     },
   };
