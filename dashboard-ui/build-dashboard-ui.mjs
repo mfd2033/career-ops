@@ -34,6 +34,49 @@ function run(cmd, cwd, env = {}) {
   });
 }
 
+// ── Windows copy hardening ───────────────────────────────────────────────────
+// The big tree copies below failed twice in a row (2026-09-24) with ENOENT on
+// the DEST side (…app\.next\node_modules) immediately after a fresh next build,
+// while the identical copy of the same settled tree succeeded minutes later.
+// Two suspects, both handled here: cpSync's symlink-dereference path (flaky on
+// Windows — hand it a link-free tree instead) and transient fresh-file state
+// (retry with backoff).
+
+/** Replace every symlink under rootDir with a real copy of its target. */
+function dereferenceTree(rootDir) {
+  let replaced = 0;
+  const walk = (dir) => {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, e.name);
+      if (e.isSymbolicLink()) {
+        const target = fs.realpathSync(full); // throws if the link is broken
+        fs.rmSync(full, { recursive: true, force: true });
+        fs.cpSync(target, full, { recursive: true, dereference: true });
+        replaced++;
+        walk(full); // the target itself may contain further symlinks
+      } else if (e.isDirectory()) {
+        walk(full);
+      }
+    }
+  };
+  walk(rootDir);
+  if (replaced) console.log(`dereferenced ${replaced} symlink(s) under ${rootDir}`);
+}
+
+/** fs.cpSync with a small retry — covers transient AV/indexer locks. */
+function cpSyncRetry(src, dest, opts = {}, tries = 3) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      fs.cpSync(src, dest, opts);
+      return;
+    } catch (err) {
+      if (attempt >= tries) throw err;
+      console.log(`cpSync → ${path.basename(dest)} failed (${err.code}); retry ${attempt}/${tries - 1} in ${attempt * 2}s …`);
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, attempt * 2000);
+    }
+  }
+}
+
 // 0. ensure go-winres is available
 if (!fs.existsSync(goWinres)) {
   console.log("installing go-winres into .gobin …");
@@ -48,7 +91,7 @@ const standalone = path.join(webDir, ".next", "standalone");
 // 2. Next does not copy .next/static into standalone — do it here.
 // dereference: the standalone tree contains symlinks (e.g. playwright-core)
 // that Windows can't re-create without privileges — copy their targets instead.
-fs.cpSync(path.join(webDir, ".next", "static"), path.join(standalone, ".next", "static"), {
+cpSyncRetry(path.join(webDir, ".next", "static"), path.join(standalone, ".next", "static"), {
   recursive: true,
   dereference: true,
 });
@@ -73,7 +116,8 @@ for (const f of fs.readdirSync(standalone)) {
 
 // 4. refresh the Go embed source for the app tree.
 fs.rmSync(path.join(uiDir, "app"), { recursive: true, force: true });
-fs.cpSync(standalone, path.join(uiDir, "app"), {
+dereferenceTree(standalone); // cpSync's dereference path is flaky on Windows — hand it a link-free tree
+cpSyncRetry(standalone, path.join(uiDir, "app"), {
   recursive: true,
   dereference: true,
 });
@@ -130,7 +174,7 @@ fs.writeFileSync(path.join(uiDir, "app", "build-info.json"), JSON.stringify({ sh
 const runtimeCacheDir = path.join(root, ".dashboard-runtime", `v${cacheVersion}`);
 fs.rmSync(runtimeCacheDir, { recursive: true, force: true });
 fs.mkdirSync(path.join(runtimeCacheDir, "app"), { recursive: true });
-fs.cpSync(path.join(uiDir, "app"), path.join(runtimeCacheDir, "app"), { recursive: true, dereference: true });
+cpSyncRetry(path.join(uiDir, "app"), path.join(runtimeCacheDir, "app"), { recursive: true, dereference: true });
 fs.copyFileSync(process.execPath, path.join(runtimeCacheDir, "node.exe"));
 console.log(`✓ prepared runtime cache ${runtimeCacheDir} (v${cacheVersion})`);
 
