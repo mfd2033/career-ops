@@ -70,6 +70,16 @@ export function InboxTriage({ inbox, scoredUrls }: { inbox: InboxJob[]; scoredUr
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const [undo, setUndo] = useState<{ label: string; fn: () => void } | null>(null);
   const [hasCli, setHasCli] = useState(false);
+  // ADR-0057: confirm dialog + in-flight state for batch delete.
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deletedToast, setDeletedToast] = useState<string | null>(null);
+  // Auto-dismiss the delete toast (same 5s as undo).
+  useEffect(() => {
+    if (!deletedToast) return;
+    const t = setTimeout(() => setDeletedToast(null), 5000);
+    return () => clearTimeout(t);
+  }, [deletedToast]);
   const [loaded, setLoaded] = useState(false);
   // Set when the shortlist is dispatched; arms the post-batch server refresh.
   const [scoredBatchId, setScoredBatchId] = useState<string | null>(null);
@@ -303,6 +313,46 @@ export function InboxTriage({ inbox, scoredUrls }: { inbox: InboxJob[]; scoredUr
     setSelected(new Set());
   };
 
+  // ADR-0057: batch delete — real removal from pipeline.md Pending section.
+  // Build the raw URL list from the selected normalized urlKeys. enriched has
+  // both job.url (raw) and urlKey (normalized), so matching is exact.
+  const deleteSelectedUrls = useMemo(() => {
+    const out: string[] = [];
+    for (const e of enriched) {
+      if (selected.has(e.urlKey) && e.job.url) out.push(e.job.url);
+    }
+    return Array.from(new Set(out));
+  }, [selected, enriched]);
+
+  const openDeleteConfirm = () => {
+    if (deleteSelectedUrls.length === 0) return;
+    setDeleteConfirmOpen(true);
+  };
+
+  const confirmDelete = async () => {
+    const urls = deleteSelectedUrls;
+    if (urls.length === 0) return;
+    setDeleting(true);
+    setDeleteConfirmOpen(false);
+    try {
+      const res = await fetch("/api/pipeline/remove", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ urls }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error ?? `HTTP ${res.status}`);
+      const removed = data?.removed ?? 0;
+      setDeletedToast(t("inbox.deletedN", { n: removed }));
+      setSelected(new Set());
+      router.refresh();
+    } catch (err) {
+      setDeletedToast(`删除失败：${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   // Estimate from BOTH scoring kinds: batch-evaluate is what this tray now
   // dispatches, evaluate is what earlier sessions left in the job history (and
   // what a previous build dispatched) — a sample from either keeps the cost
@@ -423,6 +473,10 @@ export function InboxTriage({ inbox, scoredUrls }: { inbox: InboxJob[]; scoredUr
             <button type="button" onClick={skipSelected} className="shrink-0 text-xs text-muted hover:text-foreground max-sm:min-h-[44px]">
               {t("inbox.skipSelected")}
             </button>
+            {/* ADR-0057: destructive action, visually red and farthest from the safer ones */}
+            <button type="button" onClick={openDeleteConfirm} disabled={deleting} className="shrink-0 text-xs text-red-500 hover:text-red-600 disabled:opacity-50 max-sm:min-h-[44px]">
+              {deleting ? "…" : t("inbox.deleteSelected")}
+            </button>
             <button type="button" onClick={() => setSelected(new Set())} className="shrink-0 text-xs text-muted hover:text-foreground max-sm:min-h-[44px]">
               {t("inbox.clear")}
             </button>
@@ -490,6 +544,54 @@ export function InboxTriage({ inbox, scoredUrls }: { inbox: InboxJob[]; scoredUr
         onClear={() => setShortlist([])}
         onScore={scoreShortlist}
       />
+
+      {/* ADR-0057: deletion success/failure toast (reuses undo toast positioning) */}
+      {deletedToast && (
+        <div className={cn("fixed inset-x-0 z-40 flex justify-center px-4", shortlist.length > 0 ? "bottom-24 sm:bottom-24" : "bottom-6")}>
+          <div className="inline-flex items-center gap-3 rounded-full border border-border bg-surface px-4 py-2 text-sm shadow-lg">
+            <span className="text-muted">{deletedToast}</span>
+          </div>
+        </div>
+      )}
+
+      {/* ADR-0057: deletion confirmation dialog (modal overlay) */}
+      {deleteConfirmOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4" role="dialog" aria-modal="true">
+          <div className="w-full max-w-sm rounded-2xl border border-border bg-surface p-5 shadow-xl">
+            <h3 className="font-display text-base">{t("inbox.confirmDeleteTitle", { n: deleteSelectedUrls.length })}</h3>
+            <p className="mt-2 text-sm text-muted">{t("inbox.confirmDeleteBody", { n: deleteSelectedUrls.length })}</p>
+            {/* show first 3 company names as quick preview */}
+            {(() => {
+              const companies = enriched
+                .filter((e) => selected.has(e.urlKey))
+                .map((e) => e.job.company)
+                .filter(Boolean);
+              if (companies.length === 0) return null;
+              const preview = companies.slice(0, 3).join(", ");
+              const more = companies.length > 3 ? ` +${companies.length - 3}` : "";
+              return <p className="mt-3 text-xs text-faint truncate">«{preview}»{more}</p>;
+            })()}
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setDeleteConfirmOpen(false)}
+                disabled={deleting}
+                className="rounded-md border border-border px-3 py-1.5 text-xs font-medium text-muted hover:text-foreground disabled:opacity-50"
+              >
+                {t("inbox.confirmDeleteCancel")}
+              </button>
+              <button
+                type="button"
+                onClick={confirmDelete}
+                disabled={deleting}
+                className="rounded-md bg-red-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-600 disabled:opacity-50"
+              >
+                {deleting ? "…" : t("inbox.confirmDeleteConfirm")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

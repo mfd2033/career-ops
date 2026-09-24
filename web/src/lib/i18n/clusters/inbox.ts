@@ -53,6 +53,13 @@ export const en: Dict = {
   "inbox.skipSelected": "Skip selected",
   "inbox.skippedN": "Skipped {n}",
   "inbox.openPosting": "Open original posting",
+  // ADR-0057: pipeline batch-delete (real removal from pipeline.md).
+  "inbox.deleteSelected": "Delete selected",
+  "inbox.confirmDeleteTitle": "Delete {n} posting(s)?",
+  "inbox.confirmDeleteBody": "This will permanently remove {n} posting(s) from pipeline.md. They will no longer appear in the inbox on refresh. This cannot be undone in the UI — git history is your only recovery.",
+  "inbox.confirmDeleteConfirm": "Delete",
+  "inbox.confirmDeleteCancel": "Cancel",
+  "inbox.deletedN": "Deleted {n}",
 };
 
 // Simplified Chinese strings. Every key in en must have a matching key here.
@@ -104,4 +111,10 @@ export const zh: Dict = {
   "inbox.skipSelected": "跳过选中",
   "inbox.skippedN": "已跳过 {n} 个",
   "inbox.openPosting": "打开原始职位网页",
+  "inbox.deleteSelected": "删除选中",
+  "inbox.confirmDeleteTitle": "删除 {n} 条职位？",
+  "inbox.confirmDeleteBody": "将从 pipeline.md 中永久删除 {n} 条职位，刷新后收件箱不再显示。UI 内无法撤销，git 历史是唯一恢复途径。",
+  "inbox.confirmDeleteConfirm": "确认删除",
+  "inbox.confirmDeleteCancel": "取消",
+  "inbox.deletedN": "已删除 {n} 条",
 };
