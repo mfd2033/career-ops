@@ -16,6 +16,7 @@ import {
 import { cn } from "@/lib/cn";
 import { CadenceSettings } from "@/components/followups/cadence-settings";
 import { JdRulesSettings } from "@/components/jd-rules-settings";
+import { SkillsPanel } from "@/components/skills-panel";
 import { JobTargetSettings } from "@/components/job-target-settings";
 import { persistCliId, persistModel, pushServerConfig, readSavedCliId, readSavedModel, readSavedUnknownEmployer, persistUnknownEmployer, readServerUnknownEmployer, mirrorUnknownEmployer, type UnknownEmployerPolicy } from "@/lib/saved-cli";
 import { readSavedConcurrencyPool, persistConcurrencyPool, CONCURRENCY_POOL_DEFAULT } from "@/lib/saved-cli";
@@ -874,6 +875,9 @@ export function ConfigForm() {
       <CadenceSettings />
 
       <JdRulesSettings />
+
+      {/* Agent 技能面板（ADR-0056）：知情展示，不拦截任何功能 */}
+      <SkillsPanel />
 
       <div className="mt-8 flex items-center gap-3">
         <button

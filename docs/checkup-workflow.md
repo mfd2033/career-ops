@@ -14,3 +14,11 @@
 10. **agent-inbox 请求直接执行（ADR-0026/0027）**：drain 到「公司体检 #<n>」格式的 pending（`- [ ]`）请求 → 不再二次确认（请求来自 web 按钮，按下即确认），直接跑满 7 维并回填+落台账+resolve。已标记 `[x]`（含 `dispatched worker`）的跳过——已由 web kind=checkup worker 派发，/jobs 有记录。
 11. **本机搜索通道是空的（2026-09-17 实测）**：worker WebSearch 经本机代理一律返回空结果（13/13 次仅样板 REMINDER），重试只白烧回合并抬高代理抖动概率（Content block not found / 敏感信息拒绝 / 悬挂）→ 调研直接走 bsk / browser-extract / curl 直取；搜索最多试 1–2 次确认通道即可。
 12. **落盘命令只跑一次**：`add` 一次即够；疑未落地用 `summary` 查行，绝不重跑 `add`（append-only）；`--risks` 只用脚本头部英文 key。脚本侧设防（2026-09-17 起）：`--html` 文件必须已存在（先写 HTML 再落台账）；整行相同的重复调用幂等跳过；疑点用 `node lib/log-checkup.mjs check`（重复行/孤儿 tracker#/缺 HTML，有发现退 1）。
+
+## 技能分层（ADR-0056，2026-09-24）
+
+web 端体检 worker 收到的 prompt 自带「SKILL POINTER」：服务端经 `web/src/lib/skill-registry.mjs` 解析 offer体检 的**最高版本副本**（绝对路径 + 版本号）注入，worker 第一步先读该 SKILL.md。两层规则的分工与裁决：
+
+- **技能正文管方法**：7 维调研怎么查、评分权重（references/scoring.md）、报告结构与来源行渲染——按技能正文与其 references/ 执行。
+- **本文档 12 条管安全与持久化**：落盘路径（`reports/checkups/{tracker#}-…`，不用技能自带 `reports/`，ADR-0025 决议 6）、台账 `log-checkup.mjs add` 只跑一次、零分影响、Untrusted Content 纪律、预算上限。**两者冲突时本文档优先**。
+- **页脚口径**：有技能指针时，报告页脚按技能模板（assets/report_template.html）填版本号（如「…offer体检 技能 v1.2.0 生成…」）——这是版本溯源的唯一载体，版本不进台账、门禁不校验（决议 7）。技能缺失时 worker 不读任何 SKILL.md，prompt 与页脚维持旧版（不硬失败，第 8 条），配置页技能面板以徽标如实呈现「未安装」。

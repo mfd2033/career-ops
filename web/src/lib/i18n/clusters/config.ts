@@ -119,6 +119,14 @@ export const en: Dict = {
   "config.jdRulesSaved": "Saved",
   "config.jdRulesLoadError": "Couldn't read config/profile.yml — refusing to overwrite it.",
   "config.jdRulesSaveError": "Couldn't save the rules.",
+  "config.skillsTitle": "Agent skills",
+  "config.skillsDesc": "Agent skills found on this machine, aggregated per copy with install path and version. Informational only — installing and upgrading is your skill manager's job; nothing here blocks any run.",
+  "config.skillsVersionLabel": "Version {version}",
+  "config.skillsVersionUnlabeled": "Unlabeled",
+  "config.skillsCopiesCount": "{count} copies found",
+  "config.skillsCurrent": "current",
+  "config.skillsOfferHint": "The web checkup worker reads the highest-version copy of this skill for its 7-dimension research; the report footer records that version.",
+  "config.skillsLoadError": "Couldn't scan the skill directories.",
 };
 
 // Simplified Chinese strings. Every key in en must have a matching key here.
@@ -238,4 +246,12 @@ export const zh: Dict = {
   "config.jdRulesSaved": "已保存",
   "config.jdRulesLoadError": "无法读取 config/profile.yml——拒绝覆盖。",
   "config.jdRulesSaveError": "无法保存规则。",
+  "config.skillsTitle": "Agent 技能",
+  "config.skillsDesc": "本机检测到的 agent 技能，按副本聚合展示安装路径与版本号。仅作知情展示——安装与升级由技能管理器负责，这里不拦截任何功能。",
+  "config.skillsVersionLabel": "版本 {version}",
+  "config.skillsVersionUnlabeled": "未标注",
+  "config.skillsCopiesCount": "找到 {count} 个副本",
+  "config.skillsCurrent": "当前版本",
+  "config.skillsOfferHint": "web 端公司体检 worker 读取此技能的最高版本副本执行 7 维调研，报告页脚会记录该版本号。",
+  "config.skillsLoadError": "扫描技能目录失败。",
 };
