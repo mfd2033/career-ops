@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { careerOpsRoot } from "@/lib/career-ops";
 import { resolveCvPdf } from "@/lib/cv-pdf-resolve.mjs";
+import { revealCvPdfInExplorer } from "@/lib/win-reveal.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -11,6 +12,10 @@ export const dynamic = "force-dynamic";
 // Reveal the tailored CV PDF in the OS file manager, selecting the file:
 // `explorer /select,"path"` on Windows, `open -R` on macOS, and a plain
 // xdg-open of the directory on Linux (no native "select this file" exists).
+// On Windows the bare explorer spawn lands BEHIND the browser (foreground
+// lock, ADR-0058) — win-reveal adds a hidden powershell helper that grabs
+// the window back within a 3s grace window. Best-effort; the API contract
+// stays "the spawn happened", not "the window is in front".
 // POST-only: spawning a process is a side effect, and GET would let browsers
 // prefetch/cache it. Resolution is shared with /api/cv-pdf via resolveCvPdf
 // (prefer the exact `report` link, fall back to the company name) so both stay
@@ -42,9 +47,7 @@ export async function POST(req: NextRequest) {
   // spawn itself, not the shell's eventual state.
   try {
     if (process.platform === "win32") {
-      spawn("explorer", ["/select," + result.path], { detached: true, stdio: "ignore" })
-        .on("error", () => {})
-        .unref();
+      revealCvPdfInExplorer(result.path);
     } else if (process.platform === "darwin") {
       spawn("open", ["-R", result.path], { detached: true, stdio: "ignore" })
         .on("error", () => {})

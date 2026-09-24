@@ -5,7 +5,9 @@ import { FolderOpen, Loader2 } from "lucide-react";
 import { useI18n } from "@/lib/i18n/context";
 
 // Reveals the tailored CV PDF in the OS file manager (File Explorer on Windows)
-// with the file selected — the backend spawns `explorer /select,"path"`. Mirrors
+// with the file selected — the backend spawns `explorer /select,"path"` plus a
+// foreground helper that pulls the window in front of the browser (ADR-0058).
+// Mirrors
 // GeneratePdfButton's placement: only rendered once a tailored CV exists
 // (pdfReady), so it never needs a disabled state beyond the in-flight guard.
 // `report` is the exact report-number link (preferred); `company` is the legacy
