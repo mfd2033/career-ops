@@ -197,6 +197,10 @@ export const en: Dict = {
   "explore.filter.neverInHardPlaceholder": "USA, Brazil…",
   "explore.filter.scanDepthHint": "{n} companies / source",
   "explore.filter.scanDepth": "Scan depth",
+  // ADR-0059: inline clear (×) aria-labels. clearSalaryMin is reused by the
+  // inbox salary input (same cross-cluster precedent as zhSalaryMin itself).
+  "explore.filter.clearQuery": "Clear keywords",
+  "explore.filter.clearSalaryMin": "Clear salary floor",
 
   // ── First score view ──
   "explore.firstScore.strongMatch": "You're a strong match for this role — open the full report for the breakdown.",
@@ -218,6 +222,7 @@ export const en: Dict = {
   "explore.results.zeroTokens": "0 tokens spent",
   "explore.results.partialNote": " · some boards were unreachable (normal for public directories)",
   "explore.results.filterPlaceholder": "Filter results…",
+  "explore.results.clearFilter": "Clear filter",
   "explore.results.sortFresh": "fresh",
   "explore.results.sortCompany": "company",
   "explore.results.addAll": "Add all {n}",
@@ -467,6 +472,8 @@ export const zh: Dict = {
   "explore.filter.neverInHardPlaceholder": "美国、巴西…",
   "explore.filter.scanDepthHint": "{n} 家公司 / 来源",
   "explore.filter.scanDepth": "扫描深度",
+  "explore.filter.clearQuery": "清空关键词",
+  "explore.filter.clearSalaryMin": "清空薪资下限",
 
   // ── 首个评分视图 ──
   "explore.firstScore.strongMatch": "你与这个岗位高度匹配 — 打开完整报告查看详细分析。",
@@ -488,6 +495,7 @@ export const zh: Dict = {
   "explore.results.zeroTokens": "0 token 消耗",
   "explore.results.partialNote": " · 部分招聘板无法连接（公开目录中属正常）",
   "explore.results.filterPlaceholder": "筛选结果…",
+  "explore.results.clearFilter": "清空筛选",
   "explore.results.sortFresh": "最新",
   "explore.results.sortCompany": "公司",
   "explore.results.addAll": "全部添加 {n}",

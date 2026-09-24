@@ -5,6 +5,7 @@ import type { AtsSource } from "@/lib/explore";
 import { ATS_LABEL } from "@/lib/explore";
 import { FRESHNESS_WINDOWS, SENIORITY_LABEL, type Seniority } from "@/lib/inbox";
 import { CostBadge } from "@/components/cost/cost-badge";
+import { InputClearButton } from "@/components/input-clear-button";
 import { useI18n } from "@/lib/i18n/context";
 import { cn } from "@/lib/cn";
 
@@ -69,8 +70,10 @@ export function FacetChips({
             value={kw}
             onChange={(e) => setKw(e.target.value)}
             placeholder={t("inbox.filterPlaceholder")}
-            className="w-full rounded-lg border border-border bg-surface/60 py-2 pl-9 pr-3 text-sm outline-none transition-colors placeholder:text-faint focus:border-brand/50 focus-visible:ring-2 focus-visible:ring-brand/40 max-sm:min-h-[44px]"
+            // pr-8 常驻留白（ADR-0059 决定 8）：文字不滚到内嵌 × 下方
+            className="w-full rounded-lg border border-border bg-surface/60 py-2 pl-9 pr-8 text-sm outline-none transition-colors placeholder:text-faint focus:border-brand/50 focus-visible:ring-2 focus-visible:ring-brand/40 max-sm:min-h-[44px]"
           />
+          <InputClearButton show={kw.length > 0} onClear={() => setKw("")} label={t("inbox.clearKeyword")} />
         </div>
         <span className="shrink-0 text-xs text-muted">
           <span className="tabular-nums text-foreground">{resultCount}</span>
@@ -121,13 +124,16 @@ export function FacetChips({
           </Pill>
         ))}
 
-        {/* location contains */}
-        <input
-          value={locQ}
-          onChange={(e) => setLocQ(e.target.value)}
-          placeholder={t("inbox.locationPlaceholder")}
-          className="w-28 shrink-0 rounded-full border border-border bg-surface/40 px-3 text-xs outline-none transition-colors placeholder:text-faint focus:border-brand/40 max-sm:min-h-[44px] py-1"
-        />
+        {/* location contains（ADR-0059：包 relative 容纳内嵌 ×；w-28→w-32 加宽留 × 位） */}
+        <div className="relative shrink-0">
+          <input
+            value={locQ}
+            onChange={(e) => setLocQ(e.target.value)}
+            placeholder={t("inbox.locationPlaceholder")}
+            className="w-32 rounded-full border border-border bg-surface/40 py-1 pl-3 pr-7 text-xs outline-none transition-colors placeholder:text-faint focus:border-brand/40 max-sm:min-h-[44px]"
+          />
+          <InputClearButton show={locQ.length > 0} onClear={() => setLocQ("")} label={t("inbox.clearLocation")} className="right-1.5" />
+        </div>
 
         {/* 薪资下限（月薪 K）——与探索页同一语义同一文案（ADR-0023）：区间重叠
             判定，薪资未知行放行并保持打标。空 = 不过滤。 */}
@@ -145,8 +151,10 @@ export function FacetChips({
             placeholder={t("explore.filter.zhSalaryMinPlaceholder")}
             title={t("explore.filter.zhSalaryMin")}
             aria-label={t("explore.filter.zhSalaryMin")}
-            className="w-28 shrink-0 rounded-full border border-border bg-surface/40 pl-7 pr-2 py-1 text-xs outline-none transition-colors placeholder:text-faint focus:border-brand/40 max-sm:min-h-[44px]"
+            // pr-10 留 × + 原生 spinner 位；× 定位在 spinner 左侧（ADR-0059 决定 8）
+            className="w-28 shrink-0 rounded-full border border-border bg-surface/40 pl-7 pr-10 py-1 text-xs outline-none transition-colors placeholder:text-faint focus:border-brand/40 max-sm:min-h-[44px]"
           />
+          <InputClearButton show={salaryMin != null} onClear={() => setSalaryMin(null)} label={t("explore.filter.clearSalaryMin")} className="right-5" />
         </div>
 
         {anyActive && (

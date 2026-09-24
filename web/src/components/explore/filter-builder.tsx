@@ -5,6 +5,7 @@ import { X, Ban, Clock, MapPin, ChevronDown, SlidersHorizontal, Search, Banknote
 import { cn } from "@/lib/cn";
 import { ATS_LABEL, ATS_SOURCES, BROWSER_LABEL, BROWSER_SOURCES, ZH_CITY_ANY, cleanChips, type AtsSource, type BrowserSource, type ExploreFilters, type ExploreMode } from "@/lib/explore";
 import { CITY_NAMES } from "@/lib/browser-search.mjs";
+import { InputClearButton } from "@/components/input-clear-button";
 import { useI18n } from "@/lib/i18n/context";
 
 const RECENCY = [
@@ -139,7 +140,8 @@ export function FilterBuilder({
         <style>{STYLE}</style>
         <div>
           <Label>{t("explore.filter.zhQuery")}</Label>
-          <div className="co-fb__field border border-border bg-surface/40 focus-within:border-brand/40 transition-colors">
+          {/* relative + pr 留白：容纳内嵌 ×（ADR-0059 决议 1/8） */}
+          <div className="co-fb__field relative border border-border bg-surface/40 focus-within:border-brand/40 transition-colors">
             <Search className="size-3.5 shrink-0 text-muted" />
             <input
               value={filters.zhQuery ?? ""}
@@ -148,7 +150,12 @@ export function FilterBuilder({
                 if (e.key === "Enter") e.currentTarget.blur();
               }}
               placeholder={t("explore.filter.zhQueryPlaceholder")}
-              className="min-w-0 flex-1 bg-transparent outline-none"
+              className="min-w-0 flex-1 bg-transparent pr-6 outline-none"
+            />
+            <InputClearButton
+              show={(filters.zhQuery ?? "").length > 0}
+              onClear={() => set({ zhQuery: "" })}
+              label={t("explore.filter.clearQuery")}
             />
           </div>
         </div>
@@ -181,7 +188,7 @@ export function FilterBuilder({
         </div>
         <div>
           <Label hint={t("explore.filter.zhSalaryMinHint")}>{t("explore.filter.zhSalaryMin")}</Label>
-          <div className="co-fb__field border border-border bg-surface/40 focus-within:border-brand/40 transition-colors">
+          <div className="co-fb__field relative border border-border bg-surface/40 focus-within:border-brand/40 transition-colors">
             <Banknote className="size-3.5 shrink-0 text-muted" />
             <input
               type="number"
@@ -197,7 +204,14 @@ export function FilterBuilder({
                 if (e.key === "Enter") e.currentTarget.blur();
               }}
               placeholder={t("explore.filter.zhSalaryMinPlaceholder")}
-              className="min-w-0 flex-1 bg-transparent outline-none"
+              // pr-10 留 × + 原生 spinner 位；× 定位在 spinner 左侧（ADR-0059 决定 8）
+              className="min-w-0 flex-1 bg-transparent pr-10 outline-none"
+            />
+            <InputClearButton
+              show={filters.zhSalaryMin != null}
+              onClear={() => set({ zhSalaryMin: undefined })}
+              label={t("explore.filter.clearSalaryMin")}
+              className="right-7"
             />
           </div>
         </div>

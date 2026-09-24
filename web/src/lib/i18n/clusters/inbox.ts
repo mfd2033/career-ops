@@ -6,6 +6,9 @@ import type { Dict } from "../types";
 export const en: Dict = {
   "inbox.filterPlaceholder": "Filter by company or role…",
   "inbox.locationPlaceholder": "location…",
+  // ADR-0059: inline clear (×) aria-labels for the free-input filter fields.
+  "inbox.clearKeyword": "Clear keyword",
+  "inbox.clearLocation": "Clear location",
   "inbox.clear": "Clear",
   "inbox.filterFree": "Filtering is free — only scoring uses tokens.",
   "inbox.freshWorthLook": "Fresh — worth a look",
@@ -66,6 +69,8 @@ export const en: Dict = {
 export const zh: Dict = {
   "inbox.filterPlaceholder": "按公司或职位筛选…",
   "inbox.locationPlaceholder": "地点…",
+  "inbox.clearKeyword": "清空关键词",
+  "inbox.clearLocation": "清空地点",
   "inbox.clear": "清除",
   "inbox.filterFree": "筛选是免费的 —— 只有评分会消耗 tokens。",
   "inbox.freshWorthLook": "最新 —— 值得一看",

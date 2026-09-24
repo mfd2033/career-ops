@@ -7,6 +7,7 @@ import { BROWSER_LABEL, type BrowserSource, type DiscoveredOffer } from "@/lib/e
 import { CostBadge } from "@/components/cost/cost-badge";
 import { DiscoveryCard } from "./discovery-card";
 import { GatePanel } from "./gate-panel";
+import { InputClearButton } from "@/components/input-clear-button";
 import { useExplore } from "./explore-provider";
 import { isSelectable, resultTabOf, visibleOffers } from "@/lib/results-view.mjs";
 import { useI18n } from "@/lib/i18n/context";
@@ -201,14 +202,16 @@ export function ResultsList({ offers }: { offers: EnrichedOffer[] }) {
         </div>
 
         <div className="ml-auto flex items-center gap-2">
-          <div className="flex items-center gap-1.5 rounded-lg border border-border bg-surface/40 px-2.5 py-1.5">
+          {/* relative + pr 留白：容纳内嵌 ×（ADR-0059 决议 1/8） */}
+          <div className="relative flex items-center gap-1.5 rounded-lg border border-border bg-surface/40 px-2.5 py-1.5">
             <Search className="size-3.5 text-faint" />
             <input
               value={q}
               onChange={(e) => setQ(e.target.value)}
               placeholder={t("explore.results.filterPlaceholder")}
-              className="w-32 bg-transparent text-[13px] outline-none placeholder:text-faint"
+              className="w-32 bg-transparent pr-6 text-[13px] outline-none placeholder:text-faint"
             />
+            <InputClearButton show={q.length > 0} onClear={() => setQ("")} label={t("explore.results.clearFilter")} className="right-1" />
           </div>
           <div className="inline-flex rounded-lg border border-border bg-surface/40 p-0.5 text-xs">
             {(["fresh", "company"] as const).map((s) => (
