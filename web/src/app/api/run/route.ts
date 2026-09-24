@@ -293,7 +293,7 @@ async function runPipeline({
   // 旧版逐字节一致（workflow 第 8 条：技能缺失不硬失败）。决议 8：每派发实时扫。
   const checkupSkill =
     kind === "checkup" ? (resolveSkillCopy(scanSkillRegistry(), OFFER_CHECKUP_SKILL_NAME) ?? undefined) : undefined;
-  const prompt = buildPrompt({ kind, input, memory: readMemory(), today, postedAt, unknownEmployer: readAppConfig().unknownEmployer, checkupCompany, checkupSkill, jdText, company: employer });
+  const prompt = buildPrompt({ kind, input, memory: readMemory(), today, postedAt, unknownEmployer: readAppConfig().unknownEmployer, checkupCompany, checkupSkill, jdText, company: employer, reportNum: pdfPaths?.reportNum });
 
   // Which tools each kind gets, and the whole argv for every runtime that HAS an
   // audited scope, live with those runtimes: claude-invocation.mjs (declared on

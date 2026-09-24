@@ -71,6 +71,18 @@ test("buildPrompt: the pdf prompt still pins tailoring to the real mode", () => 
   assert.match(prompt, /reports\/018-\*\.md/);
 });
 
+test("buildPrompt: pdf report glob uses the resolved report number, not the tracker #", () => {
+  // Given a re-evaluated row: run keyed by tracker #1079 but its Report cell links
+  // report 1086, so the agent must read reports/1086-*.md (the file that exists)
+  const prompt = buildPrompt({ kind: "pdf", input: "1079", reportNum: "1086", memory: "", today: "2026-08-04" });
+
+  // Then the glob points at the real report file; the human "application #" label
+  // still shows the row the user is looking at (1079)
+  assert.match(prompt, /reports\/1086-\*\.md/, "must read the linked report, not the tracker #");
+  assert.ok(!/reports\/1079-\*\.md/.test(prompt), "must not glob a report file that a re-eval removed");
+  assert.match(prompt, /application #1079/);
+});
+
 test("buildPrompt: every kind ends with exactly one VERDICT instruction", () => {
   // Given each kind — job-store.tsx parses that final line client-side
   for (const kind of ["pdf", "research", "evaluate", "fix-portal"]) {

@@ -152,7 +152,11 @@ function employerDirective(policy) {
  * inline instead of writing it), and a guard that greps route.ts for the marker
  * text matched the route's own comments instead. See test-all.mjs §55.6.
  *
- * @param {{kind: string, input: string, memory: string, today: string, postedAt?: string, unknownEmployer?: string, checkupCompany?: string, checkupSkill?: {path: string, version: string | null}, jdText?: string, company?: string}} args
+ * @param {{kind: string, input: string, memory: string, today: string, postedAt?: string, unknownEmployer?: string, checkupCompany?: string, checkupSkill?: {path: string, version: string | null}, jdText?: string, company?: string, reportNum?: string}} args
+ *   reportNum — the report number the row's Report cell actually links (a
+ *   re-evaluated row keeps its tracker `#` but links a new report file, so the two
+ *   differ). The pdf prompt reads `reports/{reportNum}-*.md` so the agent gets THIS
+ *   offer's JD; absent → falls back to `input` (byte-identical for a normal row).
  *   checkupSkill — ADR-0056 决议 5：服务端经 skill-registry 解析好的 offer体检 最高版本
  *   副本（绝对路径 + 版本号）。present → prompt 第一条指令先读技能正文，页脚换技能
  *   模板带版本号那句；absent → prompt 与旧版逐字节一致（技能缺失不硬失败，workflow 第 8 条）。
@@ -165,7 +169,7 @@ function employerDirective(policy) {
  *   prompt is byte-identical to what it always was.
  * @returns {string}
  */
-export function buildPrompt({ kind, input, memory, today, postedAt, unknownEmployer, checkupCompany, checkupSkill, jdText, company }) {
+export function buildPrompt({ kind, input, memory, today, postedAt, unknownEmployer, checkupCompany, checkupSkill, jdText, company, reportNum }) {
   const mem = memory.trim() ? `\n\nDurable notes about the user (from their profile):\n${memory.trim()}\n` : "";
   if (kind === "research") {
     return `You are investigating the user's OWN work / portfolio to surface job-search-relevant strengths, headless. Investigate the target (use WebFetch for URLs; read local files if referenced) and report: what it is, why it is impressive, and how to leverage it in their job search — which roles/claims it supports and how to frame it on a CV. Be specific, honest, and encouraging. Report only: never submit, send, or click Apply anywhere, and contact no one — you are investigating the user's own work, not acting on it.${mem}
@@ -175,6 +179,11 @@ End with EXACTLY one final line: VERDICT: {0-5 signal strength}/5 — {why it he
 Target: ${input}`;
   }
   if (kind === "pdf") {
+    // The agent reads the evaluation report by NUMBER. The run is keyed by the
+    // tracker `#`, but after a re-evaluation the row links a DIFFERENT report
+    // file (row #1079 → reports/1086-…), so globbing reports/{#}-*.md matches
+    // nothing and the CV is tailored blind. Prefer the resolved report number.
+    const rpt = reportNum ?? input;
     // The agent tailors content only — it neither renders the PDF nor saves it.
     // Rendering moved to the backend because launching a real browser can hit a
     // sandbox escalation nobody is present to approve (#2172); SAVING moved for a
@@ -185,7 +194,7 @@ Target: ${input}`;
     // backend (a plain Node process, no CLI sandbox) writes and renders it, so
     // pdf mode runs with no write tool at all.
     return `You are tailoring the user's ATS-optimized CV for application #${input}, headless, on their machine. Run the REAL career-ops "pdf" mode's CONTENT step: follow modes/pdf.md's TAILORING rules exactly (do not improvise your own scoring or format). Apply its CONTENT rules — keyword injection, ordering, the competency grid, project selection, and its never-invent-a-skill rule. Its steps that shell out (the jd-skill-gap.mjs check, template resolution) and its build/save/render steps are NOT performed on web runs; the platform handles output itself. The same goes for modes/pdf.md's eval-timing instrumentation: do NOT run \`node log-eval-timing.mjs\` — the platform records this run's pdf timing itself, and a second set of rows would corrupt the report's timing breakdown (ADR-0017).
-1. Read modes/pdf.md, cv.md, config/profile.yml, and the evaluation report at reports/${input}-*.md (for the JD keywords + analysis).
+1. Read modes/pdf.md, cv.md, config/profile.yml, and the evaluation report at reports/${rpt}-*.md (for the JD keywords + analysis).
 2. Tailor the CV per modes/pdf.md: inject the JD's keywords into the summary + first bullets, reorder experience by relevance, build the competency grid, pick the top 3–4 projects. NEVER invent skills — only reword REAL experience using the JD's vocabulary.
 3. Fill templates/cv-template.html's {{...}} placeholders with the tailored content. Use that template even though modes/pdf.md resolves one via cv-templates.mjs: web runs always use the base template. ${CV_ENVELOPE_INSTRUCTION}
 4. Emit the envelope EXACTLY ONCE. The platform writes the HTML, renders the PDF, and updates the tracker's PDF column itself, only after a confirmed successful render. Do not submit anything anywhere.
