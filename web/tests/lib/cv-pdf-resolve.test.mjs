@@ -10,7 +10,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync, utimesSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { resolveLatestCvPdf } from "../../src/lib/cv-pdf-resolve.mjs";
+import { resolveLatestCvPdf, resolveCvPdfByReport, resolveCvPdf } from "../../src/lib/cv-pdf-resolve.mjs";
 
 function makeRoot() {
   return mkdtempSync(join(tmpdir(), "co-cvresolve-"));
@@ -84,6 +84,79 @@ test("resolveLatestCvPdf: token-boundary match so Meta never resolves Metabase's
 
     // Then it does NOT match the prefix file — the slug must sit at a token boundary
     assert.equal(result.ok, false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("resolveLatestCvPdf: non-ASCII (Chinese) company fails closed, never matches every PDF", () => {
+  // Given an output/ dir holding one unrelated ASCII-slug CV
+  const root = makeRoot();
+  try {
+    mkdirSync(join(root, "output"), { recursive: true });
+    writeFileSync(join(root, "output", "cv--yikongzhijia-2026-09-24.pdf"), "x");
+    // When resolving by a Chinese company name (empty slug after token-extract)
+    const result = resolveLatestCvPdf("超聚变", root);
+    // Then it must NOT return the unrelated CV — the empty-slug regex would
+    // otherwise match every filename (the 「两个简历，第一个打不开」 bug).
+    assert.equal(result.ok, false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("resolveCvPdfByReport: exact report number -> its indexed PDF", () => {
+  // Given a pdf-index.tsv keying two reports to distinct PDFs (relative paths)
+  const root = makeRoot();
+  try {
+    mkdirSync(join(root, "data"), { recursive: true });
+    writeFileSync(
+      join(root, "data", "pdf-index.tsv"),
+      "# report\tpdf\thtml\tformat\tdate\n1079\toutput/cv--wrong-2026-09-24.pdf\t-\ta4\t2026-09-24\n1086\toutput/cv--xchujibian-software-pm-reval-2026-09-24.pdf\t-\ta4\t2026-09-24\n",
+    );
+    // When resolving the linked report number (zero-padding tolerated)
+    const hit = resolveCvPdfByReport("01086", root);
+    assert.equal(hit.ok, true);
+    assert.equal(hit.path, join(root, "output", "cv--xchujibian-software-pm-reval-2026-09-24.pdf"));
+    // An unindexed report is a real miss, not a fuzzy fallback
+    assert.equal(resolveCvPdfByReport("9999", root).ok, false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("resolveCvPdf: prefers the report link over the company name", () => {
+  // Given a Chinese offer: its CV is indexed by report, and an unrelated ASCII
+  // CV is the newest file in output/ (what the company fallback would wrongly pick)
+  const root = makeRoot();
+  try {
+    mkdirSync(join(root, "data"), { recursive: true });
+    mkdirSync(join(root, "output"), { recursive: true });
+    writeFileSync(join(root, "output", "cv--yikongzhijia-2026-09-24.pdf"), "x");
+    writeFileSync(
+      join(root, "data", "pdf-index.tsv"),
+      "1086\toutput/cv--xchujibian-software-pm-reval-2026-09-24.pdf\t-\ta4\t2026-09-24\n",
+    );
+    // When resolving with BOTH report and the (unmatched) Chinese company name
+    const r = resolveCvPdf({ report: "1086", company: "超聚变" }, root);
+    // Then the exact report link wins
+    assert.equal(r.ok, true);
+    assert.match(r.path, /xchujibian-software-pm-reval/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("resolveCvPdf: no report falls back to the (hardened) company match", () => {
+  // Given only a legacy ASCII company CV on disk and no index for the query
+  const root = makeRoot();
+  try {
+    mkdirSync(join(root, "output"), { recursive: true });
+    writeFileSync(join(root, "output", "cv-jane-acme-2026-07-26.pdf"), "x");
+    assert.equal(resolveCvPdf({ company: "Acme" }, root).ok, true);
+    // A Chinese name with no report key fails closed rather than matching all
+    assert.equal(resolveCvPdf({ company: "超聚变" }, root).ok, false);
+    assert.equal(resolveCvPdf({}, root).ok, false);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

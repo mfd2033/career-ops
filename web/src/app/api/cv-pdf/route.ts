@@ -2,20 +2,23 @@ import { NextRequest } from "next/server";
 import fs from "node:fs";
 import path from "node:path";
 import { careerOpsRoot } from "@/lib/career-ops";
-import { resolveLatestCvPdf } from "@/lib/cv-pdf-resolve.mjs";
+import { resolveCvPdf } from "@/lib/cv-pdf-resolve.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// Serve the tailored CV PDF the pdf mode wrote to output/cv-…-{company}-…pdf for
-// a given offer (matched by company slug, newest first). Inline so it opens in
-// the browser. Local-first: reads the user's own output/ dir. Path resolution is
-// shared with /api/cv-pdf/open via resolveLatestCvPdf so both stay in sync.
+// Serve the tailored CV PDF for an offer. Prefer `?report={n}` — the exact
+// report-number link recorded in data/pdf-index.tsv, which resolves correctly
+// for Chinese company names and re-evaluated rows. `?company={name}` is the
+// legacy newest-match fallback. Inline so it opens in the browser. Local-first:
+// reads the user's own output/ dir. Resolution is shared with /api/cv-pdf/open
+// via resolveCvPdf so both stay in sync.
 export async function GET(req: NextRequest) {
+  const report = (req.nextUrl.searchParams.get("report") ?? "").trim();
   const company = (req.nextUrl.searchParams.get("company") ?? "").trim();
-  if (!company) return new Response("company required", { status: 400 });
+  if (!report && !company) return new Response("report or company required", { status: 400 });
 
-  const result = resolveLatestCvPdf(company, careerOpsRoot());
+  const result = resolveCvPdf({ report, company }, careerOpsRoot());
   if (!result.ok) return new Response(result.error, { status: 404 });
 
   try {

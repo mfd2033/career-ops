@@ -8,7 +8,9 @@ import { useI18n } from "@/lib/i18n/context";
 // with the file selected — the backend spawns `explorer /select,"path"`. Mirrors
 // GeneratePdfButton's placement: only rendered once a tailored CV exists
 // (pdfReady), so it never needs a disabled state beyond the in-flight guard.
-export function OpenCvFolderButton({ company }: { company: string }) {
+// `report` is the exact report-number link (preferred); `company` is the legacy
+// fallback the backend only reaches when there is no report key.
+export function OpenCvFolderButton({ report, company }: { report?: string; company: string }) {
   const { t } = useI18n();
   const [status, setStatus] = useState<"idle" | "loading" | "ok" | "error">("idle");
   const [msg, setMsg] = useState("");
@@ -28,7 +30,7 @@ export function OpenCvFolderButton({ company }: { company: string }) {
       const res = await fetch("/api/cv-pdf/open", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ company }),
+        body: JSON.stringify({ report, company }),
       });
       const data = await res.json().catch(() => null);
       if (res.ok && data?.ok) {

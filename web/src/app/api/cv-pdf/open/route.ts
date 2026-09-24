@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { careerOpsRoot } from "@/lib/career-ops";
-import { resolveLatestCvPdf } from "@/lib/cv-pdf-resolve.mjs";
+import { resolveCvPdf } from "@/lib/cv-pdf-resolve.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -12,20 +12,23 @@ export const dynamic = "force-dynamic";
 // `explorer /select,"path"` on Windows, `open -R` on macOS, and a plain
 // xdg-open of the directory on Linux (no native "select this file" exists).
 // POST-only: spawning a process is a side effect, and GET would let browsers
-// prefetch/cache it. Path resolution is shared with /api/cv-pdf via
-// resolveLatestCvPdf so both stay in sync.
+// prefetch/cache it. Resolution is shared with /api/cv-pdf via resolveCvPdf
+// (prefer the exact `report` link, fall back to the company name) so both stay
+// in sync and reveal the SAME file the browser link opens.
 export async function POST(req: NextRequest) {
-  let body: { company?: unknown } | null = null;
+  let body: { report?: unknown; company?: unknown } | null = null;
   try {
     body = await req.json().catch(() => null);
   } catch {
     body = null;
   }
+  const report =
+    (typeof body?.report === "string" ? body.report : req.nextUrl.searchParams.get("report") ?? "").trim();
   const company =
     (typeof body?.company === "string" ? body.company : req.nextUrl.searchParams.get("company") ?? "").trim();
-  if (!company) return Response.json({ ok: false, error: "company required" }, { status: 400 });
+  if (!report && !company) return Response.json({ ok: false, error: "report or company required" }, { status: 400 });
 
-  const result = resolveLatestCvPdf(company, careerOpsRoot());
+  const result = resolveCvPdf({ report, company }, careerOpsRoot());
   if (!result.ok) return Response.json({ ok: false, error: result.error }, { status: 404 });
   // The file may have vanished between readdir and the spawn — fail closed
   // rather than letting explorer silently open the parent directory.

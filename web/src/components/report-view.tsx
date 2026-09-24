@@ -425,6 +425,13 @@ export function ReportView({
   const archetype = field("Archetype");
   const url = field("URL");
   const pdfReady = (app?.pdf ?? "").includes("✅");
+  // The tailored CV is recorded in data/pdf-index.tsv keyed by its REPORT number
+  // (a re-evaluated row keeps its tracker `#` but links a new report file, so the
+  // two differ). Resolving the view/open links by that exact number — not the
+  // fuzzy company name — is what keeps 「查看/打开定制简历」 pointing at THIS offer's
+  // CV for Chinese company names and re-eval rows. Falls back to the route id
+  // when the row carries no report link (its file number equals the id).
+  const linkedReport = app?.report?.match(/\[(\d+)\]/)?.[1] ?? id;
 
   return (
     <div className="w-full px-6 py-8">
@@ -530,9 +537,9 @@ export function ReportView({
               hasListContext={position != null}
             />
           )}
-          <GeneratePdfButton n={id} company={companyLabel} pdfReady={pdfReady} />
+          <GeneratePdfButton n={id} report={linkedReport} company={companyLabel} pdfReady={pdfReady} />
           <ReevaluateButton id={id} url={url && url.startsWith("http") ? url : undefined} company={companyLabel} />
-          {pdfReady && <OpenCvFolderButton company={typeof companyLabel === "string" ? companyLabel : id} />}
+          {pdfReady && <OpenCvFolderButton report={linkedReport} company={typeof companyLabel === "string" ? companyLabel : id} />}
           <ApplyButton n={id} url={url && url.startsWith("http") ? url : undefined} company={companyLabel} pdfReady={pdfReady} />
           {/* 公司体检（ADR-0026）：按钮按下 = 用户确认，写入 agent-inbox 异步执行 */}
           {checkupTarget && (

@@ -11,7 +11,9 @@ import { useI18n } from "@/lib/i18n/context";
 // ATS-optimized CV tailored to THIS offer → output/cv-… + marks the tracker.
 // Once a tailored CV exists (tracker PDF ✅, or a pdf worker just finished), it
 // becomes a "View tailored CV" link (served by /api/cv-pdf) + a regenerate icon.
-export function GeneratePdfButton({ n, company, pdfReady }: { n: string; company: string; pdfReady: boolean }) {
+// `report` is the row's linked report number — the exact /api/cv-pdf key that
+// resolves via data/pdf-index.tsv; `company` is only the legacy fallback.
+export function GeneratePdfButton({ n, report, company, pdfReady }: { n: string; report?: string; company: string; pdfReady: boolean }) {
   const { jobs, startJob } = useJobs();
   const { t } = useI18n();
   const job = useMemo(
@@ -33,7 +35,7 @@ export function GeneratePdfButton({ n, company, pdfReady }: { n: string; company
     return (
       <span className="inline-flex items-center gap-1">
         <a
-          href={`/api/cv-pdf?company=${encodeURIComponent(company)}`}
+          href={`/api/cv-pdf?${report ? `report=${encodeURIComponent(report)}` : `company=${encodeURIComponent(company)}`}`}
           target="_blank"
           rel="noreferrer"
           className="inline-flex items-center justify-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-3 py-1 text-xs font-medium text-emerald-700 transition-colors hover:bg-emerald-500/15 dark:text-emerald-400 max-sm:min-h-[44px]"
