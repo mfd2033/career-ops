@@ -20,12 +20,13 @@ const SCRIPT_DIR = __dirname;
 const PROJECT_ROOT = path.resolve(SCRIPT_DIR, '..', '..');
 const ICON_PATH = path.join(SCRIPT_DIR, 'icon-256.png');
 const RUNTIME_DIR = path.join(PROJECT_ROOT, '.dashboard-runtime');
-const LOCK_FILE = path.join(RUNTIME_DIR, 'LOCK');
 const LOG_FILE = path.join(RUNTIME_DIR, 'tray-debug.log');
+
+// ADR-0063: the web port is pinned to 3000 — never drifts to another port.
+const WEB_PORT = 3000;
 
 let tray = null;
 let serverProcess = null;
-let port = 0;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -38,22 +39,20 @@ function log(msg) {
   } catch (e) { /* ignore */ }
 }
 
-function readPortFromLock() {
-  try {
-    if (fs.existsSync(LOCK_FILE)) {
-      const line = fs.readFileSync(LOCK_FILE, 'utf8').trim();
-      const p = parseInt(line, 10);
-      if (!isNaN(p) && p > 0) return p;
-    }
-  } catch (e) { /* ignore */ }
-  return 0;
+function sleepMs(ms) {
+  // Synchronous wait (Atomics on a zero-length SharedArrayBuffer) — the caller
+  // is a blocking port-release poll between kill and bind; async would need a
+  // whole callback pyramid for no benefit here.
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
-function writeLockFile(p) {
+function portInUse() {
   try {
-    if (!fs.existsSync(RUNTIME_DIR)) fs.mkdirSync(RUNTIME_DIR, { recursive: true });
-    fs.writeFileSync(LOCK_FILE, p.toString());
-  } catch (e) { /* ignore */ }
+    const result = execSync(`netstat -ano | findstr ":${WEB_PORT}" | findstr "LISTENING"`, { encoding: 'utf8', shell: 'cmd' });
+    return result.trim().length > 0;
+  } catch (e) {
+    return false; // findstr exits 1 when nothing matched → port is free
+  }
 }
 
 function findCareerOpsRoot() {
@@ -73,49 +72,64 @@ function findCareerOpsRoot() {
   return PROJECT_ROOT; // fallback
 }
 
-function pickFreePort() {
-  // Use net module to find a free port
-  const net = require('net');
-  const server = net.createServer();
-  server.listen(0, '127.0.0.1', () => {
-    const p = server.address().port;
-    server.close();
-    return p;
+// ADR-0063 probe: does a live web already answer on the pinned port?
+function probeAlive(cb) {
+  const http = require('http');
+  const req = http.get(`http://localhost:${WEB_PORT}/api/version`, (res) => {
+    res.resume();
+    cb(res.statusCode === 200);
   });
-  // Synchronous fallback: try common ports
-  return 3000;
+  req.on('error', () => cb(false));
+  req.setTimeout(1500, () => { req.destroy(); cb(false); });
 }
 
-function killNodeProcesses() {
-  // Kill any existing node processes on our port
+// ADR-0063: force-kill whatever LISTENs on the pinned port and its child tree
+// (taskkill /T /F), then wait for the port to free. Targets any process, not
+// only node — mirrors start-web.cmd. Returns false if an owner stays, so the
+// caller errors out instead of drifting to another port.
+function killPortOwner() {
+  let result = '';
   try {
-    const result = execSync(
-      'netstat -ano | findstr ":' + port + '" | findstr "LISTENING"',
-      { encoding: 'utf8', shell: 'cmd' }
-    );
-    const lines = result.trim().split('\n');
-    for (const line of lines) {
-      const parts = line.trim().split(/\s+/);
-      if (parts.length >= 5) {
-        const pid = parseInt(parts[4], 10);
-        if (!isNaN(pid)) {
-          try {
-            execSync(`taskkill /PID ${pid} /F`, { shell: 'cmd' });
-            log(`killed node pid=${pid} on port ${port}`);
-          } catch (e) { /* already dead */ }
-        }
-      }
+    result = execSync(`netstat -ano | findstr ":${WEB_PORT}" | findstr "LISTENING"`, { encoding: 'utf8', shell: 'cmd' });
+  } catch (e) {
+    return true; // nothing matched → port free
+  }
+  const pids = new Set();
+  for (const line of result.trim().split('\n')) {
+    const parts = line.trim().split(/\s+/);
+    if (parts.length >= 5) {
+      const pid = parseInt(parts[4], 10);
+      if (!isNaN(pid) && pid > 0) pids.add(pid);
     }
-  } catch (e) { /* no matching processes */ }
+  }
+  for (const pid of pids) {
+    try { execSync(`taskkill /PID ${pid} /T /F`, { shell: 'cmd' }); log(`killed port owner pid=${pid} (tree)`); }
+    catch (e) { log(`taskkill pid=${pid} failed: ${e.message}`); }
+  }
+  for (let i = 0; i < 40; i++) { // up to ~10s
+    if (!portInUse()) return true;
+    sleepMs(250);
+  }
+  return !portInUse();
 }
 
 function startServer() {
   // Stop existing server first
   stopServer();
 
-  port = readPortFromLock();
-  if (!port) port = pickFreePort();
+  // ADR-0063: reuse a live instance (standalone OR dev) on the pinned port;
+  // never start a second server, never drift to another port.
+  probeAlive((alive) => {
+    if (alive) {
+      log(`port ${WEB_PORT} already serves a live web — reusing it`);
+      openBrowser();
+      return;
+    }
+    launch();
+  });
+}
 
+function launch() {
   const careerOpsRoot = findCareerOpsRoot();
   const serverJs = path.join(careerOpsRoot, 'web', '.next', 'standalone', 'server.js');
   const standaloneDir = path.join(careerOpsRoot, 'web', '.next', 'standalone');
@@ -125,17 +139,18 @@ function startServer() {
     return;
   }
 
-  // Kill existing server on this port
-  killNodeProcesses();
-
-  // Write lock file
-  writeLockFile(port);
+  // ADR-0063: evict whatever owns the pinned port before binding. If it can't be
+  // freed, error out — do NOT fall back to another port.
+  if (!killPortOwner()) {
+    log(`ERROR: port ${WEB_PORT} is occupied and could not be freed (pinned, no fallback port)`);
+    return;
+  }
 
   // Start Node process
   const env = {
     ...process.env,
     CAREER_OPS_ROOT: careerOpsRoot,
-    PORT: port.toString(),
+    PORT: WEB_PORT.toString(),
     // Bind address, not an access URL: keep the explicit IPv4 loopback literal.
     // Windows resolves `localhost` to ::1 first, so HOSTNAME=localhost would
     // bind the IPv6 loopback and break the 127.0.0.1 clients (extension probe).
@@ -161,17 +176,16 @@ function startServer() {
   serverProcess.on('exit', (code, signal) => {
     log(`server exited with code ${code}, signal ${signal}`);
     serverProcess = null;
-    port = 0;
   });
 
   serverProcess.on('error', (err) => {
     log(`server failed to start: ${err.message}`);
   });
 
-  log(`server started: port=${port} pid=${serverProcess.pid} root=${careerOpsRoot}`);
+  log(`server started: port=${WEB_PORT} pid=${serverProcess.pid} root=${careerOpsRoot}`);
 
   // Wait for server to be ready
-  waitForServerReady(port);
+  waitForServerReady(WEB_PORT);
 }
 
 function waitForServerReady(targetPort, maxAttempts = 30) {
@@ -219,23 +233,18 @@ function stopServer() {
     } catch (e) { /* ignore */ }
     serverProcess = null;
   }
-  port = 0;
 }
 
 function restartServer() {
   log('restart requested');
   stopServer();
-  try {
-    fs.unlinkSync(LOCK_FILE);
-  } catch (e) { /* ignore */ }
+  // startServer re-probes and, after our child releases 3000, re-launches on the
+  // same pinned port (ADR-0063). No port re-pick, no LOCK.
   startServer();
 }
 
 function openBrowser() {
-  if (!port) port = readPortFromLock();
-  if (!port) port = 3000;
-
-  const url = `http://localhost:${port}`;
+  const url = `http://localhost:${WEB_PORT}`;
   require('child_process').exec(`start "" "${url}"`, (err) => {
     if (err) log(`browser open failed: ${err.message}`);
     else log(`browser opened: ${url}`);
@@ -245,9 +254,6 @@ function openBrowser() {
 function quitApp() {
   log('quit requested');
   stopServer();
-  try {
-    fs.unlinkSync(LOCK_FILE);
-  } catch (e) { /* ignore */ }
   if (tray) tray.destroy();
   app.quit();
 }
@@ -319,9 +325,6 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   stopServer();
-  try {
-    fs.unlinkSync(LOCK_FILE);
-  } catch (e) { /* ignore */ }
 });
 
 // Handle IPC from renderer (if needed)

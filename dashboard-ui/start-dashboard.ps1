@@ -12,6 +12,7 @@ param(
 
 Add-Type @"
 using System;
+using System.Net;
 using System.Drawing;
 using System.Windows.Forms;
 using System.IO;
@@ -21,18 +22,14 @@ using System.Text;
 using System.Collections.Generic;
 
 public class TrayApp {
+    // ADR-0063: the web port is pinned to 3000 — never drifts to another port.
+    private const int WebPort = 3000;
     private NotifyIcon _tray;
-    private bool _running;
-    private int _port;
     private Process _serverProcess;
-    private string _lockFile;
     private string _logFile;
     private StringBuilder _log = new StringBuilder();
     
     public TrayApp(string iconPath, string runtimeDir) {
-        _port = 0;
-        _running = false;
-        _lockFile = Path.Combine(runtimeDir, "LOCK");
         _logFile = Path.Combine(runtimeDir, "tray-debug.log");
         
         Icon icon = new Icon(iconPath);
@@ -95,54 +92,92 @@ public class TrayApp {
         } catch {}
     }
     
-    private int PickFreePort() {
-        System.Net.Sockets.TcpListener tcp = new System.Net.Sockets.TcpListener(
-            System.Net.IPAddress.Loopback, 0);
-        tcp.Start();
-        int port = ((System.Net.IPEndPoint)tcp.LocalEndpoint).Port;
-        tcp.Stop();
-        return port;
-    }
-    
-    private int ReadPortFromLock() {
+    // ADR-0063 probe: does a live server already answer on the pinned port?
+    private bool ProbeAlive() {
         try {
-            if (File.Exists(_lockFile)) {
-                string line = File.ReadAllText(_lockFile).Trim();
-                int p = 0;
-                if (int.TryParse(line, out p) && p > 0) return p;
+            // Access URL uses "localhost" per the house rule; .NET falls back to 127.0.0.1 when ::1 is unanswered.
+            HttpWebRequest request = (HttpWebRequest)WebRequest.Create("http://localhost:" + WebPort + "/api/version");
+            request.Timeout = 1500;
+            using (WebResponse response = request.GetResponse()) {
+                return ((HttpWebResponse)response).StatusCode == HttpStatusCode.OK;
             }
-        } catch {}
-        return 0;
+        } catch {
+            return false;
+        }
     }
-    
-    private void KillServerForPort(int port) {
+
+    // ADR-0063: find whatever LISTENs on the pinned port and force-kill it with
+    // its process tree (taskkill /T /F). Targets any process, not only node —
+    // mirrors start-web.cmd. Returns false if an owner was found but couldn't be
+    // killed within the timeout, so the caller errors out instead of drifting.
+    private bool KillPortOwner(int waitMs) {
+        string pids;
+        try {
+            Process ps = new Process();
+            ps.StartInfo.FileName = "powershell";
+            ps.StartInfo.Arguments = "-NoProfile -Command \"(Get-NetTCPConnection -LocalPort " + WebPort + " -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique) -join ' '\"";
+            ps.StartInfo.UseShellExecute = false;
+            ps.StartInfo.RedirectStandardOutput = true;
+            ps.StartInfo.CreateNoWindow = true;
+            ps.Start();
+            pids = ps.StandardOutput.ReadToEnd().Trim();
+            ps.WaitForExit();
+        } catch (Exception ex) {
+            Log("owner lookup failed: " + ex.Message);
+            return true; // could not resolve an owner; let the bind attempt decide
+        }
+
+        if (string.IsNullOrEmpty(pids)) return true; // port is free
+
+        foreach (string s in pids.Split(' ')) {
+            int pid;
+            if (!int.TryParse(s, out pid) || pid <= 0) continue;
+            Log("killing port owner pid=" + pid + " (tree)");
+            try {
+                Process tk = new Process();
+                tk.StartInfo.FileName = "taskkill";
+                tk.StartInfo.Arguments = "/PID " + pid + " /T /F";
+                tk.StartInfo.UseShellExecute = false;
+                tk.StartInfo.CreateNoWindow = true;
+                tk.Start();
+                tk.WaitForExit();
+            } catch (Exception ex) {
+                Log("taskkill pid=" + pid + " failed: " + ex.Message);
+            }
+        }
+
+        // Wait for the port to actually free up.
+        int waited = 0;
+        while (waited < waitMs) {
+            if (!PortInUse()) return true;
+            Thread.Sleep(250);
+            waited += 250;
+        }
+        return !PortInUse();
+    }
+
+    private bool PortInUse() {
         try {
             var props = System.Net.NetworkInformation.IPGlobalProperties.GetIPGlobalProperties();
-            var connections = props.GetActiveTcpConnections();
-            var targetPids = new HashSet<int>();
-            foreach (var conn in connections) {
-                if (conn.LocalEndPoint.Port == port) {
-                    int stateInt = (int)conn.State;
-                    // Established = 1 in TcpState enum
-                    if (stateInt == 1) {
-                        try {
-                            var proc = Process.GetProcessById(conn.OwningProcessId);
-                            if (proc.ProcessName == "node") {
-                                Log("killing existing node pid=" + conn.OwningProcessId + " on port " + port);
-                                proc.Kill();
-                            }
-                        } catch {}
-                    }
-                }
+            foreach (var ep in props.GetActiveTcpListeners()) {
+                if (ep.Port == WebPort) return true;
             }
         } catch {}
+        return false;
     }
     
     private void StartServer() {
         StopServer();
-        
-        int port = ReadPortFromLock();
-        if (port == 0) port = PickFreePort();
+
+        // ADR-0063: reuse a live instance (standalone OR dev) on the pinned port;
+        // never start a second server, never drift to another port.
+        if (ProbeAlive()) {
+            Log("port " + WebPort + " already serves a live web — reusing it");
+            OpenBrowser();
+            return;
+        }
+
+        int port = WebPort;
         
         // Find career-ops root by scanning from script location
         string scriptPath = System.Reflection.Assembly.GetExecutingAssembly().Location;
@@ -174,15 +209,14 @@ public class TrayApp {
             return;
         }
         
-        // Kill any existing server on this port
-        KillServerForPort(port);
-        
-        // Write lock file
-        try {
-            string lockDir = Path.GetDirectoryName(_lockFile);
-            if (!string.IsNullOrEmpty(lockDir)) Directory.CreateDirectory(lockDir);
-            File.WriteAllText(_lockFile, port.ToString());
-        } catch {}
+        // ADR-0063: evict whatever owns the pinned port (any process, tree) before
+        // binding. If it can't be freed, error out — do NOT fall back to another port.
+        if (!KillPortOwner(10000)) {
+            Log("ERROR: port " + WebPort + " could not be freed");
+            MessageBox.Show("Cannot start dashboard: port 3000 is occupied and could not be freed.\n\nEnd the occupying process and retry (the port is pinned to 3000 and will not fall back to another).",
+                "career-ops dashboard", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return;
+        }
         
         // Start Node
         ProcessStartInfo psi = new ProcessStartInfo();
@@ -207,9 +241,6 @@ public class TrayApp {
         _serverProcess.BeginOutputReadLine();
         _serverProcess.BeginErrorReadLine();
         
-        _port = port;
-        _running = true;
-        
         Log("server started: port=" + port + " pid=" + _serverProcess.Id + " root=" + careerOpsRoot);
         
         WaitForServerReady(port);
@@ -226,7 +257,6 @@ public class TrayApp {
     
     private void OnServerExited(object sender, EventArgs e) {
         Log("server exited unexpectedly pid=" + _serverProcess.Id);
-        _running = false;
     }
     
     private void WaitForServerReady(int port, int maxAttempts = 30) {
@@ -252,22 +282,17 @@ public class TrayApp {
             try { _serverProcess.Kill(); } catch {}
             _serverProcess = null;
         }
-        _running = false;
     }
     
     private void RestartServer() {
         Log("restart requested");
         StopServer();
-        try { File.Delete(_lockFile); } catch {}
+        // StartServer re-runs the full ADR-0063 takeover chain on the pinned port.
         StartServer();
     }
     
     private void OpenBrowser() {
-        int port = ReadPortFromLock();
-        if (port == 0) port = _port;
-        if (port == 0) port = 3000;
-        
-        string url = "http://localhost:" + port;
+        string url = "http://localhost:" + WebPort;
         try {
             Process.Start("cmd", "/c start \"\" \"" + url + "\"");
             Log("browser opened: " + url);
@@ -279,7 +304,6 @@ public class TrayApp {
     private void Quit() {
         Log("quit requested");
         StopServer();
-        try { File.Delete(_lockFile); } catch {}
         _tray.Visible = false;
         _tray.Dispose();
         Environment.Exit(0);

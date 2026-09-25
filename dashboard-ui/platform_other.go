@@ -9,6 +9,14 @@ import (
 	"strconv"
 )
 
+// listenerPID is a non-Windows compilation stub. The packaged launcher is
+// Windows-only; port eviction relies on netstat/taskkill there. Here we report
+// "nothing listening" so the launcher takes the start-fresh path.
+func listenerPID(port int) (int, string) { return 0, "" }
+
+// killProcessTree is a non-Windows compilation stub (see listenerPID).
+func killProcessTree(pid int) error { return nil }
+
 // startServer launches the dashboard server process. Non-Windows builds are
 // only used for compilation checks; keep the server on a visible console.
 func startServer(nodePath, serverDir, careerRoot string, port int) *exec.Cmd {

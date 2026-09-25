@@ -27,6 +27,58 @@ import (
 // initializer. Empty → plain `go build` without the packer → "dev".
 var cacheVersion string
 
+// webPort is the single, pinned port the dashboard server binds (ADR-0063).
+// It is never changed at runtime: if it can't be taken the launcher errors out
+// rather than drifting to another port. Drift would (a) orphan the browser
+// extension, which only probes 3000-3040, and (b) change the localStorage origin
+// so the config page's per-origin state looks wiped. Both are the exact pain
+// ADR-0063 removes.
+const webPort = 3000
+
+// takeoverAction is the pure decision of what the launcher must do with port
+// webPort before it can show the dashboard.
+type takeoverAction int
+
+const (
+	actionReuse        takeoverAction = iota // a live career-ops web answers on webPort → open it, start nothing
+	actionStartFresh                         // webPort is free → start our server
+	actionKillThenStart                      // webPort is owned by a non-answering process → kill its tree, then start
+)
+
+// decideTakeover is pure (no OS, no net) so the three launcher entry points can
+// share one tested rule. probeOK is whether http://localhost:webPort/api/version
+// returned 200; listenerPID is the PID LISTENing on webPort (0 when free). Order
+// is load-bearing: an answering server is reused even though it obviously holds
+// the socket, so probeOK is checked before listenerPID.
+func decideTakeover(probeOK bool, listenerPID int) takeoverAction {
+	if probeOK {
+		return actionReuse
+	}
+	if listenerPID > 0 {
+		return actionKillThenStart
+	}
+	return actionStartFresh
+}
+
+func browserURL() string {
+	return fmt.Sprintf("http://localhost:%d", webPort)
+}
+
+// cannotFreeMsg is the error shown when a squatter on webPort can't be evicted.
+// It names the occupant and NEVER suggests another port (ADR-0063: pinned).
+func cannotFreeMsg(pid int, image string, cause error) string {
+	msg := "无法启动 dashboard：3000 端口被占用，且无法释放。"
+	if pid > 0 {
+		msg += "\n\n占用进程：" + image + " (PID " + strconv.Itoa(pid) + ")"
+	} else {
+		msg += "\n\n占用进程：未知"
+	}
+	if cause != nil {
+		msg += "\n结束该进程失败：" + cause.Error()
+	}
+	return msg + "\n\n请手动结束它后重试（端口固定为 3000，不会改用其它端口）。"
+}
+
 func main() {
 	exe, err := os.Executable()
 	if err != nil {
@@ -76,33 +128,50 @@ func main() {
 		}
 	}
 
-	lockFile := filepath.Join(runtimeDir, "LOCK")
-	if port, ok := readLock(lockFile); ok && httpAlive(port) {
-		openBrowser(fmt.Sprintf("http://localhost:%d", port))
-		return
+	// ADR-0063 takeover chain — port is pinned to webPort, no LOCK file, no
+	// port drift. Probe first; only look for a squatter when nothing answers.
+	probeOK := httpAlive(webPort)
+	pid, image := 0, ""
+	if !probeOK {
+		pid, image = listenerPID(webPort)
 	}
 
-	port, err := pickFreePort()
-	if err != nil {
-		fatal("无法启动 dashboard：\n\n" + err.Error() +
-			"\n\n请结束占用 3000-3040 任一端口的进程后重试。")
+	switch decideTakeover(probeOK, pid) {
+	case actionReuse:
+		// A live career-ops web (standalone or dev) already owns 3000. Open it and
+		// exit; never start a second server, never evict a healthy instance.
+		openBrowser(browserURL())
 		return
+	case actionKillThenStart:
+		if err := killProcessTree(pid); err != nil {
+			fatal(cannotFreeMsg(pid, image, err))
+			return
+		}
+		if !waitPortFree(webPort, 10*time.Second) {
+			p2, im2 := listenerPID(webPort)
+			fatal(cannotFreeMsg(p2, im2, nil))
+			return
+		}
+	case actionStartFresh:
+		// webPort is free — nothing to do.
 	}
-	cmd := startServer(nodePath, serverDir, careerRoot, port)
+
+	cmd := startServer(nodePath, serverDir, careerRoot, webPort)
 	if cmd == nil {
 		return
 	}
-	if err := writeLock(lockFile, port); err != nil {
-		fatal("could not write lock: " + err.Error())
+	if !waitReady(webPort, 60*time.Second) {
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+		fatal("dashboard 服务在 3000 端口未能就绪（可能启动即崩溃）。\n\n请检查 " +
+			filepath.Join(runtimeDir, "tray-debug.log") + " 后重试。")
 		return
 	}
-	defer func() { _ = os.Remove(lockFile) }()
-
-	waitReady(port, 60*time.Second)
-	openBrowser(fmt.Sprintf("http://localhost:%d", port))
+	openBrowser(browserURL())
 
 	setupTrayLog(filepath.Dir(nodePath))
-	runTrayLoop(cmd, nodePath, serverDir, careerRoot, filepath.Dir(nodePath), port)
+	runTrayLoop(cmd, nodePath, serverDir, careerRoot, filepath.Dir(nodePath))
 }
 
 func locateSelfHostedRuntime(exeDir string) (nodePath, serverDir string) {
@@ -180,23 +249,32 @@ func setupTrayLog(dir string) {
 	log.Printf("launcher started: pid=%d", os.Getpid())
 }
 
-// pickFreePort returns the first free port in 3000-3040 — the exact range the
-// browser extension probes (extension/background.js PORT_MIN..PORT_MAX). A port
-// outside that range would be invisible to the extension ("web 服务未运行"
-// forever), so when every port in the range is taken we must NOT fall back to an
-// OS-assigned port; the caller surfaces the collision instead.
-func pickFreePort() (int, error) {
-	// Availability is probed on the IPv4 loopback — the same address the server
-	// binds (HOSTNAME in platform_windows.go / platform_other.go), so "free here"
-	// and "bindable there" agree.
-	for p := 3000; p <= 3040; p++ {
-		ln, err := net.Listen("tcp", "127.0.0.1:"+strconv.Itoa(p))
-		if err == nil {
-			_ = ln.Close()
-			return p, nil
-		}
+// portFree reports whether webPort can be bound on the IPv4 loopback — the same
+// address the server binds (HOSTNAME in platform_*.go), so "free here" and
+// "bindable there" agree. Used to confirm a squatter really released the port.
+func portFree(port int) bool {
+	ln, err := net.Listen("tcp", "127.0.0.1:"+strconv.Itoa(port))
+	if err != nil {
+		return false
 	}
-	return 0, fmt.Errorf("端口 3000-3040 全部被占用（浏览器扩展只探测该范围，范围外的端口将无法连接）")
+	_ = ln.Close()
+	return true
+}
+
+// waitPortFree polls portFree up to timeout (covers the brief TIME_WAIT after a
+// kill). Returns false if the port stays owned, so the caller surfaces an error
+// instead of drifting to another port.
+func waitPortFree(port int, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for {
+		if portFree(port) {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
 }
 
 func httpAlive(port int) bool {
@@ -211,30 +289,15 @@ func httpAlive(port int) bool {
 	return resp.StatusCode == http.StatusOK
 }
 
-func waitReady(port int, timeout time.Duration) {
+func waitReady(port int, timeout time.Duration) bool {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		if httpAlive(port) {
-			return
+			return true
 		}
 		time.Sleep(300 * time.Millisecond)
 	}
-}
-
-func readLock(path string) (int, bool) {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return 0, false
-	}
-	p, err := strconv.Atoi(strings.TrimSpace(string(b)))
-	if err != nil || p <= 0 {
-		return 0, false
-	}
-	return p, true
-}
-
-func writeLock(path string, port int) error {
-	return os.WriteFile(path, []byte(strconv.Itoa(port)), 0o644)
+	return false
 }
 
 func fileExists(p string) bool {
@@ -242,7 +305,7 @@ func fileExists(p string) bool {
 	return err == nil
 }
 
-func runTrayLoop(cmd *exec.Cmd, nodePath, serverDir, careerRoot, runtimeDir string, port int) {
+func runTrayLoop(cmd *exec.Cmd, nodePath, serverDir, careerRoot, runtimeDir string) {
 	iconData := loadIcon(runtimeDir)
 	tray := newTray(iconData)
 	defer tray.Quit()
@@ -266,14 +329,14 @@ func runTrayLoop(cmd *exec.Cmd, nodePath, serverDir, careerRoot, runtimeDir stri
 			switch c {
 			case trayOpen:
 				log.Printf("tray: open command")
-				openBrowser(fmt.Sprintf("http://localhost:%d", port))
+				openBrowser(browserURL())
 			case trayRestart:
 				log.Printf("tray: restart command")
-				port = restartServer(curCmd, nodePath, serverDir, careerRoot, runtimeDir, port)
-				log.Printf("tray: restart done, new port %d", port)
+				restartServer(curCmd, nodePath, serverDir, careerRoot)
+				log.Printf("tray: restart done")
 			case trayQuit:
 				log.Printf("tray: quit command")
-				stopServer(curCmd, runtimeDir)
+				stopServer(curCmd)
 				log.Printf("tray: server stopped, quitting tray")
 				tray.Quit()
 				<-tray.Done()
@@ -291,7 +354,11 @@ func watchServer(curCmd *atomic.Pointer[exec.Cmd], serviceExit chan<- error) {
 	for {
 		cmd := curCmd.Load()
 		if cmd == nil || cmd.Process == nil {
-			return
+			// A tray restart is in progress (curCmd was nil-ed on purpose, because
+			// the pinned port forces kill-old-before-start-new). Idle until the new
+			// cmd lands — do NOT treat the old child's exit as a crash.
+			time.Sleep(100 * time.Millisecond)
+			continue
 		}
 		err := cmd.Wait()
 		if curCmd.Load() != cmd {
@@ -302,37 +369,42 @@ func watchServer(curCmd *atomic.Pointer[exec.Cmd], serviceExit chan<- error) {
 	}
 }
 
-func restartServer(curCmd *atomic.Pointer[exec.Cmd], nodePath, serverDir, careerRoot, runtimeDir string, port int) int {
-	old := curCmd.Load()
-	newPort, err := pickFreePort()
-	if err != nil {
-		// 重启只发生在托盘菜单，此时没有 fatal 的消息框路径 — 记日志并保留旧端口，
-		// 让现有服务继续跑，而不是把 server 杀掉后卡死。
-		log.Printf("tray: restart aborted: %v", err)
-		return port
-	}
-	cmd := startServer(nodePath, serverDir, careerRoot, newPort)
-	if cmd == nil {
-		return port
-	}
-	curCmd.Store(cmd)
-	if old != nil && old.Process != nil {
+// restartServer relaunches on the same pinned port (ADR-0063): kill our own
+// child, make sure 3000 is free (evicting any squatter that grabbed it in the
+// interim), then start fresh. There is no "pick a new port" branch — if the
+// port can't be reclaimed the restart is aborted in the log, leaving the tray
+// alive, rather than silently drifting.
+func restartServer(curCmd *atomic.Pointer[exec.Cmd], nodePath, serverDir, careerRoot string) {
+	if old := curCmd.Load(); old != nil && old.Process != nil {
+		// Nil the pointer first so watchServer ignores the deliberate kill.
+		curCmd.Store(nil)
 		_ = old.Process.Kill()
 	}
-	lockFile := filepath.Join(runtimeDir, "LOCK")
-	if err := writeLock(lockFile, newPort); err != nil {
-		fatal("could not write lock during restart: " + err.Error())
+	if !waitPortFree(webPort, 10*time.Second) {
+		if pid, image := listenerPID(webPort); pid != 0 {
+			_ = killProcessTree(pid)
+			if !waitPortFree(webPort, 5*time.Second) {
+				log.Printf("tray: restart aborted, port still owned by %s (pid=%d)", image, pid)
+				return
+			}
+		}
 	}
-	waitReady(newPort, 30*time.Second)
-	openBrowser(fmt.Sprintf("http://localhost:%d", newPort))
-	return newPort
+	cmd := startServer(nodePath, serverDir, careerRoot, webPort)
+	if cmd == nil {
+		return
+	}
+	curCmd.Store(cmd)
+	if waitReady(webPort, 30*time.Second) {
+		openBrowser(browserURL())
+	} else {
+		log.Printf("tray: restarted server not ready on %d within 30s", webPort)
+	}
 }
 
-func stopServer(curCmd *atomic.Pointer[exec.Cmd], runtimeDir string) {
+func stopServer(curCmd *atomic.Pointer[exec.Cmd]) {
 	if cmd := curCmd.Load(); cmd != nil && cmd.Process != nil {
 		_ = cmd.Process.Kill()
 	}
-	_ = os.Remove(filepath.Join(runtimeDir, "LOCK"))
 }
 
 func loadIcon(runtimeDir string) []byte {

@@ -1,49 +1,40 @@
-// launcher_test.go — pickFreePort 端口选择回归测试。
+// launcher_test.go — decideTakeover 端口接管决策回归测试（ADR-0063）。
 //
-// 关键约束（与 extension/background.js 的 PORT_MIN..PORT_MAX 联动）：
-// 返回端口必须落在 3000-3040 内，否则浏览器扩展探测不到 → "web 服务未运行"误报。
-// 该范围内无空闲端口时必须报错，而不是回退到 OS 随机端口（范围外 = 隐形服务）。
+// 关键约束：端口严格固定 3000，接管链三态互斥且绝不含"换端口"分支。
+// decideTakeover 是不触 OS 的纯函数，故其判定可稳定单测（OS 侧的
+// listenerPID/killProcessTree 留在平台文件，不在此覆盖，见工单 03 手工验收）。
 package main
 
-import (
-	"net"
-	"strconv"
-	"testing"
-)
+import "testing"
 
-// 范围测试：无论 3000 是否已被外部进程占用，返回端口必须 ∈ [3000, 3040]。
-func TestPickFreePortInRange(t *testing.T) {
-	port, err := pickFreePort()
-	if err != nil {
-		t.Fatalf("pickFreePort() unexpected error: %v", err)
+func TestDecideTakeover(t *testing.T) {
+	cases := []struct {
+		name        string
+		probeOK     bool
+		listenerPID int
+		want        takeoverAction
+	}{
+		{"live web is reused even though it owns the port", true, 4321, actionReuse},
+		{"free port starts fresh", false, 0, actionStartFresh},
+		{"non-answering squatter is killed then started", false, 9001, actionKillThenStart},
+		{"probe wins over listener when both true", true, 0, actionReuse},
+		{"negative pid treated as free (defensive)", false, -1, actionStartFresh},
 	}
-	if port < 3000 || port > 3040 {
-		t.Fatalf("pickFreePort() = %d, want port in [3000, 3040]", port)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := decideTakeover(tc.probeOK, tc.listenerPID); got != tc.want {
+				t.Fatalf("decideTakeover(%v, %d) = %d, want %d", tc.probeOK, tc.listenerPID, got, tc.want)
+			}
+		})
 	}
 }
 
-// 全占测试：3000-3040 全部被监听时，必须返回错误，绝不回退随机端口。
-func TestPickFreePortAllBusy(t *testing.T) {
-	var listeners []net.Listener
-	defer func() {
-		for _, ln := range listeners {
-			_ = ln.Close()
-		}
-	}()
-	for p := 3000; p <= 3040; p++ {
-		ln, err := net.Listen("tcp", "127.0.0.1:"+strconv.Itoa(p))
-		if err != nil {
-			// 端口已被外部进程占用（如正在运行的 dashboard 服务器）— 同样算"已占"，
-			// 继续占剩余端口即可，不必失败。
-			continue
-		}
-		listeners = append(listeners, ln)
+// The pinned port must never drift: browserURL always points at 3000.
+func TestBrowserURLPinnedTo3000(t *testing.T) {
+	if got := browserURL(); got != "http://localhost:3000" {
+		t.Fatalf("browserURL() = %q, want %q", got, "http://localhost:3000")
 	}
-	port, err := pickFreePort()
-	if err == nil {
-		t.Fatalf("pickFreePort() = %d, nil, want error when 3000-3040 all busy", port)
-	}
-	if port != 0 {
-		t.Fatalf("pickFreePort() = %d on error, want 0", port)
+	if webPort != 3000 {
+		t.Fatalf("webPort = %d, want 3000 (ADR-0063 pins it)", webPort)
 	}
 }
