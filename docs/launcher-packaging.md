@@ -9,6 +9,7 @@
   - 脚本住 gitignored 的 `local/`（ADR-0022 的 fork-local 层，见 `local/README.md`）：不进仓库、不与上游 merge 冲突；换机器 clone 后 `local/` 本就不在，照本文件手跑即可。
   - 为什么是 Node 而不是 PowerShell 脚本：本编排要求「命令必须与所在 shell 匹配」，而本机 shell 会在 PowerShell 与 cmd 之间回落（实测 `Set-Location` 报「不是内部或外部命令」、PS 里 `$i:` 被当成驱动器变量而解析失败）。脚本用 `child_process` + `shell: false` 直传 argv，绕开引号与插值整类问题。
   - 开关：`--no-start`（只打包不启动）/ `--keep-next`（不删 `web/.next`，也就不碰 dev server）/ `--fresh-winres`（**上次打包失败过**才用，强制重装 go-winres）/ `--keep-runtime`（保留旧 runtime 目录）/ `--dev-port N`（默认 3100）。`--help` 打印同一份清单。
+  - 值开关 `--dev-port` 两种写法都认（`--dev-port 3100` / `--dev-port=3100`）。未知开关、缺值或非法端口、以及 `--dev-port` 与 `--keep-next` 这一矛盾组合，**在做任何耗时步骤之前当场退出**，不静默回退默认值——曾因只认等号写法，照本文件传空格形式被丢弃（退成 3100）、dev server 没被停，直到清 `web/.next` 才抛 `ENOTEMPTY`，报错不指向真因（2026-09-25 实测）。手工照本文件重跑时同样适用此判据：停 dev server 的那一步必须确认它真的命中了监听端口。
   - 它替你兜住三件容易漏的事：① APPDATA 空陷阱（用 `USERPROFILE` 兜出实路径 + 进程级注入 GOPROXY）；② safe-delete shim（清 `NODE_OPTIONS` 与三个 `_BULK_*` 变量——只设 `CODEBUDDY_SAFE_DELETE_ENABLED=0` 不够，2026-09-12 实测）；③ 清 `.next` 前先停 dev server，以及打包后按 `dashboard-ui/app/build-info.json` 的 cacheVersion 删掉旧 runtime 目录。
 
 - **用途（2026-09-11 拆分）**：本文件承载「打包 career-dashboard-launcher.exe」的完整编排流程。原居 `modes/_custom.md`，因内容多、每会话全量加载耗 token，迁移至此，打包时再按索引显式 Read。
