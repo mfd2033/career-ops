@@ -1,11 +1,13 @@
 "use client";
 
+import { useRef, type MouseEvent } from "react";
 import Link from "next/link";
 import { Bookmark, BookmarkCheck, Coins, ExternalLink, Loader2, X } from "lucide-react";
 import type { InboxJob } from "@/lib/career-ops";
 import type { AtsSource } from "@/lib/explore";
 import { ATS_LABEL } from "@/lib/explore";
 import { openableUrl } from "@/lib/inbox-url.mjs";
+import { isExemptClickTarget, isDragGesture, isTextSelectionActive } from "@/lib/row-click.mjs";
 import { Badge } from "@/components/ui/badge";
 import { CompanyLogo } from "@/components/company-logo";
 import { useI18n } from "@/lib/i18n/context";
@@ -52,11 +54,25 @@ export function TriageRow({
   const { t } = useI18n();
   const ago = agoLabel(age, t);
   const evaluated = !!scored && (scored.running || scored.score != null);
+  // ADR-0060 行点击选中：判定全在 row-click.mjs（纯函数已单测），这里只接线。
+  // pointerdown 坐标供拖拽闸比对；行内控件（a/button/input）让路不劫持。
+  const pointerDownRef = useRef<{ x: number; y: number } | null>(null);
+
+  const onRowClick = (e: MouseEvent<HTMLElement>) => {
+    if (isExemptClickTarget(e.target as Element)) return;
+    if (isDragGesture(pointerDownRef.current, { x: e.clientX, y: e.clientY })) return;
+    if (isTextSelectionActive(window.getSelection?.())) return;
+    onToggleSelect();
+  };
 
   return (
     <li
+      onPointerDown={(e) => {
+        pointerDownRef.current = { x: e.clientX, y: e.clientY };
+      }}
+      onClick={onRowClick}
       className={cn(
-        "flex items-center gap-2.5 px-3 py-2.5 transition-colors sm:gap-3 sm:px-4",
+        "flex cursor-pointer items-center gap-2.5 px-3 py-2.5 transition-colors sm:gap-3 sm:px-4",
         selected ? "bg-brand-soft/50" : "hover:bg-surface-hover",
         evaluated && "opacity-95",
       )}
