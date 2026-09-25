@@ -20,6 +20,8 @@ import { ledgerCardFields } from "@/lib/ledger-display.mjs";
 import { fmtDuration } from "@/lib/format";
 import { BatchItemList } from "@/components/jobs/batch-item-list";
 import { StepTimeline } from "@/components/jobs/step-timeline";
+import { RetryJobButton } from "@/components/jobs/retry-job-button";
+import { canRetryJob } from "@/lib/job-retry.mjs";
 
 type RunLedgerEntry = {
   id: string;
@@ -357,6 +359,17 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
             <div className="mt-3 flex flex-wrap items-center gap-2.5">
               <Badge tone={job.result.tone}>{job.result.score}/5</Badge>
               {job.result.summary && <span className="text-sm text-muted">{job.result.summary}</span>}
+            </div>
+          )}
+          {/* ADR-0061 决议 3/7：attempt 徽章（第 2 次起显示，done/error 均可）+
+              手动重试按钮——组件按 canRetryJob 自守卫，批量先弹确认（决议 6）；
+              ledger-only 视图在上方提前 return，到不了这里。 */}
+          {((job.attempt != null && job.attempt > 1) || canRetryJob(job)) && (
+            <div className="mt-3 flex items-center gap-2.5">
+              {job.attempt != null && job.attempt > 1 && (
+                <span className="text-xs text-faint">{t("jobs.retryAttempt", { n: job.attempt })}</span>
+              )}
+              <RetryJobButton job={job} withLabel />
             </div>
           )}
         </div>

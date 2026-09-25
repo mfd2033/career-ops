@@ -92,6 +92,16 @@ export const en: Dict = {
   "jobs.endedAt": "Ended {time}",
   "jobs.queuedAt": "Queued {time}",
   "jobs.queuedSince": "since {time}",
+  // ADR-0061 任务重试：error 卡的手动重试——按钮、attempt 徽章、时间线分隔行
+  // 与批量整卡重跑的二次确认弹窗（单任务不拦截，决议 6）。
+  "jobs.retry": "Retry",
+  "jobs.retryAttempt": "Attempt {n}",
+  "jobs.retryAttemptSeparator": "—— attempt {n} ——",
+  "jobs.retryConfirmTitle": "Retry this batch?",
+  "jobs.retryConfirmBody":
+    "The whole batch re-runs from scratch ({n} items) — items that already succeeded will run again.",
+  "jobs.retryConfirmCancel": "Cancel",
+  "jobs.retryConfirmConfirm": "Re-run batch",
 };
 
 // Simplified Chinese strings. Every key in en must have a matching key here.
@@ -175,4 +185,12 @@ export const zh: Dict = {
   "jobs.endedAt": "止于 {time}",
   "jobs.queuedAt": "排队于 {time}",
   "jobs.queuedSince": "自 {time}",
+  // ADR-0061 任务重试：与 en 一一对应。
+  "jobs.retry": "重试",
+  "jobs.retryAttempt": "第 {n} 次尝试",
+  "jobs.retryAttemptSeparator": "—— 第 {n} 次尝试 ——",
+  "jobs.retryConfirmTitle": "重试这批任务？",
+  "jobs.retryConfirmBody": "整批将从头重跑（共 {n} 项），已成功项也会重新执行。",
+  "jobs.retryConfirmCancel": "取消",
+  "jobs.retryConfirmConfirm": "整批重跑",
 };

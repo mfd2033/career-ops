@@ -5,6 +5,7 @@ import { scoreTone } from "@/lib/format";
 import { readSavedCliId, readSavedModel, resolveCliId } from "@/lib/saved-cli";
 import { useI18n } from "@/lib/i18n/context";
 import { reconcileJobsWithLedger } from "@/lib/job-ledger-reconcile.mjs";
+import { canRetryJob, nextAttempt, resetJobForRetry } from "@/lib/job-retry.mjs";
 
 export type JobStep = { kind: "tool" | "status"; label: string; ts: number };
 // ADR-0042 决议 5：批量逐项结论（batch-evaluate/batch-checkup 的 item 事件）。
@@ -87,6 +88,12 @@ export type Job = {
   // ADR-0045 决议 2/6：批量选中总数。ledger-only 行从落盘记录带出（items 被
   // cap 截断时计数仍以此为准）；本地卡暂不填（batchPos.n 已承载同信息）。
   batchTotal?: number;
+  // ADR-0061 任务重试：批量派发参数快照——整卡重跑时唯一可靠的取参来源
+  // （items 只是结论清单、可能被 cap 截断，不能反推原始清单）。
+  urls?: string[];
+  ns?: string[];
+  // ADR-0061 任务重试：尝试次数（缺省 = 1）；重试时 +1，>1 时列表/详情展示。
+  attempt?: number;
   steps: JobStep[];
   text: string;
   result?: JobResult;
@@ -108,6 +115,7 @@ type StartOpts = { title: string; subtitle?: string; kind: string; input: string
 type Ctx = {
   jobs: Job[];
   startJob: (opts: StartOpts) => string | null;
+  retryJob: (id: string) => void;
   removeJob: (id: string) => void;
   cancelJob: (id: string) => void;
   clearFinished: () => void;
@@ -143,6 +151,14 @@ function parseVerdict(text: string): JobResult {
   return { score: null, summary: "", tone: "muted" };
 }
 
+// ADR-0043/0061：派发引擎的「当前设置」兜底解析。startJob 每次派发都走这里；
+// retryJob 只在卡上没有引擎快照（cliId 缺失）时才回退到它——重试语义是
+// 「原样再来」，引擎优先沿用失败那次的 cliId/model（决议 5）。
+async function resolveEngineFallback(): Promise<{ cliId?: string; model?: string }> {
+  const cliId = readSavedCliId() || (await resolveCliId());
+  return { cliId: cliId || undefined, model: readSavedModel() || undefined };
+}
+
 // Per-job accumulation for a single-run worker whose events arrive on the
 // /api/events multiplexed channel (ADR-0020) — the old transport kept these as
 // closure locals of the per-task stream reader.
@@ -165,6 +181,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
   const runIds = useRef(new Map<string, string>()); // server runId -> local jobId (single-run workers, ADR-0020)
   const accs = useRef(new Map<string, RunAcc>());
   const removed = useRef(new Set<string>()); // cards removed before their POST /api/run even returned
+  const jobsRef = useRef<Job[]>([]); // retryJob 读最新卡的镜像（回调闭包不追 jobs，避免 stale）
   const seq = useRef(0);
   const loaded = useRef(false);
   const { t } = useI18n();
@@ -502,6 +519,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
 
   // persist
   useEffect(() => {
+    jobsRef.current = jobs; // ADR-0061：retryJob 凭镜像找卡，不走闭包里的旧 state
     if (!loaded.current) return;
     try {
       // ADR-0042 决议 3：持久化时步骤截断到最近 20 条，防 localStorage 膨胀。
@@ -518,33 +536,18 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
     setJobs((js) => js.map((j) => (j.id === id ? fn(j) : j)));
   }, []);
 
-  const startJob = useCallback(
-    (opts: StartOpts): string | null => {
-      const id = `job-${Date.now()}-${seq.current++}`;
-      const job: Job = {
-        id,
-        title: opts.title,
-        subtitle: opts.subtitle,
-        page: opts.page,
-        input: opts.input,
-        kind: opts.kind,
-        reportNum: opts.reportNum,
-        batchId: opts.batchId,
-        status: "running",
-        steps: [{ kind: "status", label: t("jobs.stepStarting"), ts: Date.now() }],
-        text: "",
-        startedAt: Date.now(),
-      };
-      setJobs((js) => [job, ...js]);
-      removed.current.delete(id);
-
+  // ADR-0061 任务重试：startJob 与 retryJob 共用的派发体——卡片就绪后按
+  // urls/ns 二分（单任务 POST /api/run，批量 POST batch-* 端点 + NDJSON 流），
+  // 事件接线与抽取前逐行保真；服务端零改动。engine 是本次实际派发的引擎
+  // （新任务 = 当前设置解析；重试 = 卡上快照，决议 5）。
+  const dispatchJob = useCallback(
+    (id: string, opts: StartOpts, engine: { cliId?: string; model?: string }) => {
       if (!opts.urls && !opts.ns) {
         // Single-run worker (evaluate/pdf/fix-portal): POST returns {runId}
         // immediately (ADR-0020) and the worker's events arrive on the shared
         // /api/events channel — this tab holds NO per-task connection.
         (async () => {
-          const cliId = readSavedCliId() || (await resolveCliId());
-          const model = readSavedModel() || undefined;
+          const { cliId, model } = engine;
           if (!cliId) {
             patch(id, (j) => ({
               ...j,
@@ -610,7 +613,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
             }));
           }
         })();
-        return id;
+        return;
       }
 
       // Batch mode goes to the dedicated batch endpoints — one
@@ -629,8 +632,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
       batchControllers.current.set(id, controller);
 
       (async () => {
-        const cliId = readSavedCliId() || (await resolveCliId());
-        const model = readSavedModel() || undefined;
+        const { cliId, model } = engine;
         if (!cliId) {
           accs.current.delete(id);
           patch(id, (j) => ({
@@ -810,9 +812,69 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
         }
       })();
 
-      return id;
     },
     [patch, t],
+  );
+
+  // 新任务派发：建卡（含批量参数快照）→ 解析当前设置引擎 → 交给共享派发体。
+  const startJob = useCallback(
+    (opts: StartOpts): string | null => {
+      const id = `job-${Date.now()}-${seq.current++}`;
+      const job: Job = {
+        id,
+        title: opts.title,
+        subtitle: opts.subtitle,
+        page: opts.page,
+        input: opts.input,
+        kind: opts.kind,
+        reportNum: opts.reportNum,
+        batchId: opts.batchId,
+        // ADR-0061 任务重试：批量派发参数随卡落 localStorage——整卡重跑时
+        // 原样取用；单任务卡为 undefined（凭 kind+input 即可重发）。
+        urls: opts.urls,
+        ns: opts.ns,
+        status: "running",
+        steps: [{ kind: "status", label: t("jobs.stepStarting"), ts: Date.now() }],
+        text: "",
+        startedAt: Date.now(),
+      };
+      setJobs((js) => [job, ...js]);
+      removed.current.delete(id);
+      (async () => dispatchJob(id, opts, await resolveEngineFallback()))();
+      return id;
+    },
+    [dispatchJob, t],
+  );
+
+  // ADR-0061 决议 1/3/4/5：手动重试——仅 error 终态的本地卡可重试；原卡复用
+  // （attempt+1、时间线追加「第 N 次尝试」分隔行、运行态清空），引擎沿用卡上
+  // 快照、缺失才回退当前设置；派发走与 startJob 同一条共享路径，服务端零感知。
+  const retryJob = useCallback(
+    (id: string) => {
+      const job = jobsRef.current.find((j) => j.id === id);
+      if (!job || !canRetryJob(job)) return;
+      const n = nextAttempt(job);
+      patch(id, () => resetJobForRetry(job, { now: Date.now(), separatorLabel: t("jobs.retryAttemptSeparator", { n }) }) as Job);
+      (async () => {
+        const engine = job.cliId ? { cliId: job.cliId, model: job.model } : await resolveEngineFallback();
+        dispatchJob(
+          id,
+          {
+            title: job.title,
+            subtitle: job.subtitle,
+            kind: job.kind!,
+            input: job.input!,
+            page: job.page,
+            batchId: job.batchId,
+            reportNum: job.reportNum,
+            urls: job.urls,
+            ns: job.ns,
+          },
+          engine,
+        );
+      })();
+    },
+    [dispatchJob, patch, t],
   );
 
   const removeJob = useCallback((id: string) => {
@@ -858,5 +920,5 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
 
   const clearFinished = useCallback(() => setJobs((js) => js.filter((j) => j.status === "running" || j.status === "queued")), []);
 
-  return <JobsContext.Provider value={{ jobs: visibleJobs, startJob, removeJob, cancelJob, clearFinished }}>{children}</JobsContext.Provider>;
+  return <JobsContext.Provider value={{ jobs: visibleJobs, startJob, retryJob, removeJob, cancelJob, clearFinished }}>{children}</JobsContext.Provider>;
 }
