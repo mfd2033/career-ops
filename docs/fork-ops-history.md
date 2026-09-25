@@ -71,3 +71,12 @@
 - 收件箱特有的拖拽/选区双守卫（tracker 表无此需求）：pointerdown→click 位移 >5px 或释放时存在非折叠文本选区 → 不切换，保护行内拖选复制公司名/职位名的场景；阈值与排除选择器作为具名常量被 `web/tests/lib/row-click.test.mjs` 逐字锁定（零 DOM 纯函数 `web/src/lib/row-click.mjs`，组件只剩接线）。
 - 不引入 Shift 范围选择；桌面移动一致；键盘路径仍只有 checkbox；无新增 i18n/tooltip。
 - 验证：TDD 红→绿，新单测 8/8、web 套件 1119/1119、typecheck 干净、CodeReview PASS；:3010 工作副本 dev 服务器浏览器实机 6 项全 PASS（行点选中/再点取消/无双重切换/标题不被劫持/拖选不误触/cursor-pointer 且 li 无 title/role/tabindex），页面数据零改动。commit 4df2453。
+
+## §10 管道表唯一导航入口 = 公司名（ADR-0062，2026-09-25，本地工单 .scratch/pipeline-single-nav-entry/01-02）
+
+- 痛点是误触不是冗余：ADR-0038 之后 tracker 表一行有三个 `<Link>`（公司 / 职位 / 分数），用户想勾选行做批量却误点跳页，丢列表筛选与滚动位置。ADR-0062 把职位格与分数徽章改成纯内容（点击冒泡到 `<tr>` = 切换勾选），公司名单点仍走 `/pipeline/{n}{contextQuery}`，prev/next 报告导航与评估用时面板不降级。
+- `/report/{n}` 在 web 侧从此没有入口（分数徽章原本是它唯一的列表入口，ADR-0016 那条通道在列表侧失效）；路由本体保留，继续只服务扩展深链与工作器 `#N`。未另加「纯报告视图」链接也未加报告列——那等于把刚砍掉的旁路从另一个门放回来。
+- 体检★ 与「建议体检」角标从公司 `<Link>` 内移出成兄弟节点（`<td>` 内多一层 flex，`gap-2.5` 保持原视觉贴合）：`title` 悬停提示留着，`stopPropagation` 摘掉，所以点角标 = 勾选，与全行一致。
+- 不变量用源码守卫单测锁：`web/tests/lib/pipeline-single-nav-entry.test.mjs` 断言 tbody 里 `<Link>` 恰好 1 个、`stopPropagation` 只剩 2 处、角标在 `</Link>` 之后且仍带 2 个 `title`。两个现学现卖的坑：① 守卫必须先剥注释再计数，否则一句提到 `<Link>` 的注释就能让计数假红；② 不能笼统断言 `/jobs/` 零命中——本组件为了启动批量任务就得 import `@/components/jobs/job-store`，那是模块路径不是导航目标。
+- 实机取证的两条现状事实（记下来以免下一个人误判）：① tracker 表的选中态**没有行底色 class**，反馈只有复选框勾选 + 批量条计数（与收件箱 `TriageRow` 的 `bg-brand-soft/50` 不同，那是 ADR-0060 新加的，不是本件回归）；② 行点击是逐行 toggle，同一行再点一下是取消，不是「保持计数」。
+- 验证：TDD 红→绿（改前 4 项 fail / 改后 5/5 pass）、web 套件 1136/1136、typecheck 干净；:3010 工作副本 dev 服务器浏览器实机 10 项（第 9 项因全 685 行分数均有值而 N/A），零写操作、结束时选中清空。截图 `.career-ops-web/runs/pipeline-nav-0*.png`。
