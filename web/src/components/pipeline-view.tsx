@@ -553,45 +553,40 @@ export function PipelineView({
                     />
                   </td>
                   <td className="px-4 py-3 font-medium">
-                    <Link
-                      href={`/pipeline/${r.n}${contextQuery}`}
-                      onClick={(e) => e.stopPropagation()}
-                      className="flex items-center gap-2.5 transition-colors group-hover:text-brand"
-                    >
-                      <CompanyLogo name={companyLabel(r)} size={20} />
-                      {companyLabel(r)}
+                    {/* ADR-0062：公司名是全行唯一的站内导航入口。职位与分数曾经也
+                        是链接，用户想勾选行做批量却误点跳页、丢列表筛选与滚动位置。
+                        角标是 <Link> 的兄弟节点（不是后代），点它们因此冒泡到行 = 勾选。 */}
+                    <div className="flex items-center gap-2.5">
+                      <Link
+                        href={`/pipeline/${r.n}${contextQuery}`}
+                        onClick={(e) => e.stopPropagation()}
+                        className="inline-flex items-center gap-2.5 transition-colors group-hover:text-brand"
+                      >
+                        <CompanyLogo name={companyLabel(r)} size={20} />
+                        {companyLabel(r)}
+                      </Link>
                       {(() => {
                         const title = checkupTitle(r.n);
                         const c = checkups?.[r.n];
                         if (!title || !c) return null;
                         return (
-                          <span title={title} className="inline-flex shrink-0 cursor-help" onClick={(e) => e.stopPropagation()}>
+                          <span title={title} className="inline-flex shrink-0 cursor-help">
                             <Badge tone={checkupTone(c.star)}>★{c.star.toFixed(1)}</Badge>
                           </span>
                         );
                       })()}
                       {suggests?.has(r.n) && (
-                        <span title={t("pipeline.suggestCheckupTitle")} className="inline-flex shrink-0 cursor-help" onClick={(e) => e.stopPropagation()}>
+                        <span title={t("pipeline.suggestCheckupTitle")} className="inline-flex shrink-0 cursor-help">
                           <Badge tone="warn">{t("pipeline.suggestCheckup")}</Badge>
                         </span>
                       )}
-                    </Link>
+                    </div>
                   </td>
-                  <td className="px-4 py-3 text-muted">
-                    <Link href={`/pipeline/${r.n}${contextQuery}`} onClick={(e) => e.stopPropagation()}>
-                      {r.role}
-                    </Link>
-                  </td>
+                  <td className="px-4 py-3 text-muted">{r.role}</td>
                   <td className="px-4 py-3">
-                    {/* score badge → /report/{n}: the direct report jump (Q4b);
-                        the row itself still navigates to the full detail page. */}
-                    <Link
-                      href={`/report/${r.n}`}
-                      onClick={(e) => e.stopPropagation()}
-                      className="inline-flex transition-opacity hover:opacity-80"
-                    >
-                      <Badge tone={scoreTone(r.score)}>{r.score || "—"}</Badge>
-                    </Link>
+                    {/* 分数只做展示（ADR-0062）：曾经的 /report/{n} 直跳通道让位于
+                        「误点不跳页」；该路由仍服务扩展深链与工作器 #N（ADR-0018）。 */}
+                    <Badge tone={scoreTone(r.score)}>{r.score || "—"}</Badge>
                   </td>
                   {/* 报告薪资（ADR-0037）：归一化月薪区间，报告的字段原文进悬停提示；
                       未披露/无报告 → 「—」（与分数列、来源列的空值写法一致，全列只有
