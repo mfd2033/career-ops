@@ -64,3 +64,10 @@
 - 解析：`parseCodebuddyEvent` 复用 `parseClaudeEvent`（4 份真样本 167 行零异常），仅剔除恒为 0 的 `total_cost_usd`，**保留真实 token**（与 Qoder 相反：Qoder 是真假都假，CodeBuddy 只有费用假）。CodeBuddy 自有行类型 `system/status`、`file-history-snapshot` 靠默认 null 丢弃。
 - argv 坑：`--allowedTools` 是变参，会把写在它后面的位置参数 prompt 一起吞掉（实测退化成 2 行、`model:"unknown"`、`result:""` 且 exit 0）——prompt 必须紧随 `-p`。模型默认值实测为 `cmcc:auto`（不是 `auto`）。
 - 验证：typecheck 干净 + web 单测 1050 全过（新增 13 项引擎守卫、2 项 binDirs 守卫、5 项注册表解析守卫、3 项 spawn 目标守卫）；dev 模式 `/api/clis` 实测 `codebuddy: installed=true usable=true`，path 指向捆绑副本。
+
+## §9 收件箱行点击选中（ADR-0060，2026-09-25，本地工单 .scratch/inbox-row-click/01-02）
+
+- 把 ADR-0038 的 tracker 表行点击选中延伸进收件箱 `TriageRow`：整行可点切换，但实现形状不同——收件箱行内标题 `<a>` 包裹整段文字，逐格 `stopPropagation` 会漏，改用集中式 `closest('a,button,input')` 排除（checkbox / 标题打开原帖 / 徽章链 / Save / Skip 全部让路）。
+- 收件箱特有的拖拽/选区双守卫（tracker 表无此需求）：pointerdown→click 位移 >5px 或释放时存在非折叠文本选区 → 不切换，保护行内拖选复制公司名/职位名的场景；阈值与排除选择器作为具名常量被 `web/tests/lib/row-click.test.mjs` 逐字锁定（零 DOM 纯函数 `web/src/lib/row-click.mjs`，组件只剩接线）。
+- 不引入 Shift 范围选择；桌面移动一致；键盘路径仍只有 checkbox；无新增 i18n/tooltip。
+- 验证：TDD 红→绿，新单测 8/8、web 套件 1119/1119、typecheck 干净、CodeReview PASS；:3010 工作副本 dev 服务器浏览器实机 6 项全 PASS（行点选中/再点取消/无双重切换/标题不被劫持/拖选不误触/cursor-pointer 且 li 无 title/role/tabindex），页面数据零改动。commit 4df2453。
