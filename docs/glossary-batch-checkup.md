@@ -28,6 +28,6 @@
 
 ## 运行时
 
-- **worker 引擎跟随配置（cliId）**：批量体检与单体检、批量评估一致，引擎由配置页 `cliId` 决定（8 个 CLI）；claude 附加 `permissionFlags` 工具授权，其他引擎现状为无授权机制运行（known gap #2507）。
+- **worker 引擎跟随配置（cliId）**：批量体检与单体检、批量评估一致，引擎由配置页 `cliId` 决定（8 个 CLI）；worker argv 一律经共享选择器 `resolveWorkerInvocation`（ADR-0054）分发——claude / qoder-cn / codebuddy 由此携带各自审计过的 per-kind 工具授权（2026-09-25 修复：此前手拼 argv 使 codebuddy 批量 worker 工具全拒、全败），其余引擎回落纯文本 argv（known gap #2507）。
 - **并发档位**：`MAX_PARALLEL=3` + 全局 `concurrencyPool` 槽位，与批量评估共享一套参数，不为体检单设。
 - **无总超时（no batch timeout）**：批量不设总时长上限；单 worker 各自 30 分钟 `killMs` 是硬上限，总时长由用户取消控制。取消时已完成项的台账行保留（append-only 不回滚）。

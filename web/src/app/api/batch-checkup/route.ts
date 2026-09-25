@@ -40,7 +40,7 @@ import {
   checkupArtifactRowCountForTracker,
   batchCheckupFinalEvent,
 } from "@/lib/run-cli-support.mjs";
-import { permissionFlags } from "@/lib/claude-invocation.mjs";
+import { resolveWorkerInvocation } from "@/lib/worker-invocation.mjs";
 import { spawnHeadlessCli, terminateCli } from "@/lib/spawn-cli.mjs";
 import { careerOpsRoot, readMemory, findCheckupTarget } from "@/lib/career-ops";
 import { listLiveCheckups } from "@/lib/checkup-live.mjs";
@@ -64,7 +64,10 @@ const MAX_PARALLEL = 3; // shared with batch-evaluate: browser-scraping workers 
 // guard: #582/#682 burned 30 minutes each and persisted nothing).
 const CHECKUP_WORKER_KILL_MS = 1_800_000;
 
-const STAR_RE = /VERDICT:[^\n]*?★\s*([0-5](?:\.\d)?)/;
+// Structured-mode stdout (claude/codebuddy stream-json) carries the verdict
+// text inside JSON string values — most encoders leave ★ literal, but one that
+// escapes non-ASCII would emit \u2605 and silently null the star. Match both.
+const STAR_RE = /VERDICT:[^\n]*?(?:★|\\u2605)\s*([0-5](?:\.\d)?)/;
 const STAR_FALLBACK_RE = /VERDICT:[^\n]*?([0-5](?:\.\d)?)\s*\/\s*5/;
 
 // 2026-09-20 (#132/#1027 秒死不可诊)：路由此前只留布尔判定，worker 的死因文本
@@ -254,19 +257,19 @@ export async function POST(req: Request) {
               today,
               checkupCompany: t.company,
             });
-            // Plain-text argv (spec.args), not streamArgs — same reading mode as
-            // batch-evaluate. Tool policy comes from claude-invocation.mjs (checkup
-            // is a PERSISTING kind there): without it a headless `claude -p` runs on
-            // default permissions and dead-ends on the first Bash approval (the
-            // 2026-09-15 batch outage). Non-claude engines get no tool flags — the
-            // known per-CLI authorization gap (#2507), unchanged by this route.
-            const args = withModelFlag(
-              spec.id === "claude"
-                ? [...spec.args(prompt), ...permissionFlags("checkup")]
-                : spec.args(prompt),
-              spec.model,
-              model,
-            );
+            // ADR-0054: worker argv comes from the shared spec-driven selector —
+            // streamArgsFor (claude/qoder-cn/codebuddy audited per-kind permission
+            // flags) > streamArgs (codex --json) > plain args — never spelled in
+            // the route. The 2026-09-25 outage: this route hand-rolled plain
+            // argv for codebuddy, so headless workers had every tool call denied
+            // by the CLI's permission layer ("permission prompts aren't
+            // available in this non-interactive mode") — exit 0, zero stderr,
+            // nothing persisted, honest gate reads "ran but never added a
+            // checkup ledger row". Structured stdout stays a raw text stream to
+            // the STAR_RE scan above; STAR_RE tolerates a JSON-escaped ★ so a
+            // JSONL encoder that escapes non-ASCII can't silently drop the star.
+            const { args: workerArgs } = resolveWorkerInvocation(spec, { kind: "checkup", prompt });
+            const args = withModelFlag(workerArgs, spec.model, model);
             const finish = (outcome: CheckupOutcome) => {
               poolHandles.delete(poolHandle);
               release(poolHandle.id);

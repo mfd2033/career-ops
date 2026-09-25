@@ -197,3 +197,18 @@ test("batch-evaluate route takes worker argv from the shared selector, never eng
   }
   assert.ok(src.includes("resolveWorkerInvocation("), "batch route must pick worker argv via resolveWorkerInvocation");
 });
+
+// 2026-09-25 批量体检全败事故的守卫：batch-checkup 当时手工拼 argv（非 claude
+// 引擎裸 -p），codebuddy 无头 worker 的工具调用全部被 CLI 权限层拒绝 —— exit 0、
+// 零 stderr、零产物，诚实门禁只能报 "ran but never added a checkup ledger row"。
+// 与 batch-evaluate 同一契约：worker argv 一律经共享选择器，kind 必须透传。
+test("batch-checkup route takes worker argv from the shared selector, never engine builders", () => {
+  const src = readFileSync(new URL("../../src/app/api/batch-checkup/route.ts", import.meta.url), "utf8");
+  for (const forbidden of ["claudeCliArgs", "codexStreamArgs", "qoderCliArgs", "codebuddyCliArgs", "parseClaudeEvent", "parseCodexEvent", "parseQoderEvent", "parseCodebuddyEvent", "permissionFlags"]) {
+    assert.ok(!src.includes(forbidden), `batch-checkup route must not reference ${forbidden} directly`);
+  }
+  assert.ok(
+    src.includes('resolveWorkerInvocation(spec, { kind: "checkup"'),
+    "batch-checkup route must pick worker argv via resolveWorkerInvocation with the checkup kind",
+  );
+});
