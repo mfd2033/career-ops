@@ -402,7 +402,9 @@ export function InboxTriage({ inbox, scoredUrls }: { inbox: InboxJob[]; scoredUr
   if (inbox.length === 0) return null;
 
   return (
-    <div className={cn("mx-auto mt-4 max-w-3xl md:flex md:flex-1 md:min-h-0 md:flex-col", shortlist.length > 0 && "pb-28 sm:pb-24")}>
+    /* 内容区宽度自适应（ADR-0065）：去掉 mx-auto/max-w-3xl，与表格 tab 同宽铺满；
+       行内列表的定高/独立滚动与批次条槽位仍按 ADR-0011/0039。 */
+    <div className={cn("mt-4 md:flex md:flex-1 md:min-h-0 md:flex-col", shortlist.length > 0 && "pb-28 sm:pb-24")}>
       <div className="md:shrink-0">
         <FacetChips
           within={within}

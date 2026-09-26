@@ -360,7 +360,9 @@ export function PipelineView({
   }, [selected, skipBusy, router, t]);
 
   return (
-    <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8 max-sm:pb-24 md:flex md:h-screen md:flex-col">
+    /* 内容区宽度自适应（ADR-0065）：外层不设 mx-auto/max-w，铺满左侧栏右侧的全部可用宽度
+       （原 ADR-0011 语境里的 mx-auto max-w-6xl 已退役）；定高/滚动布局仍按 ADR-0011。 */
+    <div className="px-4 py-6 sm:px-6 sm:py-8 max-sm:pb-24 md:flex md:h-screen md:flex-col">
       <div className="flex items-end justify-between gap-4 md:shrink-0">
         <div>
           <h1 className="font-display text-2xl tracking-tight text-landing">{t("pipeline.title")}</h1>
@@ -566,8 +568,9 @@ export function PipelineView({
                         是链接，用户想勾选行做批量却误点跳页、丢列表筛选与滚动位置。
                         ADR-0064 修订：格内只剩 logo + 名称——体检★/建议 chip 全部搬进
                         体检列（双星重复且占宽是公司名换行的主因）；超长单行截断，
-                        全名进悬停 title，行高恒定。 */}
-                    <div className="flex max-w-[16rem] items-center">
+                        全名进悬停 title，行高恒定。ADR-0065：内容区放开后上限
+                        16rem → 24rem——列宽了截断点必须跟走，否则列内死白。 */}
+                    <div className="flex max-w-[24rem] items-center">
                       <Link
                         href={`/pipeline/${r.n}${contextQuery}`}
                         onClick={(e) => e.stopPropagation()}
@@ -580,8 +583,9 @@ export function PipelineView({
                     </div>
                   </td>
                   <td className="px-4 py-3 text-muted">
-                    {/* 职位常带括号后缀（方向/城市），同样单行截断 + 全文悬停（ADR-0064 决议 11）。 */}
-                    <div className="max-w-[22rem] truncate" title={r.role}>{r.role}</div>
+                    {/* 职位常带括号后缀（方向/城市），同样单行截断 + 全文悬停（ADR-0064 决议 11）；
+                        ADR-0065：内容区放开后上限 22rem → 32rem。 */}
+                    <div className="max-w-[32rem] truncate" title={r.role}>{r.role}</div>
                   </td>
                   <td className="px-4 py-3">
                     {/* 分数只做展示（ADR-0062）：曾经的 /report/{n} 直跳通道让位于
