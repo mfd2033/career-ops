@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { readReport, findApplication, readApplications, withReportSalaries, trackerCanDelete, readEvalTimings, findCheckupTarget, readCheckupFor, readCheckupSuggestion } from "@/lib/career-ops";
+import { readReport, findApplication, readApplications, withReportSalaries, withCheckupStars, trackerCanDelete, readEvalTimings, findCheckupTarget, readCheckupFor, readCheckupSuggestion } from "@/lib/career-ops";
 import { evalTimingKey } from "@/lib/eval-timing-key.mjs";
 import { navNeighbors, buildContextQuery } from "@/lib/pipeline-order.mjs";
 import { ReportView } from "@/components/report-view";
@@ -61,7 +61,12 @@ export default async function ReportPage({
   // 薪资排序下，prev/next 的顺序还取决于每行的「报告薪资」（ADR-0037）：只有这一种
   // 排序键需要这次全量 join，否则详情页每行薪资都是 null，「下一个」会退化成与列表页
   // 完全不同的顺序。其余排序键下薪资不参与顺序，也就不付这份读盘成本。
-  const rows = ctx.sortKey === "salary" ? withReportSalaries(readApplications()) : readApplications();
+  // 体检排序（ADR-0064 决议 8）同一模式：只在 sort=checkup 时 join 最近一次 star，
+  // 列表所见顺序与导航走到顺序共用同一个比较器，绝不漂。
+  const rows =
+    ctx.sortKey === "salary" ? withReportSalaries(readApplications())
+    : ctx.sortKey === "checkup" ? withCheckupStars(readApplications())
+    : readApplications();
   const { prev, next, position, total, context } = navNeighbors(rows, ctx, id);
   const contextQuery = buildContextQuery(context);
   // 评估用时 breakdown (ADR-0016/0017): latest eval session, straight from

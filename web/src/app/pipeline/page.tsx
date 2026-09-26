@@ -13,7 +13,13 @@ export default function PipelinePage() {
   // The key follows the row's CURRENT report link (re-eval aware), same as the
   // detail page.
   const timings = readEvalTimings();
-  const joined = applications.map((a) => ({ ...a, evalDuration: timings[evalTimingKey(a)]?.duration ?? null }));
+  // 体检★ join（ADR-0064）：同一次 checkupIndex 结果按 tracker# 落到行上，让共享的
+  // orderApplications 能按最近一次 star 排序（?sort=checkup）。与角标同源不二次读盘。
+  const joined = applications.map((a) => ({
+    ...a,
+    evalDuration: timings[evalTimingKey(a)]?.duration ?? null,
+    checkupStar: checkups[a.n]?.star ?? null,
+  }));
   return (
     <Suspense>
       <PipelineView applications={joined} inbox={inbox} scoredUrls={scoredUrls} checkups={checkups} />

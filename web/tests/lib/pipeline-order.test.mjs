@@ -209,6 +209,54 @@ test("salary: 序列化进 URL 上下文（列表与报告页导航共用一个�
   assert.equal(buildContextQuery({ tab: "ALL", sortKey: "salary", dir: -1 }), "?tab=ALL&sort=salary");
 });
 
+// ── checkup: 体检分数排序键（ADR-0064）──────────────────────────────────────
+// 排序值 = 页面级 join 的最近一次 star（checkupStar）；未体检**恒沉底**
+// （升降序都在最后，比较器不乘 dir，ADR-0037 决议 6 同一口径）；平手回退
+// score 降序 → 报告号降序。
+
+const checkuped = [
+  { n: "40", company: "A", role: "x", score: "4.0/5", status: "Evaluated", date: "2026-08-01", checkupStar: 3.0 },
+  { n: "41", company: "B", role: "x", score: "3.0/5", status: "Evaluated", date: "2026-08-02", checkupStar: 4.5 },
+  { n: "42", company: "C", role: "x", score: "4.5/5", status: "Evaluated", date: "2026-08-03", checkupStar: 1.5 },
+  // 未体检：字段缺失与显式 null 同等对待（台账里 `?` 行/无记录都走这里）
+  { n: "43", company: "D", role: "x", score: "2.0/5", status: "Evaluated", date: "2026-08-04", checkupStar: null },
+  { n: "44", company: "E", role: "x", score: "3.5/5", status: "Evaluated", date: "2026-08-05" },
+];
+
+test("checkup: 降序高星在前，未体检沉底", () => {
+  assert.deepEqual(orderApplications(checkuped, { sortKey: "checkup" }).map((a) => a.n), ["41", "40", "42", "44", "43"]);
+});
+
+test("checkup: 升序时未体检仍在最后——恒沉底不随方向翻转（ADR-0064 决议 6）", () => {
+  assert.deepEqual(orderApplications(checkuped, { sortKey: "checkup", dir: 1 }).map((a) => a.n), ["42", "40", "41", "44", "43"]);
+});
+
+test("checkup: 未体检块内部按 score 降序（平手回退），与方向无关", () => {
+  const desc = orderApplications(checkuped, { sortKey: "checkup" }).slice(3).map((a) => a.n);
+  const asc = orderApplications(checkuped, { sortKey: "checkup", dir: 1 }).slice(3).map((a) => a.n);
+  assert.deepEqual(desc, ["44", "43"], "44 是 3.5/5，43 是 2.0/5");
+  assert.deepEqual(asc, desc);
+});
+
+test("checkup: star 平手回退 score 降序，再平手回退报告号降序且不为所动于方向", () => {
+  const tie = [
+    { n: "50", score: "3.0/5", checkupStar: 4.0 },
+    { n: "51", score: "4.0/5", checkupStar: 4.0 },
+    { n: "52", score: "4.0/5", checkupStar: 4.0 },
+  ];
+  assert.deepEqual(orderApplications(tie, { sortKey: "checkup" }).map((a) => a.n), ["52", "51", "50"]);
+  assert.deepEqual(orderApplications(tie, { sortKey: "checkup", dir: 1 }).map((a) => a.n), ["52", "51", "50"]);
+});
+
+test("checkup: 台账缺失/整列无值时顺序仍确定——退化为 score 降序回退链", () => {
+  assert.deepEqual(orderApplications(apps, { sortKey: "checkup" }).map((a) => a.n), ["5", "1", "2", "4", "3"]);
+});
+
+test("checkup: 序列化进 URL 上下文（列表与报告页导航共用一个键）", () => {
+  assert.equal(buildContextQuery({ tab: "ALL", sortKey: "checkup", dir: 1 }), "?tab=ALL&sort=checkup&dir=1");
+  assert.equal(buildContextQuery({ tab: "ALL", sortKey: "checkup", dir: -1 }), "?tab=ALL&sort=checkup");
+});
+
 // ── navNeighbors: the report detail page's prev/next (ADR-0036) ──────────────
 // The detail page used to compute `index = ordered.findIndex(a => a.n === id)`
 // and, when that missed, silently fall back to the ALL rows. Two failures came
@@ -335,4 +383,47 @@ test("navNeighbors: an id excluded by min+q still inserts at its slot inside the
 test("navNeighbors: buildContextQuery of the returned context round-trips the walked view", () => {
   const nav = navNeighbors(apps, { tab: "APPLIED", sortKey: "company", dir: 1 }, "1");
   assert.equal(buildContextQuery(nav.context), "?tab=APPLIED&sort=company&dir=1");
+});
+
+// ── navNeighbors × checkup：列表所见顺序 = 导航走到顺序（ADR-0064 决议 8）────
+// 详情页只在 sort=checkup 时 join checkupStar（withCheckupStars），喂进来的就是
+// 下面这种已 join 的行——两侧同一个比较器，这些用例同时锁住两端的复现。
+
+test("navNeighbors: checkup 排序下 prev/next 与列表同序，上下文往返不变", () => {
+  const nav = navNeighbors(checkuped, { sortKey: "checkup" }, "40");
+  // 降序列是 41,40,42,44,43 —— 40  sits second。
+  assert.equal(nav.prev.n, "41");
+  assert.equal(nav.next.n, "42");
+  assert.equal(nav.position, 2);
+  assert.equal(nav.total, 5);
+  assert.equal(buildContextQuery(nav.context), "?tab=ALL&sort=checkup");
+});
+
+test("navNeighbors: 恒沉底行也能作为出发点——从尾部未知行往回走", () => {
+  // 43（未体检，尾）：prev 是未体检块内的 44（score 回退序），next 到底。
+  const tail = navNeighbors(checkuped, { sortKey: "checkup" }, "43");
+  assert.equal(tail.position, 5);
+  assert.equal(tail.prev.n, "44");
+  assert.equal(tail.next, null);
+  // 44（未知块头部）：前一个已是已体检行的尾巴 42，边界不串块。
+  const lastKnown = navNeighbors(checkuped, { sortKey: "checkup" }, "44");
+  assert.equal(lastKnown.prev.n, "42");
+  assert.equal(lastKnown.next.n, "43");
+});
+
+test("navNeighbors: checkup 升序同样不漂；未体检行离开 tab 后插回沉底块槽位", () => {
+  const asc = navNeighbors(checkuped, { sortKey: "checkup", dir: 1 }, "40");
+  // 升序：42,40,41,44,43。
+  assert.equal(asc.prev.n, "42");
+  assert.equal(asc.next.n, "41");
+  // 行 45（未体检、刚被改状态离开 EVALUATED）升序下也插回未知块而非浮顶：
+  // 若是 score/duration 的 -Infinity 惯例，(-Inf - 1.5) * 1 会让 5.0 分的它抢在
+  // 所有已体检行前面——恒沉底分支不乘 dir，正是为了堵住这个误读。
+  const left = [...checkuped.map((r) => ({ ...r, status: "Evaluated" })), 
+    { n: "45", company: "F", role: "x", score: "5.0/5", status: "Applied", date: "2026-08-06", checkupStar: null }];
+  const nav = navNeighbors(left, { tab: "EVALUATED", sortKey: "checkup", dir: 1 }, "45");
+  assert.equal(nav.total, 5, "离开的是 EVALUATED tab，导航留在其中");
+  assert.equal(nav.position, 4, "未知恒沉底：5.0 匹配分也不能让它浮顶");
+  assert.equal(nav.prev.n, "41", "升序已体检块尾是 4.5 的 41");
+  assert.equal(nav.next.n, "44", "未知块内按 score 降序回退插位：45(5.0) 在 44(3.5) 前");
 });

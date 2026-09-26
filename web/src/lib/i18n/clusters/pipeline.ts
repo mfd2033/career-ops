@@ -40,6 +40,8 @@ export const en: Dict = {
   "pipeline.col.score": "score",
   // 报告薪资（ADR-0037）—— tracker 行报告 Machine Summary 的 advertised_comp
   "pipeline.col.salary": "salary",
+  // 体检分数（ADR-0064）—— data/company-checkups.tsv 最近一次 star
+  "pipeline.col.checkup": "checkup",
   "pipeline.col.duration": "duration",
   "pipeline.col.status": "status",
   "pipeline.col.date": "date",
@@ -305,6 +307,8 @@ export const zh: Dict = {
   "pipeline.col.score": "分数",
   // 报告薪资（ADR-0037）
   "pipeline.col.salary": "薪资",
+  // 体检分数（ADR-0064）
+  "pipeline.col.checkup": "体检",
   "pipeline.col.duration": "用时",
   "pipeline.col.status": "状态",
   "pipeline.col.date": "日期",

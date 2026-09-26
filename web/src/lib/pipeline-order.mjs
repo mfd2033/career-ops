@@ -29,13 +29,14 @@ export const DEFAULT_ORDER = {
   dir: -1,
 };
 
-const SORT_KEYS = ["company", "role", "score", "salary", "status", "date", "duration"];
+const SORT_KEYS = ["company", "role", "score", "salary", "checkup", "status", "date", "duration"];
 
 /** The value a row sorts on, under `sortKey`. Numeric for score/duration (a
  *  missing value is -Infinity so it sinks to the bottom of the default
- *  descending sort), the raw string otherwise. `salary` is deliberately NOT
- *  handled here — it needs a direction-independent "unknown always last" rule,
- *  which the (av - bv) * dir shape cannot express; see compareSalary. */
+ *  descending sort), the raw string otherwise. `salary` (ADR-0037) and
+ *  `checkup` (ADR-0064) are deliberately NOT handled here — both need a
+ *  direction-independent "unknown always last" rule, which the (av - bv) * dir
+ *  shape cannot express; see compareSalary / compareCheckup. */
 function sortKeyValue(row, sortKey) {
   if (sortKey === "score") {
     const n = scoreNum(row.score);
@@ -59,15 +60,16 @@ function compareSalary(a, b, dir) {
   const am = salaryMedian(a);
   const bm = salaryMedian(b);
   if (am === null || bm === null) {
-    if (am === null && bm === null) return compareSalaryTie(a, b);
+    if (am === null && bm === null) return compareScoreThenNumber(a, b);
     return am === null ? 1 : -1;
   }
   if (am !== bm) return (am - bm) * dir;
-  return compareSalaryTie(a, b);
+  return compareScoreThenNumber(a, b);
 }
 
-/** 薪资平手时的次级比较：score 降序，再报告号降序。 */
-function compareSalaryTie(a, b) {
+/** 数值列平手时的次级比较：score 降序，再报告号降序。salary（ADR-0037）与
+ *  checkup（ADR-0064）共用——平手回退链是一个概念，不是一列一个。 */
+function compareScoreThenNumber(a, b) {
   const as = scoreNum(a.score);
   const bs = scoreNum(b.score);
   const av = Number.isNaN(as) ? -Infinity : as;
@@ -78,6 +80,25 @@ function compareSalaryTie(a, b) {
   return (Number.isNaN(bi) ? 0 : bi) - (Number.isNaN(ai) ? 0 : ai);
 }
 
+/** 体检分数比较（ADR-0064 决议 2/6/7）：排序值 = 页面级 join 的最近一次 star
+ *  （与角标/悬停口径一致，不是 minStar）。未体检**恒沉底**、平手回退链都与
+ *  compareSalary 同一口径——「未知不是极小值」这个概念只定义一次。整列无值
+ *  （台账缺失/全未体检）时回退链把顺序收敛为确定的 score 降序 → 号降序。 */
+function checkupStarOf(row) {
+  return typeof row.checkupStar === "number" && Number.isFinite(row.checkupStar) ? row.checkupStar : null;
+}
+
+function compareCheckup(a, b, dir) {
+  const am = checkupStarOf(a);
+  const bm = checkupStarOf(b);
+  if (am === null || bm === null) {
+    if (am === null && bm === null) return compareScoreThenNumber(a, b);
+    return am === null ? 1 : -1;
+  }
+  if (am !== bm) return (am - bm) * dir;
+  return compareScoreThenNumber(a, b);
+}
+
 /** The one sort comparison, shared by orderApplications and navNeighbors'
  *  insertion point — a second copy is what would let "where the row left from"
  *  drift from "the order the list shows". A NaN result (two missing scores) is
@@ -85,6 +106,7 @@ function compareSalaryTie(a, b) {
  *  ties then fall back to the stable (tracker row) order. */
 function compareByKey(a, b, sortKey, dir) {
   if (sortKey === "salary") return compareSalary(a, b, dir);
+  if (sortKey === "checkup") return compareCheckup(a, b, dir);
   const av = sortKeyValue(a, sortKey);
   const bv = sortKeyValue(b, sortKey);
   if (typeof av === "number" || typeof bv === "number") return (av - bv) * dir;
@@ -111,8 +133,9 @@ function normalizeContext(ctx = {}) {
  *   - tab: uppercase canonical tab (INBOX / ALL / EVALUATED / …). Default ALL.
  *   - min: numeric score floor; null/undefined disables.
  *   - q: company+role search needle.
- *   - sortKey: company | role | score | salary | status | date | duration. Default score.
+ *   - sortKey: company | role | score | salary | checkup | status | date | duration. Default score.
  *     salary = 报告薪资（ADR-0037）：区间中位值，未披露恒沉底。
+ *     checkup = 体检分数（ADR-0064）：最近一次 star，未体检恒沉底。
  *   - dir: 1 ascending, -1 descending. Default -1.
  * @returns {Array} A NEW array (the view used `[...rows].sort`, callers must
  *   not mutate the input).

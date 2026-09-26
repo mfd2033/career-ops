@@ -41,8 +41,9 @@ type Tab = (typeof TABS)[number];
 
 // Column order == this array's order (the header and the body both follow it):
 // salary (报告薪资, ADR-0037) sits right after score — the two numbers a user
-// trades off against each other.
-const SORT_KEYS = ["company", "role", "score", "salary", "duration", "status", "date"] as const;
+// trades off against each other; checkup (体检★, ADR-0064) follows salary so
+// all three evaluative numbers stay adjacent in one band.
+const SORT_KEYS = ["company", "role", "score", "salary", "checkup", "duration", "status", "date"] as const;
 type SortKey = (typeof SORT_KEYS)[number];
 
 export function PipelineView({
@@ -55,7 +56,8 @@ export function PipelineView({
   inbox: InboxJob[];
   scoredUrls?: Record<string, { score: string }>;
   /** 公司体检 (ADR-0025): tracker# → latest checkup. Absent/empty → no badges
-   *  (graceful degradation). Pure display — never feeds sort/filter/score. */
+   *  (graceful degradation). Feeds the ★ badge, the 体检 column, and the
+   *  checkup sort key (ADR-0064) — never filter, score, or any gate. */
   checkups?: Record<string, CheckupEntry>;
 }) {
   // Tooltip text for one tracker#'s checkup badge: star, date, zh risk labels,
@@ -100,6 +102,7 @@ export function PipelineView({
     role: t("pipeline.col.role"),
     score: t("pipeline.col.score"),
     salary: t("pipeline.col.salary"),
+    checkup: t("pipeline.col.checkup"),
     duration: t("pipeline.col.duration"),
     status: t("pipeline.col.status"),
     date: t("pipeline.col.date"),
@@ -604,6 +607,18 @@ export function PipelineView({
                   >
                     {r.reportSalary?.range ? formatSalaryRange(r.reportSalary.range) : "—"}
                   </td>
+                  {/* 体检分数（ADR-0064）：与角标同一数据源（checkups）同一悬停口径
+                      （checkupTitle），列只是把角标搬到了可排序的位置；未体检留空
+                      ——空格不是「★0」，与恒沉底的排序口径同一个诚实姿态。 */}
+                  {(() => {
+                    const c = checkups?.[r.n];
+                    if (!c) return <td className="whitespace-nowrap px-4 py-3" />;
+                    return (
+                      <td className="whitespace-nowrap px-4 py-3 tabular-nums" title={checkupTitle(r.n) || undefined}>
+                        <Badge tone={checkupTone(c.star)}>★{c.star.toFixed(1)}</Badge>
+                      </td>
+                    );
+                  })()}
                   <td className="whitespace-nowrap px-4 py-3 text-muted tabular-nums">
                     {fmtDuration(r.evalDuration ?? null)}
                   </td>

@@ -230,6 +230,10 @@ export type Application = {
    *  evalDuration/reportVia，页面级附加字段——解析器（tracker-table.mjs）不读报告。
    *  null/缺省 = 无可用原文，列表显示「—」。 */
   reportSalary?: ReportSalary | null;
+  /** 体检分数（ADR-0064）：本行最近一次公司体检的 star，由列表页从 checkupIndex
+   *  join 到行上供排序用；未体检/无台账 → null（恒沉底）。同 evalDuration，
+   *  页面级附加字段，解析器不管。只喂 sort，不喂 filter/score/任何门禁。 */
+  checkupStar?: number | null;
 };
 
 /**
@@ -313,7 +317,8 @@ export type PipelineSummary = {
   scoredUrls: Record<string, { score: string }>;
   /** 公司体检 (ADR-0025): tracker# → latest company-checkup entry. Empty
    *  ledger / missing file → {} (graceful degradation, badge simply absent).
-   *  Display-only — never feeds score, status, or any gate. */
+   *  Feeds display and the checkup sort key (ADR-0064) — never filter, score,
+   *  or any gate. */
   checkups: Record<string, CheckupEntry>;
 };
 
@@ -505,6 +510,14 @@ export type CheckupTargetResult = ReturnType<typeof findCheckupTarget>;
 export function readCheckupFor(n: string): CheckupEntry | null {
   const idx = checkupIndex(read("data/company-checkups.tsv")) as Record<string, CheckupEntry>;
   return idx[n] ?? null;
+}
+
+/** 把最近一次体检 star（checkupStar）join 到行上。报告详情页在 `sortKey=checkup`
+ *  下用它复现列表页的顺序 —— 与 withReportSalaries 同一条不漂移约束（ADR-0064
+ *  决议 8，ADR-0037 决议 9 的按排序键付费模式）；台账整份读一次建索引，不逐行读盘。 */
+export function withCheckupStars(apps: Application[]): Application[] {
+  const idx = checkupIndex(read("data/company-checkups.tsv")) as Record<string, CheckupEntry>;
+  return apps.map((a) => ({ ...a, checkupStar: idx[a.n]?.star ?? null }));
 }
 
 /**
