@@ -1,6 +1,7 @@
 import { pipelineSummary } from "@/lib/career-ops";
 import { canonStatus, scoreNum } from "@/lib/format";
 import { cumulativeTiles } from "@/lib/funnel-tiles.mjs";
+import { buildContextQuery } from "@/lib/pipeline-order.mjs";
 import { AnalyticsView } from "@/components/analytics/analytics-view";
 
 export const dynamic = "force-dynamic";
@@ -11,9 +12,13 @@ export default function Analytics() {
   const { applications } = pipelineSummary();
   const total = applications.length;
 
+  // 下钻 href 一律经共享上下文序列化器生成（ADR-0067 决议 6）：分析页与管道页
+  // 对同一个 URL 上下文只允许存在一种写法，计数口径（同一 includes 式）与
+  // 过滤口径天然同源，行数必等于条形数字。
   const stageCounts = STAGES.map((key) => ({
     key,
     n: applications.filter((a) => canonStatus(a.status).includes(key)).length,
+    href: `/pipeline${buildContextQuery({ tab: key })}`,
   }));
 
   const scores = applications.map((a) => scoreNum(a.score)).filter((n) => !Number.isNaN(n));

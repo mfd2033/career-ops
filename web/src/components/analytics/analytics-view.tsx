@@ -9,7 +9,7 @@ import { useI18n } from "@/lib/i18n/context";
 // localized through the i18n hook without pulling server-only APIs into a
 // client bundle.
 
-type StageCount = { key: string; n: number };
+type StageCount = { key: string; n: number; href?: string };
 type Bucket = { label: string; n: number };
 type Company = { name: string; n: number };
 
@@ -67,6 +67,8 @@ export function AnalyticsView({
             pct={(s.n / maxStage) * 100}
             total={total}
             tone={s.key === "OFFER" ? "positive" : "neutral"}
+            href={s.href}
+            drillTitle={t("analytics.drill.viewInPipeline", { n: s.n })}
           />
         ))}
       </Section>
@@ -115,21 +117,28 @@ function Bar({
   pct,
   total,
   tone = "neutral",
+  href,
+  drillTitle,
 }: {
   label: string;
   value: number;
   pct: number;
   total?: number;
   tone?: "neutral" | "positive";
+  href?: string;
+  drillTitle?: string;
 }) {
   const share = total && total > 0 ? Math.round((value / total) * 100) : null;
   const fill =
     tone === "positive"
       ? "bg-gradient-to-r from-emerald-500/60 to-emerald-500/30"
       : "bg-gradient-to-r from-foreground/25 to-foreground/10";
-  return (
-    <div className="flex items-center gap-3">
-      <div className="w-32 shrink-0 truncate text-sm text-muted">{label}</div>
+  // 下钻门（ADR-0067 决议 1）：有 href 且计数非零才成链接——0 计数的行点了只会
+  // 得到空列表，是死交互，不为可点付出代价。整行包链接，键盘可聚焦。
+  const clickable = href != null && value > 0;
+  const cells = (
+    <>
+      <div className="w-32 shrink-0 truncate text-sm text-muted transition-colors group-hover:text-brand">{label}</div>
       <div className="relative h-7 flex-1 overflow-hidden rounded-md bg-surface">
         <div
           className={`h-full rounded-md ${fill}`}
@@ -140,6 +149,18 @@ function Bar({
         {value}
         {share !== null && <span className="ml-1 text-xs text-faint">{share}%</span>}
       </div>
-    </div>
+    </>
+  );
+  if (!clickable) {
+    return <div className="flex items-center gap-3">{cells}</div>;
+  }
+  return (
+    <Link
+      href={href!}
+      title={drillTitle}
+      className="group -mx-2 flex items-center gap-3 rounded-md px-2 outline-none transition-colors hover:bg-foreground/5 focus-visible:ring-2 focus-visible:ring-brand/40"
+    >
+      {cells}
+    </Link>
   );
 }
