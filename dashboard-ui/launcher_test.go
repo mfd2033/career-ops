@@ -151,6 +151,29 @@ func TestServerStreamsWiredThroughSink(t *testing.T) {
 	}
 }
 
+// 回归（托盘右键菜单冻结）：日志窗口写入绝不能阻塞同步日志生产者。
+// asyncWriter.Write 只做非阻塞入队，即使 drain 卡死也立即返回、缓冲满则丢行。
+// 旧实现（共享锁内跨线程 SendMessageW）会让托盘线程的 log.Printf 冻结。
+func TestAsyncWriterNeverBlocksProducer(t *testing.T) {
+	release := make(chan struct{})
+	defer close(release)
+	a := newAsyncWriter(func(string) { <-release }, 8) // drain 永远阻塞直到用例结束
+
+	done := make(chan struct{})
+	go func() {
+		for i := 0; i < 200; i++ {
+			_, _ = a.Write([]byte("x\n"))
+		}
+		close(done)
+	}()
+	select {
+	case <-done:
+		// 生产者没被卡住的 drain 拖住——正是要守的不变量。
+	case <-time.After(2 * time.Second):
+		t.Fatal("asyncWriter.Write 阻塞了生产者——即托盘线程冻结的同型 bug")
+	}
+}
+
 func TestDecideTakeover(t *testing.T) {
 	cases := []struct {
 		name        string

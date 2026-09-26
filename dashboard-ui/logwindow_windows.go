@@ -13,6 +13,7 @@
 package main
 
 import (
+	"io"
 	"runtime"
 	"strings"
 	"sync"
@@ -69,8 +70,10 @@ const (
 	logWinClass = "CopsDashboardLogWindow"
 )
 
-// logWindow 是 launcher 自持的日志窗口，实现 io.Writer 作为汇聚流的一个目的地。
-// Write 加锁串行化到 SendMessage，保证多来源整行不交错、顺序稳定。
+// logWindow 是 launcher 自持的日志窗口。它不直接实现 io.Writer：向编辑框追加
+// 需跨线程 SendMessageW（会阻塞），故由 asyncWriter 包一层——同步日志路径只做
+// 非阻塞入队，真正的 appendLine 在 drain goroutine 里跑（见 logsink.go）。
+// 这样托盘线程的 log.Printf 永不会被窗口 IPC 卡住（修复右键菜单冻结）。
 type logWindow struct {
 	top  windows.HWND
 	edit windows.HWND
@@ -95,9 +98,10 @@ func logWndProc(hwnd, msg, wParam, lParam uintptr) uintptr {
 }
 
 // startLogWindow 注册类、创建顶层窗口 + 只读多行编辑框，在专属锁定 OS 线程上
-// 起消息泵，返回立即可写的 writer。创建失败返回 nil，launcher 据此降级保留
-// conhost 控制台可见——可观测性建不起来时不能把服务/启动一起拖死。
-func startLogWindow() *logWindow {
+// 起消息泵。返回一个 asyncWriter（io.Writer）供 sink 接入：写日志的线程只入队，
+// 不被窗口 IPC 阻塞。创建失败返回 nil（io.Writer 值为 nil），launcher 据此降级
+// 保留 conhost 控制台可见——可观测性建不起来时不能把服务/启动一起拖死。
+func startLogWindow() io.Writer {
 	ready := make(chan *logWindow, 1)
 	go func() {
 		runtime.LockOSThread() // 窗口与消息循环须固定同一 OS 线程
@@ -158,21 +162,26 @@ func startLogWindow() *logWindow {
 
 	lw := <-ready
 	activeLogWindow = lw
-	if lw != nil {
-		hideConsole() // 窗口建起来了才隐掉多余的 conhost 控制台
+	if lw == nil {
+		return nil // 窗口没建起来：不隐藏控制台，sink 不带窗口目的地
 	}
-	return lw
+	hideConsole() // 窗口建起来了才隐掉多余的 conhost 控制台
+	// 关键：窗口追加走异步 drain，同步日志生产者（含托盘线程）绝不因跨线程
+	// SendMessageW 阻塞——这正是修复托盘右键菜单冻结的那一层隔离。
+	return newAsyncWriter(lw.appendLine, 512)
 }
 
-// Write 把一行（含换行）追加到编辑框末尾。nil 接收者安全：窗口创建失败时
-// sink 仍会带着这个 nil writer 写日志，忽略即可（stdout+文件仍在）。
-func (w *logWindow) Write(p []byte) (int, error) {
+// appendLine 把一整行追加到编辑框末尾。只在 asyncWriter 的 drain goroutine 上
+// 调用（单 goroutine 串行，mu 只是与 show() 等的潜在并发做防御）。nil 接收者安全。
+func (w *logWindow) appendLine(text string) {
 	if w == nil || w.edit == 0 {
-		return len(p), nil
+		return
 	}
-	ptr, err := windows.UTF16PtrFromString(strings.ReplaceAll(string(p), "\x00", " "))
+	norm := strings.ReplaceAll(text, "\x00", " ")
+	norm = strings.ReplaceAll(norm, "\n", "\r\n") // Windows 编辑框换行需 CRLF
+	ptr, err := windows.UTF16PtrFromString(norm)
 	if err != nil {
-		return len(p), nil
+		return
 	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -180,7 +189,6 @@ func (w *logWindow) Write(p []byte) (int, error) {
 	pSendMessageW.Call(uintptr(w.edit), emSetSel, end, end)
 	pSendMessageW.Call(uintptr(w.edit), emReplaceSel, 1, uintptr(unsafe.Pointer(ptr)))
 	pSendMessageW.Call(uintptr(w.edit), emScrollCaret, 0, 0)
-	return len(p), nil
 }
 
 // show 唤回窗口并置顶（托盘「显示日志窗口」动作）。

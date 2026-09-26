@@ -86,6 +86,37 @@ func newPrefixWriter(sink *lineSink, source string) *prefixWriter {
 	return &prefixWriter{sink: sink, source: source, timeFn: time.Now}
 }
 
+// asyncWriter 把"慢/阻塞"的目的地（日志窗口：跨线程 SendMessageW）从同步日志
+// 路径上摘开：Write 只做非阻塞入队（缓冲满则丢弃），真正的 drain 在专属 goroutine
+// 里跑。诊断修复（托盘右键菜单冻结）：共享 lineSink 锁里做阻塞式跨线程 IPC 会
+// 卡死托盘线程——日志生产者（托盘线程的 log.Printf）绝不能再被窗口的 IPC 拖住。
+// 文件/stdout 仍是逐行真相源；窗口是尽力而为的实时镜像，滞后或丢行都不能阻塞主流程。
+type asyncWriter struct {
+	ch   chan string
+	drop uint64
+}
+
+func newAsyncWriter(drain func(string), buf int) *asyncWriter {
+	a := &asyncWriter{ch: make(chan string, buf)}
+	go func() {
+		for line := range a.ch {
+			drain(line)
+		}
+	}()
+	return a
+}
+
+// Write 把整行交给后台 drain，自身绝不阻塞（select+default 非阻塞入队）。
+func (a *asyncWriter) Write(p []byte) (int, error) {
+	s := string(p)
+	select {
+	case a.ch <- s:
+	default:
+		a.drop++ // 窗口滞后时丢行，但文件已同步落盘；丢多少不影响主流程
+	}
+	return len(p), nil
+}
+
 // initLogSink 按「launcher 进程启动即重置」的语义以 O_TRUNC 打开日志文件，
 // 返回行汇聚器与文件路径。extra 是除控制台与文件外的额外目的地（工单 02 的
 // 自持日志窗口 writer，可为 nil）。careerRoot/.career-ops-web 是 gitignored
