@@ -24,6 +24,7 @@ import { salaryMedian } from "./report-salary.mjs";
 export const DEFAULT_ORDER = {
   tab: "ALL",
   min: null,
+  max: null,
   q: "",
   sortKey: "score",
   dir: -1,
@@ -116,10 +117,17 @@ function compareByKey(a, b, sortKey, dir) {
 /** Normalize a URL-derived context to the shape every consumer sorts/filters
  *  with. Falls back per field, never throws — the detail page parses raw query
  *  params and hands them straight in. */
+const finiteOr = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+
 function normalizeContext(ctx = {}) {
   return {
     tab: ctx.tab ?? "ALL",
-    min: ctx.min ?? null,
+    // min/max 都在此收敛为「有限数或 null」：URL 里 ":min=abc" 这类脏值降级为
+    // 无该筛选而非渗进比较式（NaN 参与 < / >= 会把整表滤空）。
+    min: finiteOr(ctx.min),
+    // max（ADR-0067）：分数上限，与 min 组成半开区间 [min, max)——与分析页分数桶
+    // 的 >= && < 同构，严格计数一致的地基。
+    max: finiteOr(ctx.max),
     q: ctx.q ?? "",
     sortKey: SORT_KEYS.includes(ctx.sortKey) ? ctx.sortKey : "score",
     dir: ctx.dir === 1 ? 1 : -1,
@@ -129,9 +137,10 @@ function normalizeContext(ctx = {}) {
 /**
  * Filter + sort applications under the pipeline view's URL context.
  * @param {Array} applications - Application rows ({ n, company, role, score, status, date, evalDuration, ... }).
- * @param {{tab?: string, min?: number|null, q?: string, sortKey?: string, dir?: 1|-1}} ctx
+ * @param {{tab?: string, min?: number|null, max?: number|null, q?: string, sortKey?: string, dir?: 1|-1}} ctx
  *   - tab: uppercase canonical tab (INBOX / ALL / EVALUATED / …). Default ALL.
  *   - min: numeric score floor; null/undefined disables.
+ *   - max: numeric score ceiling, EXCLUSIVE — [min, max) (ADR-0067). Null disables.
  *   - q: company+role search needle.
  *   - sortKey: company | role | score | salary | checkup | status | date | duration. Default score.
  *     salary = 报告薪资（ADR-0037）：区间中位值，未披露恒沉底。
@@ -141,7 +150,7 @@ function normalizeContext(ctx = {}) {
  *   not mutate the input).
  */
 export function orderApplications(applications, ctx = {}) {
-  const { tab, min, q, sortKey, dir } = normalizeContext(ctx);
+  const { tab, min, max, q, sortKey, dir } = normalizeContext(ctx);
   if (tab === "INBOX") return [];
   let rows = applications;
   if (tab !== "ALL") rows = rows.filter((r) => canonStatus(r.status).includes(tab));
@@ -149,6 +158,14 @@ export function orderApplications(applications, ctx = {}) {
     rows = rows.filter((r) => {
       const n = scoreNum(r.score);
       return !Number.isNaN(n) && n >= min;
+    });
+  }
+  // 上限不含（半开区间）：与分析页桶的 `n < 4.5` 同一表达式，无效分数同被排除
+  // ——「分析页怎么数，管道就怎么滤」，两边共用这个形状才能锁住行数一致。
+  if (max != null) {
+    rows = rows.filter((r) => {
+      const n = scoreNum(r.score);
+      return !Number.isNaN(n) && n < max;
     });
   }
   if (q.trim()) {
@@ -300,9 +317,9 @@ export function countSelectedOffView(applications, visible, selected) {
  * The tab is ALWAYS serialized: the list page's no-param default is INBOX (the
  * triage queue), which has no tracker rows to link. Omitting tab=ALL would make
  * a row link (and the report page's back link) fall back to INBOX instead of
- * the table the user actually came from. Only min/sort/dir/q — whose omissions
+ * the table the user actually came from. Only min/max/sort/dir/q — whose omissions
  * resolve to the same tracker-table defaults — are elided.
- * @param {{tab?: string, min?: number|null, q?: string, sortKey?: string, dir?: number}} ctx
+ * @param {{tab?: string, min?: number|null, max?: number|null, q?: string, sortKey?: string, dir?: number}} ctx
  *   `dir` accepts any number (the URL param / navNeighbors' own inferred
  *   return): only `1` means ascending, everything else serializes as descending.
  * @returns {string} "?tab=ALL" for the empty/default context.
@@ -311,11 +328,12 @@ export function buildContextQuery(ctx = {}) {
   // Normalized by the same function the sort/filter use — a second copy of the
   // defaulting rules is what would let the serialized query and the list it
   // reproduces drift apart.
-  const { tab, min, sortKey, dir } = normalizeContext(ctx);
+  const { tab, min, max, sortKey, dir } = normalizeContext(ctx);
   const q = (ctx.q ?? "").trim();
   const sp = new URLSearchParams();
   sp.set("tab", tab);
   if (min != null) sp.set("min", String(min));
+  if (max != null) sp.set("max", String(max));
   if (sortKey !== "score") sp.set("sort", sortKey);
   if (dir !== -1) sp.set("dir", "1");
   if (q) sp.set("q", q);

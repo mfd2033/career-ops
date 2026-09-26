@@ -11,6 +11,9 @@ export const en: Dict = {
   "pipeline.filtered": "Filtered:",
   "pipeline.clearScoreFilter": "Clear score filter",
   "pipeline.scoreGte": "score ≥ {min}",
+  // 分数区间 chip（ADR-0067）：半开区间 [min, max)，含下不含上
+  "pipeline.scoreRange": "score {min}–{max}",
+  "pipeline.scoreLt": "score < {max}",
   "pipeline.noMatches": "No matches",
   "pipeline.noMatchesHint": "Try a different tab or clear the search.",
   "pipeline.clearSearchInbox": "Clear the search to see the full inbox.",
@@ -278,6 +281,9 @@ export const zh: Dict = {
   "pipeline.filtered": "已筛选：",
   "pipeline.clearScoreFilter": "清除分数筛选",
   "pipeline.scoreGte": "分数 ≥ {min}",
+  // 分数区间 chip（ADR-0067）：半开区间 [min, max)，含下不含上
+  "pipeline.scoreRange": "分数 {min}–{max}",
+  "pipeline.scoreLt": "分数 < {max}",
   "pipeline.noMatches": "无匹配结果",
   "pipeline.noMatchesHint": "试试其他标签或清除搜索。",
   "pipeline.clearSearchInbox": "清除搜索以查看完整收件箱。",

@@ -8,12 +8,13 @@ import { EvalTimingPanel } from "@/components/eval-timing-panel";
 export const dynamic = "force-dynamic";
 
 // URL param → context, mirroring how pipeline-view.tsx parses the SAME params
-// (tab/min/sort/dir are the URL's single source of truth; q is the search
+// (tab/min/max/sort/dir are the URL's single source of truth; q is the search
 // needle the list page serializes into the link). Invalid/absent values fall
 // back to the list page's defaults, so prev/next always reproduce that view.
 type NavCtx = {
   tab: string;
   min: number | null;
+  max: number | null;
   sortKey: string;
   dir: 1 | -1;
   q: string;
@@ -22,11 +23,15 @@ type NavCtx = {
 function parseContext(searchParams: URLSearchParams): NavCtx {
   const pTab = (searchParams.get("tab") ?? "").toUpperCase();
   const pMin = parseFloat(searchParams.get("min") ?? "");
+  // max（ADR-0067）：分析页分数区间下钻的上下文必须随 prev/next 走，否则
+  // 「下一个」会跳到区间外的行。
+  const pMax = parseFloat(searchParams.get("max") ?? "");
   const pSort = searchParams.get("sort") ?? "";
   const q = searchParams.get("q") ?? "";
   return {
     tab: pTab || "ALL",
     min: Number.isFinite(pMin) ? pMin : null,
+    max: Number.isFinite(pMax) ? pMax : null,
     sortKey: pSort || "score",
     dir: searchParams.get("dir") === "1" ? 1 : -1,
     q,

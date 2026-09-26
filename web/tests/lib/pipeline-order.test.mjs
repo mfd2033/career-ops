@@ -46,6 +46,32 @@ test("min filters numeric scores >= threshold (NaN and below dropped)", () => {
   assert.ok(!out.some((a) => a.n === "3"));
 });
 
+// ── max：分数上限（ADR-0067 决议 2）——与 min 组成半开区间 [min, max)，
+// 与分析页分数桶的 >= && < 完全同构；无效分数排除同口径。
+
+test("max 单独使用时是开区间上限，NaN 分数被排除", () => {
+  const out = orderApplications(apps, { max: 3.5 });
+  // 3.1 (2) 与 2.4 (4) 低于 3.5；空分数行（3）不得浮进来
+  assert.deepEqual(out.map((a) => a.n), ["2", "4"]);
+});
+
+test("min+max 是半开区间 [min, max)：含下限、不含上限", () => {
+  const withEdges = [
+    { n: "10", company: "Lo", role: "x", score: "3.0/5", status: "Evaluated", date: "2026-08-01" },
+    { n: "11", company: "Mid", role: "x", score: "4.4/5", status: "Evaluated", date: "2026-08-01" },
+    { n: "12", company: "Hi", role: "x", score: "4.5/5", status: "Evaluated", date: "2026-08-01" },
+  ];
+  // 分析页「4.0 – 4.4」桶 = [4, 4.5)：含下限 4.0、不含上限 4.5
+  const out = orderApplications(withEdges, { min: 3, max: 4.5 });
+  assert.deepEqual(out.map((a) => a.n), ["11", "10"], "4.5 恰好落在上限外：含下不含上");
+  const bucket = orderApplications(withEdges, { min: 4, max: 4.5 });
+  assert.deepEqual(bucket.map((a) => a.n), ["11"], "3.0 含进下限、4.5 挡在上限外");
+});
+
+test("max 非法值降级为无该筛选，不报错", () => {
+  assert.deepEqual(orderApplications(apps, { max: Number.NaN }), orderApplications(apps, {}));
+});
+
 test("q searches company + role case-insensitively", () => {
   // 1,3,4,5 all carry "engineer" in the role; 2 does not → filtered, then the
   // default score-descending order applies.
@@ -82,6 +108,9 @@ test("buildContextQuery always serializes tab, elides only tracker-defaults", ()
   assert.equal(buildContextQuery({ tab: "ALL", sortKey: "score", dir: -1, min: null, q: "" }), "?tab=ALL");
   assert.equal(buildContextQuery({ tab: "APPLIED" }), "?tab=APPLIED");
   assert.equal(buildContextQuery({ tab: "ALL", min: 4 }), "?tab=ALL&min=4");
+  // max 紧跟 min 序列化（ADR-0067）；单独 max 也是合法形态（分析页 <3.0 桶）
+  assert.equal(buildContextQuery({ tab: "ALL", min: 4, max: 4.5 }), "?tab=ALL&min=4&max=4.5");
+  assert.equal(buildContextQuery({ tab: "ALL", max: 3 }), "?tab=ALL&max=3");
   assert.equal(buildContextQuery({ sortKey: "company", dir: 1, q: "acme" }), "?tab=ALL&sort=company&dir=1&q=acme");
   assert.equal(buildContextQuery({ tab: "APPLIED", min: 3, sortKey: "date", dir: 1, q: " eng " }), "?tab=APPLIED&min=3&sort=date&dir=1&q=eng");
 });
@@ -136,6 +165,27 @@ test("buildContextQuery round-trips: query → ctx reproduces the same list", ()
     q: "data",
   };
   assert.deepEqual(orderApplications(apps, reparsed), orderApplications(apps, ctx));
+});
+
+test("min/max 往返：序列化→URLSearchParams 重解析→滤出同一列表", () => {
+  const ctx = { tab: "ALL", min: 4, max: 4.5 };
+  const qs = new URLSearchParams(buildContextQuery(ctx).slice(1));
+  const reparsed = {
+    tab: qs.get("tab"),
+    min: parseFloat(qs.get("min") ?? ""),
+    max: parseFloat(qs.get("max") ?? ""),
+  };
+  assert.deepEqual(orderApplications(apps, reparsed), orderApplications(apps, ctx));
+});
+
+test("navNeighbors 在区间上下文里只在区间内走，往返保留 max", () => {
+  // [4, 4.5) 只剩行 1——prev/next 不得跳到区间外，返回链接带 max
+  const nav = navNeighbors(apps, { tab: "ALL", min: 4, max: 4.5 }, "1");
+  assert.equal(nav.prev, null);
+  assert.equal(nav.next, null);
+  assert.equal(nav.position, 1);
+  assert.equal(nav.total, 1);
+  assert.equal(buildContextQuery(nav.context), "?tab=ALL&min=4&max=4.5");
 });
 
 // ── salary: 报告薪资排序键（ADR-0037）───────────────────────────────────────

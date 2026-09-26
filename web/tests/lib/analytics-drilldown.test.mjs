@@ -37,6 +37,10 @@ test("阶段条形 href 只经 buildContextQuery 生成，不手拼查询串", (
     PAGE_CODE.includes('buildContextQuery({ tab: key })'),
     "stage href 必须由共享序列化器 buildContextQuery 生成（ADR-0067 决议 6）",
   );
+  assert.ok(
+    PAGE_CODE.includes('buildContextQuery({ tab: "ALL", min: b.min, max: b.max })'),
+    "分数桶 href 必须携区间边界经共享序列化器生成（ADR-0067 决议 2/6）",
+  );
   assert.ok(!PAGE_CODE.includes('"?tab='), "分析页不得手拼 ?tab= —— 第二份 URL 拼接必然漂移");
   assert.ok(!PAGE_CODE.includes("`?tab="), "同上（模板字符串形态）");
 });
