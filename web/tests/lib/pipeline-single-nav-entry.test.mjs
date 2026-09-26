@@ -59,6 +59,13 @@ test("role and score render as plain content", () => {
     "分数徽章必须仍以裸 Badge 渲染，取色口径不变");
 });
 
+test("company and role are single-line truncated (ADR-0064 修订决议 11)", () => {
+  // 行高一致靠截断不靠换行：两列各有一处 truncate，完整文本进 title 悬停。
+  assert.equal(count(TBODY_CODE, "truncate"), 2, "公司/职位各一处 truncate，多一列就查谁把行高带回来了");
+  assert.match(TBODY, /title=\{companyLabel\(r\)\}/, "公司全名必须可悬停读到");
+  assert.match(TBODY, /title=\{r\.role\}/, "职位全文必须可悬停读到");
+});
+
 test("only the checkbox cell and the company link stop propagation", () => {
   // 行点击（ADR-0038）靠 stopPropagation 才不被劫持。去链后 tbody 里该只剩两处：
   // 复选框 <td> 与公司 <Link>。任何新增的拦截格都意味着那一格又不再参与勾选。
@@ -66,18 +73,19 @@ test("only the checkbox cell and the company link stop propagation", () => {
     "职位/分数/角标该冒泡到行 = 切换勾选，不再自行拦截");
 });
 
-test("the checkup badges live OUTSIDE the company link", () => {
-  // 角标（ADR-0026/0041）从 <Link> 内移出成兄弟：点它 = 勾选，与全行一致；
-  // 悬停提示必须留着，否则「这家体检过没有」的信息无从得知。
+test("checkup state lives in exactly one place: the checkup column (ADR-0064 修订决议 1/5)", () => {
+  // 曾是「角标是公司 <Link> 的兄弟节点」（ADR-0062/0026）；同日修订后公司格
+  // 不再持任何体检信息，★ 与建议 chip 的唯一落点是体检列——同一行出现两颗
+  // 体检状态就是本次要修的重复与换行根源。
+  assert.equal(count(TBODY_CODE, "checkupTone(c.star)"), 1, "★ chip 全 tbody 仅体检列一处");
+  assert.equal(count(TBODY_CODE, 't("pipeline.suggestCheckup")'), 1, "建议 chip 全 tbody 仅体检列一处");
+  assert.match(TBODY, /tab === "EVALUATED" && suggests\?\.has\(r\.n\)/,
+    "chip 渲染必须带已评估 tab 门控——suggests 集合离开该 tab 后残留，不得泄漏到其他 tab");
+  // 公司格内段（</Link> 之后到本 td 闭合）必须干净
   const close = TBODY.indexOf("</Link>");
-  assert.ok(close > 0, "公司 <Link> 未闭合 — 结构变了，本断言需随 ADR-0062 的宿主改写");
-  // 只看公司格内 </Link> 之后的那一段：薪资 <td> 也带 title 提示，全 tbody 计数会误报。
+  assert.ok(close > 0, "公司 <Link> 未闭合 — 结构变了，本断言需随宿主改写");
   const cell = TBODY.slice(close, TBODY.indexOf("</td>", close));
-  assert.ok(cell.includes("checkupTone(c.star)"),
-    "体检★ 角标必须在 </Link> 之后（仍在链接内就会被点击导航劫走）");
-  assert.ok(cell.includes('t("pipeline.suggestCheckup")'),
-    "「建议体检」角标同上，必须是链接的兄弟节点");
-  assert.equal(count(cell, "title={"), 2, "两枚角标移出后仍各自保留 title 提示");
+  assert.ok(!/checkup|suggest/i.test(cell), "公司格不得再出现任何体检 chip");
 });
 
 test("the clickable row uses the default arrow, not the hand cursor", () => {

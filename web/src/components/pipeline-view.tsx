@@ -503,9 +503,11 @@ export function PipelineView({
            overflow-x-auto, not overflow-hidden: the rounded corners still clip,
            but a table too wide for the viewport can now be scrolled to instead
            of being silently cut off. min-w keeps the columns readable rather
-           than letting w-full crush them on a phone. */
+           than letting w-full crush them on a phone.
+           44rem 是薪资/用时/体检三列加入前的旧值（ADR-0064 决议 11）：10 列下
+           被挤压的总是公司/职位两列——窄窗口靠横向滚动，不靠换行撑高行。 */
         <div className="mt-4 overflow-x-auto rounded-2xl border border-border md:min-h-0 md:flex-1 md:overflow-y-auto">
-          <table className="w-full min-w-[44rem] text-sm">
+          <table className="w-full min-w-[60rem] text-sm">
             <thead className="sticky top-0 z-10 border-b border-border bg-surface text-left text-xs uppercase tracking-wide text-faint">
               <tr>
                 <th className="w-10 px-2 py-2.5">
@@ -562,34 +564,25 @@ export function PipelineView({
                   <td className="px-4 py-3 font-medium">
                     {/* ADR-0062：公司名是全行唯一的站内导航入口。职位与分数曾经也
                         是链接，用户想勾选行做批量却误点跳页、丢列表筛选与滚动位置。
-                        角标是 <Link> 的兄弟节点（不是后代），点它们因此冒泡到行 = 勾选。 */}
-                    <div className="flex items-center gap-2.5">
+                        ADR-0064 修订：格内只剩 logo + 名称——体检★/建议 chip 全部搬进
+                        体检列（双星重复且占宽是公司名换行的主因）；超长单行截断，
+                        全名进悬停 title，行高恒定。 */}
+                    <div className="flex max-w-[16rem] items-center">
                       <Link
                         href={`/pipeline/${r.n}${contextQuery}`}
                         onClick={(e) => e.stopPropagation()}
-                        className="inline-flex items-center gap-2.5 transition-colors group-hover:text-brand"
+                        title={companyLabel(r)}
+                        className="inline-flex min-w-0 max-w-full items-center gap-2.5 transition-colors group-hover:text-brand"
                       >
                         <CompanyLogo name={companyLabel(r)} size={20} />
-                        {companyLabel(r)}
+                        <span className="truncate">{companyLabel(r)}</span>
                       </Link>
-                      {(() => {
-                        const title = checkupTitle(r.n);
-                        const c = checkups?.[r.n];
-                        if (!title || !c) return null;
-                        return (
-                          <span title={title} className="inline-flex shrink-0 cursor-help">
-                            <Badge tone={checkupTone(c.star)}>★{c.star.toFixed(1)}</Badge>
-                          </span>
-                        );
-                      })()}
-                      {suggests?.has(r.n) && (
-                        <span title={t("pipeline.suggestCheckupTitle")} className="inline-flex shrink-0 cursor-help">
-                          <Badge tone="warn">{t("pipeline.suggestCheckup")}</Badge>
-                        </span>
-                      )}
                     </div>
                   </td>
-                  <td className="px-4 py-3 text-muted">{r.role}</td>
+                  <td className="px-4 py-3 text-muted">
+                    {/* 职位常带括号后缀（方向/城市），同样单行截断 + 全文悬停（ADR-0064 决议 11）。 */}
+                    <div className="max-w-[22rem] truncate" title={r.role}>{r.role}</div>
+                  </td>
                   <td className="px-4 py-3">
                     {/* 分数只做展示（ADR-0062）：曾经的 /report/{n} 直跳通道让位于
                         「误点不跳页」；该路由仍服务扩展深链与工作器 #N（ADR-0018）。 */}
@@ -607,17 +600,27 @@ export function PipelineView({
                   >
                     {r.reportSalary?.range ? formatSalaryRange(r.reportSalary.range) : "—"}
                   </td>
-                  {/* 体检分数（ADR-0064）：与角标同一数据源（checkups）同一悬停口径
-                      （checkupTitle），列只是把角标搬到了可排序的位置；未体检留空
-                      ——空格不是「★0」，与恒沉底的排序口径同一个诚实姿态。 */}
+                  {/* 体检列三态（ADR-0064 修订决议 5）：有记录 → ★；无记录但命中
+                      建议 → chip（只随已评估 tab 的懒加载边界渲染——suggests 集合离开
+                      该 tab 后仍残留，渲染处必须判 tab）；皆无 → 空格，空格不是「★0」，
+                      与恒沉底的排序口径同一个诚实姿态。公司格不再持任何体检信息。 */}
                   {(() => {
                     const c = checkups?.[r.n];
-                    if (!c) return <td className="whitespace-nowrap px-4 py-3" />;
-                    return (
-                      <td className="whitespace-nowrap px-4 py-3 tabular-nums" title={checkupTitle(r.n) || undefined}>
-                        <Badge tone={checkupTone(c.star)}>★{c.star.toFixed(1)}</Badge>
-                      </td>
-                    );
+                    if (c) {
+                      return (
+                        <td className="whitespace-nowrap px-4 py-3 tabular-nums" title={checkupTitle(r.n) || undefined}>
+                          <Badge tone={checkupTone(c.star)}>★{c.star.toFixed(1)}</Badge>
+                        </td>
+                      );
+                    }
+                    if (tab === "EVALUATED" && suggests?.has(r.n)) {
+                      return (
+                        <td className="whitespace-nowrap px-4 py-3" title={t("pipeline.suggestCheckupTitle")}>
+                          <Badge tone="warn">{t("pipeline.suggestCheckup")}</Badge>
+                        </td>
+                      );
+                    }
+                    return <td className="whitespace-nowrap px-4 py-3" />;
                   })()}
                   <td className="whitespace-nowrap px-4 py-3 text-muted tabular-nums">
                     {fmtDuration(r.evalDuration ?? null)}
