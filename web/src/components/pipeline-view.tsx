@@ -124,6 +124,9 @@ export function PipelineView({
   // max（ADR-0067）：分数上限，与 min 组成半开区间 [min, max)——分析页分数桶下钻的落地端。
   const pMax = parseFloat(params.get("max") ?? "");
   const maxFilter: number | null = Number.isFinite(pMax) ? pMax : null;
+  // company（ADR-0067）：公司名全等筛选——分析页 Top 公司下钻的落地端。URLSearchParams
+  // 已负责解码，这里不再加工（全等口径与分析页 Map 分组同源）。
+  const companyFilter = params.get("company") || null;
   const pSort = params.get("sort") ?? "";
   const sortKey: SortKey = (SORT_KEYS as readonly string[]).includes(pSort) ? (pSort as SortKey) : "score";
   const sort = { key: sortKey, dir: (params.get("dir") === "1" ? 1 : -1) as 1 | -1 };
@@ -172,19 +175,19 @@ export function PipelineView({
   // shared with the report detail page so its prev/next navigation reproduces
   // this exact context (the list view and the detail nav must never drift).
   const filtered = useMemo(
-    () => orderApplications(applications, { tab, min: minFilter, max: maxFilter, q, sortKey: sort.key, dir: sort.dir }),
-    [applications, tab, minFilter, maxFilter, q, sort],
+    () => orderApplications(applications, { tab, min: minFilter, max: maxFilter, company: companyFilter ?? "", q, sortKey: sort.key, dir: sort.dir }),
+    [applications, tab, minFilter, maxFilter, companyFilter, q, sort],
   );
 
   // The context a row link carries into the report page (and back out again):
-  // tab/min/max/sort/dir are URL params, q is the local search state. Passing it
+  // tab/min/max/company/sort/dir are URL params, q is the local search state. Passing it
   // means "previous/next" and the back link return to THIS view, not the
   // default one. Built by the shared buildContextQuery so the report page's
   // prev/next/back links serialize the context IDENTICALLY. tab==="INBOX"
   // never reaches here (no tracker rows to link).
   const contextQuery = useMemo(
-    () => buildContextQuery({ tab, min: minFilter, max: maxFilter, sortKey: sort.key, dir: sort.dir, q }),
-    [tab, minFilter, maxFilter, sort.key, sort.dir, q],
+    () => buildContextQuery({ tab, min: minFilter, max: maxFilter, company: companyFilter ?? "", sortKey: sort.key, dir: sort.dir, q }),
+    [tab, minFilter, maxFilter, companyFilter, sort.key, sort.dir, q],
   );
 
   // ── Batch re-evaluate ──
@@ -415,7 +418,7 @@ export function PipelineView({
         {/* 分数筛选 chip 住进 tabs 行（ADR-0039 决议 5）：它原先是 tabs 下面的独立一行，
             点 X 清除时整行消失会把列表上跳——同一类位移。tabs 行本就常驻，chip 的挂载/
             卸载不再改变列表高度。窄屏下它仍可能让 tabs 行多/少折一行：已知残差。 */}
-        {tab !== "INBOX" && (minFilter != null || maxFilter != null) && (
+        {tab !== "INBOX" && (minFilter != null || maxFilter != null || companyFilter != null) && (
           <div className="ml-auto flex items-center gap-2 pl-2">
             <span className="text-xs text-faint">{t("pipeline.filtered")}</span>
             <button
@@ -433,6 +436,18 @@ export function PipelineView({
                 : t("pipeline.scoreGte", { min: minFilter!.toFixed(1) })}
               <X className="size-3" />
             </button>
+            {/* 公司 chip（ADR-0067 决议 5）：独立一枚，与分数 chip、搜索框 AND 叠加。 */}
+            {companyFilter != null && (
+              <button
+                type="button"
+                onClick={() => setParams({ company: null })}
+                className="inline-flex max-w-[16rem] items-center gap-1.5 rounded-full border border-brand/40 bg-brand-soft px-2.5 py-1 text-xs font-medium text-brand transition-colors hover:bg-brand/15"
+                title={t("pipeline.clearCompanyFilter")}
+              >
+                <span className="truncate">{t("pipeline.companyIs", { company: companyFilter })}</span>
+                <X className="size-3 shrink-0" />
+              </button>
+            )}
           </div>
         )}
       </div>

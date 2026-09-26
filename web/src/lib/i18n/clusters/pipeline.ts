@@ -14,6 +14,9 @@ export const en: Dict = {
   // 分数区间 chip（ADR-0067）：半开区间 [min, max)，含下不含上
   "pipeline.scoreRange": "score {min}–{max}",
   "pipeline.scoreLt": "score < {max}",
+  // 公司精确匹配 chip（ADR-0067）
+  "pipeline.clearCompanyFilter": "Clear company filter",
+  "pipeline.companyIs": "company: {company}",
   "pipeline.noMatches": "No matches",
   "pipeline.noMatchesHint": "Try a different tab or clear the search.",
   "pipeline.clearSearchInbox": "Clear the search to see the full inbox.",
@@ -284,6 +287,9 @@ export const zh: Dict = {
   // 分数区间 chip（ADR-0067）：半开区间 [min, max)，含下不含上
   "pipeline.scoreRange": "分数 {min}–{max}",
   "pipeline.scoreLt": "分数 < {max}",
+  // 公司精确匹配 chip（ADR-0067）
+  "pipeline.clearCompanyFilter": "清除公司筛选",
+  "pipeline.companyIs": "公司: {company}",
   "pipeline.noMatches": "无匹配结果",
   "pipeline.noMatchesHint": "试试其他标签或清除搜索。",
   "pipeline.clearSearchInbox": "清除搜索以查看完整收件箱。",

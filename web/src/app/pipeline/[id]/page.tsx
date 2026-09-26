@@ -15,6 +15,7 @@ type NavCtx = {
   tab: string;
   min: number | null;
   max: number | null;
+  company: string;
   sortKey: string;
   dir: 1 | -1;
   q: string;
@@ -32,6 +33,8 @@ function parseContext(searchParams: URLSearchParams): NavCtx {
     tab: pTab || "ALL",
     min: Number.isFinite(pMin) ? pMin : null,
     max: Number.isFinite(pMax) ? pMax : null,
+    // company（ADR-0067）：同 max，分析页公司下钻的上下文必须随 prev/next 走。
+    company: searchParams.get("company") ?? "",
     sortKey: pSort || "score",
     dir: searchParams.get("dir") === "1" ? 1 : -1,
     q,

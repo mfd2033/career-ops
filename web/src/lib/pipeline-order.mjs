@@ -25,6 +25,7 @@ export const DEFAULT_ORDER = {
   tab: "ALL",
   min: null,
   max: null,
+  company: "",
   q: "",
   sortKey: "score",
   dir: -1,
@@ -128,6 +129,9 @@ function normalizeContext(ctx = {}) {
     // max（ADR-0067）：分数上限，与 min 组成半开区间 [min, max)——与分析页分数桶
     // 的 >= && < 同构，严格计数一致的地基。
     max: finiteOr(ctx.max),
+    // company（ADR-0067）：公司名全等匹配（区分大小写、不做任何兼容加工），
+    // 与分析页 Top 公司的 Map 分组同一口径；空串是「无该筛选」。
+    company: ctx.company ?? "",
     q: ctx.q ?? "",
     sortKey: SORT_KEYS.includes(ctx.sortKey) ? ctx.sortKey : "score",
     dir: ctx.dir === 1 ? 1 : -1,
@@ -137,10 +141,11 @@ function normalizeContext(ctx = {}) {
 /**
  * Filter + sort applications under the pipeline view's URL context.
  * @param {Array} applications - Application rows ({ n, company, role, score, status, date, evalDuration, ... }).
- * @param {{tab?: string, min?: number|null, max?: number|null, q?: string, sortKey?: string, dir?: 1|-1}} ctx
+ * @param {{tab?: string, min?: number|null, max?: number|null, company?: string, q?: string, sortKey?: string, dir?: 1|-1}} ctx
  *   - tab: uppercase canonical tab (INBOX / ALL / EVALUATED / …). Default ALL.
  *   - min: numeric score floor; null/undefined disables.
  *   - max: numeric score ceiling, EXCLUSIVE — [min, max) (ADR-0067). Null disables.
+ *   - company: exact company-name equality needle (ADR-0067). "" disables.
  *   - q: company+role search needle.
  *   - sortKey: company | role | score | salary | checkup | status | date | duration. Default score.
  *     salary = 报告薪资（ADR-0037）：区间中位值，未披露恒沉底。
@@ -150,7 +155,7 @@ function normalizeContext(ctx = {}) {
  *   not mutate the input).
  */
 export function orderApplications(applications, ctx = {}) {
-  const { tab, min, max, q, sortKey, dir } = normalizeContext(ctx);
+  const { tab, min, max, company, q, sortKey, dir } = normalizeContext(ctx);
   if (tab === "INBOX") return [];
   let rows = applications;
   if (tab !== "ALL") rows = rows.filter((r) => canonStatus(r.status).includes(tab));
@@ -168,6 +173,9 @@ export function orderApplications(applications, ctx = {}) {
       return !Number.isNaN(n) && n < max;
     });
   }
+  // 全等而非子串：分析页按原始字符串 Map 分组，任何大小写/子串宽容都会让
+  // 落地行数 > 条形数字，破坏严格计数一致（ADR-0067 决议 2）。
+  if (company) rows = rows.filter((r) => r.company === company);
   if (q.trim()) {
     const needle = q.toLowerCase();
     rows = rows.filter((r) => `${r.company} ${r.role}`.toLowerCase().includes(needle));
@@ -317,9 +325,9 @@ export function countSelectedOffView(applications, visible, selected) {
  * The tab is ALWAYS serialized: the list page's no-param default is INBOX (the
  * triage queue), which has no tracker rows to link. Omitting tab=ALL would make
  * a row link (and the report page's back link) fall back to INBOX instead of
- * the table the user actually came from. Only min/max/sort/dir/q — whose omissions
+ * the table the user actually came from. Only min/max/company/sort/dir/q — whose omissions
  * resolve to the same tracker-table defaults — are elided.
- * @param {{tab?: string, min?: number|null, max?: number|null, q?: string, sortKey?: string, dir?: number}} ctx
+ * @param {{tab?: string, min?: number|null, max?: number|null, company?: string, q?: string, sortKey?: string, dir?: number}} ctx
  *   `dir` accepts any number (the URL param / navNeighbors' own inferred
  *   return): only `1` means ascending, everything else serializes as descending.
  * @returns {string} "?tab=ALL" for the empty/default context.
@@ -328,12 +336,13 @@ export function buildContextQuery(ctx = {}) {
   // Normalized by the same function the sort/filter use — a second copy of the
   // defaulting rules is what would let the serialized query and the list it
   // reproduces drift apart.
-  const { tab, min, max, sortKey, dir } = normalizeContext(ctx);
+  const { tab, min, max, company, sortKey, dir } = normalizeContext(ctx);
   const q = (ctx.q ?? "").trim();
   const sp = new URLSearchParams();
   sp.set("tab", tab);
   if (min != null) sp.set("min", String(min));
   if (max != null) sp.set("max", String(max));
+  if (company) sp.set("company", company);
   if (sortKey !== "score") sp.set("sort", sortKey);
   if (dir !== -1) sp.set("dir", "1");
   if (q) sp.set("q", q);

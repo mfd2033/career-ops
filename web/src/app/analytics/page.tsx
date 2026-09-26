@@ -38,7 +38,13 @@ export default function Analytics() {
 
   const companyCounts = new Map<string, number>();
   for (const a of applications) if (a.company) companyCounts.set(a.company, (companyCounts.get(a.company) ?? 0) + 1);
-  const topCompanies = [...companyCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10).map(([name, n]) => ({ name, n }));
+  // 下钻 href 经共享序列化器（ADR-0067）：company 是原始字符串全等匹配，与上方
+  // Map 分组同一口径（含匿名雇主 `?` 行），编码由 URLSearchParams 负责。
+  const topCompanies = [...companyCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10).map(([name, n]) => ({
+    name,
+    n,
+    href: `/pipeline${buildContextQuery({ tab: "ALL", company: name })}`,
+  }));
 
   // CUMULATIVE, unlike the stage bars above: these two tiles are achievement
   // counters whose zero-state shows a coaching nudge, so a candidate who has

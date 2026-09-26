@@ -72,6 +72,26 @@ test("max 非法值降级为无该筛选，不报错", () => {
   assert.deepEqual(orderApplications(apps, { max: Number.NaN }), orderApplications(apps, {}));
 });
 
+// ── company：公司精确匹配（ADR-0067 决议 2）——与分析页 Map 分组同一口径：
+// 原始字符串全等、区分大小写；子串/大小写宽容都会让行数 > 条形数字。
+
+test("company 全等匹配：同公司多行命中，子串与大小写变体不命中", () => {
+  assert.deepEqual(orderApplications(apps, { company: "Acme" }).map((a) => a.n), ["1", "3"]);
+  assert.deepEqual(orderApplications(apps, { company: "acme" }).map((a) => a.n), [], "大小写敏感：降级会多吃行");
+  assert.deepEqual(orderApplications(apps, { company: "Ace" }).map((a) => a.n), [], "子串不算命中");
+});
+
+test("company 与 tab/min/max/q 叠加为 AND", () => {
+  // APPLIED 里只有 Beta(3.1) 一家分数在 [3, 3.5)：Acme 的 Applied 行（3，无分数）被区间挡住
+  assert.deepEqual(orderApplications(apps, { tab: "APPLIED", company: "Beta", min: 3, max: 3.5 }).map((a) => a.n), ["2"]);
+  assert.deepEqual(orderApplications(apps, { company: "Acme", q: "engineer" }).map((a) => a.n), ["1", "3"]);
+  assert.deepEqual(orderApplications(apps, { company: "Acme", q: "analyst" }).map((a) => a.n), [], "AND 叠加：两个维度都成立才活");
+});
+
+test("company 空串/缺省是「无该筛选」，不是「匹配空公司」", () => {
+  assert.deepEqual(orderApplications(apps, { company: "" }), orderApplications(apps, {}));
+});
+
 test("q searches company + role case-insensitively", () => {
   // 1,3,4,5 all carry "engineer" in the role; 2 does not → filtered, then the
   // default score-descending order applies.
@@ -111,6 +131,12 @@ test("buildContextQuery always serializes tab, elides only tracker-defaults", ()
   // max 紧跟 min 序列化（ADR-0067）；单独 max 也是合法形态（分析页 <3.0 桶）
   assert.equal(buildContextQuery({ tab: "ALL", min: 4, max: 4.5 }), "?tab=ALL&min=4&max=4.5");
   assert.equal(buildContextQuery({ tab: "ALL", max: 3 }), "?tab=ALL&max=3");
+  // company 排在分数维度之后（ADR-0067）；空格/中文由 URLSearchParams 负责编码
+  assert.equal(buildContextQuery({ tab: "ALL", company: "Acme" }), "?tab=ALL&company=Acme");
+  assert.equal(
+    buildContextQuery({ tab: "ALL", min: 4, max: 4.5, company: "蚂蚁集团" }),
+    "?tab=ALL&min=4&max=4.5&company=" + encodeURIComponent("蚂蚁集团"),
+  );
   assert.equal(buildContextQuery({ sortKey: "company", dir: 1, q: "acme" }), "?tab=ALL&sort=company&dir=1&q=acme");
   assert.equal(buildContextQuery({ tab: "APPLIED", min: 3, sortKey: "date", dir: 1, q: " eng " }), "?tab=APPLIED&min=3&sort=date&dir=1&q=eng");
 });
@@ -176,6 +202,28 @@ test("min/max 往返：序列化→URLSearchParams 重解析→滤出同一列�
     max: parseFloat(qs.get("max") ?? ""),
   };
   assert.deepEqual(orderApplications(apps, reparsed), orderApplications(apps, ctx));
+});
+
+test("company 往返：含空格/中文的公司名经编码仍是全等匹配", () => {
+  const rows = [
+    { n: "30", company: "Blue Bridge 蓝桥", role: "x", score: "4.0/5", status: "Evaluated", date: "2026-08-01" },
+    { n: "31", company: "Blue Bridge 蓝桥西", role: "x", score: "4.0/5", status: "Evaluated", date: "2026-08-01" },
+  ];
+  const ctx = { tab: "ALL", company: "Blue Bridge 蓝桥" };
+  const qs = new URLSearchParams(buildContextQuery(ctx).slice(1));
+  assert.deepEqual(
+    orderApplications(rows, { tab: qs.get("tab"), company: qs.get("company") }).map((a) => a.n),
+    ["30"],
+    "前缀变体公司不得被往返偷进来",
+  );
+});
+
+test("navNeighbors 在公司上下文里只在同公司行之间走，往返保留 company", () => {
+  // Acme 只有 1、3 两行：从 1 出发下一个是 3，不得跳到区间外的 Acme 外公司
+  const nav = navNeighbors(apps, { tab: "ALL", company: "Acme" }, "1");
+  assert.equal(nav.next.n, "3");
+  assert.equal(nav.total, 2);
+  assert.equal(buildContextQuery(nav.context), "?tab=ALL&company=Acme");
 });
 
 test("navNeighbors 在区间上下文里只在区间内走，往返保留 max", () => {

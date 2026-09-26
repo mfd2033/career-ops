@@ -11,7 +11,7 @@ import { useI18n } from "@/lib/i18n/context";
 
 type StageCount = { key: string; n: number; href?: string };
 type Bucket = { label: string; n: number; href?: string };
-type Company = { name: string; n: number };
+type Company = { name: string; n: number; href?: string };
 
 export function AnalyticsView({
   total,
@@ -89,7 +89,14 @@ export function AnalyticsView({
 
       <Section title={t("analytics.section.topCompanies")} id="companies">
         {topCompanies.map((c) => (
-          <Bar key={c.name} label={c.name} value={c.n} pct={(c.n / maxCompany) * 100} />
+          <Bar
+            key={c.name}
+            label={c.name}
+            value={c.n}
+            pct={(c.n / maxCompany) * 100}
+            href={c.href}
+            drillTitle={t("analytics.drill.viewInPipeline", { n: c.n })}
+          />
         ))}
       </Section>
     </div>
