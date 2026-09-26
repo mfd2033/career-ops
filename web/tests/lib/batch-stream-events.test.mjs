@@ -212,3 +212,20 @@ test("batch-checkup route takes worker argv from the shared selector, never engi
     "batch-checkup route must pick worker argv via resolveWorkerInvocation with the checkup kind",
   );
 });
+
+// ADR-0056 决议 5 的批量侧补线：/api/run 派发单个体检时早已注入技能指针
+// （prompt 第一条读 SKILL.md、页脚带技能版本号），而 batch-checkup 路由漏传
+// checkupSkill，导致批量报告永远落在「无指针」旧分支——页脚写成无版本的
+// 「career-ops 公司体检技能」，与单个体检逐字分叉。此守卫锁定批量路由与
+// /api/run 同源解析：指针来自 skill-registry，且在派发时解析一次全批共用。
+test("batch-checkup route resolves the checkup skill pointer from the shared registry", () => {
+  const src = readFileSync(new URL("../../src/app/api/batch-checkup/route.ts", import.meta.url), "utf8");
+  assert.ok(
+    src.includes('from "@/lib/skill-registry.mjs"'),
+    "batch-checkup route must take the skill pointer from skill-registry (single source, ADR-0056)",
+  );
+  assert.ok(src.includes("scanSkillRegistry("), "must scan the registry, not hand-roll a path");
+  assert.ok(src.includes("resolveSkillCopy("), "must resolve the top-version copy via the shared resolver");
+  assert.ok(src.includes("OFFER_CHECKUP_SKILL_NAME"), "skill name must come from the registry constant, never spelled");
+  assert.ok(/buildPrompt\(\{[\s\S]*?checkupSkill[\s\S]*?\}\)/.test(src), "buildPrompt call must pass checkupSkill");
+});

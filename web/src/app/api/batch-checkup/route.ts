@@ -2,10 +2,11 @@
 //
 // Runs the SAME engine as a single checkup (/api/run kind:"checkup"): the CLI +
 // model picked on the config page, the SAME checkup prompt (buildPrompt kind
-// "checkup" — the pointer to modes/_custom.md's「公司体检」workflow, with the
-// ADR-0035 pre-resolved company injected), and the SAME honesty gate (green
-// requires a clean exit AND a new verifiable ledger row for THAT tracker#).
-// Where it differs is ORCHESTRATION, mirroring /api/batch-evaluate:
+// "checkup" — the ADR-0056 skill pointer resolved from the same skill-registry
+// at batch dispatch, plus the pointer to modes/_custom.md's「公司体检」workflow,
+// with the ADR-0035 pre-resolved company injected), and the SAME honesty gate
+// (green requires a clean exit AND a new verifiable ledger row for THAT
+// tracker#). Where it differs is ORCHESTRATION, mirroring /api/batch-evaluate:
 //
 //   A single checkup prompt needs NO report-number reservation and NO tracker
 //   merge — its canonical artifacts are (a) an HTML file keyed by the tracker#
@@ -41,6 +42,7 @@ import {
   batchCheckupFinalEvent,
 } from "@/lib/run-cli-support.mjs";
 import { resolveWorkerInvocation } from "@/lib/worker-invocation.mjs";
+import { OFFER_CHECKUP_SKILL_NAME, resolveSkillCopy, scanSkillRegistry } from "@/lib/skill-registry.mjs";
 import { spawnHeadlessCli, terminateCli } from "@/lib/spawn-cli.mjs";
 import { careerOpsRoot, readMemory, findCheckupTarget } from "@/lib/career-ops";
 import { listLiveCheckups } from "@/lib/checkup-live.mjs";
@@ -129,6 +131,12 @@ export async function POST(req: Request) {
   }
 
   const today = new Date().toISOString().slice(0, 10);
+  // ADR-0056 决议 5 的批量侧接线（与 /api/run 同源）：技能指针在服务端经
+  // skill-registry 解析，worker 不自己找路径。批量在派发时解一次、全批 worker
+  // 共用同一副本——/api/run 每请求实时扫（决议 8），而一批本来就是同一时刻的
+  // N 次派发，批内快照一致反而更合理。找不到副本 → undefined，prompt 落回
+  // 旧分支逐字节兼容（workflow 第 8 条：技能缺失不硬失败）。
+  const checkupSkill = resolveSkillCopy(scanSkillRegistry(), OFFER_CHECKUP_SKILL_NAME) ?? undefined;
   // ADR-0035: resolve every target company at DISPATCH (the same resolver the
   // single checkup path uses) so the worker never re-derives it from the
   // tracker. Rows that don't resolve are failed items up front — they never
@@ -256,6 +264,7 @@ export async function POST(req: Request) {
               memory: readMemory(),
               today,
               checkupCompany: t.company,
+              checkupSkill,
             });
             // ADR-0054: worker argv comes from the shared spec-driven selector —
             // streamArgsFor (claude/qoder-cn/codebuddy audited per-kind permission

@@ -19,6 +19,7 @@
 ## §3 体检 worker 端通路（原 [39876333]，ADR-0025/0027/0030/0031/0033/0035/0041）
 
 - 批量体检 `POST /api/batch-checkup` 镜像 batch-evaluate：3 并发+池、上限 20、NDJSON、per-tracker# 台账门禁（checkupArtifactRowCountForTracker）、单 worker 30min kill；冲突=跳过不 replace；建议角标 suggestsCheckup + /api/pipeline/checkup-suggest 懒加载。
+- 技能指针补线（2026-09-26）：ADR-0056 决议 5 当初只接了 /api/run，batch-checkup 漏传 checkupSkill，导致批量报告页脚停在旧固定句「career-ops 公司体检技能」、与单个体检的「WorkBuddy · offer体检 技能 v{X}」分叉。现批量派发时与 /api/run 同源经 skill-registry 解析一次、全批 worker 共用；守卫在 batch-stream-events.test.mjs（源码级：必须 import registry 且 buildPrompt 传 checkupSkill）。
 - **关键教训**：非 claude 无头 worker（opencode）遇任何权限 ask 即静默死亡（exit 0 零输出零日志）——external_directory/doom_loop 默认 ask、.env 读取为 ask。修复=仓库根 `opencode.json`（本地未跟踪）permission allow 两项 + read .env deny；**新 ask 类权限键出现需同样处理**。
 - 诊断：opencode 日志 `~/.local/share/opencode/log/opencode.log`（run=<id>，grep creating instance/asking/permission=）；复现回路 `node local/batch-checkup-repro.mjs <tracker#...>`。
 - 模型/环境坑：agnes-2.5-flash 有「研究完不落盘」的非确定性毛病（重跑可全过）；engine=opencode 配置在 `~/.career-ops-web/config.json`；opencode 无消息体持久化、只有日志（claude 的 transcript 在 ~/.claude/projects，两者不同）。
