@@ -17,12 +17,13 @@ import (
 // The tray runs its own message loop on a dedicated goroutine; onExit is
 // invoked on that loop's thread when Quit() completes, which then closes the
 // controller's done channel.
-func newTray(iconData []byte) *trayController {
+func newTray(iconData []byte, initialTooltip string) *trayController {
 	t := &trayController{
 		commands: make(chan trayCommand, 8),
 		done:     make(chan struct{}),
 	}
 	t.quit = func() { systray.Quit() }
+	t.setTooltip = func(s string) { systray.SetTooltip(s) }
 
 	go func() {
 		// Pin this goroutine to a single OS thread for its entire lifetime.
@@ -43,9 +44,10 @@ func newTray(iconData []byte) *trayController {
 					systray.SetIcon(iconData)
 				}
 				systray.SetTitle("career-ops dashboard")
-				systray.SetTooltip("career-ops dashboard")
+				systray.SetTooltip(initialTooltip)
 
 				openItem := systray.AddMenuItem("打开面板", "Open the dashboard in your browser")
+				showLogItem := systray.AddMenuItem("显示日志窗口", "Show the launcher log window")
 				restartItem := systray.AddMenuItem("重启服务", "Restart the dashboard server")
 				systray.AddSeparator()
 				quitItem := systray.AddMenuItem("退出", "Shut down the dashboard")
@@ -61,6 +63,7 @@ func newTray(iconData []byte) *trayController {
 					}()
 				}
 				relay(openItem, trayOpen)
+				relay(showLogItem, trayShowLog)
 				relay(restartItem, trayRestart)
 				relay(quitItem, trayQuit)
 

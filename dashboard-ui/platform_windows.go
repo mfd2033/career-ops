@@ -8,7 +8,18 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+
+	"golang.org/x/sys/windows"
 )
+
+// initConsole 将控制台输出代码页切为 UTF-8，让中文日志不乱码（工单 01）。
+// 控制台子系统双击启动时控制台存在，生效；无控制台（GUI 变体/静默拉起）时
+// 调用无副作用。服务日志多为 UTF-8 字节，不改代码页会被 GBK 控制台误读。
+var kernel32SetConsoleOutputCP = windows.NewLazySystemDLL("kernel32.dll").NewProc("SetConsoleOutputCP")
+
+func initConsole() {
+	_, _, _ = kernel32SetConsoleOutputCP.Call(65001) // CP_UTF8
+}
 
 // listenerPID returns the PID owning a LISTEN socket on port and its image name
 // (best-effort "", if it can't be resolved). Returns 0, "" when nothing listens.
@@ -60,8 +71,11 @@ func killProcessTree(pid int) error {
 }
 
 // startServer launches the dashboard server process hidden from the console
-// (this exe is a GUI app with no console window).
-func startServer(nodePath, serverDir, careerRoot string, port int) *exec.Cmd {
+// (this exe is a GUI app with no console window). The child's stdout/stderr are
+// wired to per-stream prefix writers (工单 01 / ADR-0066) so服务输出不再进 NUL，
+// 而是实时汇入统一时间线（控制台 + launcher.log）。stdout 与 stderr 各用一个
+// prefixWriter 实例（各自持有缓冲），避免两条流交错撞碎行。
+func startServer(nodePath, serverDir, careerRoot string, port int, sink *lineSink) *exec.Cmd {
 	cmd := exec.Command(nodePath, "server.js")
 	cmd.Dir = serverDir
 	cmd.Env = append(os.Environ(),
@@ -73,6 +87,8 @@ func startServer(nodePath, serverDir, careerRoot string, port int) *exec.Cmd {
 		// (clients fall back to 127.0.0.1), see the openBrowser call sites in launcher.go.
 		"HOSTNAME=127.0.0.1",
 	)
+	cmd.Stdout = newPrefixWriter(sink, "server")
+	cmd.Stderr = newPrefixWriter(sink, "server")
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		HideWindow:    true,
 		CreationFlags: 0x08000000, // CREATE_NO_WINDOW

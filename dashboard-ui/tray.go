@@ -19,6 +19,8 @@ const (
 	trayRestart
 	// trayQuit shuts down the server and exits the launcher.
 	trayQuit
+	// trayShowLog re-shows the launcher-owned log window (工单 02).
+	trayShowLog
 )
 
 // trayController is the tray icon lifecycle handle. Menu clicks are delivered
@@ -29,6 +31,9 @@ type trayController struct {
 	commands chan trayCommand
 	done     chan struct{}
 	quit     func()
+	// setTooltip 外显服务状态（工单 03）：启动中 / 就绪 :3000 / 服务已退出 /
+	// 启动失败。Windows 下代理到 systray.SetTooltip，非-Windows 为 no-op。
+	setTooltip func(string)
 }
 
 // commands returns the channel on which tray menu commands arrive.
@@ -44,4 +49,12 @@ func (t *trayController) Done() <-chan struct{} {
 // Quit requests tray teardown. Safe to call multiple times from any goroutine.
 func (t *trayController) Quit() {
 	t.quit()
+}
+
+// status 更新托盘 tooltip 以外显服务状态（工单 03）。对未设置的 setTooltip
+// 安全（非-Windows 或创建失败时降级为无操作）。
+func (t *trayController) status(s string) {
+	if t != nil && t.setTooltip != nil {
+		t.setTooltip(s)
+	}
 }

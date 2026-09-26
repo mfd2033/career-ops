@@ -19,7 +19,7 @@ func killProcessTree(pid int) error { return nil }
 
 // startServer launches the dashboard server process. Non-Windows builds are
 // only used for compilation checks; keep the server on a visible console.
-func startServer(nodePath, serverDir, careerRoot string, port int) *exec.Cmd {
+func startServer(nodePath, serverDir, careerRoot string, port int, sink *lineSink) *exec.Cmd {
 	cmd := exec.Command(nodePath, "server.js")
 	cmd.Dir = serverDir
 	cmd.Env = append(os.Environ(),
@@ -30,9 +30,17 @@ func startServer(nodePath, serverDir, careerRoot string, port int) *exec.Cmd {
 		// URL (the openBrowser call sites in launcher.go).
 		"HOSTNAME=127.0.0.1",
 	)
+	if sink != nil {
+		cmd.Stdout = newPrefixWriter(sink, "server")
+		cmd.Stderr = newPrefixWriter(sink, "server")
+	}
 	if err := cmd.Start(); err != nil {
 		fmt.Fprintln(os.Stderr, "failed to start the dashboard server: "+err.Error())
 		return nil
 	}
 	return cmd
 }
+
+// initConsole is a non-Windows compilation stub — there is no Windows console
+// code page to switch; UTF-8 is native on these platforms.
+func initConsole() {}

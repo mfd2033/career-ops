@@ -3,7 +3,7 @@
 career-ops **网页版 dashboard** 的 Windows 启动器——把 web UI（`web/`）打包成可双击运行的启动器。两个构建变体，都由同一份 Go 源码（`launcher.go`）编译：
 
 - **`career-dashboard-ui.exe`** —— GUI 子系统（`-H windowsgui`，无控制台窗口），由打包器注入 `cacheVersion` 戳。是常规双击目标。
-- **`career-dashboard-launcher.exe`** —— 控制台子系统变体（同一程序，无 `-H windowsgui`），想要 launcher 输出打到 stdout 而不是托盘日志时用。用 `BUILDFULL=0` 单独构建。
+- **`career-dashboard-launcher.exe`** —— 控制台子系统变体（同一程序，无 `-H windowsgui`），日常双击入口。它会弹出一个**自持的日志窗口**实时显示启动过程与服务输出（见下「运行日志」）；同时仍把日志打到 stdout，便于脚本抓取。用 `BUILDFULL=0` 单独构建。
 
 ## 它是什么
 
@@ -14,23 +14,28 @@ career-ops **网页版 dashboard** 的 Windows 启动器——把 web UI（`web/
 
 两者都没有时，launcher 会报告 `dashboard runtime not found` 并退出。
 
-找到运行时后它会：
+找到运行时后它会（端口严格固定 3000，见 ADR-0063，不再有“选空闲口”与锁文件）：
 
 1. 以**自身可执行文件目录**为锚点确定 career-ops 根目录——从 exe 所在位置读取 `cv.md` / `data/` / `reports/`（与 Go TUI 一致），
-2. 选取空闲端口（3000+），设置 `CAREER_OPS_ROOT` / `PORT` / `HOSTNAME` 后启动服务器，并等待其响应，
+2. 探活 3000：已有活实例则复用（再次双击只重开浏览器），无应答且被占用则杀进程树后接管，空闲则直接起服，设置 `CAREER_OPS_ROOT` / `PORT=3000` / `HOSTNAME=127.0.0.1` 后启动服务器并等待其响应，
 3. 在 `http://localhost:<port>` 打开默认浏览器（**本启动器交给用户或用于健康轮询的访问地址一律 `localhost`，不用 `127.0.0.1`**——fork 家规见 `modes/_custom.md`；浏览器扩展仍探测 `127.0.0.1`，见 `extension/background.js`）。`HOSTNAME` 是**监听**地址，保持显式 IPv4 字面量：Windows 下 `localhost` 先解析到 `::1`，绑成 `localhost` 会只监听 IPv6 回环。绑 `127.0.0.1` 仍可用 `localhost` 访问——Chromium / .NET / Node（autoSelectFamily）都会回退——且与调试工作流 `http://localhost:3000` 同源，localStorage 偏好共享。然后保持常驻（若已有实例在运行则复用之——再次双击只会重新打开浏览器）。
 
 进程启动后驻留在**系统托盘**（不在任务栏）。右键托盘图标有菜单：
 
 - **打开面板** —— 在默认浏览器重新打开 dashboard，
-- **重启服务** —— 杀掉并重启内嵌服务器（另选空闲端口、更新锁文件、重新打开浏览器），
-- **退出** —— 停止服务器、删除锁文件、退出 launcher。
+- **显示日志窗口** —— 唤回被隐藏的日志窗口（见「运行日志」），
+- **重启服务** —— 杀掉并重启内嵌服务器（端口恒为 3000，重新打开浏览器），
+- **退出** —— 停止服务器、退出 launcher。
 
-左键点击托盘图标无动作（只有菜单，与托盘菜单措辞一致）。图标复用内嵌的 `icon.ico`。
+托盘 tooltip 实时外显服务状态：`就绪 :3000` / `服务已退出` / `启动失败`。左键点击托盘图标无动作（只有菜单）。图标复用内嵌的 `icon.ico`。
 
-launcher 总是把托盘库的日志输出重定向到 exe 旁的 `.dashboard-runtime\v{N}\tray-debug.log`（只追加、体积小），排障无需设置环境变量——启动 exe、复现、读日志即可。每行带 launcher PID。
+## 运行日志（工单 01–02 / ADR-0066）
 
-GUI 变体（`-H windowsgui`）不显示控制台窗口；控制台变体除了托盘日志，还会把生命周期日志打到 stdout。
+launcher 把**自身决策**（接管/杀占口/起服/就绪）与 **dashboard 服务子进程的 stdout/stderr** 汇入同一条时间线，逐行加 `[HH:MM:SS] [launcher|server]` 前缀，同时送往：自持的**日志窗口**（Win32 只读编辑框，实时滚动）与磁盘文件 **`.career-ops-web/launcher.log`**（每次 launcher 进程启动即重置）。启动时 conhost 控制台被隐藏（其窗口归 conhost 进程、无法拦截关闭改隐藏，故改用自持窗口）。
+
+- 日志窗口的 × 只是**隐藏**，不影响 launcher 与服务生死；托盘「显示日志窗口」唤回。
+- 启动失败不再让进程蒸发：关掉错误框后 launcher 驻留托盘，随时可唤回窗口查完整死因。
+- 旧 `.dashboard-runtime\v{N}\tray-debug.log` 通道已退役（路径随版本漂移、就绪前日志丢失），由上述固定路径取代。
 
 ## 目录结构
 
@@ -89,12 +94,12 @@ Get-Item career-dashboard-launcher.exe
 # 2. 在 exe 旁提供运行时（node.exe + app/server.js），或先跑一次 launcher
 #    ——存在时会读取 .dashboard-runtime\v{N}\。
 
-# 3. 启动并验证 API 是否应答（端口号写在 .dashboard-runtime\v{N}\LOCK 里）：
+# 3. 启动并验证 API 是否应答（端口固定 3000，无锁文件，见 ADR-0063）：
 .\career-dashboard-launcher.exe
 Invoke-WebRequest "http://localhost:3000/api/version"   # 期望 HTTP 200
 
-# 4. 诊断：若行为异常，查看托盘日志
-Get-Content .dashboard-runtime\v{N}\tray-debug.log
+# 4. 诊断：若行为异常，看自持日志窗口，或读统一启动器日志
+Get-Content .career-ops-web\launcher.log
 ```
 
 ### 常见问题
@@ -104,11 +109,11 @@ Get-Content .dashboard-runtime\v{N}\tray-debug.log
 | `go: command not found` | 安装 Go 1.24+ 并加入 `PATH` |
 | 首次打包 go-winres 安装失败 | 检查网络 / `GOPROXY` 后重试；成功后缓存在 `.gobin/`，之后不再安装 |
 | 启动时报 "dashboard runtime not found" | 在 exe 旁放 `node.exe` + `app/server.js`，或把运行时解压进 `.dashboard-runtime\v{N}\`（跑一次完整构建会准备好 `dashboard-ui/app` + `dashboard-ui/node.exe`） |
-| exe 启动了但浏览器没弹出来 | 查看 `.dashboard-runtime\v{N}\tray-debug.log`（始终会写） |
+| exe 启动了但浏览器没弹出来 | 看日志窗口或读 `.career-ops-web/launcher.log`（始终会写） |
 | 重新打包后网页还是旧版 | `cacheVersion` 来自 git SHA + dirty 标记；干净重建会生成新的 `.dashboard-runtime\v{N}` 目录——若没变，先确认 exe 时间戳确实更新了 |
-| 弹「server exited unexpectedly」对话框 | 看托盘日志，用托盘菜单「重启服务」重试 |
+| 弹「服务意外退出」/「启动失败」对话框 | 关掉框后托盘驻留；托盘「显示日志窗口」看完整死因，「重启服务」重试 |
 
-GUI 变体（`-H windowsgui`）：**默认没有控制台输出**——托盘日志是唯一的诊断渠道。控制台变体还会把日志打到 stdout。
+日志窗口与 `.career-ops-web/launcher.log` 逐行同源；窗口的 × 只隐藏不退出（工单 02）。GUI 变体（`-H windowsgui`）无控制台，日志主要靠窗口与文件。
 
 ## 说明
 
