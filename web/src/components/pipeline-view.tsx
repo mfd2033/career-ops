@@ -421,21 +421,26 @@ export function PipelineView({
         {tab !== "INBOX" && (minFilter != null || maxFilter != null || companyFilter != null) && (
           <div className="ml-auto flex items-center gap-2 pl-2">
             <span className="text-xs text-faint">{t("pipeline.filtered")}</span>
-            <button
-              type="button"
-              onClick={() => setParams({ min: null, max: null })}
-              className="inline-flex items-center gap-1.5 rounded-full border border-brand/40 bg-brand-soft px-2.5 py-1 text-xs font-medium text-brand transition-colors hover:bg-brand/15"
-              title={t("pipeline.clearScoreFilter")}
-            >
-              {/* 分数是一个维度、一枚 chip（ADR-0067 决议 5）：有 max 时单枚显示完整
-                  区间，清除上下限一起清；无 max 时维持现状「分数 ≥ x」只清 min。 */}
-              {maxFilter != null
-                ? minFilter != null
-                  ? t("pipeline.scoreRange", { min: minFilter.toFixed(1), max: maxFilter.toFixed(1) })
-                  : t("pipeline.scoreLt", { max: maxFilter.toFixed(1) })
-                : t("pipeline.scoreGte", { min: minFilter!.toFixed(1) })}
-              <X className="size-3" />
-            </button>
+            {/* 分数 chip 按自身维度挂载（ADR-0067 决议 5）：只有 company 筛选时不得
+                渲染分数 chip——容器门比成员宽会把 null 推进 toFixed，company-only
+                落地实测即撞此坑。 */}
+            {(minFilter != null || maxFilter != null) && (
+              <button
+                type="button"
+                onClick={() => setParams({ min: null, max: null })}
+                className="inline-flex items-center gap-1.5 rounded-full border border-brand/40 bg-brand-soft px-2.5 py-1 text-xs font-medium text-brand transition-colors hover:bg-brand/15"
+                title={t("pipeline.clearScoreFilter")}
+              >
+                {/* 分数是一个维度、一枚 chip（ADR-0067 决议 5）：有 max 时单枚显示完整
+                    区间，清除上下限一起清；无 max 时维持现状「分数 ≥ x」只清 min。 */}
+                {maxFilter != null
+                  ? minFilter != null
+                    ? t("pipeline.scoreRange", { min: minFilter.toFixed(1), max: maxFilter.toFixed(1) })
+                    : t("pipeline.scoreLt", { max: maxFilter.toFixed(1) })
+                  : t("pipeline.scoreGte", { min: minFilter!.toFixed(1) })}
+                <X className="size-3" />
+              </button>
+            )}
             {/* 公司 chip（ADR-0067 决议 5）：独立一枚，与分数 chip、搜索框 AND 叠加。 */}
             {companyFilter != null && (
               <button
