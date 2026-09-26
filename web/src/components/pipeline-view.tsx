@@ -318,6 +318,10 @@ export function PipelineView({
   // Row click toggles selection (the blank area outside the checkbox). Links and
   // the checkbox cell stop propagation so navigation / checkbox toggle are not
   // hijacked by the row click.
+  //
+  // 整行用默认箭头，不挂 cursor-pointer：点行 = 勾选而非跳转，而手型按团队规范只代表
+  // 链接/导航（ADR-0062 增补），否则又回到「点哪都跳」的错觉。行内的原生 checkbox 与
+  // 公司名真链接各自保留手型，不在本规则约束内。可勾选线索靠 hover 底色，不靠光标。
   const toggleRow = useCallback((n: string) => {
     setSelected((prev) => {
       const next = new Set(prev);
@@ -536,7 +540,7 @@ export function PipelineView({
                 <tr
                   key={`${r.n}-${i}`}
                   onClick={() => toggleRow(r.n)}
-                  className="group cursor-pointer transition-colors hover:bg-surface/40"
+                  className="group transition-colors hover:bg-surface/40"
                 >
                   <td className="w-10 px-2 py-3" onClick={(e) => e.stopPropagation()}>
                     <input

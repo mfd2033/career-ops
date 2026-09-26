@@ -79,3 +79,13 @@ test("the checkup badges live OUTSIDE the company link", () => {
     "「建议体检」角标同上，必须是链接的兄弟节点");
   assert.equal(count(cell, "title={"), 2, "两枚角标移出后仍各自保留 title 提示");
 });
+
+test("the clickable row uses the default arrow, not the hand cursor", () => {
+  // 点行 = 切换勾选（ADR-0038），不是跳转。手型按团队规范只代表链接/导航
+  // （ADR-0062 增补），所以行本身不能挂 cursor-pointer——否则“点哪都跳”的错觉又回来。
+  // 行内 checkbox（原生控件）与公司 <Link>（真链接）仍各自保留手型，不在本断言范围。
+  const tr = TBODY_CODE.match(/<tr[\s\S]*?>/)[0];
+  assert.ok(tr, "未找到追踪器行 <tr> — 结构变了，本断言需随宿主改写");
+  assert.ok(!/cursor-pointer/.test(tr),
+    "数据行不该用 cursor-pointer；手型只留给真链接，点行只是勾选");
+});
