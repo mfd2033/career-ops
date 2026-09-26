@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useI18n } from "@/lib/i18n/context";
+import { UNKNOWN_EMPLOYER_SENTINEL } from "@/lib/unknown-employer.mjs";
 
 // Presentational client component for the Analytics page. The page itself stays
 // a server component (it reads the career-ops core via @/lib/career-ops); it
@@ -31,6 +32,12 @@ export function AnalyticsView({
   offers: number;
 }) {
   const { t } = useI18n();
+
+  // 匿名雇主 `?` 哨兵行在榜单上显示成可读标签，不再裸显问号（用户误读为渲染错误）。
+  // 只改显示层：下钻 href 由 page.tsx 仍携原始 `?`（ADR-0067 全等口径），落地
+  // 行数必等于条形数字不变。key 保留 c.name（`?` 在分组里唯一，不撞 key）。
+  const companyDisplayLabel = (name: string) =>
+    name === UNKNOWN_EMPLOYER_SENTINEL ? t("analytics.company.unknownEmployer") : name;
 
   const maxStage = Math.max(1, ...stageCounts.map((s) => s.n));
   const maxBucket = Math.max(1, ...buckets.map((b) => b.n));
@@ -91,7 +98,7 @@ export function AnalyticsView({
         {topCompanies.map((c) => (
           <Bar
             key={c.name}
-            label={c.name}
+            label={companyDisplayLabel(c.name)}
             value={c.n}
             pct={(c.n / maxCompany) * 100}
             href={c.href}

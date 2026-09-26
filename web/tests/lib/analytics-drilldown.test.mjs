@@ -67,3 +67,26 @@ test("下钻 tooltip 键在 en/zh 词典成对存在", () => {
   assert.equal(count(I18N, '"analytics.drill.viewInPipeline"'), 2, "tooltip 键必须 en/zh 各一处");
   assert.ok(I18N.includes("{n}"), "tooltip 必须带条数插值，用户点前知道会看到多少行");
 });
+
+// 热门公司匿名雇主显示：`?` 哨兵行不得裸显问号（用户读作渲染错误），
+// 须经 i18n 显示成「匿名雇主（代招）」。守卫只锁显示层——下钻 href 仍携
+// 原始 `?`（ADR-0067 全等口径），故此处只禁 label 直传 c.name。
+test("热门公司 `?` 哨兵行经 i18n 显示，不裸显问号", () => {
+  assert.ok(
+    VIEW_CODE.includes("UNKNOWN_EMPLOYER_SENTINEL"),
+    "analytics-view.tsx 必须引用 UNKNOWN_EMPLOYER_SENTINEL 才能识别匿名雇主 `?` 行",
+  );
+  assert.ok(
+    !VIEW_CODE.includes("label={c.name}"),
+    "公司条形 label 不得直传原始 c.name —— `?` 会裸显成问号",
+  );
+  assert.ok(
+    VIEW_CODE.includes('t("analytics.company.unknownEmployer")'),
+    "哨兵行标签必须走 i18n key analytics.company.unknownEmployer",
+  );
+  assert.equal(
+    count(I18N, '"analytics.company.unknownEmployer"'),
+    2,
+    "该 key 必须在 en 与 zh 两个字典各出现一次（中英对齐）",
+  );
+});
