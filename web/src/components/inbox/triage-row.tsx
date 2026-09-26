@@ -56,6 +56,11 @@ export function TriageRow({
   const evaluated = !!scored && (scored.running || scored.score != null);
   // ADR-0060 行点击选中：判定全在 row-click.mjs（纯函数已单测），这里只接线。
   // pointerdown 坐标供拖拽闸比对；行内控件（a/button/input）让路不劫持。
+  //
+  // 整行用默认箭头，不挂 cursor-pointer：点行 = 勾选而非跳转，而手型按团队规范只代表
+  // 链接/导航（ADR-0062 增补 #2，ADR-0060 决议 6 的 cursor-pointer 表述自该增补起失效），
+  // 否则又回到「点哪都跳」的错觉。行内的原生 checkbox 与标题真链接各自保留手型，
+  // 不在本规则约束内。可勾选线索靠 hover 底色，不靠光标——与 tracker 表同口径。
   const pointerDownRef = useRef<{ x: number; y: number } | null>(null);
 
   const onRowClick = (e: MouseEvent<HTMLElement>) => {
@@ -72,7 +77,7 @@ export function TriageRow({
       }}
       onClick={onRowClick}
       className={cn(
-        "flex cursor-pointer items-center gap-2.5 px-3 py-2.5 transition-colors sm:gap-3 sm:px-4",
+        "flex items-center gap-2.5 px-3 py-2.5 transition-colors sm:gap-3 sm:px-4",
         selected ? "bg-brand-soft/50" : "hover:bg-surface-hover",
         evaluated && "opacity-95",
       )}
@@ -83,7 +88,9 @@ export function TriageRow({
         checked={selected}
         onChange={onToggleSelect}
         aria-label={t("inbox.selectAria", { company: job.company, role: job.role })}
-        className="size-4 shrink-0 accent-brand max-sm:min-h-[44px] max-sm:min-w-[24px]"
+        // 手型从 <li> 摘除后这里要显式挂上：勾选框是原生控件，且 tracker 表的
+        // checkbox（pipeline-view.tsx）本就显式 cursor-pointer，两表对齐。
+        className="size-4 shrink-0 cursor-pointer accent-brand max-sm:min-h-[44px] max-sm:min-w-[24px]"
       />
 
       <CompanyLogo name={job.company} size={20} />

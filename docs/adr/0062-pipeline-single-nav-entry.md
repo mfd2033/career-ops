@@ -33,6 +33,14 @@
 - **影响面:** `<tr>` 为所有非 INBOX tab 共用，故本改统一作用于全部 / 已评估 / 跳过等各 tracker tab（点行=勾选的语义在各 tab 相同）。
 - **落档:** 决议 6 的措辞「行 hover 底色沿用现状」不变（hover 高亮仍是可点线索）；本增补只收敛光标，不引入新布局。`pipeline-single-nav-entry.test.mjs` 加一条源码守卫断言行 `<tr>` 不含 `cursor-pointer`，防止被改回。
 
+## Amendment #2 (2026-09-26): 光标规范升级为通用规则，推广至收件箱行
+
+- **背景:** 上一增补落档后盘点全 web 端 `cursor-pointer`（14 处），唯一违规点剩收件箱 `TriageRow` 的 `<li>`：ADR-0060 决议 6 明写「`<li>` 加 `cursor-pointer`」，而收件箱行点击语义与 tracker 表相同（点行空白 = 勾选，ADR-0060 决议 1），两表光标却不一致。需求（一轮 grilling 敲定）：鼠标移到收件箱数据行该显示手型还是箭头。
+- **规范升级（由「管道页」扩为通用）:** 凡「点行 = 选中而非导航」的数据行，整行一律默认箭头，手型只代表真链接/原生控件；未来任何新列表自动受本规则约束，无需另行决策。收件箱据此改：`triage-row.tsx` 的 `<li>` 摘掉 `cursor-pointer`，可勾选线索由既有 hover 底色承担（与上一增补同口径）。
+- **行内控件:** 标题外链、分数徽章 `<Link>`、Save/Skip 按钮保留各自手型（原生控件/真链接不在本规则约束内）。行首 checkbox 原先的手型是从 `<li>` 继承的，`<li>` 改箭头后会退化为箭头，与 tracker 勾选框（显式 `cursor-pointer`）不一致——故为收件箱 checkbox 显式补挂 `cursor-pointer`，两表同一控件同一光标。
+- **失效表述:** ADR-0060 决议 6「`<li>` 加 `cursor-pointer`」自本增补起失效，原文不改写，以本文为准（同决议 10 对 ADR-0038 的处理模式）；ADR-0060 其余决议（行点击判定、拖拽/选区闸、标题保持打开）维持不动。
+- **影响面:** 改动单文件 `web/src/components/inbox/triage-row.tsx`（摘一个 class + 补一个 class + 镜像 `pipeline-view.tsx` 的光标规范注释）；源码守卫单测并入 `row-click.test.mjs`（ADR-0060 既有单测，同一关注点，不新建文件），断言 `<li>` 语义切片不含 `cursor-pointer`、checkbox 含；先剥注释再计数（同 `pipeline-single-nav-entry.test.mjs` 踩坑口径）。
+
 
 ## Alternatives considered
 
@@ -59,6 +67,6 @@
 - ADR-0036 / ADR-0037（`/pipeline/{n}` 的报告导航与薪资排序，依赖 `contextQuery`，本件不改）。
 - ADR-0018 / ADR-0055 / ADR-0002（`/report/{n}` 的列表之外入口：工作器 `#N` 与扩展深链）。
 - ADR-0026 / ADR-0041（体检★ 与「建议体检」角标的宿主与判定口径）。
-- ADR-0060（收件箱行点击，本件维持不动）。
+- ADR-0060（收件箱行点击，行点击语义维持不动；其决议 6 的光标表述已被增补 #2 推翻）。
 - `web/src/components/pipeline-view.tsx`、`web/src/app/pipeline/[id]/page.tsx`、`web/src/app/report/[id]/page.tsx`、`web/tests/lib/unknown-employer-policy.test.mjs`。
 - 实现工单：`.scratch/pipeline-single-nav-entry/issues/01–02`（01 = ADR + 去链接线 + 守卫测试；02 = 实机逐条取证 + 收尾提交）。
