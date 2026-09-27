@@ -80,19 +80,30 @@ function classify(reportMd) {
 }
 
 // —— 解析 tracker 表格 ——
+// 列位置按表头动态解析，不能写死：tracker 可能有 Via 列，也可能没有，写死
+// cells[6] 会在有 Via 的表上把 Score 当成 Status（结果 0 行）。
 function parseRows(md) {
   const lines = md.split("\n");
+  const cellsOf = (line) => line.split("|").map((c) => c.trim());
+  // 表头行：第一个含名为 # 的格子的表格行（数据行的 notes 里也可能出现 #N，
+  // 但表头一定在它们之前）
+  const header = lines.find((l) => l.startsWith("|") && cellsOf(l).includes("#"));
+  const idx = (name) => (header ? cellsOf(header).findIndex((c) => c.toLowerCase() === name) : -1);
+  const iN = idx("#");
+  const iStatus = idx("status");
+  const iReport = idx("report");
+  const iNotes = idx("notes");
   const rows = [];
   for (const line of lines) {
     if (!line.startsWith("|")) continue;
-    const cells = line.split("|").map((c) => c.trim());
-    // 数据行：第 2 格是数字
-    if (!/^\d+$/.test(cells[1] ?? "")) continue;
+    const cells = cellsOf(line);
+    // 数据行：# 列是数字
+    if (iN < 0 || /^\d+$/.test(cells[iN] ?? "") === false) continue;
     rows.push({
-      n: cells[1],
-      status: cells[6],
-      reportLink: cells[8] ?? "",
-      notes: cells[9] ?? "",
+      n: cells[iN],
+      status: iStatus < 0 ? "" : cells[iStatus],
+      reportLink: iReport < 0 ? "" : (cells[iReport] ?? ""),
+      notes: iNotes < 0 ? "" : (cells[iNotes] ?? ""),
     });
   }
   return rows;
