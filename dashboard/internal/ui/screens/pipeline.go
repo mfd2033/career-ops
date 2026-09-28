@@ -1243,6 +1243,44 @@ func (m PipelineModel) chromeRowsFixed() int {
 	return rows
 }
 
+// overlayRows returns how many rows an active picker overlay occupies, so View()
+// can reserve that space when clipping the body. Without it the overlay is
+// appended after the body has already been clipped to the viewport, which pushes
+// the picker below the fold for any list taller than one screen — exactly the
+// "skip from the report viewer, list never changes" symptom, where the discard
+// reason picker was rendered off-screen and its confirmation never happened.
+func (m PipelineModel) overlayRows() int {
+	switch {
+	case m.discardPicker:
+		if m.discardCustomInput {
+			return 3 // title + input line + hint
+		}
+		rows := 1 + len(m.discardOptions)
+		if m.discardPredictedCount > 0 {
+			rows += 2 // "★ Predicted" label + "── Other options" separator
+		}
+		return rows
+	case m.statusPicker:
+		return 1 + len(m.currentStatusPairs())
+	case m.pdfPicker:
+		return 1 + len(m.pdfChoices)
+	case m.colPicker:
+		return 1 + len(getOptionalCols())
+	}
+	return 0
+}
+
+// renderedLines counts the number of visual lines in a rendered section, treating
+// an empty section as zero lines (unlike a naive "count \n + 1", which would report
+// one line for "" and throw the View() height budget off by one when the search
+// bar is hidden).
+func renderedLines(s string) int {
+	if s == "" {
+		return 0
+	}
+	return strings.Count(s, "\n") + 1
+}
+
 // previewBudgetApprox is the approximate row count reserved for the preview block
 // when computing scroll positioning. View() measures the actual rendered preview
 // height; adjustScroll uses this constant to avoid re-rendering on every keystroke.
@@ -1302,6 +1340,7 @@ func (m PipelineModel) View() string {
 	metricsBar := m.renderMetrics()
 	sortBar := m.renderSortBar()
 	searchBar := m.renderSearchBar()
+	columnHeader := m.renderColumnHeader()
 	body := m.renderBody()
 	preview := m.renderPreview()
 	help := m.renderHelp()
@@ -1312,11 +1351,19 @@ func (m PipelineModel) View() string {
 		bodyLines = bodyLines[m.scrollOffset:]
 	}
 
-	// Calculate available height for body
-	previewLines := strings.Count(preview, "\n") + 1
-	availHeight := m.height - m.chromeRowsFixed() - previewLines
-	if availHeight < 3 {
-		availHeight = 3
+	// Calculate the body's available height from the actual rendered height of
+	// every fixed section, then reserve rows for any active picker overlay so
+	// the overlay stays on-screen. The old chromeRowsFixed budget assumed the
+	// help bar is a single line, but it wraps on narrower terminals — and the
+	// overlay was appended after the body was already clipped, which pushed it
+	// below the fold for any list taller than one screen (the "skip from the
+	// report viewer, list never changes" symptom).
+	fixedRows := renderedLines(header) + renderedLines(tabs) + renderedLines(metricsBar) +
+		renderedLines(sortBar) + renderedLines(searchBar) + renderedLines(columnHeader) +
+		renderedLines(preview) + renderedLines(help)
+	availHeight := m.height - fixedRows - m.overlayRows()
+	if availHeight < 1 {
+		availHeight = 1
 	}
 	if len(bodyLines) > availHeight {
 		bodyLines = bodyLines[:availHeight]
@@ -1347,7 +1394,7 @@ func (m PipelineModel) View() string {
 	if searchBar != "" {
 		sections = append(sections, searchBar)
 	}
-	sections = append(sections, m.renderColumnHeader(), body, preview, help)
+	sections = append(sections, columnHeader, body, preview, help)
 	return lipgloss.JoinVertical(lipgloss.Left, sections...)
 }
 

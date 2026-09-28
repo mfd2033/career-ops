@@ -727,3 +727,39 @@ func TestGetStatusPairsUnrecognizedStatusFallsBackToStaticOrder(t *testing.T) {
 		}
 	}
 }
+// Regression: picking SKIP from the report viewer returns to the pipeline with
+// the discard reason picker open. On a list taller than the terminal the overlay
+// used to be appended AFTER the body was clipped to the viewport, so it rendered
+// off-screen — the user saw the un-refreshed list and the reason confirmation
+// never happened, leaving the row's status unchanged.
+func TestDiscardPickerOverlayStaysOnScreen(t *testing.T) {
+	apps := make([]model.CareerApplication, 0, 40)
+	for i := 0; i < 40; i++ {
+		apps = append(apps, model.CareerApplication{
+			Number:       i + 1,
+			Company:      "Co",
+			Role:         "Role",
+			Status:       "Evaluated",
+			Score:        4.0,
+			ReportPath:   "reports/001.md",
+			ReportNumber: "1",
+		})
+	}
+
+	pm := NewPipelineModel(theme.NewTheme("catppuccin-mocha"), apps, model.PipelineMetrics{Total: len(apps)}, "..", 120, 24)
+	pm.applyFilterAndSort()
+	pm.cursor = 0
+
+	pm, _ = pm.StartDiscardReasonFlow(apps[0], "Skip")
+	reloaded := pm.WithReloadedData(apps, model.PipelineMetrics{Total: len(apps)})
+
+	out := reloaded.View()
+	lines := strings.Split(out, "\n")
+
+	if !strings.Contains(strings.Join(lines, "\n"), "Discard reason") {
+		t.Fatal("discard reason overlay title missing from the rendered view")
+	}
+	if len(lines) > reloaded.height {
+		t.Fatalf("view overflows the terminal: %d rendered lines > height %d; the picker is off-screen", len(lines), reloaded.height)
+	}
+}
