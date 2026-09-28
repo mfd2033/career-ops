@@ -12,13 +12,51 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// initConsole 将控制台输出代码页切为 UTF-8，让中文日志不乱码（工单 01）。
-// 控制台子系统双击启动时控制台存在，生效；无控制台（GUI 变体/静默拉起）时
-// 调用无副作用。服务日志多为 UTF-8 字节，不改代码页会被 GBK 控制台误读。
-var kernel32SetConsoleOutputCP = windows.NewLazySystemDLL("kernel32.dll").NewProc("SetConsoleOutputCP")
+// attachParentConsole 让 GUI 子系统的 launcher 在「从终端/脚本启动」时仍写 stdout：
+// 附加父进程已有的控制台，把无句柄的 stdout/stderr 重开到 CONOUT$，并切 UTF-8 代码页
+// （服务日志多为 UTF-8 字节，不改会被 GBK 控制台误读）。双击启动时父进程没有控制台，
+// 附加失败即静默返回——不新建控制台，这正是「无控制台窗口」的治本之策（修订 2 决议 7）。
+var (
+	kernel32SetConsoleOutputCP = windows.NewLazySystemDLL("kernel32.dll").NewProc("SetConsoleOutputCP")
+	pAttachConsole             = windows.NewLazySystemDLL("kernel32.dll").NewProc("AttachConsole")
+)
 
-func initConsole() {
-	_, _, _ = kernel32SetConsoleOutputCP.Call(65001) // CP_UTF8
+const attachParentProcess = 0xFFFFFFFF // (DWORD)-1：附加到父进程的控制台
+
+func attachParentConsole() {
+	attached := attachConsoleToParent()
+	if shouldReopenConsole(stdioHandleValid(os.Stdout), attached) {
+		reopenStdHandles()
+	}
+	if attached {
+		_, _, _ = kernel32SetConsoleOutputCP.Call(65001) // CP_UTF8
+	}
+}
+
+// attachConsoleToParent 附加到父进程控制台。进程本就持有控制台时 Windows 报
+// ERROR_ACCESS_DENIED，同样视为「有控制台可用」。
+func attachConsoleToParent() bool {
+	ok, _, _ := pAttachConsole.Call(attachParentProcess)
+	return ok != 0
+}
+
+// stdioHandleValid 判断流是否已有有效句柄（例如调用方做了 `> file` / 管道重定向）。
+func stdioHandleValid(f *os.File) bool {
+	if f == nil {
+		return false
+	}
+	_, err := f.Stat()
+	return err == nil
+}
+
+// reopenStdHandles 把标准流重新指向当前控制台的设备名。
+func reopenStdHandles() {
+	if out, err := os.OpenFile("CONOUT$", os.O_WRONLY, 0); err == nil {
+		os.Stdout, os.Stderr = out, out
+	}
+	if in, err := os.OpenFile("CONIN$", os.O_RDONLY, 0); err == nil {
+		os.Stdin = in
+	}
 }
 
 // listenerPID returns the PID owning a LISTEN socket on port and its image name

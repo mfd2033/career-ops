@@ -205,3 +205,26 @@ func TestBrowserURLPinnedTo3000(t *testing.T) {
 		t.Fatalf("webPort = %d, want 3000 (ADR-0063 pins it)", webPort)
 	}
 }
+
+// 修订 2 决议 7：GUI 子系统下 stdout 只在校验通过时重开。
+// 重定向（stdout 已有有效句柄）绝不被覆盖；未附加到父控制台时也无从重开。
+func TestShouldReopenConsole(t *testing.T) {
+	cases := []struct {
+		name        string
+		stdoutValid bool
+		attached    bool
+		want        bool
+	}{
+		{"无 stdout + 附加成功 → 重开（终端直接启动）", false, true, true},
+		{"stdout 有效 → 保留调用方的重定向", true, true, false},
+		{"没附加到控制台 → 无从重开（双击静默）", false, false, false},
+		{"stdout 有效且未附加 → 不动", true, false, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := shouldReopenConsole(tc.stdoutValid, tc.attached); got != tc.want {
+				t.Fatalf("shouldReopenConsole(%v, %v) = %v, want %v", tc.stdoutValid, tc.attached, got, tc.want)
+			}
+		})
+	}
+}

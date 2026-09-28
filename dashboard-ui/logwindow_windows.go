@@ -1,11 +1,14 @@
 //go:build windows
 
-// logwindow_windows.go — launcher 自持的 Win32 日志窗口（工单 02 / ADR-0066 修订）。
+// logwindow_windows.go — launcher 自持的 Win32 日志窗口（工单 02 / ADR-0066 修订 2）。
 //
-// 为什么自持窗口而非复用 conhost 控制台：Win10/11 的控制台窗口归独立进程
-// conhost.exe 托管，本进程无法跨进程给它 subclass WM_CLOSE，SetConsoleCtrlHandler
-// 也拦不住关闭终止——「关窗即隐藏」在 conhost 窗口上做不到。于是隐藏 conhost 控制台，
-// 自建一个属于自己的只读多行编辑框窗口，WM_CLOSE 由自有 WndProc 处理成「仅隐藏」。
+// 为什么自持窗口而非复用控制台：Win10/11 的控制台窗口归独立进程 conhost.exe
+// 托管，本进程无法跨进程给它 subclass WM_CLOSE，SetConsoleCtrlHandler 也拦不住
+// 关闭终止——「关窗即隐藏」在控制台窗口上做不到。修订 2（2026-09-28）进一步实测
+// 到：当默认终端是 Windows Terminal 时，控制台被委托给 WT 宿主进程，
+// GetConsoleWindow() 返回的只是本进程内一个不可见的 PseudoConsoleWindow，
+// ShowWindow(SW_HIDE) 对屏幕上那个 WT 窗口完全无效。遂定为：双击入口直接用
+// GUI 子系统构建（无控制台可隐），自持窗口默认隐藏、由托盘唤回。
 //
 // 该窗口是 logsink 汇聚流的一个目的地（io.Writer）：Write 把整行 SendMessage 进编辑框。
 // 编辑框有历史文本长度上限（约 64K Unicode 字符），触顶后不再滚动追加，但
@@ -30,7 +33,6 @@ var (
 	pCreateWindowExW        = user32.NewProc("CreateWindowExW")
 	pDefWindowProcW         = user32.NewProc("DefWindowProcW")
 	pShowWindowLog          = user32.NewProc("ShowWindow")
-	pUpdateWindow           = user32.NewProc("UpdateWindow")
 	pGetMessageW            = user32.NewProc("GetMessageW")
 	pTranslateMessageLog    = user32.NewProc("TranslateMessage")
 	pDispatchMessageW       = user32.NewProc("DispatchMessageW")
@@ -38,7 +40,6 @@ var (
 	pLoadCursorW            = user32.NewProc("LoadCursorW")
 	pPostQuitMessage        = user32.NewProc("PostQuitMessage")
 	pSetForegroundWindowLog = user32.NewProc("SetForegroundWindow")
-	pGetConsoleWindow       = kernel32Log.NewProc("GetConsoleWindow")
 	pGetModuleHandleW       = kernel32Log.NewProc("GetModuleHandleW")
 )
 
@@ -59,8 +60,8 @@ const (
 	esAutoVScroll      = 0x00000040
 	esReadOnly         = 0x00000800
 
-	swHide = 0
-	swShow = 5
+	swHide    = 0 // WM_CLOSE → 仅隐藏
+	swRestore = 9 // 托盘唤回：隐藏窗口能显示、最小化窗口能还原
 
 	idcArrow         = 3251
 	colorWindowBrush = 5 + 1 // (COLOR_WINDOW+1) as HBRUSH
@@ -98,9 +99,10 @@ func logWndProc(hwnd, msg, wParam, lParam uintptr) uintptr {
 }
 
 // startLogWindow 注册类、创建顶层窗口 + 只读多行编辑框，在专属锁定 OS 线程上
-// 起消息泵。返回一个 asyncWriter（io.Writer）供 sink 接入：写日志的线程只入队，
-// 不被窗口 IPC 阻塞。创建失败返回 nil（io.Writer 值为 nil），launcher 据此降级
-// 保留 conhost 控制台可见——可观测性建不起来时不能把服务/启动一起拖死。
+// 起消息泵。窗口以**隐藏态**创建（修订 2 决议 8：静默启动，不抢桌面），日志照样
+// 实时累积进编辑框，托盘「显示日志窗口」唤回。返回一个 asyncWriter（io.Writer）
+// 供 sink 接入：写日志的线程只入队，不被窗口 IPC 阻塞。创建失败返回 nil
+// （io.Writer 值为 nil），sink 只剩 stdout（如有）+ 文件。
 func startLogWindow() io.Writer {
 	ready := make(chan *logWindow, 1)
 	go func() {
@@ -145,8 +147,7 @@ func startLogWindow() io.Writer {
 			top, 0, hInst, 0,
 		)
 		lw := &logWindow{top: windows.HWND(top), edit: windows.HWND(edit)}
-		pShowWindowLog.Call(top, swShow)
-		pUpdateWindow.Call(top)
+		// 不 ShowWindow：窗口保持隐藏（WS_VISIBLE 未设），静默启动只留托盘图标。
 		ready <- lw
 
 		var msg winmsg
@@ -163,9 +164,8 @@ func startLogWindow() io.Writer {
 	lw := <-ready
 	activeLogWindow = lw
 	if lw == nil {
-		return nil // 窗口没建起来：不隐藏控制台，sink 不带窗口目的地
+		return nil // 窗口没建起来：sink 只剩 stdout（如有）+ 文件，启动不死
 	}
-	hideConsole() // 窗口建起来了才隐掉多余的 conhost 控制台
 	// 关键：窗口追加走异步 drain，同步日志生产者（含托盘线程）绝不因跨线程
 	// SendMessageW 阻塞——这正是修复托盘右键菜单冻结的那一层隔离。
 	return newAsyncWriter(lw.appendLine, 512)
@@ -191,21 +191,16 @@ func (w *logWindow) appendLine(text string) {
 	pSendMessageW.Call(uintptr(w.edit), emScrollCaret, 0, 0)
 }
 
-// show 唤回窗口并置顶（托盘「显示日志窗口」动作）。
+// show 唤回窗口并置顶（托盘「显示日志窗口」动作）。用 SW_RESTORE 而非 SW_SHOW：
+// SW_SHOW 的语义是「以当前状态显示」，窗口一旦被最小化就永远停在任务栏（实测
+// showCmd 停在 2，只剩闪烁）；SW_RESTORE 对隐藏窗口能显示、对最小化窗口能还原，
+// 一种命令覆盖两种状态（修订 2 决议 8）。
 func (w *logWindow) show() {
 	if w == nil || w.top == 0 {
 		return
 	}
-	pShowWindowLog.Call(uintptr(w.top), swShow)
+	pShowWindowLog.Call(uintptr(w.top), swRestore)
 	pSetForegroundWindowLog.Call(uintptr(w.top))
-}
-
-// hideConsole 隐藏 conhost 托管的控制台窗口（日志改由自持窗口呈现）。
-func hideConsole() {
-	h, _, _ := pGetConsoleWindow.Call()
-	if h != 0 {
-		pShowWindowLog.Call(h, swHide)
-	}
 }
 
 // 本模块依赖的 x/sys/windows 版本未导出 WNDCLASSEXW/MSG，故按 x64 内存布局

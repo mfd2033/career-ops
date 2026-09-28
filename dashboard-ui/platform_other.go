@@ -41,6 +41,6 @@ func startServer(nodePath, serverDir, careerRoot string, port int, sink *lineSin
 	return cmd
 }
 
-// initConsole is a non-Windows compilation stub — there is no Windows console
-// code page to switch; UTF-8 is native on these platforms.
-func initConsole() {}
+// attachParentConsole is a non-Windows compilation stub — without a console-window
+// concept there is nothing to attach to, and stdout already works as inherited.
+func attachParentConsole() {}

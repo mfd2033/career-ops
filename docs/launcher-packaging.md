@@ -73,7 +73,7 @@
         `APPDATA="$APPDATA_REAL_ROAMING" GOPROXY=https://goproxy.cn,direct node dashboard-ui/build-dashboard-ui.mjs`
     - **关键：命令行必须与所在 shell 匹配**。PowerShell 会话里跑 Bash 写法（`VAR=x cmd` 命令前缀）**不会注入 env**——PowerShell 只认 `$env:VAR=` 前缀,命令会回退官方源挂起（workbuddy 卡在 1.1 的根因之一）。先判用哪个 shell（见执行约定「PS 探针」）,再选对应写法。
     - 说明：`APPDATA` 必须指向含 `go\env` 的实路径（`C:\Users\<user>\AppData\Roaming`）；只用 `go env -w` 写盘不够——子进程继承空 APPDATA 会读不到 env 文件，回退官方源 Bad Gateway；显式进程级注入 `GOPROXY=https://goproxy.cn,direct` 直走国内镜像,`go install go-winres` 几秒装完,无官方源挂起窗口。
-    - **预期结果**：命令退出码 0，无报错；仓库根出现新 `career-dashboard-launcher.exe`（约 9 MB，mtime 为本次时间），`.dashboard-runtime\v{cacheVersion}\` 重建。
+    - **预期结果**：命令退出码 0，无报错；仓库根出现新 `career-dashboard-launcher.exe`（约 9 MB，mtime 为本次时间），`.dashboard-runtime\v{cacheVersion}\` 重建；exe 为 **GUI 子系统**（PE 可选头 +0x44 = 2；打包脚本已建后强制校验，非 GUI 直接报错拒绝产出，见 ADR-0066 修订 2）。
     - **成功判据**：新 exe 产出 + 无 `Error:`；若报 `[safe-delete][SAFE_DELETE_BULK_CONFIRM_REQUIRED]` 见下方豁免；若卡 5 分钟无新 `$ <cmd>` 行 = 卡死，终止排查。
     - 工具：Shell · 位置：沙箱内（产物全在仓库内，网络默认放行） · 超时：**900000ms（15 分钟）**
     - **前台等待 / 当轮收尾（硬性，2026-09-11 实测）**：打包命令必须前台阻塞等待完成或在同一会话轮次内收尾，**禁止以后台方式跨轮等待**——后台长命令会在会话轮次结束时被终止（实测第 2 次打包运行 10m15s 仍无报错输出，但轮次结束进程被杀，未产出 exe）。
@@ -92,18 +92,20 @@
     5. 写 `app/build-info.json`（sha / builtAt / cacheVersion）
     6. 预生成 `.dashboard-runtime\v{cacheVersion}\` 运行时缓存
     7. `go-winres make` 生成 `.syso`（图标+清单+版本）
-    8. `go build -ldflags "-X main.cacheVersion=..."` → 仓库根 `career-dashboard-launcher.exe`（约 9 MB）
+    8. `go build -ldflags "-H windowsgui -X main.cacheVersion=..."` → 仓库根 `career-dashboard-launcher.exe`（约 9 MB，GUI 子系统），建后校验 PE Subsystem=GUI(2)，不合格即报错
 - **第 2 步 启动新 exe 并验证：**
   2.1 **启动**：运行 `career-dashboard-launcher.exe`
     - 工具：Shell · 位置：沙箱外（拉起进程） · 超时：30000ms
     - 说明：启动长驻进程，工具立即返回；无端口参数，launcher 在 3000–3040 自动挑空闲端口（`pickFreePort`），通常取 3000。
     - 预期结果：命令立即返回，进程 `career-dashboard-launcher.exe` 出现在 `tasklist` 中；其在大约 60s 内就绪。
+    - **窗口预期（ADR-0066 修订 2）**：双击/沙箱外拉起**全程不出现控制台窗口**（GUI 子系统）；日志窗口**默认不弹出**（隐藏态创建，日志照常累积）；托盘图标存在（不在任务栏）。旧行为「启动弹出日志窗口 + 控制台被隐藏」已废。
   2.2 **验证**：`Invoke-RestMethod http://localhost:3000/api/version`
     - 工具：Shell · 位置：沙箱内可试（localhost），被拦则沙箱外 · 超时：60000ms（launcher 有 60s 就绪窗口）
     - 说明：端口按实际（launcher 自动挑选，通常 3000）。
     - **预期结果**：HTTP 200，体为 `{"sha":"{短sha}","packaged":true,...}` → 成功。
     - 失败判据：`packaged:false` 或 sha 不符 = 服务的是工作树而非打包构建；连接失败/超时 = 见 2.3。
-  2.3 **启动失败排查**：端口被占 → 回到 0.2 清端口；启动即崩 → 检查 `.dashboard-runtime\v{cacheVersion}` 权限与 node.exe 完整性。
+  2.3 **启动失败排查**：端口被占 → 回到 0.2 清端口；启动即崩 → 检查 `.dashboard-runtime\v{cacheVersion}` 权限与 node.exe 完整性；双击冒出控制台窗口 → 产物不是 GUI 子系统，重跑 1.1。
+  2.4 **日志窗口验收（托盘操作，ADR-0066 修订 2）**：托盘「显示日志窗口」→ 窗口出现在前台且内容连续（启动期日志已在）；把窗口**最小化**后再点一次 → **还原为正常窗口**而非停在最小化（旧 `SW_SHOW` 缺陷的回归判据）；点 × → 窗口消失、服务仍应答。
 - **第 3 步 旧 runtime 目录清理（可选维护）：**
   3.1 **清理命令**：`Remove-Item .dashboard-runtime\v{旧sha} -Recurse -Force`
     - 工具：Shell · 位置：沙箱内（仓库内目录） · 超时：120000ms（大目录删除慢）

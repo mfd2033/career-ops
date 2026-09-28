@@ -1,16 +1,18 @@
 # dashboard-ui/
 
-career-ops **网页版 dashboard** 的 Windows 启动器——把 web UI（`web/`）打包成可双击运行的启动器。两个构建变体，都由同一份 Go 源码（`launcher.go`）编译：
+career-ops **网页版 dashboard** 的 Windows 启动器——把 web UI（`web/`）打包成可双击运行的启动器。打包产出的日常双击入口是 **`career-dashboard-launcher.exe`**：
 
-- **`career-dashboard-ui.exe`** —— GUI 子系统（`-H windowsgui`，无控制台窗口），由打包器注入 `cacheVersion` 戳。是常规双击目标。
-- **`career-dashboard-launcher.exe`** —— 控制台子系统变体（同一程序，无 `-H windowsgui`），日常双击入口。它会弹出一个**自持的日志窗口**实时显示启动过程与服务输出（见下「运行日志」）；同时仍把日志打到 stdout，便于脚本抓取。用 `BUILDFULL=0` 单独构建。
+- **GUI 子系统**（`-H windowsgui`）：双击启动全程**不创建控制台窗口**。这是治本手段——Windows Terminal 充当默认终端时，控制台窗口归 WT 宿主进程所有，process 内 `GetConsoleWindow()` 只拿到一个不可见的 `PseudoConsoleWindow`，`ShowWindow(SW_HIDE)` 对它无效（实测，见 ADR-0066 修订 2）。
+- **静默启动**：启动后只有托盘图标 + 后台服务，日志窗口默认不弹出；托盘「显示日志窗口」随时唤回（隐藏或最小化都能拉回前台）。
+- 从终端/脚本拉起时，launcher 附加父进程控制台（`AttachConsole`）接回 stdout，日志照旧打到该终端；`> file` / 管道重定向原样保留。
+- 打包脚本在建后强制校验 PE Subsystem=GUI(2)，改回控制台子系统即打包失败（防回归）。
 
 ## 它是什么
 
-两个 exe **都不内嵌** Node 运行时。启动时 launcher 按顺序在自身目录旁寻找运行时：
+启动器**不内嵌** Node 运行时。启动时 launcher 按顺序在自身目录旁寻找运行时：
 
 1. exe 旁边的 `node.exe` + `app/server.js`（`locateSelfHostedRuntime`），或
-2. exe 旁已解压的运行时缓存 `.dashboard-runtime\v{N}\`（node.exe + app/）——完整构建/`career-dashboard-ui.exe` 之前运行产生的布局。
+2. exe 旁已解压的运行时缓存 `.dashboard-runtime\v{N}\`（node.exe + app/）——完整构建或先前一次运行产生的布局。
 
 两者都没有时，launcher 会报告 `dashboard runtime not found` 并退出。
 
@@ -29,11 +31,13 @@ career-ops **网页版 dashboard** 的 Windows 启动器——把 web UI（`web/
 
 托盘 tooltip 实时外显服务状态：`就绪 :3000` / `服务已退出` / `启动失败`。左键点击托盘图标无动作（只有菜单）。图标复用内嵌的 `icon.ico`。
 
-## 运行日志（工单 01–02 / ADR-0066）
+## 运行日志（工单 01–02 / ADR-0066 修订 2）
 
-launcher 把**自身决策**（接管/杀占口/起服/就绪）与 **dashboard 服务子进程的 stdout/stderr** 汇入同一条时间线，逐行加 `[HH:MM:SS] [launcher|server]` 前缀，同时送往：自持的**日志窗口**（Win32 只读编辑框，实时滚动）与磁盘文件 **`.career-ops-web/launcher.log`**（每次 launcher 进程启动即重置）。启动时 conhost 控制台被隐藏（其窗口归 conhost 进程、无法拦截关闭改隐藏，故改用自持窗口）。
+launcher 把**自身决策**（接管/杀占口/起服/就绪）与 **dashboard 服务子进程的 stdout/stderr** 汇入同一条时间线，逐行加 `[HH:MM:SS] [launcher|server]` 前缀，同时送往：自持的**日志窗口**（Win32 只读编辑框，实时滚动）与磁盘文件 **`.career-ops-web/launcher.log`**（每次 launcher 进程启动即重置）。
 
-- 日志窗口的 × 只是**隐藏**，不影响 launcher 与服务生死；托盘「显示日志窗口」唤回。
+- **默认静默**：窗口随进程创建但保持隐藏，日志持续累积；托盘「显示日志窗口」唤回（`SW_RESTORE`，隐藏或最小化都能拉回前台）。
+- **无控制台窗口**：双击入口是 GUI 子系统，启动全程不出现控制台；从终端/脚本启动时日志额外写该终端的 stdout。
+- 日志窗口的 × 只是**隐藏**，不影响 launcher 与服务生死。
 - 启动失败不再让进程蒸发：关掉错误框后 launcher 驻留托盘，随时可唤回窗口查完整死因。
 - 旧 `.dashboard-runtime\v{N}\tray-debug.log` 通道已退役（路径随版本漂移、就绪前日志丢失），由上述固定路径取代。
 
@@ -58,8 +62,8 @@ launcher 把**自身决策**（接管/杀占口/起服/就绪）与 **dashboard 
 ## 构建
 
 ```bash
-node dashboard-ui/build-dashboard-ui.mjs      # 两个变体
-BUILDFULL=0 node dashboard-ui/build-dashboard-ui.mjs   # 只编 launcher（约 9 MB）
+node dashboard-ui/build-dashboard-ui.mjs      # 打包 launcher（含 web 构建，约 1–3 分钟）
+# 本地重打包首选：node local/pack-launcher.mjs（停旧实例 → 清缓存 → 打包 → 启动验证 → 清旧 runtime）
 ```
 
 脚本会：
@@ -70,7 +74,7 @@ BUILDFULL=0 node dashboard-ui/build-dashboard-ui.mjs   # 只编 launcher（约 9
 4. 把干净的目录树复制进 `app/`（launcher 读取的运行时源），并把当前运行的 Node 二进制复制为 `node.exe`，
 5. 用构建的 git SHA / 时间戳 / cacheVersion 写入 `app/build-info.json`，
 6. 用 go-winres 重新生成 `.syso` 资源（图标 + manifest + 版本），
-7. 把变体编译到仓库根目录（`career-dashboard-ui.exe`，以及 `BUILDFULL=0` 之外的 `career-dashboard-launcher.exe`）。
+7. 把 launcher 编译到仓库根目录：`go build -ldflags "-H windowsgui -X main.cacheVersion=..."`（GUI 子系统，双击不创建控制台窗口），建后校验 PE Subsystem=GUI(2)，不合格即拒绝产出。
 
 需要 **Node 20+**（Next 16 引擎下限）、**Go 1.24+** 和 **go-winres**（首次运行时自动安装到 `.gobin/`）。先确认环境：
 
@@ -81,7 +85,7 @@ go version       # 需 ≥ go1.24
 
 ### 打包产物
 
-- **输出：** 仓库根目录下的 `career-dashboard-ui.exe` 和 `career-dashboard-launcher.exe`（各约 9 MB）。两者都**不内嵌**运行时——服务器二进制（`node.exe`）和 Next standalone 目录树位于 `dashboard-ui/` 下的 `app/` / `node.exe`（构建产物，git 已忽略），启动时必须位于 exe 旁或 `.dashboard-runtime\v{N}\`。
+- **输出：** 仓库根目录下的 `career-dashboard-launcher.exe`（约 9 MB）。**不内嵌**运行时——服务器二进制（`node.exe`）和 Next standalone 目录树位于 `dashboard-ui/` 下的 `app/` / `node.exe`（构建产物，git 已忽略），启动时必须位于 exe 旁或 `.dashboard-runtime\v{N}\`。
 - **耗时：** 一般机器约 1–3 分钟（首次会安装 go-winres，更久一些）。旁边跑着 `next dev` 也不冲突——构建写入的是独立的输出目录。
 - **缓存版本：** `cacheVersion` 由构建自动注入（构建时的 git SHA，外加树不干净时的 `-dirty`），因此重新构建绝不会复用旧的 `.dashboard-runtime\v{N}` 解压。
 
@@ -90,6 +94,7 @@ go version       # 需 ≥ go1.24
 ```bash
 # 1. 确认 exe 存在且时间戳是最新的
 Get-Item career-dashboard-launcher.exe
+#    子系统应为 GUI：子系统值在 PE 可选头 +0x44 处（2=GUI、3=Console）
 
 # 2. 在 exe 旁提供运行时（node.exe + app/server.js），或先跑一次 launcher
 #    ——存在时会读取 .dashboard-runtime\v{N}\。
@@ -98,7 +103,7 @@ Get-Item career-dashboard-launcher.exe
 .\career-dashboard-launcher.exe
 Invoke-WebRequest "http://localhost:3000/api/version"   # 期望 HTTP 200
 
-# 4. 诊断：若行为异常，看自持日志窗口，或读统一启动器日志
+# 4. 诊断：若行为异常，托盘「显示日志窗口」看实时日志，或读统一启动器日志文件
 Get-Content .career-ops-web\launcher.log
 ```
 
@@ -109,11 +114,12 @@ Get-Content .career-ops-web\launcher.log
 | `go: command not found` | 安装 Go 1.24+ 并加入 `PATH` |
 | 首次打包 go-winres 安装失败 | 检查网络 / `GOPROXY` 后重试；成功后缓存在 `.gobin/`，之后不再安装 |
 | 启动时报 "dashboard runtime not found" | 在 exe 旁放 `node.exe` + `app/server.js`，或把运行时解压进 `.dashboard-runtime\v{N}\`（跑一次完整构建会准备好 `dashboard-ui/app` + `dashboard-ui/node.exe`） |
-| exe 启动了但浏览器没弹出来 | 看日志窗口或读 `.career-ops-web/launcher.log`（始终会写） |
+| exe 启动了但浏览器没弹出来 | 托盘「显示日志窗口」或读 `.career-ops-web/launcher.log`（始终会写） |
+| 双击后冒出控制台窗口 | 产物不是 GUI 子系统——重新打包（打包脚本会拒绝非 GUI 产物）；另检查是不是双击了别的 exe |
 | 重新打包后网页还是旧版 | `cacheVersion` 来自 git SHA + dirty 标记；干净重建会生成新的 `.dashboard-runtime\v{N}` 目录——若没变，先确认 exe 时间戳确实更新了 |
 | 弹「服务意外退出」/「启动失败」对话框 | 关掉框后托盘驻留；托盘「显示日志窗口」看完整死因，「重启服务」重试 |
 
-日志窗口与 `.career-ops-web/launcher.log` 逐行同源；窗口的 × 只隐藏不退出（工单 02）。GUI 变体（`-H windowsgui`）无控制台，日志主要靠窗口与文件。
+日志窗口与 `.career-ops-web/launcher.log` 逐行同源；窗口默认隐藏、点 × 只隐藏不退出，「显示日志窗口」用 `SW_RESTORE` 唤回（工单 02 / 修订 2）。
 
 ## 说明
 

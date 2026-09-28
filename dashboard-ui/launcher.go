@@ -70,6 +70,14 @@ func browserURL() string {
 	return fmt.Sprintf("http://localhost:%d", webPort)
 }
 
+// shouldReopenConsole 是 attachParentConsole 的纯决策（无 OS、可单测）：仅当调用方
+// 没有给我们可用 stdout（GUI 子系统从终端启动的典型情形：句柄为空）且已成功附加
+// 到父控制台时，才把标准流重开到 CONOUT$。调用方做了重定向/管道（stdout 已有效）
+// 时绝不覆盖——那是它要的产出物，不是我们该抢的通道。
+func shouldReopenConsole(stdoutValid, attached bool) bool {
+	return attached && !stdoutValid
+}
+
 // cannotFreeMsg is the error shown when a squatter on webPort can't be evicted.
 // It names the occupant and NEVER suggests another port (ADR-0063: pinned).
 func cannotFreeMsg(pid int, image string, cause error) string {
@@ -115,12 +123,13 @@ func main() {
 	runtimeDir := filepath.Dir(nodePath)
 
 	// 统一日志管道（工单 01 / ADR-0066）：进程一启动就把 launcher 决策与服务
-	// 子进程输出汇入同一条时间线，同时写控制台与 .career-ops-web/launcher.log。
+	// 子进程输出汇入同一条时间线，同时写控制台（如附加到）与 .career-ops-web/launcher.log。
 	// 在接管决策之前建立，确保启动期日志不再丢失（旧 tray-debug.log 的"就绪后
 	// 才重定向"两截问题就此消灭）。
-	initConsole() // 控制台切 UTF-8 代码页，中文不乱码
-	// 自持日志窗口（工单 02）：创建成功则隐藏 conhost 控制台，日志改由窗口+文件呈现；
-	// 创建失败时 win==nil，initLogSink 仅接 stdout+文件，控制台保留可见作降级。
+	attachParentConsole() // GUI 子系统无控制台：附加父控制台（有则）保住脚本 stdout
+	// 自持日志窗口（工单 02 / 修订 2 决议 8）：窗口建起来但默认隐藏（静默启动），
+	// 日志实时累积进编辑框 + launcher.log，托盘「显示日志窗口」唤回；建不起来时
+	// win==nil，sink 只剩 stdout（如有）+ 文件，启动照常继续。
 	win := startLogWindow()
 	sink, logPath := initLogSink(careerRoot, win)
 	log.SetOutput(newPrefixWriter(sink, "launcher"))

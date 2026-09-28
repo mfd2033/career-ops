@@ -13,6 +13,3 @@ type logWindow struct{}
 func startLogWindow() io.Writer { return nil }
 
 func (w *logWindow) show() {}
-
-// hideConsole 在非-Windows 无对应概念。
-func hideConsole() {}

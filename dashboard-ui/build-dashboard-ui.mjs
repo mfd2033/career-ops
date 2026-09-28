@@ -9,7 +9,8 @@
 //   4. copy the clean standalone tree  → dashboard-ui/app   (Go embed source)
 //   5. copy the running node binary     → dashboard-ui/node.exe (Go embed source)
 //   6. go-winres make                   → rsrc_windows_amd64.syso (icon + manifest)
-//   7. go build -ldflags cacheVersion   → career-dashboard-launcher.exe (repo root)
+//   7. go build -ldflags "-H windowsgui -X main.cacheVersion" → career-dashboard-launcher.exe
+//      （GUI 子系统：双击不创建控制台窗口，见 ADR-0066 修订 2）
 //
 // Requires: Node (builds the web app), Go 1.24+, and go-winres (auto-installed
 // on first run into dashboard-ui/.gobin). Run from anywhere:
@@ -75,6 +76,21 @@ function cpSyncRetry(src, dest, opts = {}, tries = 3) {
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, attempt * 2000);
     }
   }
+}
+
+// ── PE 子系统守卫（ADR-0066 修订 2）────────────────────────────────────────
+// 日常双击入口必须是 GUI 子系统：控制台子系统会随双击创建一个控制台窗口，
+// 而 Windows Terminal 默认终端下该窗口既不归本进程、也隐不掉（实测：GetConsoleWindow
+// 返回进程内不可见的 PseudoConsoleWindow，SW_HIDE 对屏幕上的 WT 窗口无效）。
+// 构建后直接读 PE 头校验，防止有人改回控制台子系统而回归。
+const PE_SUBSYSTEM_WINDOWS_GUI = 2;
+const PE_SUBSYSTEM_CONSOLE = 3;
+
+/** 读 PE 可选头里的 Subsystem：e_lfanew 在 0x3C，COFF 头 20 字节后为可选头，Subsystem 在可选头 +0x44（IMAGES_OPTIONAL_HEADER64 布局）。 */
+function peSubsystem(file) {
+  const buf = fs.readFileSync(file);
+  const optionalHeader = buf.readUInt32LE(0x3c) + 24;
+  return buf.readUInt16LE(optionalHeader + 0x44);
 }
 
 // 0. ensure go-winres is available
@@ -184,9 +200,20 @@ run(`${goWinres} make --arch amd64`, uiDir);
 // 7. Lightweight launcher (~9 MB): no embedded runtime, reads from cache dir.
 // cacheVersion injection prevents the launcher falling back to newest-by-mtime
 // and silently serving a stale .dashboard-runtime extraction after a rebuild.
+// -ldflags "-H windowsgui"（ADR-0066 修订 2）：GUI 子系统，双击启动全程无控制台窗口；
+// 从终端/脚本拉起时由 launcher 自己 AttachConsole(父进程) 接回 stdout，重定向/管道则原样保留。
+// 注意 -H 是链接器选项，必须包在 -ldflags 里（`go build -H ...` 会被当成非法 build flag）。
 {
   const out = path.join(root, "career-dashboard-launcher.exe");
-  run(`go build -ldflags "-X main.cacheVersion=${cacheVersion}" -o ..\\career-dashboard-launcher.exe .`, uiDir);
+  run(`go build -ldflags "-H windowsgui -X main.cacheVersion=${cacheVersion}" -o ..\\career-dashboard-launcher.exe .`, uiDir);
+  const subsystem = peSubsystem(out);
+  if (subsystem !== PE_SUBSYSTEM_WINDOWS_GUI) {
+    const kind = subsystem === PE_SUBSYSTEM_CONSOLE ? "console(3)" : `${subsystem}`;
+    throw new Error(
+      `launcher 子系统校验失败：期望 GUI(${PE_SUBSYSTEM_WINDOWS_GUI})，实际 ${kind}。` +
+        "控制台子系统会在双击时弹出隐不掉的控制台窗口（ADR-0066 修订 2），拒绝产出。",
+    );
+  }
   const mb = (fs.statSync(out).size / (1024 * 1024)).toFixed(1);
-  console.log(`\n✓ ${out} (${mb} MB)`);
+  console.log(`\n✓ ${out} (${mb} MB, subsystem=GUI)`);
 }

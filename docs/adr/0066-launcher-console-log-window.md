@@ -1,6 +1,6 @@
 # ADR-0066: launcher 日志窗口——自持 Win32 窗口、关窗即隐藏、统一日志随进程重置
 
-- **Status:** Accepted (2026-09-26；同日实现时修订窗口机制，见 Decision 1/3 与修订说明)
+- **Status:** Accepted (2026-09-26；同日实现时修订窗口机制，见 Decision 1/3 与修订说明；2026-09-28 修订 2：控制台宿主事实修正 + 静默启动，见文末)
 - **Context:** 需求（2026-09-26，四轮 grilling 敲定）：launcher 启动后能看到后台服务运行情况（启动过程、日志输出）。现状三个断层：
   1. `startServer`（`dashboard-ui/platform_windows.go`）spawn `node server.js` 时未接 `cmd.Stdout/Stderr`，服务输出被 Go 默认丢进 NUL；
   2. `setupTrayLog`（`launcher.go`）在服务**就绪之后**才把 launcher 自身日志重定向到 `.dashboard-runtime\v{版本}\tray-debug.log`——启动期最关键的接管决策全部丢失，且路径含版本号，重打包后日志位置漂移；
@@ -32,3 +32,26 @@
 - 日志可观测性覆盖"launcher 自己拉起的服务"这一条链路；dev server（`start-web.cmd`）与复用路径的输出仍走各自通道，本 ADR 不接管。
 - 重打包后才能对日常双击入口生效（家规：打包前先停旧实例）。
 - 验收以手动目视为主（GUI 三路径先例同 ADR-0063）：①双击→窗口实时可见启动过程→就绪横幅；②点 ×→窗口消失、服务活、托盘唤回；③杀掉 node→弹窗+tooltip「服务已退出」+日志含死前输出；④占口起服失败→弹窗+托盘驻留+可查日志。
+
+## 修订 2（2026-09-28）——控制台宿主事实修正：双击入口转 GUI 子系统、日志窗口静默启动
+
+**触发**：用户报告「启动 launcher 之后控制台和自持日志窗口都没有隐藏，只是最小化了」。实测复现后确认是两个独立缺陷（下），其中第一个推翻了 Context 3 的事实前提。
+
+**事实修正（探针实测，非推断）**：Context 3 与决议 1 的「控制台窗口归独立进程 conhost.exe 所有」在本机（Win11 25H2，默认终端 = Windows Terminal）不成立——
+
+1. 控制台被**委托给 Windows Terminal 宿主进程**（`WindowsTerminal.exe`，窗口类 `CASCADIA_HOSTING_WINDOW_CLASS`，标题即 exe 路径）；
+2. `GetConsoleWindow()` 返回的是**本进程内一个不可见的 `PseudoConsoleWindow` 助手窗口**，`ShowWindow(SW_HIDE)` 隐的是它。实测：隐藏后伪控制台 `visible=false`，而屏幕上的 WT 宿主窗口仍 `visible=true / showCmd=1`——`hideConsole()` 对用户可见的那个窗口完全无效，控制台就这么一直留在桌面上。
+3. 附带发现：`GetAncestor(GetConsoleWindow(), GA_ROOTOWNER)` 能直接拿到 WT 宿主窗口，跨进程 `SW_HIDE` 对它有效（实测 `ancestorHiddenOk=true`）——可直接用，但依赖另一进程的窗口归属与 WT 的委托策略，微软一改即失效。
+
+**第二个缺陷**：决议 3 的唤回用 `ShowWindow(SW_SHOW)`，其语义是「以当前状态显示」。窗口被用户最小化后（标题栏带最小化按钮），唤回只剩任务栏闪烁，`showCmd` 停在 2（实测）——这正是用户看到的「只是最小化了」。
+
+**修订决议**（决议 7/8 分别替代决议 1 的「启动即隐藏 conhost 控制台」与决议 3 的「启动弹出窗口 + SW_SHOW 唤回」）：
+
+7. **日常双击入口改用 GUI 子系统构建**：launcher 构建加 `-H windowsgui`，从源头不创建控制台窗口——治本，不再与宿主进程的窗口归属赛跑，也不依赖 `GA_ROOTOWNER` 这类跨进程技巧。`hideConsole()` 及其非-Windows 桩退役：保留它反而新增一类危险（进程若 attach 到脚本/终端已有的控制台，隐藏动作会连带隐掉用户自己的终端窗口）。脚本场景的 stdout 捕获由 launcher 自己 `AttachConsole(ATTACH_PARENT_PROCESS)` + 重开 `CONOUT$` 保住；父进程无控制台（双击）时附加失败即静默，不新建控制台。打包脚本在建后校验 PE Subsystem=GUI(2)，防回归到控制台子系统。
+8. **日志窗口静默启动**：窗口照旧创建（日志持续累积进编辑框，托盘随时可唤回），但不再在启动时 `ShowWindow(SW_SHOW)`；托盘「显示日志窗口」改 `SW_RESTORE`——对隐藏窗口显示、对最小化窗口还原，一种命令覆盖两种状态（实测：最小化后 `SW_SHOW` → showCmd 仍为 2，`SW_RESTORE` → 1）。
+
+**Consequences 增补**：
+
+- 双击启动的全过程不再有任何控制台窗口，也不再需要在窗口创建失败时「降级保留控制台可见」——没有控制台可留，失败即静默 + 日志文件 + 托盘驻留。
+- 从终端/脚本启动时日志仍同步打到该终端的 stdout（附加父控制台）；`detached` 拉起场景无 stdout，launcher.log 与自持窗口是唯一记录。
+- 验收判据替换为：①双击→**无任何控制台窗口**（任务栏无终端项）、托盘图标就绪、日志窗口默认不出现；②托盘「显示日志窗口」→窗口出现在前台、内容连续；③最小化该窗口后托盘再次唤回→**还原**而非停在最小化；④点 ×→窗口消失、服务活；⑤杀掉 node→弹窗 + tooltip + 日志含死前输出。
