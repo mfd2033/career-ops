@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { Loader2, X } from "lucide-react";
-import { CHANNELS, localISODate, type CadenceEntry, type Channel } from "@/lib/followups";
+import { CHANNELS, channelLabel } from "@/lib/followup-channel.mjs";
+import { localISODate, type CadenceEntry, type Channel } from "@/lib/followups";
 import { cn } from "@/lib/cn";
 import { useI18n } from "@/lib/i18n/context";
 
@@ -112,7 +113,8 @@ export function LogDialog({
               <select value={channel} onChange={(e) => setChannel(e.target.value as Channel)} className={cn(inputCls, "mt-1")}>
                 {CHANNELS.map((c) => (
                   <option key={c} value={c}>
-                    {c}
+                    {/* 显示层翻译：数据值永远是英文规范值 */}
+                    {channelLabel(c, t)}
                   </option>
                 ))}
               </select>

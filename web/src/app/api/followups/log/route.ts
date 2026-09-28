@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { atomicWrite } from "@/lib/core/safe-write";
-import { CHANNELS, isRealISODate, localISODate } from "@/lib/followups";
+import { CHANNELS, normalizeChannel } from "@/lib/followup-channel.mjs";
+import { isRealISODate, localISODate } from "@/lib/followups";
 import { followupsLogPath, withFollowupsWrite, followupsWriteError } from "@/lib/followups-server";
 
 export const runtime = "nodejs";
@@ -58,8 +59,9 @@ export async function POST(req: Request) {
   if (!isRealISODate(date)) {
     return Response.json({ error: "date must be a real calendar date (YYYY-MM-DD)" }, { status: 400 });
   }
-  const rawChannel = (body.channel ?? "Other").trim();
-  const channel = CHANNELS.find((c) => c.toLowerCase() === rawChannel.toLowerCase());
+  // 白名单归一化住在 followup-channel.mjs（唯一事实来源，单测门住）：新值
+  // Platform 在此自动放行，中文别名不容错（用户决策：无中文输入路径）。
+  const channel = normalizeChannel(body.channel ?? "Other");
   if (!channel) {
     return Response.json({ error: `channel must be one of: ${CHANNELS.join(", ")}` }, { status: 400 });
   }

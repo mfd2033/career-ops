@@ -3,7 +3,9 @@
 // the core's — followup-cadence.mjs --json — never recomputed here; these are
 // only the display-side contracts and formatters.
 
-export const CHANNELS = ["Email", "LinkedIn", "Phone", "Other"] as const;
+// 渠道枚举的唯一事实来源在 followup-channel.mjs（纯逻辑，node --test 可直接
+// 门住）；本模块只仍对外暴露 Channel 类型，具体值与下拉框都直引 followup-channel.mjs。
+import { CHANNELS } from "./followup-channel.mjs";
 export type Channel = (typeof CHANNELS)[number];
 
 /** The profile.yml → followup_cadence keys the core followup-cadence.mjs reads. */

@@ -88,6 +88,13 @@ export const en: Dict = {
   "followups.close": "Close",
   "followups.fieldDate": "Date",
   "followups.fieldChannel": "Channel",
+  // 渠道显示名（数据值永远是英文规范值，这里只翻译显示）——key 与
+  // followup-channel.mjs 的 channelLabelKey 一一对应。
+  "followups.channel.Email": "Email",
+  "followups.channel.LinkedIn": "LinkedIn",
+  "followups.channel.Platform": "Platform",
+  "followups.channel.Phone": "Phone",
+  "followups.channel.Other": "Other",
   "followups.fieldContact": "Contact",
   "followups.optional": "optional",
   "followups.contactPlaceholder": "who you reached out to",
@@ -194,6 +201,12 @@ export const zh: Dict = {
   "followups.close": "关闭",
   "followups.fieldDate": "日期",
   "followups.fieldChannel": "渠道",
+  // 渠道显示名（与 en 段同键）。
+  "followups.channel.Email": "邮件",
+  "followups.channel.LinkedIn": "领英",
+  "followups.channel.Platform": "招聘平台",
+  "followups.channel.Phone": "电话",
+  "followups.channel.Other": "其他",
   "followups.fieldContact": "联系人",
   "followups.optional": "可选",
   "followups.contactPlaceholder": "你联系了谁",

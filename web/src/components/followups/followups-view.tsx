@@ -9,6 +9,7 @@ import { CompanyLogo } from "@/components/company-logo";
 import { LogDialog } from "@/components/followups/log-dialog";
 import { NextDateDialog } from "@/components/followups/next-date-dialog";
 import { scoreTone } from "@/lib/format";
+import { channelLabel } from "@/lib/followup-channel.mjs";
 import {
   type CadenceEntry,
   type CadenceMetadata,
@@ -483,7 +484,8 @@ function HistoryPanel({ entry: e, onRemove }: { entry: CadenceEntry; onRemove: (
                 )}
               </span>
               <span className="tabular-nums text-muted">{f.date}</span>
-              <Badge tone="muted">{f.channel}</Badge>
+              {/* 渠道 Badge 与下拉框同一套翻译；未知值原样显示（兼容旧数据） */}
+              <Badge tone="muted">{channelLabel(f.channel, t)}</Badge>
               {f.contact && <span className="text-muted">{f.contact}</span>}
               {f.notes && <span className="text-faint">{f.notes}</span>}
             </li>
