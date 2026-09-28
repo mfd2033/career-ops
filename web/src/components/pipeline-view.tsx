@@ -385,8 +385,24 @@ export function PipelineView({
               value={q}
               onChange={(e) => setQ(e.target.value)}
               placeholder={t("pipeline.searchPlaceholder")}
-              className="w-full rounded-md border border-border bg-surface/60 py-2 pl-9 pr-3 text-sm outline-none transition-colors placeholder:text-faint focus:border-brand/50 focus-visible:ring-2 focus-visible:ring-brand/40"
+              className="w-full rounded-md border border-border bg-surface/60 py-2 pl-9 pr-9 text-sm outline-none transition-colors placeholder:text-faint focus:border-brand/50 focus-visible:ring-2 focus-visible:ring-brand/40"
             />
+            {/* 一键清除：仅在有输入时显示。q 是本地态，清除即时生效；若 URL 也带了
+                q（assistant 深链设置），一并清掉，避免刷新后被旧值重新 seed 回来。 */}
+            {q && (
+              <button
+                type="button"
+                onClick={() => {
+                  setQ("");
+                  if (params.get("q")) setParams({ q: null });
+                }}
+                title={t("pipeline.clearSearch")}
+                aria-label={t("pipeline.clearSearch")}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-faint transition-colors hover:text-foreground"
+              >
+                <X className="size-4" />
+              </button>
+            )}
           </div>
         )}
       </div>
