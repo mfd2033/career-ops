@@ -5,6 +5,9 @@ export const CHANNELS: readonly ["Email", "LinkedIn", "Platform", "Phone", "Othe
 
 export type Channel = (typeof CHANNELS)[number];
 
+/** 表单预选渠道；单测锁定其为 CHANNELS 成员。 */
+export const DEFAULT_CHANNEL: (typeof CHANNELS)[number];
+
 /** 归一化为合法渠道值；非法/非字符串输入返回 null（语义见 .mjs 实现）。 */
 export function normalizeChannel(raw: unknown): Channel | null;
 

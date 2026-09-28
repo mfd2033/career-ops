@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Loader2, X } from "lucide-react";
-import { CHANNELS, channelLabel } from "@/lib/followup-channel.mjs";
+import { CHANNELS, DEFAULT_CHANNEL, channelLabel } from "@/lib/followup-channel.mjs";
 import { localISODate, type CadenceEntry, type Channel } from "@/lib/followups";
 import { cn } from "@/lib/cn";
 import { useI18n } from "@/lib/i18n/context";
@@ -22,7 +22,8 @@ export function LogDialog({
   // Local day, not UTC — east of UTC toISOString() defaults to "yesterday"
   // and its max would block picking the user's actual today.
   const [date, setDate] = useState(() => localISODate());
-  const [channel, setChannel] = useState<Channel>("Email");
+  // 预选渠道来自纯模块的 DEFAULT_CHANNEL（当前 Platform），避免默认值散落在组件里。
+  const [channel, setChannel] = useState<Channel>(DEFAULT_CHANNEL);
   const [contact, setContact] = useState(entry.contacts[0]?.email ?? "");
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);

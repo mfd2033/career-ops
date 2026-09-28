@@ -10,7 +10,17 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { CHANNELS, normalizeChannel, channelLabelKey } from "../../src/lib/followup-channel.mjs";
+import { CHANNELS, DEFAULT_CHANNEL, normalizeChannel, channelLabelKey } from "../../src/lib/followup-channel.mjs";
+
+// ---- DEFAULT_CHANNEL：表单预选渠道 ----------------------------------------
+
+test("默认渠道是 Platform（用户决策 2026-09-28）", () => {
+  assert.equal(DEFAULT_CHANNEL, "Platform");
+});
+
+test("默认渠道必须是合法枚举值——防止改名后默认为非法值", () => {
+  assert.ok(CHANNELS.includes(DEFAULT_CHANNEL), `${DEFAULT_CHANNEL} 不在 CHANNELS 里`);
+});
 
 // ---- CHANNELS：枚举顺序即下拉框顺序 --------------------------------------
 

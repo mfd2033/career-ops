@@ -11,6 +11,12 @@
 export const CHANNELS = ["Email", "LinkedIn", "Platform", "Phone", "Other"];
 
 /**
+ * 表单预选渠道（用户决策 2026-09-28）：国内求职的主跟进渠道是招聘平台，
+ * 默认值随之设为 Platform；单测锁定它与 CHANNELS 的成员关系，防改名后脱离。
+ */
+export const DEFAULT_CHANNEL = "Platform";
+
+/**
  * 把任意输入归一化为合法渠道值，非法输入返回 null（调用方负责拒绝）。
  * 大小写不敏感 + 容忍首尾空白，与既有路由行为一致；非字符串安全返回 null。
  */
