@@ -96,8 +96,8 @@ for (const [url, expected] of BOARD_CASES) {
   else fail(`  ${JSON.stringify(url)} → ${JSON.stringify(got)}，期望 ${JSON.stringify(expected)}`);
 }
 
-// ── 4. inboxSalaryRange + passesInboxSalaryFloor：过滤语义（ADR-0023 决定 3）──
-console.log('薪资下限过滤（区间重叠、未知放行）');
+// ── 4. inboxSalaryRange + passesInboxSalaryFloor：过滤语义（严格下限、未知过滤）──
+console.log('薪资下限过滤（严格下限、未知过滤）');
 const RANGE_CASES = [
   // [salaryText, url, expected range]
   ['20-35K·14薪', 'https://www.zhipin.com/x', { minK: 20, maxK: 35 }],
@@ -114,10 +114,11 @@ for (const [text, url, expected] of RANGE_CASES) {
 }
 const FLOOR_CASES = [
   // [range, floor, passes]
-  [{ minK: 20, maxK: 35 }, 20, true],   // 上限 ≥ 下限 → 保留（区间重叠）
-  [{ minK: 15, maxK: 25 }, 30, false],  // 上限 < 下限 → 滤掉
-  [{ minK: 30, maxK: 40 }, 30, true],   // 贴线保留
-  [null, 30, true],                      // 薪资未知 → 放行（不误删）
+  [{ minK: 20, maxK: 35 }, 20, true],   // 下限 = 输入值 → 保留（贴线）
+  [{ minK: 30, maxK: 40 }, 30, true],   // 下限 = 输入值 → 保留
+  [{ minK: 15, maxK: 25 }, 30, false],  // 下限 < 输入值 → 滤掉
+  [{ minK: 20, maxK: 35 }, 30, false],  // 下限 < 输入值 → 滤掉（即使上限 ≥ 输入值）
+  [null, 30, false],                     // 薪资未知 → 过滤掉（不再放行）
   [{ minK: 20, maxK: 35 }, 0, true],    // 门关
   [null, 0, true],
 ];

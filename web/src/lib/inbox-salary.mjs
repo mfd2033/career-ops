@@ -77,8 +77,8 @@ export function salaryBoardFromUrl(url) {
  * @param {string} [url] 行的职位 URL，用于站点口径
  * @returns {{ salaryText?: string, salaryUnknown: boolean }}
  *   salaryText   展示用原文（PUA 已清洗）；尾段缺失时缺省
- *   salaryUnknown 解析不出月薪（含无尾段/手写行/面议/元·天口径）——「不误删」
- *                取向：过滤放行、排序沉底、展示打标
+ *   salaryUnknown 解析不出月薪（含无尾段/手写行/面议/元·天口径）——排序沉底、
+ *                展示打标；薪资下限过滤开启时被过滤掉（不再放行）
  */
 export function inboxSalaryFromNote(note, url) {
   const tail = noteSalaryTail(note);
@@ -104,8 +104,8 @@ export function inboxSalaryRange(salaryText, url) {
 }
 
 /**
- * 薪资下限门（语义与探索页 applyBrowserSalaryGate 一致——「不误删」）：
- * 区间重叠（区间上限 ≥ 下限）即保留；无区间（薪资未知）放行；下限 0/缺省 = 门关。
+ * 薪资下限门：严格下限判定——区间下限 ≥ 输入值才保留；无区间（薪资未知）
+ * 过滤掉；下限 0/缺省 = 门关。
  * 纯 — 导出给测试。
  * @param {{ minK: number, maxK: number } | null} [range]
  * @param {number | null} [salaryMinK] 月薪下限（K）；null/0 = 门关
@@ -114,8 +114,8 @@ export function inboxSalaryRange(salaryText, url) {
 export function passesInboxSalaryFloor(range, salaryMinK) {
   const floor = Number(salaryMinK) || 0;
   if (floor <= 0) return true;
-  if (!range) return true; // 薪资未知 → 放行并打标，绝不静默丢弃
-  return range.maxK >= floor;
+  if (!range) return false; // 薪资未知 → 过滤掉（不再放行）
+  return range.minK >= floor;
 }
 
 /**

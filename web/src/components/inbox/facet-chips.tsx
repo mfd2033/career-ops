@@ -135,8 +135,8 @@ export function FacetChips({
           <InputClearButton show={locQ.length > 0} onClear={() => setLocQ("")} label={t("inbox.clearLocation")} className="right-1.5" />
         </div>
 
-        {/* 薪资下限（月薪 K）——与探索页同一语义同一文案（ADR-0023）：区间重叠
-            判定，薪资未知行放行并保持打标。空 = 不过滤。 */}
+        {/* 薪资下限（月薪 K）——严格下限（区间下限 ≥ 输入值）；薪资未知行过滤掉。
+            空 = 不过滤。 */}
         <div className="relative shrink-0">
           <Coins className="pointer-events-none absolute left-2.5 top-1/2 size-3 -translate-y-1/2 text-faint" />
           <input

@@ -58,7 +58,7 @@ export function InboxTriage({ inbox, scoredUrls }: { inbox: InboxJob[]; scoredUr
   const [kw, setKw] = useState("");
   // 默认开（ADR-0024）；持久化键见上——无记录保持默认，显式 "0" 关
   const [unscoredOnly, setUnscoredOnly] = useState(true);
-  // 薪资下限（月薪 K）——与探索页同一语义（区间重叠、未知放行打标）
+  // 薪资下限（月薪 K）——严格下限（区间下限 ≥ 输入值），薪资未知过滤掉
   const [salaryMin, setSalaryMin] = useState<number | null>(null);
   // 按薪资排序（ADR-0023 决定 4；默认开见 ADR-0024）：开 = 解析区间中位值降序、未知沉底；关 = 新鲜度
   const [sortBySalary, setSortBySalary] = useState(true);
@@ -227,7 +227,7 @@ export function InboxTriage({ inbox, scoredUrls }: { inbox: InboxJob[]; scoredUr
         if (seniorities.size && (!e.seniority || !seniorities.has(e.seniority))) return false;
         if (locQ.trim() && !(e.job.location || "").toLowerCase().includes(locQ.trim().toLowerCase())) return false;
         if (kw.trim() && !`${e.job.company} ${e.job.role}`.toLowerCase().includes(kw.trim().toLowerCase())) return false;
-        // 薪资下限：区间重叠保留、未知放行（与探索页同语义，ADR-0023）
+        // 薪资下限：严格下限（区间下限 ≥ 输入值）保留，薪资未知过滤掉
         if (!passesInboxSalaryFloor(e.salaryRange, salaryMin)) return false;
         if (unscoredOnly && isEvaluatedRow(resolveRowScore(liveScores.get(e.urlKey), persistedScores.get(e.urlKey)))) return false;
         return true;
