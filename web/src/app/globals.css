@@ -200,6 +200,14 @@ html {
 .report-prose tbody tr:hover { background: color-mix(in srgb, var(--fg) 3%, transparent); }
 .report-prose img { border-radius: 0.5rem; }
 
+/* 薪资下限数字框：隐藏原生 number spinner（▲▼）。ADR-0059 决定 8 原样保留
+   spinner 并把 × 挤在其左侧，实测在圆角 pill / 表单域里观感异常——箭头灰盒
+   与内嵌 × 打架。此处仅对带 .no-number-spin 的输入生效，不影响 config 页等
+   仍需要步进箭头的 number 输入框。 */
+.no-number-spin::-webkit-outer-spin-button,
+.no-number-spin::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.no-number-spin { -moz-appearance: textfield; appearance: textfield; }
+
 /* CostBadge (co-located → global): cost color-semantics, see cost-badge.tsx */
 .co-cost{display:inline-flex;align-items:center;gap:.28rem;border-radius:999px;font-weight:600;line-height:1;white-space:nowrap;border:1px solid transparent}
 .co-cost[data-size="xs"]{font-size:10.5px;padding:.16rem .4rem;letter-spacing:.04em;text-transform:uppercase}

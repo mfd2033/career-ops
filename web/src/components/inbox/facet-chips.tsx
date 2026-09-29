@@ -151,10 +151,10 @@ export function FacetChips({
             placeholder={t("explore.filter.zhSalaryMinPlaceholder")}
             title={t("explore.filter.zhSalaryMin")}
             aria-label={t("explore.filter.zhSalaryMin")}
-            // pr-10 留 × + 原生 spinner 位；× 定位在 spinner 左侧（ADR-0059 决定 8）
-            className="w-28 shrink-0 rounded-full border border-border bg-surface/40 pl-7 pr-10 py-1 text-xs outline-none transition-colors placeholder:text-faint focus:border-brand/40 max-sm:min-h-[44px]"
+            // 隐藏原生 spinner（no-number-spin）；pr-7 只留 × 位，与同排地点框对齐（修正 ADR-0059 决定 8）
+            className="no-number-spin w-28 shrink-0 rounded-full border border-border bg-surface/40 pl-7 pr-7 py-1 text-xs outline-none transition-colors placeholder:text-faint focus:border-brand/40 max-sm:min-h-[44px]"
           />
-          <InputClearButton show={salaryMin != null} onClear={() => setSalaryMin(null)} label={t("explore.filter.clearSalaryMin")} className="right-5" />
+          <InputClearButton show={salaryMin != null} onClear={() => setSalaryMin(null)} label={t("explore.filter.clearSalaryMin")} className="right-1.5" />
         </div>
 
         {anyActive && (

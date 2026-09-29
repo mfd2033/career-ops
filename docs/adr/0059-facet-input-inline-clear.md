@@ -28,6 +28,7 @@
 7. **i18n：新增 5 个 aria-label 键（en/zh 对称）**：`inbox.clearKeyword`、`inbox.clearLocation`、`explore.filter.clearQuery`、`explore.filter.clearSalaryMin`、`explore.results.clearFilter`。薪资 × 键定义于 explore cluster、收件箱复用（沿用薪资下限键已有的跨集群复用先例）。
 
 8. **布局细节**：可显示 × 的输入框常驻右侧留白（`pr` 加大），避免文字滚动到 × 下方；`locQ` `w-28` → `w-32` 容纳 ×；`salaryMin` 的 × 通过 className 定位点放在原生 number spinner 左侧，不隐藏 spinner（不改既有外观）。
+   - **修订（2026-09-29）**：决定 8 的"不隐藏 spinner"实测观感异常——Chromium/Edge 下原生 ▲▼ 灰盒常驻右边缘，实际渲染成 `value→spinner→×`（与本条意图相反），且破坏圆角 pill 造型。改为给两个薪资数字框加 `globals.css` 作用域类 `.no-number-spin` 隐藏原生 spinner，并收紧留白：收件箱 `pr-10`→`pr-7`、× `right-5`→`right-1.5`（对齐同排 `locQ`）；Explore `pr-10`→`pr-6`、× 复位默认（对齐同表单 `zhQuery`）。`.no-number-spin` 只挂薪资框，不影响 config 页等仍需步进箭头的 number 输入。
 
 ## Alternatives considered
 

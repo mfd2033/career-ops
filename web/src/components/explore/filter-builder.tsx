@@ -204,14 +204,13 @@ export function FilterBuilder({
                 if (e.key === "Enter") e.currentTarget.blur();
               }}
               placeholder={t("explore.filter.zhSalaryMinPlaceholder")}
-              // pr-10 留 × + 原生 spinner 位；× 定位在 spinner 左侧（ADR-0059 决定 8）
-              className="min-w-0 flex-1 bg-transparent pr-10 outline-none"
+              // 隐藏原生 spinner（no-number-spin）；pr-6 只留 × 位，与同表单 zhQuery 对齐（修正 ADR-0059 决定 8）
+              className="no-number-spin min-w-0 flex-1 bg-transparent pr-6 outline-none"
             />
             <InputClearButton
               show={filters.zhSalaryMin != null}
               onClear={() => set({ zhSalaryMin: undefined })}
               label={t("explore.filter.clearSalaryMin")}
-              className="right-7"
             />
           </div>
         </div>
