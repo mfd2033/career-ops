@@ -425,8 +425,6 @@ export function InboxTriage({ inbox, scoredUrls }: { inbox: InboxJob[]; scoredUr
           onToggleSortBySalary={() => setSortBySalary((v) => !v)}
           availSources={availSources}
           availSeniorities={availSeniorities}
-          resultCount={filtered.length}
-          totalCount={enriched.length - hiddenCount}
           anyActive={anyFacet}
           // 清空 = 回到默认（ADR-0024 决定 5）：两开关回默认开，其余条件清零——
           // 否则会落入已退役的 fresh-batch 截断视图；清除后的开关状态照常持久化
@@ -434,8 +432,9 @@ export function InboxTriage({ inbox, scoredUrls }: { inbox: InboxJob[]; scoredUr
         />
       </div>
 
-      {/* batch header: fresh slice by default, or the full filtered set */}
-      <div className="mt-4 flex items-baseline justify-between gap-3 md:shrink-0">
+      {/* batch header: fresh slice by default, or the full filtered set —— 命中数在此处
+          唯一呈现（筛选工具条不再重复 N/total） */}
+      <div className="mt-3 flex items-baseline justify-between gap-3 md:shrink-0">
         <p className="text-sm font-medium text-foreground">
           {capped
             ? t("inbox.freshWorthLook")
