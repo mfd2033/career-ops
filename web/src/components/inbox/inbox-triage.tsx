@@ -462,8 +462,10 @@ export function InboxTriage({ inbox, scoredUrls, kwdSet, onToggleKwd, onClearKwd
       </div>
 
       {/* batch header: fresh slice by default, or the full filtered set —— 命中数在此处
-          唯一呈现（筛选工具条不再重复 N/total） */}
-      <div className="mt-3 flex items-baseline justify-between gap-3 md:shrink-0">
+          唯一呈现（筛选工具条不再重复 N/total）。「全选 / 已隐藏恢复」是作用于命中集合的
+          动作，紧跟标题成同一视觉组：ADR-0065 后内容区全宽，原先的 justify-between 会把
+          按钮甩到远端右角，宽屏下与它作用的范围相距上千像素，形同失踪。 */}
+      <div className="mt-3 flex flex-wrap items-baseline gap-x-4 gap-y-1 md:shrink-0">
         <p className="text-sm font-medium text-foreground">
           {capped
             ? t("inbox.freshWorthLook")
@@ -477,14 +479,14 @@ export function InboxTriage({ inbox, scoredUrls, kwdSet, onToggleKwd, onClearKwd
           <button
             type="button"
             onClick={toggleSelectAll}
-            className="text-xs text-faint transition-colors hover:text-foreground"
+            className="text-xs text-muted transition-colors hover:text-foreground"
             aria-pressed={allFilteredSelected}
           >
             {allFilteredSelected ? t("inbox.selectNone") : t("inbox.selectAll")}
           </button>
         )}
         {hiddenCount > 0 && (
-          <button type="button" onClick={() => setHidden([])} className="text-xs text-faint transition-colors hover:text-foreground">
+          <button type="button" onClick={() => setHidden([])} className="text-xs text-muted transition-colors hover:text-foreground">
             {t("inbox.hiddenRestore", { n: hiddenCount })}
           </button>
         )}
