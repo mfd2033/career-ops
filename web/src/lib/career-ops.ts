@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import * as yaml from "js-yaml";
 import { atomicWrite } from "@/lib/core/safe-write";
 import { parseApplications } from "@/lib/tracker-table.mjs";
 // One definition of the `{n}-RESERVED.md` convention, shared with
@@ -29,6 +30,16 @@ import type { EvalTimingEntry } from "@/lib/eval-timing";
 // keyed by tracker#; display-only, never a scoring input.
 import { checkupIndex, suggestsCheckup } from "@/lib/company-checkups.mjs";
 import type { CheckupEntry } from "@/lib/format";
+// 收件箱关键词条（ADR-0068）：纯逻辑层（词节提取/三源词表/词典匹配/装配）全在
+// inbox-keywords.mjs（node --test locked），这里只做 fs/yaml 读取与 join。
+import {
+  extractSectionKeywords,
+  cvSkillsFromMd,
+  parseSkillTokens,
+  buildVocab,
+  assembleRowKeywords,
+} from "@/lib/inbox-keywords.mjs";
+import { normalizeUrl } from "@/lib/core/url-key.mjs";
 
 /**
  * Resolve the career-ops "home" — the directory holding the user's sibling
@@ -103,7 +114,7 @@ function read(rel: string): string | null {
   }
 }
 
-export type InboxJob = { url: string; company: string; role: string; location?: string; compensation?: string; done: boolean; postedAt?: string; salaryText?: string; salaryUnknown?: boolean };
+export type InboxJob = { url: string; company: string; role: string; location?: string; compensation?: string; done: boolean; postedAt?: string; salaryText?: string; salaryUnknown?: boolean; keywords: string[] };
 
 /** A pipeline-row segment like `posted: 2026-07-14`, `trust: 62 stale` or
  *  `note: …` — the core appends these LABELED segments after whatever
@@ -161,6 +172,9 @@ export function readInbox(): InboxJob[] {
       postedAt: posted && /^\d{4}-\d{2}-\d{2}$/.test(posted) ? posted : undefined,
       salaryText: salary.salaryText,
       salaryUnknown: salary.salaryUnknown,
+      // 读盘层不装配关键词（explore 快照等消费方不依赖它）；管道页在
+      // pipelineSummary 里 join 词节+词典命中覆盖这个空数组（ADR-0068）。
+      keywords: [],
     });
   }
   return jobs;
@@ -329,12 +343,27 @@ export function pipelineSummary(): PipelineSummary {
   // 一次读盘拿齐每行的报告事实（URL 头 / 报告薪资 / `?` 行的 Via，ADR-0037 决议 9）
   // —— 三者此前分别读一趟，合并后页面加载仍是「一行一读」。
   const facts = readReportFacts(applications);
+  // 收件箱关键词条（ADR-0068）：词节 map 复用同一次报告读盘；词表/jds 归档
+  // 另读几份小文件（portals/cv/skill-extract/keywords.yml + jds/ 目录下十余个）。
+  const kwCtx = readKeywordContext();
+  const keywordsByUrl = new Map<string, string[]>();
+  for (const a of applications) {
+    const f = facts.get(a.n);
+    if (!f?.url || !f.keywords?.length) continue;
+    const k = normalizeUrl(f.url);
+    if (k && !keywordsByUrl.has(k)) keywordsByUrl.set(k, f.keywords);
+  }
   return {
     root,
     rootExists: fs.existsSync(root),
     // join the freshness date (first_seen) onto each raw posting — the inbox's
     // triage view orders/faceted-filters on it entirely client-side.
-    inbox: readInbox().map((j) => ({ ...j, postedAt: j.postedAt ?? scanDates.get(j.url) })),
+    inbox: readInbox().map((j) => {
+      const row = { ...j, postedAt: j.postedAt ?? scanDates.get(j.url) };
+      // done 行不会出现在收件箱 triage 面，不浪费匹配周期（ADR-0068）。
+      if (!row.done) row.keywords = inboxRowKeywords(row, kwCtx, keywordsByUrl);
+      return row;
+    }),
     // 每行带上报告薪资（列展示 + salary 排序）；`?`（未知雇主）行另带上报告的
     // `**Via:**` 头，让列表在 agency 策略下显示「{代招方}（代招）」而无需客户端读文件。
     applications: applications.map((a) => {
@@ -352,7 +381,7 @@ export function pipelineSummary(): PipelineSummary {
   };
 }
 
-/** 一行的报告事实：一次读盘能拿到的三样（ADR-0037 决议 9）。 */
+/** 一行的报告事实：一次读盘能拿到的四样（ADR-0037 决议 9 + ADR-0068 词节）。 */
 export type ReportFacts = {
   /** 报告 `**URL:**` 头（仅当是 http(s) 绝对链接时存在）。 */
   url?: string;
@@ -361,6 +390,9 @@ export type ReportFacts = {
   /** 报告 `**Via:**` 头（发帖/代招方）——**仅** `?`（未知雇主）行才取值；其它行
    *  undefined 表示「不需要」。读不到时是 ""（调用方保持 `?`）。 */
   via?: string;
+  /** `## Keywords extracted` 节的词条（ADR-0068，已评估行的词节词源）；无节 → 缺省。
+   *  只认这一节，报告其余正文不参与（红线）。 */
+  keywords?: string[];
 };
 
 /**
@@ -386,6 +418,8 @@ export function readReportFacts(apps: Application[]): Map<string, ReportFacts> {
         if (url && /^https?:\/\//i.test(url)) facts.url = url;
         facts.salary = parseReportSalary(extractAdvertisedComp(md)) as ReportSalary | null;
         if (isUnknownEmployer) facts.via = fields.find((f) => f.label === "Via")?.value ?? "";
+        const kws = extractSectionKeywords(md);
+        if (kws.length) facts.keywords = kws;
       } catch {
         // 报告不可读：保持空事实（pipelineSummary 的旧行为）
       }
@@ -415,6 +449,87 @@ export function withReportSalaries(apps: Application[]): Application[] {
  *  只传一行，故仍是一次读盘。读不到报告 → ""，调用方保持 `?`。 */
 function readReportVia(app: Application): string {
   return readReportFacts([app]).get(app.n)?.via ?? "";
+}
+
+/** 关键词装配上下文（ADR-0068）：运行时三源并集词表 + 用户增量/抑制 + jds 归档正文。
+ *  每个管道页请求装配一次（纯函数在 inbox-keywords.mjs，这里只负责读盘）。 */
+type KeywordContext = { vocab: string[]; exclude: string[]; jdsBodies: Map<string, string> };
+
+const yamlStrList = (v: unknown): string[] =>
+  Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+
+function readKeywordContext(): KeywordContext {
+  // 词源 1：portals.yml title_filter.positive（扫描配置里的职位词表）
+  let portalsPositive: string[] = [];
+  try {
+    const doc = yaml.load(read("portals.yml") ?? "") as { title_filter?: { positive?: unknown } } | null;
+    portalsPositive = yamlStrList(doc?.title_filter?.positive);
+  } catch {
+    /* portals 坏了：少一个词源，不阻塞页面 */
+  }
+  // 词源 2/3：cv.md Skills 节 + skill-extract.mjs 的 SKILL_TOKENS（源码文本解析，
+  // 格式变更由 inbox-keywords.test.mjs 的用例先红报信）
+  const cvSkills = cvSkillsFromMd(read("cv.md") ?? "");
+  const skillTokens = parseSkillTokens(read("skill-extract.mjs") ?? "");
+  // 用户增量层：config/keywords.yml 可不存在；坏了也只当没有增量
+  let userKeywords: string[] = [];
+  let exclude: string[] = [];
+  const kys = read("config/keywords.yml");
+  if (kys) {
+    try {
+      const doc = yaml.load(kys) as { keywords?: unknown; exclude?: unknown } | null;
+      userKeywords = yamlStrList(doc?.keywords);
+      exclude = yamlStrList(doc?.exclude);
+    } catch {
+      /* ignore */
+    }
+  }
+  const vocab = buildVocab({ portalsPositive, cvSkills, skillTokens, userKeywords });
+  // jds 归档关联：按 frontmatter `url:` 的归一键存正文（不重建 apify 的文件名 hash，
+  // 两边归一化口径不同会漂）。正文 < 50 字的空壳归档不参匹配（防噪声）。
+  const jdsBodies = new Map<string, string>();
+  try {
+    const dir = path.join(careerOpsRoot(), "jds");
+    for (const f of fs.readdirSync(dir)) {
+      if (!f.endsWith(".md")) continue;
+      try {
+        const txt = fs.readFileSync(path.join(dir, f), "utf8");
+        const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(txt);
+        if (!m) continue;
+        const fm = yaml.load(m[1]) as { url?: unknown } | null;
+        if (typeof fm?.url !== "string") continue;
+        const k = normalizeUrl(fm.url);
+        const body = txt.slice(m[0].length);
+        if (k && body.trim().length >= 50) jdsBodies.set(k, body);
+      } catch {
+        /* 坏归档：跳过 */
+      }
+    }
+  } catch {
+    /* 无 jds/ 目录 → 无归档 */
+  }
+  return { vocab, exclude, jdsBodies };
+}
+
+/** 装配一个收件箱 pending 行的最终关键词（ADR-0068 决议 1）：
+ *  词节来源（已评估行）∪ 词典命中（行标题文本 + 能关联到的 jds 归档正文）。
+ *  `local:jds/x.md` 行直读路径；http 行按归一 URL 查归档表。 */
+function inboxRowKeywords(j: InboxJob, kwCtx: KeywordContext, keywordsByUrl: Map<string, string[]>): string[] {
+  const sectionKeywords = keywordsByUrl.get(normalizeUrl(j.url)) ?? [];
+  const face = [j.company, j.role, j.location].filter(Boolean).join(" ");
+  let body = "";
+  if (/^local:jds\/.+\.md$/i.test(j.url)) {
+    body = read(j.url.slice("local:".length)) ?? "";
+  } else {
+    const k = normalizeUrl(j.url);
+    if (k) body = kwCtx.jdsBodies.get(k) ?? "";
+  }
+  return assembleRowKeywords({
+    sectionKeywords,
+    faces: body ? [face, body] : [face],
+    vocab: kwCtx.vocab,
+    exclude: kwCtx.exclude,
+  });
 }
 
 export type ReportData = { content: string; file: string };

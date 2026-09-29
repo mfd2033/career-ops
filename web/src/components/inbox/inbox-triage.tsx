@@ -14,6 +14,8 @@ import { resolveRowScore } from "@/lib/inbox-score.mjs";
 import { scoreTone } from "@/lib/format";
 import { scoreNum } from "@/lib/score-num.mjs";
 import { FacetChips } from "./facet-chips";
+import { KeywordBar } from "./keyword-bar";
+import { countKeywords } from "@/lib/inbox-keywords.mjs";
 import { TriageRow, type RowScore } from "./triage-row";
 import { RowSlot } from "@/components/row-slot";
 import { ShortlistTray, type ShortItem } from "./shortlist-tray";
@@ -45,7 +47,7 @@ const SCORE_BATCH_MAX = 20;
 // `**URL:**` headers). The live job-store only covers evaluations fired THIS
 // browser — postings already evaluated via CLI / batch / an earlier session
 // must still show their real score, not a false "not scored".
-export function InboxTriage({ inbox, scoredUrls }: { inbox: InboxJob[]; scoredUrls?: Record<string, { score: string }> }) {
+export function InboxTriage({ inbox, scoredUrls, kwdSet, onToggleKwd, onClearKwd }: { inbox: InboxJob[]; scoredUrls?: Record<string, { score: string }>; kwdSet?: Set<string>; onToggleKwd?: (w: string) => void; onClearKwd?: () => void }) {
   const { jobs, startJob } = useJobs();
   const { t } = useI18n();
   const router = useRouter();
@@ -227,12 +229,15 @@ export function InboxTriage({ inbox, scoredUrls }: { inbox: InboxJob[]; scoredUr
         if (seniorities.size && (!e.seniority || !seniorities.has(e.seniority))) return false;
         if (locQ.trim() && !(e.job.location || "").toLowerCase().includes(locQ.trim().toLowerCase())) return false;
         if (kw.trim() && !`${e.job.company} ${e.job.role}`.toLowerCase().includes(kw.trim().toLowerCase())) return false;
+        // 关键词条（ADR-0068 决议 3）：选中 chip 之间 OR（命中任一即保留），
+        // 与其余 facet 之间 AND（就住在这个 filter 链里）。
+        if (kwdSet && kwdSet.size > 0 && !(e.job.keywords || []).some((k) => kwdSet.has(k))) return false;
         // 薪资下限：严格下限（区间下限 ≥ 输入值）保留，薪资未知过滤掉
         if (!passesInboxSalaryFloor(e.salaryRange, salaryMin)) return false;
         if (unscoredOnly && isEvaluatedRow(resolveRowScore(liveScores.get(e.urlKey), persistedScores.get(e.urlKey)))) return false;
         return true;
       }),
-    [enriched, hidden, within, sources, seniorities, locQ, kw, salaryMin, unscoredOnly, liveScores, persistedScores],
+    [enriched, hidden, within, sources, seniorities, locQ, kw, salaryMin, unscoredOnly, liveScores, persistedScores, kwdSet],
   );
 
   // 🔴 SINGLE ORDER PLUG POINT — exactly one comparator, chosen by the sort toggle:
@@ -261,7 +266,14 @@ export function InboxTriage({ inbox, scoredUrls }: { inbox: InboxJob[]; scoredUr
     [filtered, sortBySalary],
   );
 
-  const anyFacet = within != null || sources.size > 0 || seniorities.size > 0 || locQ.trim() !== "" || kw.trim() !== "" || salaryMin != null || unscoredOnly;
+  const anyFacet = within != null || sources.size > 0 || seniorities.size > 0 || locQ.trim() !== "" || kw.trim() !== "" || salaryMin != null || unscoredOnly || (kwdSet?.size ?? 0) > 0;
+
+  // 关键词条 chip 数据（ADR-0068 决议 4）：口径 = 未隐藏的全部 pending 行，
+  // 不随其他 facet 波动（与 availSources 的「存在才显示」同构，chip 集不闪跳）。
+  const keywordCounts = useMemo(
+    () => countKeywords(enriched.filter((e) => !hidden.includes(e.urlKey)).map((e) => ({ keywords: e.job.keywords }))),
+    [enriched, hidden],
+  );
   const capped = !showAll && !anyFacet;
   const visible = capped ? ordered.slice(0, BATCH) : ordered;
   const hiddenCount = hidden.length;
@@ -428,8 +440,11 @@ export function InboxTriage({ inbox, scoredUrls }: { inbox: InboxJob[]; scoredUr
           anyActive={anyFacet}
           // 清空 = 回到默认（ADR-0024 决定 5）：两开关回默认开，其余条件清零——
           // 否则会落入已退役的 fresh-batch 截断视图；清除后的开关状态照常持久化
-          onClear={() => { setWithin(null); setSources(new Set()); setSeniorities(new Set()); setLocQ(""); setKw(""); setSalaryMin(null); setUnscoredOnly(true); setSortBySalary(true); }}
+          onClear={() => { setWithin(null); setSources(new Set()); setSeniorities(new Set()); setLocQ(""); setKw(""); setSalaryMin(null); setUnscoredOnly(true); setSortBySalary(true); onClearKwd?.(); }}
         />
+        {/* 关键词条（ADR-0068）：工具条下方独立一行，可折叠、零 token；
+            没有任何关键词时组件自返 null，不占位。 */}
+        <KeywordBar counts={keywordCounts} selected={kwdSet ?? new Set<string>()} onToggle={(w) => onToggleKwd?.(w)} />
       </div>
 
       {/* batch header: fresh slice by default, or the full filtered set —— 命中数在此处
@@ -496,6 +511,7 @@ export function InboxTriage({ inbox, scoredUrls }: { inbox: InboxJob[]; scoredUr
               scored={resolveRowScore(liveScores.get(e.urlKey), persistedScores.get(e.urlKey))}
               selected={selected.has(e.urlKey)}
               shortlisted={isShortlisted(e.urlKey)}
+              highlight={kwdSet && kwdSet.size > 0 ? [...kwdSet] : undefined}
               onToggleSelect={() => toggleSelect(e.urlKey)}
               onSave={() => save(e.job)}
               onSkip={() => skip(e.job)}

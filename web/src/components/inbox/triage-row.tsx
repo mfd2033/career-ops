@@ -1,12 +1,13 @@
 "use client";
 
-import { useRef, type MouseEvent } from "react";
+import { useRef, type MouseEvent, type ReactNode } from "react";
 import Link from "next/link";
 import { Bookmark, BookmarkCheck, Coins, ExternalLink, Loader2, X } from "lucide-react";
 import type { InboxJob } from "@/lib/career-ops";
 import type { AtsSource } from "@/lib/explore";
 import { ATS_LABEL } from "@/lib/explore";
 import { openableUrl } from "@/lib/inbox-url.mjs";
+import { splitHighlight } from "@/lib/inbox-keywords.mjs";
 import { isExemptClickTarget, isDragGesture, isTextSelectionActive } from "@/lib/row-click.mjs";
 import { Badge } from "@/components/ui/badge";
 import { CompanyLogo } from "@/components/company-logo";
@@ -27,6 +28,26 @@ function agoLabel(
   return t("inbox.monthsAgo", { n: Math.floor(age / 30) });
 }
 
+// 命中高亮（ADR-0068 决议 6）：只在关键词过滤激活时解释「为什么筛到它」。
+// 分段口径在 splitHighlight（纯函数已单测）；无 terms 或未命中时逐字节等于原文。
+function Marked({ text, terms }: { text: string; terms?: string[] }): ReactNode {
+  const segs = splitHighlight(text, terms);
+  if (segs.length === 1 && !segs[0].hit) return <>{text}</>;
+  return (
+    <>
+      {segs.map((s, i) =>
+        s.hit ? (
+          <mark key={i} className="rounded-xs bg-brand-soft text-brand">
+            {s.t}
+          </mark>
+        ) : (
+          <span key={i}>{s.t}</span>
+        ),
+      )}
+    </>
+  );
+}
+
 // One raw posting in the triage list. Shows ONLY cheap, free signals + an honest
 // "not scored" (CRUDA) — never a fake match%. Once its shortlist eval finishes it
 // flips to EVALUADA (a real A–F badge). Save→shortlist / Skip→hidden are free + undoable.
@@ -37,6 +58,7 @@ export function TriageRow({
   scored,
   selected,
   shortlisted,
+  highlight,
   onToggleSelect,
   onSave,
   onSkip,
@@ -47,6 +69,9 @@ export function TriageRow({
   scored?: RowScore;
   selected: boolean;
   shortlisted: boolean;
+  /** 关键词过滤生效时传入选中词（ADR-0068 决议 6）：只高亮命中的标题子串，
+   *  未激活/未命中时行渲染零变化。 */
+  highlight?: string[];
   onToggleSelect: () => void;
   onSave: () => void;
   onSkip: () => void;
@@ -109,14 +134,14 @@ export function TriageRow({
               title={t("inbox.openPosting")}
               className="group text-foreground transition-colors hover:text-brand"
             >
-              <span className="font-medium">{job.company}</span>
-              <span className="text-muted group-hover:text-brand"> · {job.role}</span>
+              <span className="font-medium"><Marked text={job.company} terms={highlight} /></span>
+              <span className="text-muted group-hover:text-brand"> · <Marked text={job.role} terms={highlight} /></span>
               <ExternalLink className="ml-1 inline size-3 align-[-1px] text-faint opacity-0 transition-opacity group-hover:opacity-100" />
             </a>
           ) : (
             <>
-              <span className="font-medium text-foreground">{job.company}</span>
-              <span className="text-muted"> · {job.role}</span>
+              <span className="font-medium text-foreground"><Marked text={job.company} terms={highlight} /></span>
+              <span className="text-muted"> · <Marked text={job.role} terms={highlight} /></span>
             </>
           )}
         </p>

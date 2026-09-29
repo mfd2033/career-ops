@@ -38,6 +38,7 @@ local\restore-data.cmd            按快照恢复单个文件
 ```
 data/  reports/  interview-prep/  writing-samples/  todo-list/
 cv.md  portals.yml  modes/_custom.md  modes/_profile.md  config/profile.yml
+config/keywords.yml           # 2026-09-29 起：收件箱关键词词表用户层（ADR-0068）
 local/  tests/local-*.test.mjs        # 2026-09-21 起：gitignored 的 fork-local 代码层
 ```
 

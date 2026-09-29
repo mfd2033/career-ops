@@ -63,10 +63,19 @@ export const en: Dict = {
   "inbox.confirmDeleteConfirm": "Delete",
   "inbox.confirmDeleteCancel": "Cancel",
   "inbox.deletedN": "Deleted {n}",
+  // ADR-0068: inbox keyword bar (free, server-assembled chips; click = filter).
+  "inbox.kwBarAria": "Keyword filter (free)",
+  "inbox.kwChipTitle": "Filter inbox by {word} ({n} postings)",
+  "inbox.kwExpand": "Show all {n} more",
+  "inbox.kwCollapse": "Collapse",
 };
 
 // Simplified Chinese strings. Every key in en must have a matching key here.
 export const zh: Dict = {
+  "inbox.kwBarAria": "关键词筛选（免费）",
+  "inbox.kwChipTitle": "按 {word} 筛选收件箱（{n} 条）",
+  "inbox.kwExpand": "展开全部 +{n} 枚",
+  "inbox.kwCollapse": "收起",
   "inbox.filterPlaceholder": "按公司或职位筛选…",
   "inbox.locationPlaceholder": "地点…",
   "inbox.clearKeyword": "清空关键词",

@@ -13,6 +13,9 @@ import type { CheckupEntry } from "@/lib/format";
 import { CHECKUP_RISK_LABELS } from "@/lib/company-checkups.mjs";
 import { orderApplications, buildContextQuery, countSelectedOffView } from "@/lib/pipeline-order.mjs";
 import { normalizeUrl } from "@/lib/core/url-key.mjs";
+// 收件箱关键词条（ADR-0068）：kwd 是视图型 URL 参数（与 tab/q/company 同语言），
+// 只作用于 INBOX 行集——有意不进 orderApplications/buildContextQuery 共享链。
+import { parseKwdParam, serializeKwd } from "@/lib/inbox-keywords.mjs";
 // 报告薪资（ADR-0037）：列里显示归一化月薪区间，字段原文进悬停提示。
 import { formatSalaryRange } from "@/lib/report-salary.mjs";
 import { sourceLabel } from "@/lib/source-label.mjs";
@@ -155,6 +158,20 @@ export function PipelineView({
     },
     [params, router, pathname],
   );
+
+  // 关键词条选中态（ADR-0068 决议 5）：URL 是唯一真相（与 tab/min/company 同姿态），
+  // 刷新/前进后退/assistant navigate 都直接恢复；`kwd=` 非法段在 parseKwdParam 里丢弃。
+  const kwdSet = useMemo(() => parseKwdParam(params.get("kwd") ?? ""), [params]);
+  const toggleKwd = useCallback(
+    (word: string) => {
+      const next = new Set(kwdSet);
+      if (next.has(word)) next.delete(word);
+      else next.add(word);
+      setParams({ kwd: next.size ? serializeKwd(next) : null });
+    },
+    [kwdSet, setParams],
+  );
+  const clearKwd = useCallback(() => setParams({ kwd: null }), [setParams]);
 
   // Pending + deduped by CANONICAL url key (normalizeUrl) so header count, tab
   // count and triage list all agree on one number even when pipeline.md lists
@@ -542,7 +559,7 @@ export function PipelineView({
       {tab === "INBOX" ? (
         /* ── Inbox: the triage surface (Abundance → Triage → Shortlist → Score) ── */
         pendingInbox.length > 0 ? (
-          <InboxTriage inbox={pendingInbox} scoredUrls={scoredUrls} />
+          <InboxTriage inbox={pendingInbox} scoredUrls={scoredUrls} kwdSet={kwdSet} onToggleKwd={toggleKwd} onClearKwd={clearKwd} />
         ) : (
           <InboxEmpty count={0} filtered={false} />
         )
