@@ -8,7 +8,8 @@ import { instrumentSerif } from "@/lib/fonts";
 import type { Application, InboxJob } from "@/lib/career-ops";
 import { normalizeTextKey } from "@/lib/core/normalize-text-key.mjs";
 import { paramsToFilters, paramsToAi, paramsToBrowser, type ExploreFilters } from "@/lib/explore";
-import { SCAN_SOURCES, type ScanSource } from "@/lib/scan-mode";
+import { carriesFilterParams, shouldAutoRunOnHandoff } from "@/lib/explore-params.mjs";
+import { SCAN_SOURCES, readScanSources, type ScanSource } from "@/lib/scan-mode";
 import { FilterBuilder } from "./filter-builder";
 import { DiscoveringState } from "./discovering-state";
 import { AiHuntView } from "./ai-hunt-view";
@@ -93,12 +94,31 @@ export function ExplorerView({
         initFilters(seed.filters);
         void loadFresh();
       } else {
-        initFilters(sp.toString() ? paramsToFilters(sp) : seed.filters);
+        // Only a URL carrying FILTER params is a complete, shareable search
+        // (filtersToParams' own key set) — decode that. An action param alone
+        // (?run=1 onboarding hand-off) says nothing about filters, so the
+        // server seed must survive: the old "URL had ANY param" test made
+        // ?run=1 decode to all-empty filters, which serialized to an
+        // annotations-only ephemeral portals.yml (an empty YAML document).
+        // The scanner then died before printing its JSON, and the page showed
+        // "The scanner returned no readable output."
+        initFilters(carriesFilterParams(sp) ? paramsToFilters(sp) : seed.filters);
         // Onboarding hand-off: ?run=1 auto-fires the free scan + flags the first-run
-        // banner (the "matches found from your CV, free" reveal).
+        // banner (the "matches found from your CV, free" reveal) — but ONLY when
+        // the configured scan sources include ATS. With BSK(-only) configured the
+        // hand-off stops at the form: BSK collection needs keywords/city chosen
+        // first and drives the user's own browser, so auto-firing a sweep the
+        // user did not configure is the wrong arrival. Read localStorage
+        // (authoritative) instead of the provider state — this mount's effects
+        // run before the provider's own source re-read effect.
         if (sp.get("run") === "1") {
           setFirstRun(true);
-          void discover();
+          if (shouldAutoRunOnHandoff(readScanSources())) {
+            // Pin the visible engine to ATS so the sub-tab matches what is
+            // actually scanning (a multi-source config may default the view to bsk).
+            setScanSource("ats");
+            void discover();
+          }
         }
       }
     }

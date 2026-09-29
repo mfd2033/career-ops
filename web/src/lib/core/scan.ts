@@ -112,13 +112,36 @@ export function runDiscovery(filters: ExploreFilters, onEvent: (e: ScanEvent) =>
     let errBuf = "";
     let jsonOut = ""; // --json mode: the single stdout object accumulates here
 
-    const killer = setTimeout(() => {
-      try {
-        child.kill("SIGTERM");
-      } catch {
-        /* ignore */
-      }
-    }, 230_000);
+    // The watchdog guards against a WEDGED scanner, not a slow one: the sweep
+    // is HTTP-bound across hundreds of boards, and a legitimate full run (150
+    // companies x 4 ATS) measures ~3.5 minutes. A fixed TOTAL-time kill turned
+    // a healthy-but-slow sweep into "The scanner returned no readable
+    // output." — stdout only carries the final --json payload, so killing
+    // mid-run discards everything. The clock therefore resets on every chunk
+    // the child emits (per-ATS start/done plus periodic "N/M scanned" lines on
+    // stderr), so only a child silent for the whole window is actually dead.
+    //
+    // The window must outlast the scanner's own worst-case SILENCE, which is
+    // its per-company watchdog (COMPANY_TIMEOUT_MS = 5 min in
+    // scan-ats-full.mjs): one hung board may legitimately produce no output for
+    // that long while its worker slot waits, so any shorter window aborts
+    // healthy sweeps on a flaky network (measured: lever@150 hung past 230s
+    // while the same sweep completes in 82s once the network behaves).
+    const IDLE_KILL_MS = 330_000;
+    let killer: ReturnType<typeof setTimeout> | undefined;
+    let killedForSilence = false;
+    const armKiller = () => {
+      clearTimeout(killer);
+      killer = setTimeout(() => {
+        killedForSilence = true;
+        try {
+          child.kill("SIGTERM");
+        } catch {
+          /* ignore */
+        }
+      }, IDLE_KILL_MS);
+    };
+    armKiller();
 
     // Live progress (atsStart / progress / atsDone) — in --json mode these human
     // lines arrive on STDERR; in legacy mode on STDOUT (handled inside handleLine).
@@ -194,6 +217,7 @@ export function runDiscovery(filters: ExploreFilters, onEvent: (e: ScanEvent) =>
     };
 
     child.stdout.on("data", (d: Buffer) => {
+      armKiller();
       if (useJson) {
         jsonOut += d.toString(); // one JSON object — parsed at close
         return;
@@ -204,6 +228,7 @@ export function runDiscovery(filters: ExploreFilters, onEvent: (e: ScanEvent) =>
       for (const p of parts) handleLine(p);
     });
     child.stderr.on("data", (d: Buffer) => {
+      armKiller();
       errBuf += d.toString();
       const parts = errBuf.split(/\r?\n/);
       errBuf = parts.pop() ?? "";
@@ -262,7 +287,15 @@ export function runDiscovery(filters: ExploreFilters, onEvent: (e: ScanEvent) =>
         } else {
           // --json requested but stdout didn't parse — surface honestly rather than
           // silently returning 0 (defensive; shouldn't happen once the probe passed).
-          onEvent({ kind: "error", message: "The scanner returned no readable output." });
+          // Distinguish the watchdog's kill (a wedged scanner: no output at all
+          // for the whole idle window) from a scanner that ran and printed
+          // something unparsable — they call for different next steps.
+          onEvent({
+            kind: "error",
+            message: killedForSilence
+              ? `The scanner stopped responding (no output for ${Math.round(IDLE_KILL_MS / 1000)}s) and was stopped. Try a smaller scan (fewer sources or a lower limit).`
+              : "The scanner returned no readable output.",
+          });
         }
         resolve(offers);
         return;

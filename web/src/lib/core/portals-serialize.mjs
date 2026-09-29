@@ -17,6 +17,8 @@ function block(key, items) {
     : "";
 }
 
+const HEADER = "# Ephemeral Explorer filters — generated per-search, safe to delete.\n";
+
 /**
  * Serialize filters into a minimal, valid portals.yml.
  *
@@ -25,11 +27,20 @@ function block(key, items) {
  * block_hard included, or a config that hard-blocks and nothing else would write
  * no location_filter at all and the scan would honor none of it (#3102).
  *
+ * The output ALWAYS parses to a YAML mapping, the all-empty filter set included:
+ * a comments-only document is an EMPTY document to js-yaml, so its load()
+ * throws "expected a document, but the input is empty". The scanner
+ * (scan-ats-full.mjs) reads this file with a bare yaml.load, so the empty case
+ * made it die before printing its --json payload and the page could only say
+ * "The scanner returned no readable output." An explicit empty positive list
+ * keeps the document a mapping; "no positive constraint" is its existing
+ * meaning in the scanner (every title passes).
+ *
  * @param {{positive:string[], negative:string[], allow:string[], block:string[], alwaysAllow:string[], blockHard:string[]}} f
  * @returns {string}
  */
 export function serializePortals(f) {
-  let out = "# Ephemeral Explorer filters — generated per-search, safe to delete.\n";
+  let out = HEADER;
   if (f.positive.length || f.negative.length) {
     out += "title_filter:\n";
     out += block("positive", f.positive);
@@ -42,5 +53,7 @@ export function serializePortals(f) {
     out += block("allow", f.allow);
     out += block("block", f.block);
   }
+  // Nothing above emitted a mapping key → the file would be comments-only.
+  if (out === HEADER) out += "title_filter:\n  positive: []\n";
   return out;
 }

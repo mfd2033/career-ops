@@ -423,6 +423,22 @@ export function resolveTitleFilterConfig(config) {
   return config?.title_filter_full ?? config?.title_filter;
 }
 
+// Tolerant portals.yml reader. A document with nothing but blank lines and
+// comments is an EMPTY document to js-yaml — its load() throws "expected a
+// document, but the input is empty" — but the state it encodes, "no filter
+// config", is legitimate: it is what an all-empty Explorer filter set
+// serializes to, and what a bare checkout's portals file effectively is. The
+// read used to be a bare yaml.load, so such a file Fatal-ed the whole sweep
+// before the --json payload ever reached stdout (the web can only render
+// that as "The scanner returned no readable output."). Empty → null so the
+// ?. chains below degrade to "no filters + the no-positive warning", which
+// is exactly what resolveTitleFilterConfig's contract already expects.
+// Malformed YAML still throws — tolerance for EMPTY, not for BROKEN.
+export function loadPortalsConfig(raw) {
+  if (!raw.replace(/^[ \t]*#.*$/gm, '').trim()) return null;
+  return yaml.load(raw);
+}
+
 // Title/location/content filter chain for one posting, used by runSeedScan().
 // The main ATS-directory loop below inlines the same three checks (it tracks
 // a droppedContent counter per stage for the run summary), but this shared,
@@ -639,13 +655,24 @@ async function main() {
   // In --json mode, stdout is reserved for the single machine-readable result,
   // so every human-facing line goes to stderr instead.
   const log = opts.json ? (...a) => console.error(...a) : (...a) => console.log(...a);
-  const progress = (s) => { if (!opts.json) process.stdout.write(s); };
+  // Progress lines are \r-refreshed on a TTY (stdout). In --json mode they go
+  // to stderr as complete \n-terminated lines instead: that is the channel the
+  // web reads for live progress (handleProgressLine in
+  // web/src/lib/core/scan.ts matches exactly this "N/M scanned" shape), and a
+  // long sweep's steady progress doubles as the liveness signal for the web's
+  // stuck-scanner watchdog. Dropping them left both consumers blind — the web
+  // showed no per-company progress, and a healthy but slow sweep (600 boards
+  // is minutes of HTTP) looked indistinguishable from a hung one.
+  const progress = (s) => {
+    if (opts.json) process.stderr.write(`${s.replace(/\r+$/, '')}\n`);
+    else process.stdout.write(s);
+  };
 
   if (!existsSync(PORTALS_PATH)) {
     console.error('Error: portals.yml not found. Run onboarding first — the reverse scan reuses its title_filter/location_filter.');
     process.exit(1);
   }
-  const config = yaml.load(readFileSync(PORTALS_PATH, 'utf-8'));
+  const config = loadPortalsConfig(readFileSync(PORTALS_PATH, 'utf-8'));
   const fullTitleFilterConfig = resolveTitleFilterConfig(config);
   const titleFilter = buildTitleFilter(fullTitleFilterConfig);
   const locationFilter = buildLocationFilter(config?.location_filter);
@@ -861,7 +888,13 @@ async function main() {
     }, ({ done, resumeAt }) => {
       lastDone = done;
       lastResumeAt = resumeAt;
-      if (done % 200 === 0 || done === entries.length) {
+      // Report density is a CONSUMER contract, not cosmetics: the web's
+      // stuck-scanner watchdog resets on every line the child emits, and a
+      // 150-company ATS never hits the old 200-company mark, so a whole
+      // single-ATS phase was silent and looked identical to a hang. Every 50
+      // companies keeps the UI's live progress moving and the heartbeat loud
+      // at no extra cost (\r-refresh on a TTY).
+      if (done % 50 === 0 || done === entries.length) {
         progress(`  ${done}/${entries.length} scanned, ${newOffers.length} total matches\r`);
       }
       if (done % CHECKPOINT_EVERY === 0 && !opts.dryRun) {

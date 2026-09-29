@@ -50,3 +50,17 @@ test("a keyword that could break YAML is quoted, not injected", () => {
   const doc = yaml.load(serializePortals({ ...empty, blockHard: ["a: b", "- x", '"q"'] }));
   assert.deepEqual(doc.location_filter.block_hard, ["a: b", "- x", '"q"']);
 });
+
+// The all-empty filter set is REACHABLE, not theoretical: the onboarding
+// hand-off (?run=1) decoded to it before the explore-params fix, and clearing
+// every keyword/location chip then re-scanning still reaches it legitimately.
+// The serializer used to emit a comments-only file for this input — and in
+// js-yaml a comments-only document IS an empty document, so scan-ats-full.mjs's
+// yaml.load threw "expected a document, but the input is empty", the scanner
+// exited before printing its --json payload, and the page reported "The
+// scanner returned no readable output." The output must therefore ALWAYS parse
+// to a mapping.
+test("an all-empty filter set still serializes to a parsable document", () => {
+  const doc = yaml.load(serializePortals(empty)); // must not throw
+  assert.ok(doc && typeof doc === "object", "must parse to a mapping, never an empty document");
+});
