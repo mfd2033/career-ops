@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Undo2 } from "lucide-react";
 import { useJobs } from "@/components/jobs/job-store";
@@ -220,24 +220,37 @@ export function InboxTriage({ inbox, scoredUrls, kwdSet, onToggleKwd, onClearKwd
   // the row's own evaluated flag in TriageRow so the two can never disagree.
   const isEvaluatedRow = (s: RowScore | undefined) => !!s && (s.running || s.score != null);
 
+  // 除关键词外的全部生效条件——它们放行的行集就是关键词条的计数基底
+  // （ADR-0068 决议 4 修订）：chip 上的数字必须等于点它的匹配行数，否则
+  // 「未评分」默认开时会出现计数 1、点击 0 匹配的死 chip。
+  const passesOtherFacets = useCallback(
+    (e: (typeof enriched)[number]) => {
+      if (hidden.includes(e.urlKey)) return false;
+      if (within != null && (e.age == null || e.age > within)) return false;
+      if (sources.size && (!e.source || !sources.has(e.source))) return false;
+      if (seniorities.size && (!e.seniority || !seniorities.has(e.seniority))) return false;
+      if (locQ.trim() && !(e.job.location || "").toLowerCase().includes(locQ.trim().toLowerCase())) return false;
+      if (kw.trim() && !`${e.job.company} ${e.job.role}`.toLowerCase().includes(kw.trim().toLowerCase())) return false;
+      // 薪资下限：严格下限（区间下限 ≥ 输入值）保留，薪资未知过滤掉
+      if (!passesInboxSalaryFloor(e.salaryRange, salaryMin)) return false;
+      if (unscoredOnly && isEvaluatedRow(resolveRowScore(liveScores.get(e.urlKey), persistedScores.get(e.urlKey)))) return false;
+      return true;
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [enriched, hidden, within, sources, seniorities, locQ, kw, salaryMin, unscoredOnly, liveScores, persistedScores],
+  );
+
+  const facetRows = useMemo(() => enriched.filter(passesOtherFacets), [enriched, passesOtherFacets]);
+
   const filtered = useMemo(
     () =>
-      enriched.filter((e) => {
-        if (hidden.includes(e.urlKey)) return false;
-        if (within != null && (e.age == null || e.age > within)) return false;
-        if (sources.size && (!e.source || !sources.has(e.source))) return false;
-        if (seniorities.size && (!e.seniority || !seniorities.has(e.seniority))) return false;
-        if (locQ.trim() && !(e.job.location || "").toLowerCase().includes(locQ.trim().toLowerCase())) return false;
-        if (kw.trim() && !`${e.job.company} ${e.job.role}`.toLowerCase().includes(kw.trim().toLowerCase())) return false;
+      facetRows.filter((e) => {
         // 关键词条（ADR-0068 决议 3）：选中 chip 之间 OR（命中任一即保留），
-        // 与其余 facet 之间 AND（就住在这个 filter 链里）。
+        // 与其余 facet 之间 AND（其余条件已在上游 facetRows 里过掉）。
         if (kwdSet && kwdSet.size > 0 && !(e.job.keywords || []).some((k) => kwdSet.has(k))) return false;
-        // 薪资下限：严格下限（区间下限 ≥ 输入值）保留，薪资未知过滤掉
-        if (!passesInboxSalaryFloor(e.salaryRange, salaryMin)) return false;
-        if (unscoredOnly && isEvaluatedRow(resolveRowScore(liveScores.get(e.urlKey), persistedScores.get(e.urlKey)))) return false;
         return true;
       }),
-    [enriched, hidden, within, sources, seniorities, locQ, kw, salaryMin, unscoredOnly, liveScores, persistedScores, kwdSet],
+    [facetRows, kwdSet],
   );
 
   // 🔴 SINGLE ORDER PLUG POINT — exactly one comparator, chosen by the sort toggle:
@@ -268,11 +281,12 @@ export function InboxTriage({ inbox, scoredUrls, kwdSet, onToggleKwd, onClearKwd
 
   const anyFacet = within != null || sources.size > 0 || seniorities.size > 0 || locQ.trim() !== "" || kw.trim() !== "" || salaryMin != null || unscoredOnly || (kwdSet?.size ?? 0) > 0;
 
-  // 关键词条 chip 数据（ADR-0068 决议 4）：口径 = 未隐藏的全部 pending 行，
-  // 不随其他 facet 波动（与 availSources 的「存在才显示」同构，chip 集不闪跳）。
+  // 关键词条 chip 数据（ADR-0068 决议 4 修订）：口径 = 通过其余全部 facet 的行集
+  // （facetRows），chip 数字恒等于点击后的匹配行数；其他 facet 变动时 chip 集
+  // 随之刷新（诚实优先于不闪跳：带计数的控件必须对自己的点击结果负责）。
   const keywordCounts = useMemo(
-    () => countKeywords(enriched.filter((e) => !hidden.includes(e.urlKey)).map((e) => ({ keywords: e.job.keywords }))),
-    [enriched, hidden],
+    () => countKeywords(facetRows.map((e) => ({ keywords: e.job.keywords }))),
+    [facetRows],
   );
   const capped = !showAll && !anyFacet;
   const visible = capped ? ordered.slice(0, BATCH) : ordered;
