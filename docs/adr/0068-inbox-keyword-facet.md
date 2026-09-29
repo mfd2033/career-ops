@@ -28,6 +28,7 @@
 8. **成本姿态 = 纯免费**：整个链路（服务端装配 + 客户端过滤）零 LLM 调用，关键词条沿工具条现有 CostBadge "free" 语言，不新增成本徽标。
 9. **新用户层文件登记（三处同步）**：`config/keywords.yml` 进 `DATA_CONTRACT.md` 用户层表；进 `local\backup-data.cmd` 白名单路径清单与 `docs/data-backup.md` 白名单段。`config/keywords.example.yml`（格式说明 + 初始中文种子清单）为系统层，供用户复制起步——服务端**从不自动创建** keywords.yml，缺失时仅用三源种子。
 10. **i18n**：全部新键 en/zh 成对（`clusters/inbox.ts`），用户可见文案简体中文；技术词形（chip 上的关键词本体）原样显示不翻译。
+11. **死词自动剪枝（2026-09-29 补，用户报修）**：批量删除/评估把选中词的命中行清空后，残留的死 `kwd` 会把页面锁在「0 匹配」而数据其实还在。现在 `InboxTriage` 在 pending 行集变动后剪掉「不再命中任何 pending 行」的选中词（存活集含 hidden 行——skip 可撤销不该被剪），部分存活只剪死词、幸存词保留选中态；纯逻辑在 `deadKeywords`（单测上锁）。
 
 ## Alternatives considered
 

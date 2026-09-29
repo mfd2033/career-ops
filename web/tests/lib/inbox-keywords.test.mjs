@@ -22,6 +22,7 @@ import {
   parseKwdParam,
   serializeKwd,
   splitHighlight,
+  deadKeywords,
 } from "../../src/lib/inbox-keywords.mjs";
 
 // ── 默认值锁定（ADR-0068 决议 4：前 12 枚）─────────────────────────────
@@ -213,4 +214,24 @@ test("重叠/邻接区间合并，不重复不丢字；多处命中全高亮", (
     { t: "模型", hit: true },
     { t: "应用", hit: false },
   ]);
+});
+
+// ── deadKeywords（删除命中行后的死词剪枝，回归锁）──────────────────
+
+test("回归：选中词的行全被删除后，该词判死可剪（页面不再停在 0 匹配）", () => {
+  const before = new Set(["alpha"]);
+  assert.deepEqual(deadKeywords(before, [
+    { keywords: ["alpha", "工程师"] },
+    { keywords: ["beta"] },
+  ]), []);
+  // 删除 alpha 行后的剩余数据：alpha 已无任何存活行 → 死词
+  assert.deepEqual(deadKeywords(before, [{ keywords: ["beta"] }]), ["alpha"]);
+});
+
+test("部分存活只剪死词；hidden 行（skip 可撤销）仍算存活；空集/无行为 no-op", () => {
+  const sel = new Set(["alpha", "beta"]);
+  assert.deepEqual(deadKeywords(sel, [{ keywords: ["beta"] }]), ["alpha"]);
+  assert.deepEqual(deadKeywords(sel, []), ["alpha", "beta"]);
+  assert.deepEqual(deadKeywords(new Set(), [{ keywords: ["x"] }]), []);
+  assert.deepEqual(deadKeywords(null, undefined), []);
 });

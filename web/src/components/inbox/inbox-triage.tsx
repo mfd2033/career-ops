@@ -15,7 +15,7 @@ import { scoreTone } from "@/lib/format";
 import { scoreNum } from "@/lib/score-num.mjs";
 import { FacetChips } from "./facet-chips";
 import { KeywordBar } from "./keyword-bar";
-import { countKeywords } from "@/lib/inbox-keywords.mjs";
+import { countKeywords, deadKeywords } from "@/lib/inbox-keywords.mjs";
 import { TriageRow, type RowScore } from "./triage-row";
 import { RowSlot } from "@/components/row-slot";
 import { ShortlistTray, type ShortItem } from "./shortlist-tray";
@@ -47,7 +47,7 @@ const SCORE_BATCH_MAX = 20;
 // `**URL:**` headers). The live job-store only covers evaluations fired THIS
 // browser — postings already evaluated via CLI / batch / an earlier session
 // must still show their real score, not a false "not scored".
-export function InboxTriage({ inbox, scoredUrls, kwdSet, onToggleKwd, onClearKwd }: { inbox: InboxJob[]; scoredUrls?: Record<string, { score: string }>; kwdSet?: Set<string>; onToggleKwd?: (w: string) => void; onClearKwd?: () => void }) {
+export function InboxTriage({ inbox, scoredUrls, kwdSet, onToggleKwd, onClearKwd, onPruneKwd }: { inbox: InboxJob[]; scoredUrls?: Record<string, { score: string }>; kwdSet?: Set<string>; onToggleKwd?: (w: string) => void; onClearKwd?: () => void; onPruneKwd?: (terms: string[]) => void }) {
   const { jobs, startJob } = useJobs();
   const { t } = useI18n();
   const router = useRouter();
@@ -241,6 +241,15 @@ export function InboxTriage({ inbox, scoredUrls, kwdSet, onToggleKwd, onClearKwd
   );
 
   const facetRows = useMemo(() => enriched.filter(passesOtherFacets), [enriched, passesOtherFacets]);
+
+  // 死词自动剪枝（用户报修回归）：批量删除/评估把选中词的命中行清空后，
+  // 数据其实还在收件箱，但残留的死 kwd 会把页面锁在「0 匹配」。存活集取
+  // 自全部 pending 行（含 hidden——skip 可撤销，不该被剪），词死了就从 URL 剪掉。
+  useEffect(() => {
+    if (!kwdSet || kwdSet.size === 0 || !onPruneKwd) return;
+    const dead = deadKeywords(kwdSet, inbox.map((j) => ({ keywords: j.keywords })));
+    if (dead.length) onPruneKwd(dead);
+  }, [inbox, kwdSet, onPruneKwd]);
 
   const filtered = useMemo(
     () =>

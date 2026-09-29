@@ -172,6 +172,17 @@ export function PipelineView({
     [kwdSet, setParams],
   );
   const clearKwd = useCallback(() => setParams({ kwd: null }), [setParams]);
+  // 死词剪枝落地（ADR-0068 后续修复）：只从 URL 里去掉已无存活命中的词，
+  // 幸存词保留选中态（部分剪枝）。
+  const pruneKwd = useCallback(
+    (terms: string[]) => {
+      const next = new Set(kwdSet);
+      for (const t of terms) next.delete(t);
+      if (next.size === kwdSet.size) return;
+      setParams({ kwd: next.size ? serializeKwd(next) : null });
+    },
+    [kwdSet, setParams],
+  );
 
   // Pending + deduped by CANONICAL url key (normalizeUrl) so header count, tab
   // count and triage list all agree on one number even when pipeline.md lists
@@ -559,7 +570,7 @@ export function PipelineView({
       {tab === "INBOX" ? (
         /* ── Inbox: the triage surface (Abundance → Triage → Shortlist → Score) ── */
         pendingInbox.length > 0 ? (
-          <InboxTriage inbox={pendingInbox} scoredUrls={scoredUrls} kwdSet={kwdSet} onToggleKwd={toggleKwd} onClearKwd={clearKwd} />
+          <InboxTriage inbox={pendingInbox} scoredUrls={scoredUrls} kwdSet={kwdSet} onToggleKwd={toggleKwd} onClearKwd={clearKwd} onPruneKwd={pruneKwd} />
         ) : (
           <InboxEmpty count={0} filtered={false} />
         )

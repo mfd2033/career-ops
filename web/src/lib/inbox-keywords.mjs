@@ -253,6 +253,23 @@ export function serializeKwd(set) {
 }
 
 /**
+ * 挑出选中词里已不再命中任何 pending 行的死词（删除/批量评估后调用）。
+ * rows 必须传「全部 pending 行，含 hidden」——skip 可撤销、数据还在，不该被
+ * 剪；done 行的 keywords 本就是空数组，天然不贡献存活集。
+ * 死词过滤器让页面停在「0 匹配」而数据其实还在（用户报修：删完命中行后
+ * 应显示剩余数据），由调用侧从 URL 里剪掉。
+ * @param {Set<string>|null|undefined} kwdSet
+ * @param {{ keywords?: string[] }[]} rows
+ * @returns {string[]}
+ */
+export function deadKeywords(kwdSet, rows) {
+  if (!kwdSet || kwdSet.size === 0) return [];
+  const alive = new Set();
+  for (const r of rows || []) for (const k of r.keywords || []) alive.add(k);
+  return [...kwdSet].filter((k) => !alive.has(k));
+}
+
+/**
  * 命中高亮的分段器（ADR-0068 决议 6）：把 text 按 terms 的命中区间切成
  * [{t, hit}] 连续段（重叠区间自动合并）。匹配口径与 matchVocab 一致：
  * 纯拉丁形态大小写不敏感，CJK 直接子串。无 terms → 单段不命中（行渲染零变化）。
