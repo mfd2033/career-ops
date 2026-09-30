@@ -9,7 +9,9 @@
 //   1. PowerShell 脚本的字面量转义（路径含单引号不能撕开字符串字面量）；
 //   2. spawn 编排（先 explorer 后 powershell，detached + unref，错误静默）；
 //   3. 路由接线（win32 分支必须走本模块，不许再直接 spawn explorer）。
-// 前置效果本身无法在 CI 断言（需要真实桌面会话），由本机手动清单验证。
+// 前置效果本身无法在 CI 断言（需要真实桌面会话），由本机手动清单验证；
+// 清单实测结论（2026-09-30）：单独的 SwitchToThisWindow 在真实双击启动器
+// 场景下调用成功但窗口不动，必须用前台窃取组合拳（见脚本锁单测）。
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -22,8 +24,18 @@ import { buildForegroundScript, revealCvPdfInExplorer } from "../../src/lib/win-
 test("buildForegroundScript: 脚本包含前置所需的三要素（P/Invoke、Shell.Application、超时轮询）", () => {
   const script = buildForegroundScript("D:\\workspace\\career-ops\\output");
 
-  // SwitchToThisWindow 是唯一能绕开前台锁定的 user32 入口（Alt+Tab 专用）
+  // 前台窃取组合拳（ADR-0058 修订 2026-09-30）：实测 SwitchToThisWindow 单独调用
+  // 对无前台权限的后台进程静默无效（调用成功但窗口不动）；真生效靠
+  // AttachThreadInput + keybd_event(ALT) + SetForegroundWindow 经典配方，
+  // SwitchToThisWindow 保留作叠加兜底。缺一元素即回归。
   assert.match(script, /SwitchToThisWindow/);
+  assert.match(script, /SetForegroundWindow/, "必须真调 SetForegroundWindow");
+  assert.match(script, /AttachThreadInput/, "必须挂接前台线程输入，否则 SetForegroundWindow 被拒");
+  assert.match(script, /keybd_event\(18/, "必须模拟 ALT 按下，解除前台锁定标志");
+  assert.match(script, /BringWindowToTop/, "Z 序置顶兜底");
+  assert.match(script, /ShowWindow\(\$h,9\)/, "目标窗被最小化时要先 SW_RESTORE 还原");
+  assert.match(script, /GetWindowThreadProcessId/, "需要前台窗所属线程 id");
+  assert.match(script, /GetCurrentThreadId/, "需要 helper 自身线程 id 做挂接");
   assert.match(script, /user32\.dll/);
   // 窗口枚举走 Shell.Application，不用进程 MainWindowHandle（explorer 共享进程）；
   // 集合必须来自 Windows() 方法 —— $shell 自身没有 Count/Item（首轮冒烟实测）。

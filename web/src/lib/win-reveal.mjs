@@ -1,11 +1,18 @@
 // win-reveal.mjs —— Windows 桌面专用：在资源管理器中定位文件，并把窗口抢到前台。
 //
-// 背景（ADR-0058）：/api/cv-pdf/open 由 career-ops web 服务器 spawn
-// `explorer /select,<path>`。服务器是 exe 启动器拉起的后台进程，Windows 的
-// 前台锁定（foreground lock）禁止后台进程的子窗口抢焦点 —— 资源管理器窗口
+// 背景（ADR-0058 及其修订 2026-09-30）：/api/cv-pdf/open 由 career-ops web 服务器
+// spawn `explorer /select,<path>`。服务器是 exe 启动器拉起的后台进程，Windows 的
+// 前台锁定（foreground lock）禁止后台进程把窗口摆到 Z 序最前 —— 资源管理器窗口
 // 每次都开到浏览器背后。修复：再 spawn 一个隐藏窗口的 powershell helper，
-// 轮询找到标题匹配目标目录的 Explorer 窗口，用 user32 的 SwitchToThisWindow
-// （Alt+Tab 专用入口，不受前台锁定约束）把它提到最前。
+// 轮询找到路径匹配目标目录的 Explorer 窗口并前置。
+//
+// 前置机制的关键教训：单调 SwitchToThisWindow 不够 —— 实测（启动器→node→helper
+// 整链 marker 日志）它在不持前台权限的后台进程里调用成功但窗口纹丝不动；
+// 真生效靠经典前台窃取组合拳：ShowWindow(SW_RESTORE) 还原最小化窗 →
+// AttachThreadInput 挂接前台线程 → keybd_event 模拟 ALT 按下（重置前台锁定标志）
+// → SetForegroundWindow + BringWindowToTop → SwitchToThisWindow 叠加兜底 → ALT 抬起
+// → 解除挂接。Windows 把“刚按过 Alt 的进程”视为持有前台权限，组合拳是公开
+// 文档认可的合法绕法（SetForegroundWindow 官方文档列出的豁免条件之一）。
 //
 // 决议口径（见 ADR-0058）：
 //   - 接口语义保持即发即忘：explorer 走 detached+unref，helper 走
@@ -30,7 +37,7 @@ function psSingleQuoteLiteral(value) {
 
 // 拼出传给 powershell -Command 的前置脚本：轮询 Shell.Application 的打开窗口，
 // 逐个比对 Document.Folder.Self.Path 与目标目录（去尾分隔符、忽略大小写），
-// 命中即 SwitchToThisWindow 前置并 exit 0；超时 exit 1（调用方不读退出码）。
+// 命中即组合拳前置并 exit 0；超时 exit 1（调用方不读退出码）。
 export function buildForegroundScript(dirPath, { timeoutMs = 3000, pollMs = 150 } = {}) {
   const timeout = Number.isInteger(timeoutMs) && timeoutMs > 0 ? timeoutMs : 3000;
   const poll = Number.isInteger(pollMs) && pollMs > 0 ? pollMs : 150;
@@ -38,9 +45,9 @@ export function buildForegroundScript(dirPath, { timeoutMs = 3000, pollMs = 150 
   return [
     "$ErrorActionPreference='SilentlyContinue'",
     `$target=${target}`,
-    // HWND 级前置入口；explorer 多窗口共享进程，进程 MainWindowHandle 不可靠，
+    // HWND 级前置入口集合；explorer 多窗口共享进程，进程 MainWindowHandle 不可靠，
     // 所以窗口枚举走 Shell.Application 而不是 Get-Process。
-    "Add-Type -TypeDefinition 'using System;using System.Runtime.InteropServices;public static class CareerOpsForeground{[DllImport(\"user32.dll\")]public static extern void SwitchToThisWindow(IntPtr hWnd,bool fAltTab);}'",
+    "Add-Type -TypeDefinition 'using System;using System.Runtime.InteropServices;public static class CareerOpsForeground{[DllImport(\"user32.dll\")]public static extern void SwitchToThisWindow(IntPtr hWnd,bool fAltTab);[DllImport(\"user32.dll\")]public static extern bool SetForegroundWindow(IntPtr hWnd);[DllImport(\"user32.dll\")]public static extern bool BringWindowToTop(IntPtr hWnd);[DllImport(\"user32.dll\")]public static extern bool ShowWindow(IntPtr hWnd,int nCmdShow);[DllImport(\"user32.dll\")]public static extern void keybd_event(byte bVk,byte bScan,uint dwFlags,UIntPtr dwExtraInfo);[DllImport(\"user32.dll\")]public static extern IntPtr GetForegroundWindow();[DllImport(\"user32.dll\")]public static extern uint GetWindowThreadProcessId(IntPtr hWnd,IntPtr lpdwProcessId);[DllImport(\"kernel32.dll\")]public static extern uint GetCurrentThreadId();[DllImport(\"user32.dll\")]public static extern bool AttachThreadInput(uint idAttach,uint idAttachTo,bool fAttach);}'",
     "$shell=New-Object -ComObject Shell.Application",
     // 窗口集合是 Windows() 方法返回值，不是 $shell 自身 —— Shell.Application 没有
     // Count/Item 直接属性，写错会让轮询永远空转（首轮冒烟实测的 bug）。
@@ -53,7 +60,8 @@ export function buildForegroundScript(dirPath, { timeoutMs = 3000, pollMs = 150 
     "    try{$p=[string]$w.Document.Folder.Self.Path}catch{}",
     "    if($p){",
     "      if($p.TrimEnd('\\') -ieq $target.TrimEnd('\\')){",
-    "        try{[CareerOpsForeground]::SwitchToThisWindow([IntPtr]$w.HWND,$true);exit 0}catch{}",
+    // 前台窃取组合拳（顺序敏感）：还原→挂接→按 ALT→置前台→置顶→兜底→抬 ALT→解挂。
+    "        try{$h=[IntPtr]$w.HWND;[CareerOpsForeground]::ShowWindow($h,9)|Out-Null;$fgT=[CareerOpsForeground]::GetWindowThreadProcessId([CareerOpsForeground]::GetForegroundWindow(),[IntPtr]::Zero);$myT=[CareerOpsForeground]::GetCurrentThreadId();[CareerOpsForeground]::AttachThreadInput($myT,$fgT,$true)|Out-Null;[CareerOpsForeground]::keybd_event(18,0,0,[UIntPtr]::Zero);[CareerOpsForeground]::SetForegroundWindow($h)|Out-Null;[CareerOpsForeground]::BringWindowToTop($h)|Out-Null;[CareerOpsForeground]::SwitchToThisWindow($h,$true);[CareerOpsForeground]::keybd_event(18,0,2,[UIntPtr]::Zero);[CareerOpsForeground]::AttachThreadInput($myT,$fgT,$false)|Out-Null;exit 0}catch{}",
     "      }",
     "    }",
     "  }",

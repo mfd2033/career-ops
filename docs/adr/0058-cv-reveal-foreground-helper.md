@@ -2,7 +2,7 @@
 
 ## 状态
 
-Accepted (2026-09-24)
+Accepted (2026-09-24)，**修订 2026-09-30**：前置机制由单调 `SwitchToThisWindow` 改为前台窃取组合拳（见文末修订节）
 
 ## 背景
 
@@ -19,7 +19,7 @@ Accepted (2026-09-24)
 
 1. **修在服务端，前端零改动**：`/api/cv-pdf/open` 的 win32 分支改调 `web/src/lib/win-reveal.mjs`；按钮组件、toast 文案、i18n 全部不动。
 2. **实现载体 = 内联 PowerShell helper**：spawn `powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -Command <脚本>`，脚本由 `buildForegroundScript()` 在 `win-reveal.mjs` 里拼装。不新增仓库 `.ps1` 文件（免得跟着 standalone 打包/exe 解压链路多一份分发一致性风险），不加编译产物。接受的代价：点击后窗口"过一小会儿才飞过来"（PowerShell 冷启动 + Add-Type 首次编译约 1–2s，之后有 OS 级程序集缓存）。
-3. **前置机制 = `SwitchToThisWindow`**（user32，Alt+Tab 专用入口，不受前台锁定约束）；窗口枚举走 `Shell.Application` COM 的 `Windows()` 集合，用每个窗口的 `Document.Folder.Self.Path` 与 PDF 父目录比对（去尾分隔符、`-ieq` 忽略大小写）。命中即前置。
+3. **前置机制 = 前台窃取组合拳（修订 2026-09-30，原方案单调 `SwitchToThisWindow` 已被实测否定）**：窗口枚举仍走 `Shell.Application` COM 的 `Windows()` 集合，用每个窗口的 `Document.Folder.Self.Path` 与 PDF 父目录比对（去尾分隔符、`-ieq` 忽略大小写）；命中后执行 `ShowWindow(SW_RESTORE)` → `AttachThreadInput` 挂接前台线程 → `keybd_event` 模拟 ALT 按下 → `SetForegroundWindow` + `BringWindowToTop` → `SwitchToThisWindow` 叠加兜底 → ALT 抬起 → 解挂。
 4. **接口语义保持 fire-and-forget**：接口仍然立即返回 `ok:true`（陈述"spawn 发生了"，不陈述"窗口在前台"）；explorer 是 GUI 进程走 `detached + unref`，helper 则是 **非 detached 的 `{stdio:"ignore", windowsHide:true} + unref`**——实施后实测发现 detached 的 powershell.exe（控制台应用）拿不到控制台会**启动即静默死亡**（marker 实验：detached 子进程连第一行日志都写不出），初版实现因此完全不生效；unref 足以维持即发即忘，父进程退出也不会带走子进程。失败静默。
 5. **竞态礼仪 = 短窗口内必抢**：helper 在 ≤3 秒内以 150ms 间隔轮询目标窗口，窗口一出现就前置——即使此刻用户切去了别的窗口也照抢（点击即意图）；超时窗口没出现则静默退出，不检测用户输入、不重试。
 6. **平台范围 = 仅 Windows**：darwin 的 `open -R` 与 linux 的 `xdg-open` 本来就能到前台，分支原样保留（单测里有源码锁防止误改）。
@@ -41,6 +41,16 @@ Accepted (2026-09-24)
 - 每次点击多活一个隐藏 powershell 子进程，≤3s 内自行退出。
 - 陷阱记录（首轮验证失败的直接原因）：Windows 下 `detached:true` 对控制台应用等于判死刑——powershell 静默不执行且无任何报错，exit 事件对 detached 子进程还可能不触发；唯一的决定性证据是子进程自己往文件写 marker 再回读。已由单测断言锁死（helper 禁 detached）。
 - 维护点：`SwitchToThisWindow` 是 undocumented 但二十年稳定的 user32 入口；`Shell.Application` COM 依赖桌面会话存在——在无桌面的服务化部署里 helper 静默失败，行为回退到修复前。
+
+## 修订（2026-09-30）：SwitchToThisWindow 单独调用无效
+
+用户报告按钮仍不到前台。整链 marker 实验（临时给打包 chunk 内嵌脚本插日志，重启服务后实跑）定位真相：
+
+1. helper 在服务器上下文**确实运行了**（spawn 选项、Add-Type、COM 枚举、目录匹配、函数调用全部成功）；
+2. 但 `SwitchToThisWindow` 对不持前台权限的后台进程**调用成功而窗口纹丝不动**——原背景里「不受前台锁定约束」的假设是错的。本 ADR 初次验收用的终端 dev 链沾了控制台的前台权限，才误判为已修复；
+3. 差分证据：旧脚本点击后前台 20s 采样纹丝不动；换成组合拳后同一链路点击后 ≤2.5s 前台变为目标资源管理器窗（判据：GetForegroundWindow 类名 CabinetWClass）。
+
+修复落点：`win-reveal.mjs` 的 `buildForegroundScript` 改为组合拳（决议 3 新口径），单测新增八个 P/Invoke 要素锁（`SetForegroundWindow`/`AttachThreadInput`/`keybd_event(18`/`BringWindowToTop`/`ShowWindow($h,9)`/`GetWindowThreadProcessId`/`GetCurrentThreadId` 缺一即红）；已按四判据重打包验收。陷阱沉淀：验证「窗口前置」类功能，验收链路的权限上下文必须和生产链路一致（双击启动器，而非终端 dev 服务器）；undocumented API 的「不受限制」声称必须在真实后台上下文里 marker 实测，不能只在开发终端里冒烟。
 
 ## References
 
