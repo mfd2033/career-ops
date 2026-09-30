@@ -17,6 +17,11 @@ const STYLE = `
 .co-src__chip[data-state="active"]{border-color:hsl(26 73% 51% / .45)}
 .co-src__orb{width:.55rem;height:.55rem;border-radius:50%;background:hsl(26 80% 55%);box-shadow:0 0 0 0 hsl(26 80% 55% / .5);animation:co-orb 1.4s ease-out infinite}
 .co-src__bar{height:3px;border-radius:2px;background:hsl(26 73% 51%);transition:width .4s ease}
+.co-src__chip[data-engine="browser"][data-state="swept"] .co-src__bar{background:hsl(160 64% 46%)}
+.co-src__num{font-variant-numeric:tabular-nums;font-size:12px;font-weight:600;line-height:1;color:var(--fg);opacity:.85}
+.co-src__chip[data-state="queued"] .co-src__num{font-weight:400}
+.co-src__chip[data-state="swept"] .co-src__num{color:hsl(160 60% 40%)}
+html.dark .co-src__chip[data-state="swept"] .co-src__num{color:hsl(158 64% 62%)}
 .co-src__track{height:3px;border-radius:2px;background:color-mix(in srgb, var(--fg) 14%, transparent);overflow:hidden;width:3.5rem}
 .co-disc__skel{display:grid;grid-template-columns:repeat(auto-fill,minmax(15rem,1fr));gap:.7rem;width:100%;max-width:46rem;margin-top:.5rem}
 .co-disc__skelcard{height:4.4rem;border-radius:.8rem;border:1px solid var(--border,hsl(0 0% 50% / .15));background:color-mix(in srgb, var(--bg) 60%, transparent);overflow:hidden;position:relative}
@@ -46,11 +51,23 @@ export function useCountUp(target: number): number {
   return Math.round(val);
 }
 
-function SourceChip({ ats, label, s }: { ats: string; label: string; s?: SourceState }) {
+function SourceChip({ ats, label, s, isBrowser }: { ats: string; label: string; s?: SourceState; isBrowser?: boolean }) {
   const state = s?.state ?? "queued";
   const pct = s?.total ? Math.min(100, Math.round(((s.done ?? 0) / s.total) * 100)) : state === "swept" || state === "noisy" ? 100 : 0;
+  // 逐平台采到数（ADR-0069 决议 5）：仅浏览器模式且分母已知时显示——
+  // queued `—/上限`、active `n/上限`、swept `✓ n`（上限是截断保护不是目标，
+  // 采完即转 ✓ 停比）；noisy 保持 `~n skipped` 行，数字定格在失败时刻。
+  // ATS 分支不显数：done/total 在公司数语义轴上，与条数不同口径。
+  const num =
+    isBrowser && s?.total
+      ? state === "swept"
+        ? `✓ ${s.done ?? 0}`
+        : state === "queued"
+          ? `—/${s.total}`
+          : `${s.done ?? 0}/${s.total}`
+      : "";
   return (
-    <div className="co-src__chip" data-state={state === "noisy" ? "active" : state}>
+    <div className="co-src__chip" data-engine={isBrowser ? "browser" : "ats"} data-state={state === "noisy" ? "active" : state}>
       {state === "active" ? (
         <span className="co-src__orb" />
       ) : state === "swept" || state === "noisy" ? (
@@ -61,6 +78,7 @@ function SourceChip({ ats, label, s }: { ats: string; label: string; s?: SourceS
       <span className="text-[13px] font-medium text-foreground">{label}</span>
       <div className="ml-auto flex flex-col items-end gap-1">
         {state === "noisy" && <span className="text-[10px] text-faint">~{s?.unreachable} skipped</span>}
+        {num && <span className="co-src__num">{num}</span>}
         <div className="co-src__track">
           <div className="co-src__bar" style={{ width: `${pct}%` }} />
         </div>
@@ -110,7 +128,7 @@ export function DiscoveringState() {
 
         <div className="co-src">
           {chipIds.map((a) => (
-            <SourceChip key={a} ats={a} label={chipLabel(a)} s={sources[a]} />
+            <SourceChip key={a} ats={a} label={chipLabel(a)} s={sources[a]} isBrowser={isBrowser} />
           ))}
         </div>
 

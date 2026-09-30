@@ -27,6 +27,7 @@ import { makeAiStreamParser, type AiTraceChunk } from "@/lib/explore-ai";
 import { MAX_OFFER_LIMIT } from "@/lib/whats-new.mjs";
 import { isScannerMissing, isBrowserCollectorMissing } from "@/lib/explore-error.mjs";
 import { expandSearchTargets } from "@/lib/browser-search.mjs";
+import { maxSnapshotByBoard } from "@/lib/browser-progress.mjs";
 import { readScanMax } from "@/lib/scan-max.mjs";
 import { readScanWrapUp } from "@/lib/scan-wrapup.mjs";
 import { useI18n } from "@/lib/i18n/context";
@@ -433,6 +434,22 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
       // 每站采集上限走用户配置（配置页可改，默认猎聘 1200 / BOSS/智联 400），随消息
       // 传给扩展 content script 的累积器，防分页型大关键词被 400 硬上限截掉末页。
       const scanMax = readScanMax();
+      // 分母快照（ADR-0069 决议 3）：发起时一次性冻结每平台上限合计（猎聘拆词时各词
+      // 求和）——扫描途中改配置页不影响本次进度条。驱动消息与快照共用同一份列表，
+      // 两处不会漂移。
+      const driveTargets = targets.map((t) => ({
+        source: t.source as string,
+        url: t.url as string,
+        maxCount: scanMax[t.source as keyof typeof scanMax] ?? 400,
+      }));
+      // Record<string, number> 宽化：.mjs 纯模块的返回型在 TS 里是固定三键字面量，
+      // 而平台 id 在这里是 string（与 SourceMap 的开放键同形），按字符串索引需宽化。
+      const maxSnap: Record<string, number> = maxSnapshotByBoard(driveTargets);
+      setSources((s) => {
+        const next = { ...s };
+        for (const p of platforms) next[p as string] = { ...next[p as string], state: "queued", total: maxSnap[p as string] ?? 0 };
+        return next;
+      });
       const scanId =
         typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
           ? crypto.randomUUID()
@@ -447,11 +464,7 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
           // 收尾开关（ADR-0007 E9）：扩展读不到 localStorage，只能由页面读出带过去。
           // 缺省（老版本前端）在扩展侧按「开启」处理。
           wrapUp: readScanWrapUp(),
-          sources: targets.map((t) => ({
-            source: t.source,
-            url: t.url,
-            maxCount: scanMax[t.source as keyof typeof scanMax] ?? 400,
-          })),
+          sources: driveTargets,
         },
         45_000, // 开 tab + content 注入可能比默认 4s 久,放宽等全部平台驱动完成
       );
@@ -468,20 +481,26 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
 
       // 温和轮询(2s):条数走 scan-progress,收尾走桥 scan-status 的 active 列表为空。
       // 超时 180s 兜底(防 SW/tab 意外丢失卡死)。drive 全败 → 直接跳过等待。
-      const collectedCount = async () => {
+      // ADR-0069: 同一轮响应里顺手拿 perSource 逐平台采到数，并把 active 列表灌进
+      // chip 状态机——浏览器模式的 active/swept 流转首次由轮询真实驱动，而不是全程
+      // 灰着等收尾一次性置 swept。
+      type ScanProgress = { collected?: number; perSource?: Record<string, number> };
+      const pollProgress = async (): Promise<ScanProgress> => {
         try {
-          const j = (await fetch(`/api/explore/scan-progress?scanId=${encodeURIComponent(scanId)}`).then((r) => r.json()).catch(() => ({}))) as { collected?: number };
-          return Number(j.collected) || 0;
+          return (await fetch(`/api/explore/scan-progress?scanId=${encodeURIComponent(scanId)}`).then((r) => r.json()).catch(() => ({}))) as ScanProgress;
         } catch {
-          return 0;
+          return {};
         }
       };
+      const everActive = new Set<string>(); // 出现过 active 的平台：从列表消失即视为采完
       let tick = 0;
       const maxTicks = 90;
       while (tick < maxTicks) {
         tick += 1;
         await new Promise((r) => setTimeout(r, 2000));
-        const collected = await collectedCount();
+        const prog = await pollProgress();
+        const collected = Number(prog.collected) || 0;
+        const perSource = prog.perSource && typeof prog.perSource === "object" ? prog.perSource : {};
         let active: string[] = [];
         try {
           const st = await extRequest({ type: "scan-status", scanId });
@@ -489,15 +508,39 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
         } catch {
           /* transient — keep polling */
         }
+        for (const a of active) everActive.add(a);
+        const activeSet = new Set(active);
+        setSources((s) => {
+          const next = { ...s };
+          for (const p of platforms) {
+            const id = p as string;
+            if (failedSet.has(id)) continue; // noisy 保持原样，采到数定格在上一次更新
+            const cur = next[id];
+            if (cur?.state === "swept") {
+              next[id] = { ...cur, done: perSource[id] ?? cur.done ?? 0, total: maxSnap[id] ?? cur.total ?? 0 };
+              continue;
+            }
+            const state = activeSet.has(id) || everActive.has(id) ? (activeSet.has(id) ? "active" : "swept") : "queued";
+            next[id] = { ...cur, state, done: perSource[id] ?? 0, total: maxSnap[id] ?? 0 };
+          }
+          return next;
+        });
         setStatus(t("explore.disc.collected", { n: collected }));
         if (active.length === 0) break;
       }
-
+      
       // 收尾:标记仍 active/queued 的平台为 swept,取回本 scanId 采集到的最前端显示。
+      // 最后一轮再读一次 scan-progress：采完到退出循环之间可能还有批次落表，chip 的
+      // ✓n 要定格在真实采到数而不是最后一次轮询快照。
+      const finalProg = await pollProgress();
+      const finalPer = finalProg.perSource && typeof finalProg.perSource === "object" ? finalProg.perSource : {};
       setSources((s) => {
         const next = { ...s };
-        for (const k of Object.keys(next))
+        for (const k of Object.keys(next)) {
+          if (failedSet.has(k)) continue;
           if (next[k]?.state === "queued" || next[k]?.state === "active") next[k] = { ...next[k]!, state: "swept" };
+          if (next[k]?.state === "swept") next[k] = { ...next[k]!, done: finalPer[k] ?? next[k]!.done ?? 0, total: maxSnap[k] ?? next[k]!.total ?? 0 };
+        }
         return next;
       });
       const offersRes = await extRequest({ type: "scan-offers", scanId });

@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import path from "node:path";
 import { careerOpsRoot } from "@/lib/career-ops";
 import { loadScanMap, scanIdempotencyPath } from "@/lib/scan-idempotency.mjs";
+import { countByBoard } from "@/lib/browser-progress.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -17,12 +18,19 @@ export const dynamic = "force-dynamic";
 //
 // 采集"是否收尾"由前端另用扩展 SW 的 scan-status(active 平台列表为空即全收尾)
 // 判定;本条只管条数。
+//
+// ADR-0069: 除全局 collected 外,再按 URL host 把本 scanId 已采键归集成
+// perSource {zhipin, liepin, zhaopin} —— 探索页平台 chip 的「n/上限」逐平台进度。
+// 计数是原始采到数(采集门收尾才跑,两线口径的取舍见 ADR-0069 决议 4)。
 export async function GET(req: NextRequest) {
   const scanId = req.nextUrl.searchParams.get("scanId")?.trim() ?? "";
-  if (!scanId) return Response.json({ collected: 0 });
+  if (!scanId) return Response.json({ collected: 0, perSource: countByBoard([]) });
 
   const map = loadScanMap(scanIdempotencyPath(path.join(careerOpsRoot(), "data")));
   // ADR-0021: 采集条数记在 `seen:` 命名空间下（采集只记「见过」，不再写 add）。
   const keys = map.get(`seen:${scanId}`) ?? map.get(scanId);
-  return Response.json({ collected: keys ? keys.size : 0 });
+  return Response.json({
+    collected: keys ? keys.size : 0,
+    perSource: countByBoard(keys ?? []),
+  });
 }
