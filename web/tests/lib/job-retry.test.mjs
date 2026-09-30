@@ -1,4 +1,4 @@
-// 工作器任务重试的判定与重置纯函数测试（ADR-0061 决议 3/4/8）。
+// 工作器任务重试的判定与重置纯函数测试（ADR-0061 决议 3/4/8 + 修订 1）。
 // 零 DOM 依赖：入参是 Job 卡的结构化最小形状，组件侧只做事件/动作接线。
 //
 // Run:  node --test tests/lib/job-retry.test.mjs
@@ -29,6 +29,21 @@ test("canRetryJob：跨会话恢复的 interruptedAt 卡仍是 error 终态，�
 
 test("canRetryJob：池源卡（active- 前缀）不可重试", () => {
   assert.equal(canRetryJob({ ...singleError, id: "active-pool-9" }), false);
+});
+
+test("canRetryJob：ledger-only 单次卡（uuid id + kind+input，error）可重试 — 修订 1", () => {
+  // 扩展/CLI/别的页签发起的任务：本浏览器无 job- 本地卡，id 就是服务端 runId。
+  const ledgerOnly = { id: "58d091a4-482c-4a5d-b4cb-2b81ae72cd04", status: "error", kind: "evaluate", input: "https://x/a" };
+  assert.equal(canRetryJob(ledgerOnly), true);
+});
+
+test("canRetryJob：ledger-only 批量卡无 urls/ns 仍不可重试 — 原始清单无法重建", () => {
+  const ledgerBatch = { id: "b7c2...", status: "error", kind: "batch-evaluate", input: "3 urls" };
+  assert.equal(canRetryJob(ledgerBatch), false);
+});
+
+test("canRetryJob：空字符串 id 保守拒绝", () => {
+  assert.equal(canRetryJob({ id: "", status: "error", kind: "evaluate", input: "https://x" }), false);
 });
 
 test("canRetryJob：仅 error 终态可重试 — done/queued/running 一律 false", () => {

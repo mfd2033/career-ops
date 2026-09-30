@@ -31,7 +31,7 @@ export function RetryJobButton({
 
   const requestRetry = () => {
     if (needsConfirm) setConfirmOpen(true);
-    else retryJob(job.id);
+    else retryJob(job);
   };
 
   return (
@@ -73,7 +73,7 @@ export function RetryJobButton({
                 type="button"
                 onClick={() => {
                   setConfirmOpen(false);
-                  retryJob(job.id);
+                  retryJob(job);
                 }}
                 className="rounded-md bg-brand px-3 py-1.5 text-xs font-medium text-brand-foreground transition-colors hover:bg-brand-200"
               >

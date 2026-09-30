@@ -115,7 +115,7 @@ type StartOpts = { title: string; subtitle?: string; kind: string; input: string
 type Ctx = {
   jobs: Job[];
   startJob: (opts: StartOpts) => string | null;
-  retryJob: (id: string) => void;
+  retryJob: (job: Job) => void;
   removeJob: (id: string) => void;
   cancelJob: (id: string) => void;
   clearFinished: () => void;
@@ -846,35 +846,43 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
     [dispatchJob, t],
   );
 
-  // ADR-0061 决议 1/3/4/5：手动重试——仅 error 终态的本地卡可重试；原卡复用
-  // （attempt+1、时间线追加「第 N 次尝试」分隔行、运行态清空），引擎沿用卡上
-  // 快照、缺失才回退当前设置；派发走与 startJob 同一条共享路径，服务端零感知。
+  // ADR-0061 决议 1/3/4/5 + 修订 1：手动重试。本地 error 卡原卡复用（attempt+1、
+  // 时间线追加「第 N 次尝试」分隔行、运行态清空），引擎沿用卡上快照、缺失才
+  // 回退当前设置。ledger-only 卡（扩展/CLI/别的页签发起，本浏览器无本地卡）不在
+  // store jobs 里、无法原卡复用：按卡上 kind+input 种子一张全新本地卡走 startJob
+  // 同一条派发路径（新 runId、attempt 从 1 起）。
   const retryJob = useCallback(
-    (id: string) => {
-      const job = jobsRef.current.find((j) => j.id === id);
-      if (!job || !canRetryJob(job)) return;
-      const n = nextAttempt(job);
-      patch(id, () => resetJobForRetry(job, { now: Date.now(), separatorLabel: t("jobs.retryAttemptSeparator", { n }) }) as Job);
+    (job: Job) => {
+      if (!canRetryJob(job)) return;
+      const local = jobsRef.current.find((j) => j.id === job.id);
+      if (!local) {
+        // 修订 1：ledger-only 单次卡——种子全新本地卡（批量 ledger-only 无 urls/ns，
+        // canRetryJob 已拦，走不到这里）。
+        startJob({ title: job.title, subtitle: job.subtitle, kind: job.kind!, input: job.input!, page: job.page });
+        return;
+      }
+      const n = nextAttempt(local);
+      patch(local.id, () => resetJobForRetry(local, { now: Date.now(), separatorLabel: t("jobs.retryAttemptSeparator", { n }) }) as Job);
       (async () => {
-        const engine = job.cliId ? { cliId: job.cliId, model: job.model } : await resolveEngineFallback();
+        const engine = local.cliId ? { cliId: local.cliId, model: local.model } : await resolveEngineFallback();
         dispatchJob(
-          id,
+          local.id,
           {
-            title: job.title,
-            subtitle: job.subtitle,
-            kind: job.kind!,
-            input: job.input!,
-            page: job.page,
-            batchId: job.batchId,
-            reportNum: job.reportNum,
-            urls: job.urls,
-            ns: job.ns,
+            title: local.title,
+            subtitle: local.subtitle,
+            kind: local.kind!,
+            input: local.input!,
+            page: local.page,
+            batchId: local.batchId,
+            reportNum: local.reportNum,
+            urls: local.urls,
+            ns: local.ns,
           },
           engine,
         );
       })();
     },
-    [dispatchJob, patch, t],
+    [dispatchJob, patch, startJob, t],
   );
 
   const removeJob = useCallback((id: string) => {

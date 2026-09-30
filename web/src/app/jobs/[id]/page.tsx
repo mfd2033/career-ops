@@ -205,6 +205,17 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
             {e.msg && (
               <p className="mt-3 rounded-lg border border-border bg-surface/60 px-3 py-2 text-sm text-muted">{e.msg}</p>
             )}
+            {/* ADR-0061 修订 1：ledger-only 单次 error 卡也可重试——本浏览器无本地卡，
+                点重试会种子一张全新本地卡重发。批量子任务行（isChild）语义特殊，不提供。
+                组件按 canRetryJob 自守卫（done / 无 kind+input 一律渲染 null）。 */}
+            {!isChild && e.status === "error" && (
+              <div className="mt-3">
+                <RetryJobButton
+                  job={{ id: e.id, title: display.title, subtitle: e.input, page: display.page, input: e.input, kind: e.kind, status: e.status, steps: [], text: "", startedAt: e.startedAt }}
+                  withLabel
+                />
+              </div>
+            )}
             {/* ADR-0045：UI 外发起的批量终结后，ledger-only 视图不再只有状态+
                 时长+原因——落盘的逐项快照同口径渲染（本地卡视图零变化）。 */}
             {e.items && e.items.length > 0 && (

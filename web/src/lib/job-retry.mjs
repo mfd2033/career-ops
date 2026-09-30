@@ -5,8 +5,10 @@
  * ADR-0061：失败（error 终态）的本地卡可手动重试——原卡复用、attempt+1、
  * 整卡重跑（批量已成功项接受重复执行）。重试的取参来源是卡上的派发参数
  * 快照：单任务凭 kind+input，批量凭 urls/ns（items 只是结论清单、可能被
- * cap 截断，不能反推原始清单）。池源卡（active-*）与 ledger-only 行没有
- * 完整参数，永远不可重试。
+ * cap 截断，不能反推原始清单）。池源卡（active-*）是轮询临时投影、没有
+ * 完整参数，永远不可重试。ledger-only 行（ADR-0061 修订 1）：单次卡台账存了
+ * kind+input，可重试（retryJob 对不在本地 store 的卡种子一张全新本地卡）；
+ * 批量卡台账只有结论清单、无 urls/ns，仍然不可重试。
  */
 
 /** 批量任务的 kind——它们的派发参数是 urls/ns 而非单个 input。 */
@@ -14,19 +16,25 @@ export const BATCH_JOB_KINDS = Object.freeze(["batch-evaluate", "batch-checkup"]
 
 /**
  * 这张卡当前能否发起重试。
- * 规则（ADR-0061 决议 4/8）：仅本地卡（id 以 `job-` 开头）且 status === "error"
- * （含跨会话恢复的 interruptedAt 卡）；批量卡必须留有非空 urls/ns 快照，
- * 单任务卡必须留有 kind+input。取消/完成不提供入口；判不了就 false。
+ * 规则（ADR-0061 决议 4/8 + 修订 1）：status === "error"（含跨会话恢复的
+ * interruptedAt 卡）且 id 不是池源前缀（active-*）——本地卡（job-）与
+ * ledger-only 单次卡（id = 服务端 runId）都可重试。批量卡必须留有非空
+ * urls/ns 快照（ledger-only 批量卡没有，天然被拦）；单任务卡必须留有
+ * kind+input。取消/完成不提供入口；判不了就 false。
  *
  * @param {{ id?: string, status?: string, kind?: string, input?: string, urls?: string[], ns?: string[] } | null | undefined} job
  * @returns {boolean}
  */
 export function canRetryJob(job) {
-  if (!job || typeof job.id !== "string" || !job.id.startsWith("job-")) return false;
+  if (!job || typeof job.id !== "string" || job.id.length === 0) return false;
+  // 池源卡（active- 前缀）是 /api/active-runs 轮询的临时投影，不落 localStorage、
+  // 没有可持久化的派发快照，取消后下次轮询即消失——永远不可重试（修订 1）。
+  if (job.id.startsWith("active-")) return false;
   if (job.status !== "error") return false;
   if (BATCH_JOB_KINDS.includes(job.kind)) {
     return (job.urls?.length ?? 0) > 0 || (job.ns?.length ?? 0) > 0;
   }
+  // 本地卡与 ledger-only 单次卡都凭 kind+input 整卡重发。
   return !!job.kind && !!job.input;
 }
 

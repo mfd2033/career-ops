@@ -17,7 +17,7 @@
 1. **仅手动重试**：`error` 终态卡提供「重试」按钮；不做自动重试/退避。CLI 内部重试已覆盖瞬时故障，web 层自动重试易与其叠加放大消耗。
 2. **整卡重跑**：批量任务重试 = 整批重新派发，已成功项接受重复执行；按失败项重试留作二期（需动批量数据结构与对账逻辑）。
 3. **原卡复用 + attempt 计数**：Job 新增 `attempt` 字段（缺省 = 1），重试时 +1，列表与详情展示「第 N 次尝试」；时间线追加「第 N 次尝试」分隔行后**保留旧步骤**（`STEPS_CAP` 滚动窗口自然截断更早的尝试，接受）；`items`/`batchPos`/`serverBatchId`/`text`/`result`/`runId`/`interruptedAt` 及时间戳字段清空重建，`startedAt` 重置。
-4. **可重试范围**：仅本地卡（`job-*` id）且 `status === "error"`（含跨会话恢复的 `interruptedAt` 卡）；取消/完成不提供入口；池源卡与 ledger-only 行不可重试。
+4. **可重试范围**：仅本地卡（`job-*` id）且 `status === "error"`（含跨会话恢复的 `interruptedAt` 卡）；取消/完成不提供入口；池源卡与 ledger-only 行不可重试。**（本条被修订 1 部分推翻：ledger-only 单次卡改为可重试。）**
 5. **引擎沿用卡片快照**：重试派发用卡上记录的 `cliId`/`model`（ADR-0043），缺失才回退重新解析——重试语义是「原样再来」，换引擎应改设置后新建任务。
 6. **批量重试二次确认**：`urls`/`ns` 条数 > 1 的卡片重试前弹确认框（复用 ADR-0057 的内嵌弹窗模式，不用 `window.confirm`），明示整卡重跑与条数；单任务一键直达。
 7. **双入口**：/jobs 历史列表错误行（重试按钮做 Link 的兄弟节点，沿用展开 chevron 的行外模式）+ `/jobs/[id]` 详情页头部；侧栏 tray 不加（只显示前 6 张、空间小，详情页一键可达）。
@@ -40,8 +40,20 @@
 - 服务端无感知：重试即一次全新派发——台账里是两条独立记录（原失败 run + 重试 run），ADR-0034 的失败证据完整保留；`/co-job-done`、`/api/runs/save`、卡片-台账去重逻辑零改动（新 run 新 runId 落卡）。
 - 中断卡（`interruptedAt`）重试后标记清除，跨会话恢复语义不受影响。
 
+## Revisions
+
+### 修订 1（2026-09-30）：ledger-only 单次 error 卡纳入可重试范围
+
+- **触发的缺陷**：诊断 `/diagnosing-bugs` 报告——从浏览器扩展派发的评估（ADR-0051 走 `POST /api/run`）出错后，/jobs 工作器页没有任何重试入口。反馈环（回放真实台账行 `58d091a4`）证明：该 ledger-only 单次行的 `kind`、`input`、`status="error"` 三条件全满足，唯一拦截因子是决议 4 的 `id.startsWith("job-")` 前缀判断。
+- **原假设失效的地方**：决议 4「ledger-only 行没有完整派发参数」只对**批量**卡成立——台账对单次 run 逐字存了 `kind`+`input`（`run-ledger.mjs`），足以原样重发。ADR-0051 让扩展成为单次 evaluate 的主要派发源之一后，这个盲区被稳定命中。
+- **修订后的范围**：`canRetryJob` 改为「非 `active-*` 前缀 + `status === "error"`」；批量卡仍凭 `urls`/`ns` 判定（ledger-only 批量卡没有，天然被拦）；单任务卡凭 `kind`+`input`。**池源卡（`active-*`）维持不可重试**——它是轮询临时投影、不落 localStorage、无持久化派发快照。
+- **retryJob 的连带改动**：原 `retryJob(id)` 只在本地 `jobs` 里找卡，ledger-only 行不在 store 状态里。签名改为 `retryJob(job)`：命中本地卡 → 原卡复用（原语义不变）；未命中（ledger-only 单次卡）→ 按卡上 `kind`+`input` 调 `startJob` 种子一张**全新本地卡**重发（新 `runId`、`attempt` 从 1 起、旧台账行原样留存为历史）。**这是与决议 3「原卡复用」的一处有意偏离**：ledger-only 根本没有可复用的本地卡，种子新卡是唯一不引入跨页签状态同步的路径。
+- **重试取参的一处诚实降级**：扩展派发时把内联 `jdText`/`company` 注入 prompt；ledger-only 种子重发只带 `input`（url），由 worker 自行抓取——与「在 web 里粘贴同一 url 评估」同形态，非新增风险。
+- **验证**：`node --test web/tests/lib/job-retry.test.mjs`（新增 3 例：ledger-only 单次可重试 / ledger-only 批量不可重试 / 空 id 拒绝）；`web` tsc 干净；反馈环场景 A 转绿。
+- **决议 7 的入口范围相应扩展**：/jobs 列表行（原本就渲染按钮，现在对 ledger-only 行放行）+ `/jobs/[id]` 详情页 ledger-only 视图（新增，批量子任务行 `isChild` 语义特殊不提供）。
+
 ## References
 
-- ADR-0020（事件通道与派发路径）、ADR-0031（卡片-台账对账）、ADR-0034（失败证据入账）、ADR-0042/0043/0044/0045（卡片字段口径）、ADR-0057（二次确认弹窗先例）。
+- ADR-0020（事件通道与派发路径）、ADR-0031（卡片-台账对账）、ADR-0034（失败证据入账）、ADR-0042/0043/0044/0045（卡片字段口径）、ADR-0051（扩展单次评估改走 `/api/run`——修订 1 的诱因）、ADR-0057（二次确认弹窗先例）。
 - `web/src/components/jobs/job-store.tsx`、`web/src/components/jobs/worker-pills.tsx`、`web/src/app/jobs/page.tsx`、`web/src/app/jobs/[id]/page.tsx`、`web/src/lib/i18n/clusters/jobs.ts`、`web/src/lib/run-cli-support.mjs`。
 - 实现工单：`.scratch/worker-job-retry/issues/01–04`（纯函数+持久化 → retryJob 派发路径 → UI 双入口 → 验证收尾）；单测 `web/tests/lib/job-retry.test.mjs`。
