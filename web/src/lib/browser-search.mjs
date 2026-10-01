@@ -492,6 +492,18 @@ export function expandSearchTargets(sources, query, cityName) {
   return out;
 }
 
+/**
+ * ADR-0066 单关键词门：浏览器扫描只允许一个关键词。去首尾空格后仍含内部空白
+ * （空格、全角空格、Tab 等）即视为多词 —— 多词会被 driveViaExtension 拼成 ` OR `
+ * 展开、并对猎聘触发逐词拆 URL，使采集窗口数超过「选中平台数 ≤3」，破坏下半屏
+ * 一行布局。故发起前用它拦下多词输入。空/纯空白返回 false（缺失词由既有必填校验拦）。
+ * @param {string} query 用户填入的原始关键词
+ * @returns {boolean} 含两个及以上关键词时为真
+ */
+export function hasMultipleKeywords(query) {
+  return /\s/.test(String(query ?? "").trim());
+}
+
 /** Keep only known browser sources; the empty/absent/ non-array value means "all". */
 export function cleanBrowserSources(v) {
   if (!Array.isArray(v)) return [...BROWSER_SOURCES];

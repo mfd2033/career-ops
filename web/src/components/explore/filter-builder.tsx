@@ -139,7 +139,7 @@ export function FilterBuilder({
       <div className="space-y-4">
         <style>{STYLE}</style>
         <div>
-          <Label>{t("explore.filter.zhQuery")}</Label>
+          <Label hint={t("explore.filter.zhQuerySingleHint")}>{t("explore.filter.zhQuery")}</Label>
           {/* relative + pr 留白：容纳内嵌 ×（ADR-0059 决议 1/8） */}
           <div className="co-fb__field relative border border-border bg-surface/40 focus-within:border-brand/40 transition-colors">
             <Search className="size-3.5 shrink-0 text-muted" />

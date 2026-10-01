@@ -29,6 +29,7 @@ export const en: Dict = {
   "explore.discoverBrowser": "Discover (browser)",
   "explore.discoverNote": "Evaluating a role later costs tokens. Discovering never does.",
   "explore.discoverBrowserKeywordRequired": "Enter a Chinese keyword first.",
+  "explore.discoverBrowserKeywordSingle": "One keyword only — remove the spaces.",
 
   // ── First-run reveal banner ──
   "explore.firstRun.lead": "These are live roles that match your CV. ",
@@ -171,6 +172,7 @@ export const en: Dict = {
   "explore.filter.sourcesHint": "pick at least one",
   "explore.filter.sources": "Sources",
   "explore.filter.zhQuery": "Keywords (Chinese)",
+  "explore.filter.zhQuerySingleHint": "One keyword only (spaces count as multiple).",
   "explore.filter.zhQueryPlaceholder": "AI 工程师，算法…",
   "explore.filter.zhCity": "City (optional)",
   "explore.filter.zhCityPlaceholder": "郑州，北京…",
@@ -304,6 +306,7 @@ export const zh: Dict = {
   "explore.discoverBrowser": "发现（浏览器）",
   "explore.discoverNote": "稍后评估岗位会消耗 token。发现永远不会。",
   "explore.discoverBrowserKeywordRequired": "请先输入中文关键词。",
+  "explore.discoverBrowserKeywordSingle": "只支持单个关键词，请去掉空格。",
 
   // ── 首次揭示横幅 ──
   "explore.firstRun.lead": "这些是与你的 CV 匹配的真实岗位。",
@@ -446,6 +449,7 @@ export const zh: Dict = {
   "explore.filter.sourcesHint": "至少选择一个",
   "explore.filter.sources": "来源",
   "explore.filter.zhQuery": "关键词（中文）",
+  "explore.filter.zhQuerySingleHint": "只支持单个关键词（含空格会被当作多个）。",
   "explore.filter.zhQueryPlaceholder": "AI 工程师，算法…",
   "explore.filter.zhCity": "城市（可选）",
   "explore.filter.zhCityPlaceholder": "郑州，北京…",

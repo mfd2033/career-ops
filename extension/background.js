@@ -303,6 +303,25 @@ const DRIVE_SOURCES = {
 const activeDrives = new Map();
 const driveKey = (source, url) => `${source}|${url}`;
 
+// ADR-0066：本次扫描开出的采集窗口账（scanId → [{scanId,windowId,tabId,source,originalUrl}]）。
+// activeDrives 会随每条采集结束逐条摘除，收尾时点已读不到"这次一共开了哪些窗口"，
+// 故单列一份存活到整轮 settle 的窗口账，供关窗判定用。窗口/其 tab 被关时同步剔除。
+const scanWindows = new Map();
+function recordScanWindow(rec) {
+  if (!rec || typeof rec.windowId !== "number") return;
+  const list = scanWindows.get(rec.scanId) || [];
+  list.push(rec);
+  scanWindows.set(rec.scanId, list);
+}
+function dropScanWindow(tabId) {
+  for (const [sid, list] of scanWindows) {
+    const kept = list.filter((r) => r.tabId !== tabId);
+    if (kept.length === list.length) continue;
+    if (kept.length) scanWindows.set(sid, kept);
+    else scanWindows.delete(sid);
+  }
+}
+
 // scanId → DiscoveredOffer[];content script 分批上报的增量本地缓冲,供探索页在采集
 // 收尾后一次取回用于结果渲染(ADR-0021:上报只记「见过」台账,结果区是这些候选的
 // 展示面;入管由用户在结果区勾选后显式确认)。
@@ -310,11 +329,10 @@ const scanOffers = new Map();
 
 // ---- 扫描收尾(ADR-0007 E9) ------------------------------------------------
 
-// 发起本次扫描的探索页 tab(由 localhost 桥的 sender.tab 给出)与收尾开关,随
-// drive-scan 一起进来。同一时刻只有一次探索页驱动的扫描(前端 runningRef 拦连点),
-// 故用单份模块状态而非按 scanId 存表。
+// 发起本次扫描的探索页 tab(由 localhost 桥的 sender.tab 给出),随 drive-scan 一起
+// 进来。同一时刻只有一次探索页驱动的扫描(前端 runningRef 拦连点),故用单份模块状态
+// 而非按 scanId 存表。
 let exploreTabId = null;
-let wrapUpEnabled = true;
 
 // 已收尾过的 scanId:幂等,挡掉迟到的 scan-done 与事件竞态下的重复收尾。有条数上限 ——
 // SW 常驻期内扫描次数无上限,不设界就是慢性泄漏。
@@ -368,7 +386,8 @@ function endDrivesForTab(tabId, url) {
   return endedScanId;
 }
 
-/** 收尾判定 → 动作。settle 为真则记 scanId(幂等);有 activateTabId 才切焦点。 */
+/** 收尾判定 → 动作。ADR-0066：settle 为真(本次扫描全部采完)则按保护规则关闭本次
+ *  开出的采集窗口，并把焦点还给探索页所在窗口。切旧「激活探索页 tab」行为已删除。 */
 function runWrapUp(facts) {
   const decision = WRAPUP.decideWrapUp({ ...facts, wrappedUpScans: [...wrappedUpScans] });
   if (decision.settle) {
@@ -381,10 +400,76 @@ function runWrapUp(facts) {
   console.log(
     "[bg] scan wrap-up:",
     decision.reason,
-    decision.activateTabId == null ? "(no tab switch)" : `→ tab ${decision.activateTabId}`,
+    decision.settle ? `→ close windows for ${decision.scanId}` : "(not settled)",
   );
-  if (decision.activateTabId != null) activateExploreTab(decision.activateTabId);
+  if (decision.settle) closeScanWindows(decision.scanId, facts.exploreTabId).catch(() => {});
   return decision;
+}
+
+/** 关闭本次 scanId 应关的采集窗口：读各窗口当前 URL → decideCloseWindows 判保护
+ *  → 关之，最后把焦点还给探索页所在窗口。已被用户关掉的 tab 读 URL 会抛错，按原样剔除。 */
+async function closeScanWindows(scanId, exploreTabId) {
+  const recs = scanWindows.get(scanId);
+  scanWindows.delete(scanId);
+  const facts = [];
+  for (const r of recs || []) {
+    let currentUrl = r.originalUrl;
+    try {
+      const tab = await chrome.tabs.get(r.tabId);
+      if (tab && typeof tab.url === "string") currentUrl = tab.url;
+    } catch {
+      /* tab 已关：currentUrl 回落 originalUrl，归一化相等→被当作应关；窗口关不存在→静默 */
+    }
+    facts.push({ scanId: r.scanId, windowId: r.windowId, originalUrl: r.originalUrl, currentUrl, isDetailPath: isDetailPathFor(r.source, currentUrl), isAuthPage: isAuthUrl(currentUrl) });
+  }
+  const { closeWindowIds, keepWindowIds } = WRAPUP.decideCloseWindows({ drives: facts, scanId });
+  console.log(
+    "[bg] closeScanWindows", scanId,
+    "close:", closeWindowIds.join(",") || "(none)",
+    "keep:", keepWindowIds.join(",") || "(none)",
+    "urls:", facts.map((f) => `${f.windowId}=${f.currentUrl}`).join(" | "),
+  );
+  for (const wid of closeWindowIds) {
+    try {
+      await chrome.windows.remove(wid); // Chrome 关窗 API 是 windows.remove（没有 windows.close）
+      console.log("[bg] closeScanWindows closed", wid);
+    } catch (e) {
+      console.log("[bg] closeScanWindows FAILED to close", wid, ":", (e && e.message) || String(e));
+    }
+  }
+  if (exploreTabId != null) await refocusExploreWindow(exploreTabId);
+}
+
+/** 把探索页所在窗口提到前台并激活其 tab（ADR-0066：多窗口扫完后焦点回探索页）。 */
+async function refocusExploreWindow(tabId) {
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    if (tab && typeof tab.windowId === "number") {
+      await chrome.windows.update(tab.windowId, { focused: true }).catch(() => {});
+    }
+    activateExploreTab(tabId);
+  } catch {
+    /* 探索页 tab 已关：静默 */
+  }
+}
+
+/** 粗判登录/验证页 URL（重定向到登录页多半已被 host/路径变更盖盖，这里给同站登录态页兜底）。 */
+function isAuthUrl(url) {
+  if (typeof url !== "string") return false;
+  return /(\/(login|signin|register)(\b|[/?#])|web\/user|passport|\/(verify|captcha|security|checkcode)(\b|[/?#]))/i.test(url);
+}
+
+/** 该站当前 URL 是否职位详情页（用 DRIVE_SOURCES[source].isDetail 判 pathname）。
+ *  用作关窗保护的"用户已点进去看"信号——比 pathname 与原始 URL 是否相等更准，
+ *  不会误伤 BOSS 这类会把列表页自身路径 job→jobs 改写的站。 */
+function isDetailPathFor(source, url) {
+  const spec = DRIVE_SOURCES[source];
+  if (!spec || typeof url !== "string") return false;
+  try {
+    return !!spec.isDetail(new URL(url).pathname);
+  } catch {
+    return false;
+  }
 }
 
 /** 问一句采集 tab:内容脚本按自己的状态答。无应答(tab 已关 / content 没注入 / 被换页)
@@ -422,7 +507,7 @@ async function probeDeadDrives() {
   for (const key of deadKeys) activeDrives.delete(key);
   console.log("[bg] drive went silent → ended", deadKeys.length, "drive(s)");
   if (scanId) {
-    runWrapUp({ drives: driveSnapshots(), scanId, wrapUpEnabled, exploreTabId });
+    runWrapUp({ drives: driveSnapshots(), scanId, exploreTabId });
   }
 }
 
@@ -446,8 +531,9 @@ chrome.tabs.onRemoved.addListener((tabId) => {
     return;
   }
   const endedScanId = endDrivesForTab(tabId, null);
+  dropScanWindow(tabId); // 采集窗口/其 tab 被用户关掉 → 从窗口账剔除，免得收尾去关已不存在的窗口
   if (endedScanId) {
-    runWrapUp({ drives: driveSnapshots(), scanId: endedScanId, wrapUpEnabled, exploreTabId });
+    runWrapUp({ drives: driveSnapshots(), scanId: endedScanId, exploreTabId });
   }
 });
 
@@ -478,26 +564,45 @@ function waitTabLoaded(tabId, timeoutMs = 15000) {
   });
 }
 
-/** 新开搜索 tab、等加载完成、驱动扫描;content 未及时就绪时多等 800ms 重试一轮。 */
-async function openAndDrive(source, url, scanId, maxCount) {
+/** 新开搜索窗口、等加载完成、驱动扫描;content 未及时就绪时多等 800ms 重试一轮。
+ *  ADR-0066:每平台一个下半屏独立窗口(取代在当前窗口开 tab)。bounds 来自探索页
+ *  (window.screen 算好下发),缺失或尺寸非法时退回默认窗口位置。 */
+async function openAndDrive(source, url, scanId, maxCount, bounds) {
   try {
     const key = driveKey(source, url);
-    const tab = await chrome.tabs.create({ url });
-    activeDrives.set(key, { scanId, tabId: tab.id, started: false });
-    await waitTabLoaded(tab.id);
-    let res = await tryStartScan(tab.id, scanId, maxCount);
+    const winOpts = { url };
+    if (bounds && bounds.width > 0 && bounds.height > 0) {
+      winOpts.left = bounds.left;
+      winOpts.top = bounds.top;
+      winOpts.width = bounds.width;
+      winOpts.height = bounds.height;
+    }
+    const win = await chrome.windows.create(winOpts);
+    // chrome.windows.create 的创建期 bounds 在部分环境(尤其 SW 刚唤醒的第一个窗口)会被
+    // 忽略、退化成级联默认位置。拿到窗口后用 windows.update 再钉一次位置/尺寸——这是
+    // 已知更可靠的做法;create 已生效时 update 为幂等空操作。
+    if (win && win.id != null && bounds && bounds.width > 0 && bounds.height > 0) {
+      await chrome.windows
+        .update(win.id, { left: bounds.left, top: bounds.top, width: bounds.width, height: bounds.height, state: "normal" })
+        .catch(() => {});
+    }
+    const tabId = win.tabs && win.tabs[0] ? win.tabs[0].id : undefined;
+    activeDrives.set(key, { scanId, tabId, windowId: win.id, originalUrl: url, started: false });
+    await waitTabLoaded(tabId);
+    let res = await tryStartScan(tabId, scanId, maxCount);
     if (!res || !res.ok) {
       await new Promise((r) => setTimeout(r, 800));
-      res = await tryStartScan(tab.id, scanId, maxCount);
+      res = await tryStartScan(tabId, scanId, maxCount);
     }
     if (res && res.ok) {
       // 握上手才算"这个采集端应该活着":在此之前无应答是正常的,存活探测必须让开这段窗口。
       const entry = activeDrives.get(key);
       if (entry) entry.started = true;
-      return { source, status: "created", tabId: tab.id, scanId: res.scanId || scanId };
+      recordScanWindow({ scanId, windowId: win.id, tabId, source, originalUrl: url });
+      return { source, status: "created", tabId, windowId: win.id, scanId: res.scanId || scanId };
     }
     activeDrives.delete(key); // 启动失败:清登记,允许后续重试驱动
-    return { source, status: "failed", tabId: tab.id, error: (res && res.error) || "content not ready" };
+    return { source, status: "failed", tabId, windowId: win.id, error: (res && res.error) || "content not ready" };
   } catch (e) {
     return { source, status: "failed", error: (e && e.message) || String(e) };
   }
@@ -507,13 +612,13 @@ async function openAndDrive(source, url, scanId, maxCount) {
  * 驱动单个平台:查既存 hosts 命中 tab,优先取列表页驱动;都不可用/被拒则新开搜索
  * tab。activeDrives 按 {source,url} 登记成功来源,scan-done 时清除,避免重复驱动。
  */
-async function driveSource(source, url, scanId, maxCount) {
+async function driveSource(source, url, scanId, maxCount, bounds) {
   const spec = DRIVE_SOURCES[source];
   const key = driveKey(source, url);
   const active = activeDrives.get(key);
-  if (active) return { source, status: "active", tabId: active.tabId, scanId: active.scanId };
+  if (active) return { source, status: "active", tabId: active.tabId, windowId: active.windowId, scanId: active.scanId };
   if (!spec) return { source, status: "failed", error: "unknown source" };
-  return openAndDrive(source, url, scanId, maxCount);
+  return openAndDrive(source, url, scanId, maxCount, bounds);
 }
 
 /**
@@ -526,24 +631,22 @@ async function driveScan(msg, sender) {
     ? msg.sources
         .map((s) => (s && typeof s.source === "string" ? s : { source: s }))
         .filter((s) => s && typeof s.source === "string" && DRIVE_SOURCES[s.source] && typeof s.url === "string" && /^https?:\/\//i.test(s.url))
-        .map((s) => ({ source: s.source, url: s.url, maxCount: typeof s.maxCount === "number" && s.maxCount > 0 ? s.maxCount : undefined }))
+        .map((s) => ({ source: s.source, url: s.url, maxCount: typeof s.maxCount === "number" && s.maxCount > 0 ? s.maxCount : undefined, bounds: s.bounds && typeof s.bounds === "object" ? s.bounds : undefined }))
     : [];
   // 收尾上下文:web-bridge 是注入在本地面板上的 content script,故 sender.tab 就是发起
-  // 本次扫描的探索页 tab —— 不用猜端口,也不用从页面 URL 反推。wrapUp 缺省按开启处理,
-  // 老版本前端(不带该字段)仍工作。
+  // 本次扫描的探索页 tab —— 不用猜端口,也不用从页面 URL 反推。扫完据此把焦点还回此窗口。
   exploreTabId = sender && sender.tab && typeof sender.tab.id === "number" ? sender.tab.id : null;
-  wrapUpEnabled = msg.wrapUp !== false;
   if (requested.length === 0) return { ok: true, scanId, connected: true, tasks: [] };
   const tasks = [];
   for (const s of requested) {
     // 顺序驱动(每平台一次采集会话,避免同时弹多个搜索 tab)。每步失败不中断其它平台。
-    tasks.push(await driveSource(s.source, s.url, scanId, s.maxCount));
+    tasks.push(await driveSource(s.source, s.url, scanId, s.maxCount, s.bounds));
   }
   // 全部平台一个都没起来:openAndDrive 是先开 tab 再握手,失败时 tab 留着(只摘登记),
   // 用户已经被带到那个空 tab 上 —— 立即收尾把他送回探索页(E9)。部分失败不在此列,
   // 仍等成功启动的平台跑完(它们各自的 scan-done 会触发收尾)。
   if (!tasks.some((t) => t && (t.status === "created" || t.status === "active"))) {
-    runWrapUp({ drives: driveSnapshots(), scanId, wrapUpEnabled, exploreTabId });
+    runWrapUp({ drives: driveSnapshots(), scanId, exploreTabId });
   }
   return { ok: true, scanId, connected: true, tasks };
 }
@@ -1023,7 +1126,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         // 登记已被整表清过(如探索页被关时)也走一次判定:幂等会挡掉重复,exploreTabId
         // 为 null 时自然什么都不切。没有 scanId 就无从归口,交给 onRemoved 那条路径。
         if (endedScanId) {
-          runWrapUp({ drives: driveSnapshots(), scanId: endedScanId, wrapUpEnabled, exploreTabId });
+          runWrapUp({ drives: driveSnapshots(), scanId: endedScanId, exploreTabId });
         }
         break;
       }

@@ -6,7 +6,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { extractBrowserQuery, buildSearchUrls, expandSearchTargets, parseSalaryText, matchesBrowserSalary, isSalaryUnknown, browserToParams, applyBrowserSalaryGate, applyBrowserCityGate, applyBrowserTitleGate, effectiveBrowserCity, browserCityValue, ZH_CITY_ANY, cleanSalaryText } from "../../src/lib/browser-search.mjs";
+import { extractBrowserQuery, buildSearchUrls, expandSearchTargets, hasMultipleKeywords, parseSalaryText, matchesBrowserSalary, isSalaryUnknown, browserToParams, applyBrowserSalaryGate, applyBrowserCityGate, applyBrowserTitleGate, effectiveBrowserCity, browserCityValue, ZH_CITY_ANY, cleanSalaryText } from "../../src/lib/browser-search.mjs";
 
 // ── cleanSalaryText —— 字形反爬清洗（工单 03 缺陷修复）──
 
@@ -22,6 +22,27 @@ test("parseSalaryText: BOSS PUA 数字已在采集侧解码为 ASCII，web 侧�
   // 采集侧解码后的形态（15-30K / 20-30K·13薪）走正常解析路径
   assert.deepEqual(parseSalaryText("15-30K", "zhipin"), { minK: 15, maxK: 30 });
   assert.deepEqual(parseSalaryText("20-30K·13薪", "zhipin"), { minK: 20, maxK: 30 });
+});
+
+// ── hasMultipleKeywords —— ADR-0066 单关键词门 ──
+
+test("hasMultipleKeywords: 单个关键词（含首尾空格）放行", () => {
+  assert.equal(hasMultipleKeywords("AI工程师"), false);
+  assert.equal(hasMultipleKeywords("  AI工程师  "), false);
+  assert.equal(hasMultipleKeywords("项目经理"), false);
+});
+
+test("hasMultipleKeywords: 多词（内部空白）拦下", () => {
+  assert.equal(hasMultipleKeywords("AI 工程师"), true);
+  assert.equal(hasMultipleKeywords("算法\t工程师"), true);
+  assert.equal(hasMultipleKeywords("AI　工程师"), true); // 全角空格也是空白
+  assert.equal(hasMultipleKeywords("a OR b"), true);
+});
+
+test("hasMultipleKeywords: 空/纯空白/未填不报多词（缺失由必填校验拦）", () => {
+  assert.equal(hasMultipleKeywords(""), false);
+  assert.equal(hasMultipleKeywords("   "), false);
+  assert.equal(hasMultipleKeywords(undefined), false);
 });
 
 // ── browserToParams —— smin 编码（工单 02）──

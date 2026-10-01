@@ -18,42 +18,38 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 const mod = await import(pathToFileURL(join(ROOT, "extension", "wrapup-pure.js")).href);
-const { REASON, decideWrapUp, decideAfterExploreGone, decideDeadDrives } = mod.default ?? mod;
+const { REASON, decideWrapUp, decideAfterExploreGone, decideDeadDrives, decideCloseWindows } = mod.default ?? mod;
 
 const SCAN = "scan-1";
 /** 登记快照里一条驱动的最小形状（key 只为可读，判定只认 scanId）。 */
 const drive = (scanId, key = `liepin|${scanId}`) => ({ key, scanId });
-/** 默认输入：单平台扫描结束、登记表已摘空、开关开、探索页 tab 记录在案、未收尾过。 */
+/** 默认输入：单平台扫描结束、登记表已摘空、未收尾过。ADR-0066 起无开关/tabId入参。 */
 const base = (over = {}) => ({
   drives: [],
   scanId: SCAN,
-  wrapUpEnabled: true,
-  exploreTabId: 42,
   wrappedUpScans: [],
   ...over,
 });
 
-test("last platform finished → activate the explore tab, once", () => {
+test("last platform finished → settle once", () => {
   const d = decideWrapUp(base());
   assert.equal(d.settle, true);
   assert.equal(d.scanId, SCAN);
-  assert.equal(d.activateTabId, 42);
-  assert.equal(d.reason, REASON.ACTIVATED);
+  assert.equal(d.reason, REASON.SETTLED);
 });
 
-test("still-active: 同 scanId 的其它驱动（猎聘拆词）还在采 → 不收尾", () => {
+test("still-active: 同 scanId 的其它驱动（拆词契约保留）还在采 → 不结算", () => {
   const d = decideWrapUp(base({ drives: [drive(SCAN), drive(SCAN, "liepin|scan-1#b")] }));
   assert.equal(d.settle, false);
-  assert.equal(d.activateTabId, null);
   assert.equal(d.reason, REASON.STILL_ACTIVE);
 });
 
-test("归口：别的 scanId 的残留登记不参与判定，压不住本次收尾", () => {
+test("归口：别的 scanId 的残留登记不参与判定，压不住本次结算", () => {
   // 上一次扫描的登记没被摘掉（tab 消失得连 onRemoved 都没赶上）——它是别的 scanId，
   // 不该让本次扫描永远收不了尾。
   const d = decideWrapUp(base({ drives: [drive("scan-old", "zhipin|https://x/")] }));
   assert.equal(d.settle, true);
-  assert.equal(d.activateTabId, 42);
+  assert.equal(d.reason, REASON.SETTLED);
 });
 
 test("归口：本次与残留同时存在时，仍以本次的登记为准", () => {
@@ -62,47 +58,22 @@ test("归口：本次与残留同时存在时，仍以本次的登记为准", ()
   assert.equal(still.reason, REASON.STILL_ACTIVE);
 });
 
-test("idempotent: 同一 scanId 第二次判定不再切焦点", () => {
+test("idempotent: 同一 scanId 第二次判定不再结算", () => {
   const d = decideWrapUp(base({ wrappedUpScans: [SCAN] }));
   assert.equal(d.settle, false);
-  assert.equal(d.activateTabId, null);
   assert.equal(d.reason, REASON.ALREADY);
 });
 
 test("idempotent: 只认这个 scanId，别的 scanId 的历史记录不挡", () => {
   const d = decideWrapUp(base({ wrappedUpScans: ["scan-0", "scan-old"] }));
   assert.equal(d.settle, true);
-  assert.equal(d.activateTabId, 42);
-});
-
-test("switch off → 不切焦点，但仍要把这次扫描标记为已收尾", () => {
-  const d = decideWrapUp(base({ wrapUpEnabled: false }));
-  assert.equal(d.settle, true);
-  assert.equal(d.scanId, SCAN);
-  assert.equal(d.activateTabId, null);
-  assert.equal(d.reason, REASON.DISABLED);
-});
-
-test("探索页 tab 不可用（用户已关掉） → 收尾但什么都不切", () => {
-  for (const exploreTabId of [null, undefined]) {
-    const d = decideWrapUp(base({ exploreTabId }));
-    assert.equal(d.settle, true);
-    assert.equal(d.activateTabId, null);
-    assert.equal(d.reason, REASON.NO_EXPLORE_TAB);
-  }
-});
-
-test("tabId 为 0 是合法 id，不能被当成不可用", () => {
-  const d = decideWrapUp(base({ exploreTabId: 0 }));
-  assert.equal(d.activateTabId, 0);
-  assert.equal(d.reason, REASON.ACTIVATED);
+  assert.equal(d.reason, REASON.SETTLED);
 });
 
 test("没有 scanId 就无从归口 → 不动，也不记幂等账", () => {
   for (const scanId of [null, undefined, "", "   "]) {
     const d = decideWrapUp(base({ scanId }));
     assert.equal(d.settle, false);
-    assert.equal(d.activateTabId, null);
     assert.equal(d.reason, REASON.NO_SCAN_ID);
   }
 });
@@ -110,7 +81,7 @@ test("没有 scanId 就无从归口 → 不动，也不记幂等账", () => {
 test("全平台启动就失败：登记表本来就空 → 一样要收尾（05 用例）", () => {
   const d = decideWrapUp(base({ drives: [], scanId: "scan-all-failed" }));
   assert.equal(d.settle, true);
-  assert.equal(d.activateTabId, 42);
+  assert.equal(d.reason, REASON.SETTLED);
 });
 
 test("空输入不抛错（事件竞态下可能拿到空快照）", () => {
@@ -118,12 +89,11 @@ test("空输入不抛错（事件竞态下可能拿到空快照）", () => {
   for (const input of [undefined, {}, { drives: [] }, { drives: null }]) {
     const d = decideWrapUp(input);
     assert.equal(d.settle, false);
-    assert.equal(d.activateTabId, null);
   }
-  // 有 scanId 但登记快照缺失/为 null → 等价于"本次没有登记在跑"，照常收尾（与 05 同形）。
+  // 有 scanId 但登记快照缺失/为 null → 等价于"本次没有登记在跑"，照常结算（与 05 同形）。
   const d = decideWrapUp(base({ drives: null }));
   assert.equal(d.settle, true);
-  assert.equal(d.activateTabId, 42);
+  assert.equal(d.reason, REASON.SETTLED);
 });
 
 test("探索页被关 → 停掉全部采集 tab 并摘掉全部登记", () => {
@@ -145,12 +115,6 @@ test("探索页被关：不按 scanId 归口 —— 别的 scanId 的采集也�
     drives: [{ key: "k-old", tabId: 5, scanId: "scan-old" }, { key: "k-new", tabId: 6, scanId: SCAN }],
   });
   assert.deepEqual(d.stopTabIds, [5, 6]);
-});
-
-test("探索页被关的判定不接开关：签名里没有 wrapUpEnabled，行为与之无关", () => {
-  // 传进去也不该改变结果 —— 这条钉住 ADR-0007 E9「本动作不受收尾开关管辖」。
-  const withFlag = decideAfterExploreGone({ drives: [{ key: "k", tabId: 3 }], wrapUpEnabled: false });
-  assert.deepEqual(withFlag, { stopTabIds: [3], clearKeys: ["k"] });
 });
 
 test("探索页被关：无采集在跑 / 字段缺失时不产出动作，且不抛错", () => {
@@ -200,6 +164,95 @@ test("探活：scanId 取死掉登记里第一个非空值", () => {
     probes: [{ key: "a", alive: false }, { key: "b", alive: false }],
   });
   assert.deepEqual(d, { deadKeys: ["a", "b"], scanId: "scan-x" });
+});
+
+// ── decideCloseWindows —— ADR-0066 扫完自动关窗 + 保护 ──
+
+const LIST = "https://www.zhipin.com/web/geek/job?query=AI%E5%B7%A5%E7%A8%8B%E5%B8%88&city=101190100";
+/** 一条采集窗口事实的最小形状。 */
+const win = (windowId, over = {}) => ({ scanId: SCAN, windowId, originalUrl: LIST, currentUrl: LIST, ...over });
+
+test("关窗：仍停在原始列表页的窗口被关", () => {
+  const r = decideCloseWindows({ drives: [win(1)], scanId: SCAN });
+  assert.deepEqual(r.closeWindowIds, [1]);
+  assert.deepEqual(r.keepWindowIds, []);
+});
+
+test("保护：导航到职位详情（isDetailPath）→ 不关", () => {
+  const r = decideCloseWindows({
+    drives: [win(1, { currentUrl: "https://www.zhipin.com/job_detail/123.html", isDetailPath: true })],
+    scanId: SCAN,
+  });
+  assert.deepEqual(r.closeWindowIds, []);
+  assert.deepEqual(r.keepWindowIds, [1]);
+});
+
+test("同站列表页路径被自身改写（job→jobs）不算接管 → 关（回归：BOSS 扫完能关）", () => {
+  const r = decideCloseWindows({
+    drives: [win(1, { currentUrl: "https://www.zhipin.com/web/geek/jobs?query=AI&city=101190100" })],
+    scanId: SCAN,
+  });
+  assert.deepEqual(r.closeWindowIds, [1]);
+  assert.deepEqual(r.keepWindowIds, []);
+});
+
+test("保护：登录/验证页（isAuthPage）→ 不关", () => {
+  const r = decideCloseWindows({ drives: [win(1, { isAuthPage: true })], scanId: SCAN });
+  assert.deepEqual(r.keepWindowIds, [1]);
+  assert.deepEqual(r.closeWindowIds, []);
+});
+
+test("query 变（翻页/筛选/懒加载）不算接管 → 关", () => {
+  const r = decideCloseWindows({
+    drives: [win(1, { currentUrl: `${LIST}&d_curPage=2&_sort=time` })],
+    scanId: SCAN,
+  });
+  assert.deepEqual(r.closeWindowIds, [1]);
+  assert.deepEqual(r.keepWindowIds, []);
+});
+
+test("跳到其他站点（host 变）算接管 → 不关", () => {
+  const r = decideCloseWindows({
+    drives: [win(1, { currentUrl: "https://example.com/other" })],
+    scanId: SCAN,
+  });
+  assert.deepEqual(r.keepWindowIds, [1]);
+  assert.deepEqual(r.closeWindowIds, []);
+});
+
+test("跟踪参数差异（utm）不算接管 → 关", () => {
+  const r = decideCloseWindows({
+    drives: [win(1, { currentUrl: `${LIST}&utm_source=share` })],
+    scanId: SCAN,
+  });
+  assert.deepEqual(r.closeWindowIds, [1]);
+});
+
+test("混合：只关应关项，保留被接管/无 windowId 的", () => {
+  const r = decideCloseWindows({
+    drives: [
+      win(1), // 列表页 → 关
+      win(2, { currentUrl: "https://www.zhipin.com/job_detail/x.html", isDetailPath: true }), // 详情 → 留
+      win(3, { isAuthPage: true }), // 登录 → 留
+      { scanId: SCAN, originalUrl: LIST, currentUrl: LIST }, // 无 windowId → 忽略
+    ],
+    scanId: SCAN,
+  });
+  assert.deepEqual(r.closeWindowIds, [1]);
+  assert.deepEqual(r.keepWindowIds, [2, 3]);
+});
+
+test("按 scanId 归口：别人的窗口不动；无 scanId 全不动", () => {
+  const r = decideCloseWindows({ drives: [win(1, { scanId: "other" })], scanId: SCAN });
+  assert.deepEqual(r, { closeWindowIds: [], keepWindowIds: [] });
+  const none = decideCloseWindows({ drives: [win(1)], scanId: null });
+  assert.deepEqual(none, { closeWindowIds: [], keepWindowIds: [] });
+});
+
+test("URL 解析失败按保护处理（判不准就不关）", () => {
+  const r = decideCloseWindows({ drives: [win(1, { currentUrl: "not a url" })], scanId: SCAN });
+  assert.deepEqual(r.keepWindowIds, [1]);
+  assert.deepEqual(r.closeWindowIds, []);
 });
 
 test("探活：空输入 / 字段缺失不抛错，也不凭空判死", () => {

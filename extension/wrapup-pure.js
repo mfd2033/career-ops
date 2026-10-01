@@ -19,7 +19,7 @@
 (function () {
   "use strict";
 
-  /** 判定结果的 reason —— 供后台打一行日志解释"为什么这次没切回"。 */
+  /** 判定结果的 reason —— 供后台打一行日志解释"本次扫描结算了没有"。 */
   const REASON = {
     /** 本次扫描还有别的驱动在采（拆词扫描下同 scanId 有多条驱动）。 */
     STILL_ACTIVE: "still-active",
@@ -27,20 +27,19 @@
     NO_SCAN_ID: "no-scan-id",
     /** 同一 scanId 已经收尾过（连点/重放/迟到的 scan-done）。 */
     ALREADY: "already-wrapped",
-    /** 收尾开关关闭（配置页）。 */
-    DISABLED: "wrapup-disabled",
-    /** 探索页 tab 不可用（用户已经关掉它，或从未记录到）。 */
-    NO_EXPLORE_TAB: "no-explore-tab",
-    /** 真的切了焦点。 */
-    ACTIVATED: "activated",
+    /** 真的结算了（本次扫描全部结束，调用方据此关窗）。 */
+    SETTLED: "settled",
   };
 
   /**
-   * 一条驱动的采集结束后：本次扫描是否已经全部结束，以及要不要把焦点切回探索页。
+   * 一条驱动的采集结束后：本次扫描是否已经全部结束（结算）。
+   *
+   * ADR-0066 起不再判定"要不要切焦点"——收尾动作改为关窗（见 decideCloseWindows），
+   * 旧「扫描收尾」开关已删。本函数只回答"结算了没有"，settle 为真时调用方去关窗。
    *
    * 「结束了没有」按 scanId 归口——只看属于本次 scanId 的登记。两个理由：
-   *   ① 拆词扫描（猎聘一个关键词一条搜索 URL）下同 scanId 有多条驱动，任何一条还在跑
-   *      就都还没结束；
+   *   ① 拆词扫描下同 scanId 可能有多条驱动，任何一条还在跑就都还没结束（单关键词约
+   *      束后一般不再拆词，但契约保留，别把这一条归口规则删掉）；
    *   ② 别的 scanId 的残留登记（极端情况下 tab 消失得连 onRemoved 都没赶上）不该把
    *      本次扫描永远压住。
    *
@@ -48,16 +47,13 @@
    * @param {Array<{key?: string, scanId?: string}>} input.drives 摘掉刚结束的那条登记
    *   **之后**，登记表里剩下的全部登记（可能含别的 scanId 的残留，本函数自行归口）
    * @param {string|null} input.scanId 刚结束的那条驱动所属的扫描 id
-   * @param {boolean} input.wrapUpEnabled 配置页收尾开关
-   * @param {number|null} input.exploreTabId 发起本次扫描的探索页 tab（不可用时为 null）
    * @param {Iterable<string>} [input.wrappedUpScans] 已收尾过的 scanId
-   * @returns {{settle: boolean, scanId: string|null, activateTabId: number|null, reason: string}}
-   *   settle = 「把这次扫描标记为已收尾」，调用方据此记 scanId；
-   *   activateTabId = 要设为 active 的 tab（null = 不切，但 settle 仍可能为 true）。
+   * @returns {{settle: boolean, scanId: string|null, reason: string}}
+   *   settle = 「本次扫描已结算」，调用方据此记 scanId + 关窗（幂等一次）。
    */
-  function decideWrapUp({ drives, scanId, wrapUpEnabled, exploreTabId, wrappedUpScans } = {}) {
+  function decideWrapUp({ drives, scanId, wrappedUpScans } = {}) {
     const sid = typeof scanId === "string" && scanId.trim() ? scanId.trim() : null;
-    const idle = { settle: false, scanId: null, activateTabId: null, reason: REASON.STILL_ACTIVE };
+    const idle = { settle: false, scanId: null, reason: REASON.STILL_ACTIVE };
     if (!sid) return { ...idle, reason: REASON.NO_SCAN_ID };
 
     const list = Array.isArray(drives) ? drives : [];
@@ -66,12 +62,9 @@
     const seen = wrappedUpScans || [];
     for (const prev of seen) if (prev === sid) return { ...idle, reason: REASON.ALREADY };
 
-    // 走到这里 = 本次扫描的收尾判定已消费，无论最终有没有真的切焦点都要记 scanId，
+    // 走到这里 = 本次扫描的收尾判定已消费，无论后面真关成几个窗口都要记 scanId，
     // 否则迟到的 scan-done 会把同一次扫描再判一遍。
-    const done = { settle: true, scanId: sid, activateTabId: null };
-    if (!wrapUpEnabled) return { ...done, reason: REASON.DISABLED };
-    if (exploreTabId == null) return { ...done, reason: REASON.NO_EXPLORE_TAB };
-    return { ...done, activateTabId: exploreTabId, reason: REASON.ACTIVATED };
+    return { settle: true, scanId: sid, reason: REASON.SETTLED };
   }
 
   /**
@@ -136,7 +129,51 @@
     return { deadKeys, scanId };
   }
 
-  const api = { REASON, decideWrapUp, decideAfterExploreGone, decideDeadDrives };
+  /** 取 URL 的小写 host；解析失败返回 null（调用方按"判不准就保护"处理）。 */
+  function hostOf(u) {
+    try {
+      return new URL(u).hostname.toLowerCase();
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * 采集窗口收尾关窗判定（ADR-0066）：本次扫描的采集窗口里，扫完后哪些关、哪些留。
+   *
+   * 只保护"用户真的把窗口拿去做别的了"这一种情形，其余一律关：
+   *   • host 变了（跳到别的站点），或任一 URL 解析失败（判不准就保护）；
+   *   • isDetailPath 为真——已导航到职位详情页（由后台用 DRIVE_SOURCES.isDetail 判定传入）；
+   *   • isAuthPage 为真——停在登录/验证页。
+   * **不拿 pathname 是否变当接管信号**——BOSS 会把列表页自身路径从 /web/geek/job 改写成
+   * /web/geek/jobs（单→复数），拿 pathname 相等判接管会误伤这些"仍停在列表页"的窗口，
+   * 导致它们扫完不关。详情页靠 isDetailPath 精确区分，不靠 pathname 比对。
+   * 按 scanId 归口，别人的 scanId 不动。
+   *
+   * @param {object} input
+   * @param {Array<{scanId?:string, windowId?:number, originalUrl?:string, currentUrl?:string, isDetailPath?:boolean, isAuthPage?:boolean}>} input.drives 本次各采集窗口事实
+   * @param {string|null} input.scanId 本次扫描 id
+   * @returns {{closeWindowIds:number[], keepWindowIds:number[]}}
+   */
+  function decideCloseWindows({ drives, scanId } = {}) {
+    const sid = typeof scanId === "string" && scanId.trim() ? scanId.trim() : null;
+    const closeWindowIds = [];
+    const keepWindowIds = [];
+    if (!sid) return { closeWindowIds, keepWindowIds };
+    for (const d of Array.isArray(drives) ? drives : []) {
+      if (!d || d.scanId !== sid) continue;
+      if (typeof d.windowId !== "number") continue;
+      const hCur = hostOf(d.currentUrl);
+      const hOrig = hostOf(d.originalUrl);
+      const hostChangedOrUnparseable = hCur === null || hOrig === null || hCur !== hOrig;
+      const tookOver = hostChangedOrUnparseable || d.isDetailPath === true || d.isAuthPage === true;
+      if (tookOver) keepWindowIds.push(d.windowId);
+      else closeWindowIds.push(d.windowId);
+    }
+    return { closeWindowIds, keepWindowIds };
+  }
+
+  const api = { REASON, decideWrapUp, decideAfterExploreGone, decideDeadDrives, decideCloseWindows };
 
   // service worker（经典脚本，background.js 经 importScripts 引入）：挂 self。
   // 内容脚本里 self === window，同一行也成立。

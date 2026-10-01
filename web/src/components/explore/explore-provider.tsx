@@ -26,10 +26,10 @@ import {
 import { makeAiStreamParser, type AiTraceChunk } from "@/lib/explore-ai";
 import { MAX_OFFER_LIMIT } from "@/lib/whats-new.mjs";
 import { isScannerMissing, isBrowserCollectorMissing } from "@/lib/explore-error.mjs";
-import { expandSearchTargets } from "@/lib/browser-search.mjs";
+import { expandSearchTargets, hasMultipleKeywords } from "@/lib/browser-search.mjs";
 import { maxSnapshotByBoard } from "@/lib/browser-progress.mjs";
+import { computeBottomHalfBounds } from "@/lib/explore-window-bounds.mjs";
 import { readScanMax } from "@/lib/scan-max.mjs";
-import { readScanWrapUp } from "@/lib/scan-wrapup.mjs";
 import { useI18n } from "@/lib/i18n/context";
 import {
   readScanSources,
@@ -401,6 +401,14 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     const f = filtersRef.current;
     const platforms = f.browserSources?.length ? f.browserSources : BROWSER_SOURCES;
     const query = f.zhQuery?.trim() ?? "";
+    // ADR-0066 单关键词门：浏览器扫描只支持一个关键词。视图层的 DiscoverBar 已在多词时
+    // 禁用按钮，但 empty-loose / degraded / failed 的重扫按钮直接调本函数绕过那道门，
+    // 故此处兜底拦下——不静默截断，报错后停在 failed 让用户改词。不消耗 runningRef。
+    if (query && hasMultipleKeywords(query)) {
+      setError(t("explore.discoverBrowserKeywordSingle"));
+      setPhase("failed");
+      return;
+    }
     runningRef.current = true;
     setPhase("casting");
     setOffers([]);
@@ -434,13 +442,17 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
       // 每站采集上限走用户配置（配置页可改，默认猎聘 1200 / BOSS/智联 400），随消息
       // 传给扩展 content script 的累积器，防分页型大关键词被 400 硬上限截掉末页。
       const scanMax = readScanMax();
+      // ADR-0066 下半屏平铺：单关键词下 targets.length = 选中平台数 ≤3，按此数与发起页
+      // 所在显示器的可用区算每个采集窗口的 bounds，随驱动消息下发给扩展开窗。
+      const winBounds = computeBottomHalfBounds(targets.length, typeof window !== "undefined" ? window.screen : {});
       // 分母快照（ADR-0069 决议 3）：发起时一次性冻结每平台上限合计（猎聘拆词时各词
       // 求和）——扫描途中改配置页不影响本次进度条。驱动消息与快照共用同一份列表，
       // 两处不会漂移。
-      const driveTargets = targets.map((t) => ({
+      const driveTargets = targets.map((t, i) => ({
         source: t.source as string,
         url: t.url as string,
         maxCount: scanMax[t.source as keyof typeof scanMax] ?? 400,
+        bounds: winBounds[i],
       }));
       // Record<string, number> 宽化：.mjs 纯模块的返回型在 TS 里是固定三键字面量，
       // 而平台 id 在这里是 string（与 SourceMap 的开放键同形），按字符串索引需宽化。
@@ -461,12 +473,10 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
         {
           type: "drive-scan",
           scanId,
-          // 收尾开关（ADR-0007 E9）：扩展读不到 localStorage，只能由页面读出带过去。
-          // 缺省（老版本前端）在扩展侧按「开启」处理。
-          wrapUp: readScanWrapUp(),
+          // ADR-0066：旧「扫描收尾」开关已移除，扫完自动关窗（不可配）。
           sources: driveTargets,
         },
-        45_000, // 开 tab + content 注入可能比默认 4s 久,放宽等全部平台驱动完成
+        45_000, // 开窗 + content 注入可能比默认 4s 久,放宽等全部平台驱动完成
       );
       const tasks = Array.isArray(drive.tasks) ? (drive.tasks as Array<{ source: string; status: string }>) : [];
       const failed = tasks.filter((x) => x && x.status === "failed");

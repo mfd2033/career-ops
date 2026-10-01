@@ -8,6 +8,7 @@ import { instrumentSerif } from "@/lib/fonts";
 import type { Application, InboxJob } from "@/lib/career-ops";
 import { normalizeTextKey } from "@/lib/core/normalize-text-key.mjs";
 import { paramsToFilters, paramsToAi, paramsToBrowser, type ExploreFilters } from "@/lib/explore";
+import { hasMultipleKeywords } from "@/lib/browser-search.mjs";
 import { carriesFilterParams, shouldAutoRunOnHandoff } from "@/lib/explore-params.mjs";
 import { SCAN_SOURCES, readScanSources, type ScanSource } from "@/lib/scan-mode";
 import { FilterBuilder } from "./filter-builder";
@@ -148,7 +149,10 @@ export function ExplorerView({
   if (running) return isAi ? <AiHuntView cliName={cli.name} /> : <DiscoveringState />;
 
   const browserKeywordMissing = isBsk && !(filters.zhQuery ?? "").trim();
-  const canDiscover = isBsk ? !browserKeywordMissing : filters.ats.length > 0;
+  // ADR-0066 单关键词门：多词（去首尾空格后含内部空白）时禁用发现按钮，与
+  // provider 里 discoverBrowser 的兜底门同一谓词。
+  const browserKeywordMulti = isBsk && hasMultipleKeywords(filters.zhQuery ?? "");
+  const canDiscover = isBsk ? !browserKeywordMissing && !browserKeywordMulti : filters.ats.length > 0;
   const isResults = phase === "results";
 
   return (
@@ -233,7 +237,7 @@ export function ExplorerView({
                 {refineOpen && (
                   <div className="space-y-4 border-t border-border p-4">
                     <FilterBuilder filters={filters} onChange={setFilters} seededFrom={seed.seededFrom} mode="browser" />
-                    <DiscoverBar canDiscover={canDiscover} onDiscover={discoverBrowser} label={t("explore.recastBrowser")} hint={browserKeywordMissing ? t("explore.discoverBrowserKeywordRequired") : undefined} />
+                    <DiscoverBar canDiscover={canDiscover} onDiscover={discoverBrowser} label={t("explore.recastBrowser")} hint={browserKeywordMissing ? t("explore.discoverBrowserKeywordRequired") : browserKeywordMulti ? t("explore.discoverBrowserKeywordSingle") : undefined} />
                   </div>
                 )}
               </div>
@@ -241,7 +245,7 @@ export function ExplorerView({
               <div className="mb-6 rounded-2xl border border-border bg-surface/30 p-5">
                 <FilterBuilder filters={filters} onChange={setFilters} seededFrom={seed.seededFrom} mode="browser" />
                 <div className="mt-5">
-                  <DiscoverBar canDiscover={canDiscover} onDiscover={discoverBrowser} label={t("explore.discoverBrowser")} hint={browserKeywordMissing ? t("explore.discoverBrowserKeywordRequired") : undefined} />
+                  <DiscoverBar canDiscover={canDiscover} onDiscover={discoverBrowser} label={t("explore.discoverBrowser")} hint={browserKeywordMissing ? t("explore.discoverBrowserKeywordRequired") : browserKeywordMulti ? t("explore.discoverBrowserKeywordSingle") : undefined} />
                 </div>
               </div>
             )}
