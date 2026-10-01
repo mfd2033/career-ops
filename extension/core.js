@@ -671,59 +671,76 @@
     scan.noMoveTicks = 0;
   }
 
-  // 分页型平台(猎聘)翻页驱动节奏:点击「下一页」后页面原生加载,新卡片经
-  // MutationObserver 采入累积器;900ms tick 内采不完会连点下一页,加载慢交给
-  // SCAN_QUIET_MS 兜底。任一终态即停 —— 满上限(scanTick 已查) / 无下一页控件后
-  // 连续静默(末页数据已采完)。
-  const SCAN_PAGING_MIN_GAP_MS = 1500; // 两次翻页最小间隔,防连点触发风控/重复加载
+  // 分页型平台(猎聘)翻页驱动(ADR-0070)：点击「下一页」不再靠固定最小间隔 + 900ms tick
+  // 边界门控(那种精确周期最易触发站点异常行为检测)。改为调度式细抖——每次点击后用独立
+  // setTimeout 排下一次，间隔从 scan-pure 的 pickPagingGap 在 [1300,2700]ms 均匀随机取，
+  // 点击时刻与 tick 解耦。tick 只保留翻页后全量重扫 + 到末页静默收尾的簿记。任一终态即
+  // 停 —— 满上限/跳详情页(doPageClick 主动查 + scanTick 每 tick 兜底查) / 无下一页控件后
+  // 连续静默(末页数据已采完，交给 tick 收尾并停链)。
+  const SCAN_PAGING_MIN_GAP_MS = 1500; // pickPagingGap 缺失(旧缓存)时的回退间隔
 
-  /** 分页型平台:每个 tick 点一次「下一页」(有控件且距上次足够久),无控件则等到
-   *  静默超阈值收尾。用户可自由点页码,采集只读不干预。lastPageClickAt 挂在 scan
-   *  上(非模块级),避免多次扫描串扰。 */
+  /** 排一次「下一页」点击：清掉在途定时器，用受管 setTimeout 在 delayMs 后触发 doPageClick。
+   *  句柄同时挂 scan(收尾精确清)与 trackTimer(实例销毁兜底清)，同 scrollT/batchT 口径。 */
+  function scheduleNextPageClick(delayMs) {
+    if (!scan) return;
+    if (scan.nextPageTimer) clearTimeout(scan.nextPageTimer);
+    const delay = Number(delayMs) > 0 ? Number(delayMs) : SCAN_PAGING_MIN_GAP_MS;
+    scan.nextPageTimer = trackTimer(setTimeout(doPageClick, delay));
+  }
+
+  /** 点一次「下一页」→ 记录点击态 → 无论成功或瞬态失败都重排下一次(到末页真正交由 tick
+   *  的静默判定 finishScan)。满上限/跳详情页即刻停排并收尾，杜绝停不下来的孤儿定时器。 */
+  function doPageClick() {
+    if (!scan) return;
+    scan.nextPageTimer = null;
+    if (site.isDetailPath(location.pathname)) {
+      finishScan("navigated");
+      return;
+    }
+    if (scan.acc.reachedMax) {
+      finishScan("max");
+      return;
+    }
+    const nextBtn = site.findNextPageBtn ? site.findNextPageBtn() : null;
+    const disabled = !!nextBtn && (nextBtn.disabled || (nextBtn.getAttribute && nextBtn.getAttribute("aria-disabled") === "true"));
+    if (nextBtn && !disabled) {
+      try {
+        nextBtn.click();
+        scan.lastPageClickAt = Date.now();
+        // 点击后页面原生加载/重渲染，期间「无新卡」正常 —— 拉回静默起点，避免旧页末卡
+        // 时间戳被误判为「已静默 8s」提前收尾漏采下一页。新页卡采入后继续刷新 lastNewAt。
+        scan.lastNewAt = Date.now();
+        scan.pendingRescan = true; // 让下一 tick 主动全扫新页卡片，双保险兜 observer 漏采
+        scan.lastClickUrl = location.href;
+      } catch {
+        /* 点击瞬间元素失效(页面重渲染)，交给下一次重排重试 */
+      }
+    }
+    // 控件缺失/禁用(瞬态或末页)也继续重排；真到末页时 tick 的静默判定会 finishScan 停链。
+    scheduleNextPageClick(SCAN.pickPagingGap ? SCAN.pickPagingGap() : SCAN_PAGING_MIN_GAP_MS);
+  }
+
+  /** tick 内分页簿记(点击不在此发生，由 scheduleNextPageClick 调度)：翻页后 URL 已切到
+   *  新页才主动全量重扫(兜 observer 漏采)；到末页(无下一页控件/禁用)且静默超阈值即收尾。 */
   function pagingAwareStep() {
     if (!scan) return;
-    const lastClick = scan.lastPageClickAt || 0;
-    // 用户滚轮接管期语义保留(翻页页无滚动,实际不影响,仅防重复 handler)。
+    // 用户滚轮接管期语义保留(翻页页无滚动，实际不影响，仅防重复 handler)。
     if (scan.holdTicks > 0) {
       scan.holdTicks -= 1;
       return;
     }
-    const quiet = Date.now() - scan.lastNewAt;
-    // 翻页后主动全量重扫当前页卡片(不依赖 MutationObserver 捕获)。猎聘 SPA 翻页
-    // 复用卡片节点/列表容器时 childList 只报增删,textContent 替换或同层节点复用
-    // 会被 observer 漏掉 → 漏采整页。URL 去重保证重扫幂等,首次进累积器才计新卡。
-    // 仅在 URL 已切到新页(与点击时不同)才消费 pendingRescan —— 翻页未完成(还停
-    // 旧页)时不浪费全扫,留待下一 tick 新页就绪后再扫,避免扫到空/旧列表。
+    // 翻页后主动全量重扫当前页卡片(不依赖 MutationObserver 捕获)。猎聘 SPA 翻页复用卡片
+    // 节点/列表容器时 childList 只报增删，textContent 替换或同层节点复用会被 observer 漏掉
+    // → 漏采整页。URL 去重保证重扫幂等，首次进累积器才计新卡。仅在 URL 已切到新页(与点击
+    // 时不同)才消费 pendingRescan —— 翻页未完成(还停旧页)时不浪费全扫，留待下一 tick。
     if (scan.pendingRescan && location.href !== scan.lastClickUrl) {
       scan.pendingRescan = false;
       document.querySelectorAll(site.cardSelector).forEach((c) => scanCollect(c));
     }
     const nextBtn = site.findNextPageBtn ? site.findNextPageBtn() : null;
-    if (!nextBtn) {
-      // 无下一页控件 = 已到末页。该页新卡已采(或本就没有),等待静默收尾。
-      if (quiet > SCAN_QUIET_MS) finishScan("paged");
-      return;
-    }
-    // 末页判定兜底:控件存在但被禁用(点击无效果) → 视为无下一页。
-    if (nextBtn.disabled || (nextBtn.getAttribute && nextBtn.getAttribute("aria-disabled") === "true")) {
-      if (quiet > SCAN_QUIET_MS) finishScan("paged");
-      return;
-    }
-    // 翻页节流:距上次点击不足最小间隔则等待(给 MutationObserver 采当前页时间)。
-    if (Date.now() - lastClick < SCAN_PAGING_MIN_GAP_MS) return;
-    try {
-      nextBtn.click();
-      scan.lastPageClickAt = Date.now();
-      // 点击变换新页后 URL/页面异步渲染,期间「无新卡」是正常的 —— 立即把 lastNewAt
-      // 拉回当下,避免旧页最后一张卡的时间戳被误判为"已静默 8s"而提前收尾,漏采
-      // 刚加载的下一页。新页卡经 MutationObserver 采入后会继续刷新 lastNewAt。
-      // pendingRescan=true 让下一 tick 主动全扫新页卡片,双保险兜 observer 漏采。
-      scan.lastNewAt = Date.now();
-      scan.pendingRescan = true;
-      scan.lastClickUrl = location.href;
-    } catch {
-      /* 点击场景:元素在点击瞬间失效(页面重渲染),交给下次 tick 重试 */
-    }
+    const gone = !nextBtn || nextBtn.disabled || (nextBtn.getAttribute && nextBtn.getAttribute("aria-disabled") === "true");
+    // 无下一页控件/禁用 = 已到末页：点击链会持续重排空点(无害)，由静默超阈值收尾停链。
+    if (gone && Date.now() - scan.lastNewAt > SCAN_QUIET_MS) finishScan("paged");
   }
 
   /** 尝试把一张卡片收入扫描累积器(URL 已采则忽略,绝不重报)。取不到 url 的卡
@@ -773,6 +790,11 @@
       clearInterval(s.timers.scrollT);
       clearInterval(s.timers.batchT);
     }
+    // 分页型平台的调度点击定时器随扫描实例收尾一并清除(ADR-0070 停点纪律)。
+    if (s.nextPageTimer) {
+      clearTimeout(s.nextPageTimer);
+      s.nextPageTimer = null;
+    }
     if (s.wheelFn) window.removeEventListener("wheel", s.wheelFn, { passive: true });
     const count = s.acc.count;
     scan = null;
@@ -807,6 +829,7 @@
       holdTicks: 0,
       scanTicks: 0,
       lastPageClickAt: 0, // 分页型平台最近一次点击「下一页」的时间戳(防连点)
+      nextPageTimer: null, // 分页型平台调度式细抖的「下一页」点击定时器句柄(ADR-0070)
       pendingReports: 0,
       timers: null,
       wheelFn: null,
@@ -842,6 +865,10 @@
     window.addEventListener("wheel", wheelFn, { passive: true });
     scan.timers = { scrollT, batchT };
     scan.wheelFn = wheelFn;
+    // 分页型平台(猎聘)：点击与 tick 解耦，首点排一个随机间隔做并发错峰(ADR-0070)。
+    if (site.isPageMode === true) {
+      scheduleNextPageClick(SCAN.pickPagingGap ? SCAN.pickPagingGap() : SCAN_PAGING_MIN_GAP_MS);
+    }
     showToast("开始采集职位...", false);
   }
 

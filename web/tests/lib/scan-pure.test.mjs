@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 const mod = await import(pathToFileURL(join(ROOT, "extension", "scan-pure.js")).href);
-const { SCAN_MAX, SCAN_BATCH_SIZE, defaultNormalizeKey, createScanAccumulator, toDiscoveredOffer } =
+const { SCAN_MAX, SCAN_BATCH_SIZE, SCAN_PAGING_GAP_MIN_MS, SCAN_PAGING_GAP_MAX_MS, defaultNormalizeKey, createScanAccumulator, toDiscoveredOffer, pickPagingGap } =
   mod.default ?? mod;
 
 const mkMeta = (url, extra = {}) => ({ url, title: "AI 工程师", company: "示例公司", salary: "20-40K", city: "", ...extra });
@@ -19,6 +19,32 @@ const mkMeta = (url, extra = {}) => ({ url, title: "AI 工程师", company: "示
 test("exposed constants match ADR-0007 (E5/E7)", () => {
   assert.equal(SCAN_MAX, 400);
   assert.equal(SCAN_BATCH_SIZE, 50);
+});
+
+test("ADR-0070: 翻页点击间隔默认区间被单测锁定（改值即改测试）", () => {
+  assert.equal(SCAN_PAGING_GAP_MIN_MS, 1300);
+  assert.equal(SCAN_PAGING_GAP_MAX_MS, 2700);
+});
+
+test("pickPagingGap: 注入确定性随机源返回精确值（闭区间线性映射）", () => {
+  assert.equal(pickPagingGap(() => 0), 1300); // 下界
+  assert.equal(pickPagingGap(() => 1), 2700); // 上界
+  assert.equal(pickPagingGap(() => 0.5), 2000); // 中值
+  assert.equal(pickPagingGap(() => 0.25), 1650); // 1300 + 0.25*1400
+});
+
+test("pickPagingGap: 注入值越界/非数夹回闭区间，结果永不越界", () => {
+  assert.equal(pickPagingGap(() => -0.5), 1300);
+  assert.equal(pickPagingGap(() => 2), 2700);
+  assert.equal(pickPagingGap(() => NaN), 1300); // Number(NaN)||0 → 0 → 下界
+});
+
+test("pickPagingGap: 默认走 Math.random，多次抽样均为区间内整数", () => {
+  for (let i = 0; i < 500; i++) {
+    const g = pickPagingGap();
+    assert.equal(Number.isInteger(g), true);
+    assert.ok(g >= SCAN_PAGING_GAP_MIN_MS && g <= SCAN_PAGING_GAP_MAX_MS, `越界: ${g}`);
+  }
 });
 
 test("accumulator dedups by normalized URL: same posting never re-adds", () => {

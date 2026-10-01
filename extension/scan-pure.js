@@ -17,6 +17,26 @@
   const SCAN_MAX = 400;
   const SCAN_BATCH_SIZE = 50;
 
+  // 分页型平台(猎聘)仿人翻页点击间隔闭区间(ADR-0070)。默认值在此导出并被单测锁定:
+  // 均值≈2000ms,相对改造前固定 realized≈1800ms 慢约 10%,符合「基本保速」。core.js 翻页
+  // 驱动经 pickPagingGap 取间隔,不在驱动里散落魔数。
+  const SCAN_PAGING_GAP_MIN_MS = 1300;
+  const SCAN_PAGING_GAP_MAX_MS = 2700;
+
+  /**
+   * 取一次「下一页」点击间隔(毫秒):在 [SCAN_PAGING_GAP_MIN_MS, SCAN_PAGING_GAP_MAX_MS]
+   * 内均匀随机、四舍五入取整。打破机械翻页周期,降低触发站点异常行为检测的概率。
+   * rand 可注入以便确定性单测(默认走 Math.random);注入值越界(<0 或 >1 或 NaN)夹回闭区间,
+   * 保证结果永不越界。纯函数,不触 DOM/定时器/运行态。
+   * @param {() => number} [rand] 返回 [0,1] 的随机源
+   * @returns {number} 落在闭区间内的整数毫秒
+   */
+  function pickPagingGap(rand) {
+    const raw = typeof rand === "function" ? rand() : Math.random();
+    const clamped = Math.min(1, Math.max(0, Number(raw) || 0));
+    return Math.round(SCAN_PAGING_GAP_MIN_MS + clamped * (SCAN_PAGING_GAP_MAX_MS - SCAN_PAGING_GAP_MIN_MS));
+  }
+
   // PUA 字形混淆清洗(BOSS 把薪资数字渲染为私用区码点,DOM 文本不可见/不可解析,
   // 实证 data/pipeline.md 的 "\uE032\uE036-\uE034\uE031K")。与 web 侧
   // web/src/lib/browser-search.mjs 的 cleanSalaryText 同规则;本文件是经典脚本、
@@ -137,7 +157,16 @@
     };
   }
 
-  const api = { SCAN_MAX, SCAN_BATCH_SIZE, defaultNormalizeKey, createScanAccumulator, toDiscoveredOffer };
+  const api = {
+    SCAN_MAX,
+    SCAN_BATCH_SIZE,
+    SCAN_PAGING_GAP_MIN_MS,
+    SCAN_PAGING_GAP_MAX_MS,
+    defaultNormalizeKey,
+    createScanAccumulator,
+    toDiscoveredOffer,
+    pickPagingGap,
+  };
 
   // 浏览器:暴露给 core.js(core 在 manifest js 数组里位于本文件之后)。
   if (typeof window !== "undefined" && window && !window.__careerScanPure) {
