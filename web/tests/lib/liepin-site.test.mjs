@@ -72,6 +72,18 @@ test("LIEPIN_SITE: contract shape required keys are present and non-empty", () =
   assert.equal(typeof LIEPIN_SITE.findNextPageBtn, "function", "分页扫描需提供「下一页」定位函数");
 });
 
+test("LIEPIN_SITE: cardSelector 同时锁定漂移后的 camelCase 容器与旧 kebab 形态（防回归）", () => {
+  // 实证 2026-10：猎聘把卡片容器 class 从 kebab-case `job-card-pc-container` 改成
+  // camelCase `jobCardPcContainer`，旧串整页匹配 0 → 扩展采集「猎聘恒为 0」。
+  // 本断言把修正后的选择器钉住为「两个形态都覆盖」，挡掉未来意外删掉 camelCase 分支的
+  // “清理”。真正的 DOM 命中靠浏览器实测（见上方注释：本仓无 jsdom 不重复测）。
+  const sel = LIEPIN_SITE.cardSelector;
+  assert.ok(sel.includes("jobCardPcContainer"), "cardSelector 必须匹配漂移后的 camelCase 容器");
+  assert.ok(sel.includes("job-card-pc-container"), "cardSelector 应保留旧 kebab 形态作兼容兜底");
+  // 链接锚点是采集去重的实际锚点，改名不应连带被动。
+  assert.equal(LIEPIN_SITE.linkSelector, 'a[data-nick="job-detail-job-info"]');
+});
+
 test("LIEPIN_SITE: evaluateInlineJd is declared (detail-page eval inlines DOM JD)", () => {
   assert.equal(LIEPIN_SITE.evaluateInlineJd, true);
 });

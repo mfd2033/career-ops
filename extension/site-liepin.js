@@ -16,7 +16,13 @@
 
   // 猎聘搜索页卡片容器：外层带每次加载随机变化的哈希 class，不能依赖前缀以外
   // 的部分；职位链接稳定锚点是 a[data-nick="job-detail-job-info"]。
-  const CARD_SELECTOR = "[class*='job-card-pc-container']";
+  //
+  // 容器 class 名随前端构建漂移过一次（实证 2026-10：由 kebab-case
+  // `job-card-pc-container` 改成 camelCase `jobCardPcContainer`），旧串整页匹配 0，
+  // 而采集循环以 `document.querySelectorAll(cardSelector)` 为唯一切片入口（首扫 +
+  // 翻页重扫 + MutationObserver），落空即「猎聘恒为 0」——链接锚点 data-nick 仍命中
+  // 42 条，证明只有容器名漂了。两个历史形态并列保留，任一命中即可，降低再次漂移的面。
+  const CARD_SELECTOR = "[class*='jobCardPcContainer'], [class*='job-card-pc-container']";
   const LINK_SELECTOR = 'a[data-nick="job-detail-job-info"]';
 
   // 详情页：/job/{id}.shtml 与推荐位变体 /a/{id}.shtml。数字 + .shtml 结尾，
