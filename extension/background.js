@@ -526,6 +526,10 @@ chrome.tabs.onRemoved.addListener((tabId) => {
     const abort = WRAPUP.decideAfterExploreGone({ drives });
     for (const key of abort.clearKeys) activeDrives.delete(key);
     for (const id of abort.stopTabIds) stopDriveTab(id);
+    // ADR-0066 决议 4：探索页被关=中止采集，本次开出的采集窗口按同一保护规则关掉，
+    // 并把窗口账清空——否则窗口留在桌面、scanWindows 残留到下次扫描。探索页已关，
+    // closeScanWindows 的焦点归还传 null 自然跳过。
+    for (const sid of [...scanWindows.keys()]) closeScanWindows(sid, null).catch(() => {});
     exploreTabId = null; // 之后迟到的 scan-done 只会 settle,不再切焦点
     console.log("[bg] explore tab closed → stopped", abort.stopTabIds.length, "drive(s)");
     return;

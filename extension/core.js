@@ -677,7 +677,9 @@
   // 点击时刻与 tick 解耦。tick 只保留翻页后全量重扫 + 到末页静默收尾的簿记。任一终态即
   // 停 —— 满上限/跳详情页(doPageClick 主动查 + scanTick 每 tick 兜底查) / 无下一页控件后
   // 连续静默(末页数据已采完，交给 tick 收尾并停链)。
-  const SCAN_PAGING_MIN_GAP_MS = 1500; // pickPagingGap 缺失(旧缓存)时的回退间隔
+  // pickPagingGap 缺失(旧缓存)时的回退间隔：与 scan-pure 的区间下限同源，不另立魔数；
+  // scan-pure 也未加载(异常注入顺序)时用同值兜底。
+  const SCAN_PAGING_MIN_GAP_MS = (SCAN && SCAN.SCAN_PAGING_GAP_MIN_MS) || 1300;
 
   /** 排一次「下一页」点击：清掉在途定时器，用受管 setTimeout 在 delayMs 后触发 doPageClick。
    *  句柄同时挂 scan(收尾精确清)与 trackTimer(实例销毁兜底清)，同 scrollT/batchT 口径。 */

@@ -4,7 +4,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { countByBoard, maxSnapshotByBoard } from "../../src/lib/browser-progress.mjs";
+import { chipProgressPct, countByBoard, maxSnapshotByBoard } from "../../src/lib/browser-progress.mjs";
 import { SCAN_MAX_DEFAULT } from "../../src/lib/scan-max.mjs";
 
 test("countByBoard: 三站 URL 各归各桶（含 www 与子域）", () => {
@@ -72,4 +72,18 @@ test("maxSnapshotByBoard: 未知 source 与坏条目跳过，空输入得全 0",
     { zhipin: 0, liepin: 0, zhaopin: 0 },
   );
   assert.deepEqual(maxSnapshotByBoard([]), { zhipin: 0, liepin: 0, zhaopin: 0 });
+});
+test("chipProgressPct: swept 有分母也满格（ADR-0069 决议 5：采完即满，不留残缺 bar）", () => {
+  assert.equal(chipProgressPct({ done: 240, total: 400 }, "swept"), 100);
+  assert.equal(chipProgressPct({ done: 0, total: 400 }, "swept"), 100);
+  assert.equal(chipProgressPct(undefined, "swept"), 100);
+});
+
+test("chipProgressPct: active 按 done/total；queued 空；noisy 无分母满格、有分母定格", () => {
+  assert.equal(chipProgressPct({ done: 120, total: 400 }, "active"), 30);
+  assert.equal(chipProgressPct({ done: 400, total: 400 }, "active"), 100);
+  assert.equal(chipProgressPct({ done: 5 }, "queued"), 0);
+  assert.equal(chipProgressPct(undefined, "queued"), 0);
+  assert.equal(chipProgressPct(undefined, "noisy"), 100);
+  assert.equal(chipProgressPct({ done: 90, total: 400 }, "noisy"), 23);
 });

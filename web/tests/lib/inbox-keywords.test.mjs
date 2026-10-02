@@ -216,6 +216,26 @@ test("重叠/邻接区间合并，不重复不丢字；多处命中全高亮", (
   ]);
 });
 
+test("匹配口径单源：命中判定与高亮分段对同一输入一致，空词两处都不命中", () => {
+  const vocab = ["python", "大模型", "RAG", "Kubernetes"];
+  const text = "资深 Python 工程师（大模型方向），熟悉 RAG";
+  const hits = matchVocab(text, vocab);
+  assert.deepEqual(hits, ["python", "大模型", "RAG"]);
+  const hitText = splitHighlight(text, vocab)
+    .filter((s) => s.hit)
+    .map((s) => s.t)
+    .join("");
+  for (const term of hits) {
+    const found = /^[\x00-\x7F]+$/.test(term)
+      ? hitText.toLowerCase().includes(term.toLowerCase())
+      : hitText.includes(term);
+    assert.ok(found, `${term} 命中后必须产出对应高亮段`);
+  }
+  // 空词：共享实现下命中判定与高亮分段都视为不命中（不产生假阳性）
+  assert.deepEqual(matchVocab("任意文本", [""]), []);
+  assert.deepEqual(splitHighlight("任意文本", [""]), [{ t: "任意文本", hit: false }]);
+});
+
 // ── deadKeywords（删除命中行后的死词剪枝，回归锁）──────────────────
 
 test("回归：选中词的行全被删除后，该词判死可剪（页面不再停在 0 匹配）", () => {

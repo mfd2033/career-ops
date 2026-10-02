@@ -170,8 +170,32 @@ export function buildVocab(sources) {
 }
 
 /**
- * 词典匹配：text 命中词表里的哪些词。拉丁形态大小写不敏感子串，CJK/混合形态
- * 直接子串（与收件箱 `q` 搜索框的匹配姿态一致，不发明第二套分词）。
+ * 关键词匹配的唯一口径实现：纯 ASCII 术语大小写不敏感子串，非 ASCII（CJK/混合）
+ * 直接子串（与收件箱 `q` 搜索框的匹配姿态一致，不发明第二套分词）。命中判定
+ * （matchVocab）与高亮分段（splitHighlight）共用本函数，杜绝两处口径漂移。
+ * 空术语不命中。
+ * @param {string} text
+ * @param {string} term
+ * @returns {Array<[number, number]>} 命中区间（半开 [start, end)，按出现序）
+ */
+function findTermRanges(text, term) {
+  if (!text || !term) return [];
+  const ascii = /^[\x00-\x7F]+$/.test(term);
+  const needle = ascii ? term.toLowerCase() : term;
+  const hay = ascii ? text.toLowerCase() : text;
+  const ranges = [];
+  let from = 0;
+  for (;;) {
+    const idx = hay.indexOf(needle, from);
+    if (idx === -1) break;
+    ranges.push([idx, idx + needle.length]);
+    from = idx + needle.length;
+  }
+  return ranges;
+}
+
+/**
+ * 词典匹配：text 命中词表里的哪些词（匹配口径见 findTermRanges）。
  * @param {string} text
  * @param {string[]} vocab
  * @returns {string[]}
@@ -179,14 +203,9 @@ export function buildVocab(sources) {
 export function matchVocab(text, vocab) {
   if (!text || !vocab || !vocab.length) return [];
   const hay = String(text);
-  const hayLower = hay.toLowerCase();
   const out = [];
   for (const term of vocab) {
-    if (/^[\x00-\x7F]+$/.test(term)) {
-      if (hayLower.includes(term.toLowerCase())) out.push(term);
-    } else if (hay.includes(term)) {
-      out.push(term);
-    }
+    if (findTermRanges(hay, term).length > 0) out.push(term);
   }
   return out;
 }
@@ -271,8 +290,8 @@ export function deadKeywords(kwdSet, rows) {
 
 /**
  * 命中高亮的分段器（ADR-0068 决议 6）：把 text 按 terms 的命中区间切成
- * [{t, hit}] 连续段（重叠区间自动合并）。匹配口径与 matchVocab 一致：
- * 纯拉丁形态大小写不敏感，CJK 直接子串。无 terms → 单段不命中（行渲染零变化）。
+ * [{t, hit}] 连续段（重叠区间自动合并）。匹配口径见 findTermRanges（与
+ * matchVocab 同一实现）。无 terms → 单段不命中（行渲染零变化）。
  * @param {string} text
  * @param {string[]|null|undefined} terms
  * @returns {{t: string, hit: boolean}[]}
@@ -281,18 +300,9 @@ export function splitHighlight(text, terms) {
   if (!text) return [];
   if (!terms || !terms.length) return [{ t: text, hit: false }];
   const marks = new Array(text.length).fill(false);
-  const hayLower = text.toLowerCase();
   for (const term of terms) {
-    if (!term) continue;
-    const ascii = /^[\x00-\x7F]+$/.test(term);
-    const needle = ascii ? term.toLowerCase() : term;
-    const hay = ascii ? hayLower : text;
-    let from = 0;
-    for (;;) {
-      const idx = hay.indexOf(needle, from);
-      if (idx === -1) break;
-      for (let i = idx; i < idx + needle.length; i++) marks[i] = true;
-      from = idx + needle.length;
+    for (const [start, end] of findTermRanges(text, term)) {
+      for (let i = start; i < end; i++) marks[i] = true;
     }
   }
   const out = [];

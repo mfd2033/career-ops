@@ -47,3 +47,17 @@ export function maxSnapshotByBoard(targets) {
   }
   return out;
 }
+/**
+ * 平台 chip 的进度条百分比（ADR-0069 决议 5）：swept 恒满格——上限是截断保护而非
+ * 目标，采完即满，不因未达上限留残缺 bar；其余有分母按 done/total，无分母时
+ * noisy 满格、queued/active 为空。
+ *
+ * @param {{done?: number, total?: number} | null | undefined} source 该平台的进度
+ * @param {string} state chip 当前状态（调用侧用 `source?.state ?? "queued"`）
+ * @returns {number} 0..100
+ */
+export function chipProgressPct(source, state) {
+  if (state === "swept") return 100;
+  if (!source || !source.total) return state === "noisy" ? 100 : 0;
+  return Math.min(100, Math.round(((source.done ?? 0) / source.total) * 100));
+}

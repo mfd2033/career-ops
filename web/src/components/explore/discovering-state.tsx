@@ -5,6 +5,7 @@ import { Check, Loader2 } from "lucide-react";
 import { ApplyBackdrop } from "@/components/apply/apply-backdrop";
 import { instrumentSerif } from "@/lib/fonts";
 import { ATS_LABEL, ATS_SOURCES, BROWSER_LABEL, BROWSER_SOURCES, type AtsSource, type BrowserSource } from "@/lib/explore";
+import { chipProgressPct } from "@/lib/browser-progress.mjs";
 import { useExplore, type SourceState } from "./explore-provider";
 import { useI18n } from "@/lib/i18n/context";
 
@@ -51,21 +52,21 @@ export function useCountUp(target: number): number {
   return Math.round(val);
 }
 
+/** 逐平台采到数文案（ADR-0069 决议 5）：仅浏览器模式且分母已知时显示——
+ *  queued `—/上限`、active `n/上限`、swept `✓ n`（上限是截断保护不是目标，
+ *  采完即转 ✓ 停比）；noisy 保持 `~n skipped` 行，数字定格在失败时刻。
+ *  ATS 分支不显数：done/total 在公司数语义轴上，与条数不同口径。 */
+function browserCountLabel(s: SourceState | undefined, state: SourceState["state"], isBrowser?: boolean): string {
+  if (!isBrowser || !s?.total) return "";
+  if (state === "swept") return `✓ ${s.done ?? 0}`;
+  if (state === "queued") return `—/${s.total}`;
+  return `${s.done ?? 0}/${s.total}`;
+}
+
 function SourceChip({ ats, label, s, isBrowser }: { ats: string; label: string; s?: SourceState; isBrowser?: boolean }) {
   const state = s?.state ?? "queued";
-  const pct = s?.total ? Math.min(100, Math.round(((s.done ?? 0) / s.total) * 100)) : state === "swept" || state === "noisy" ? 100 : 0;
-  // 逐平台采到数（ADR-0069 决议 5）：仅浏览器模式且分母已知时显示——
-  // queued `—/上限`、active `n/上限`、swept `✓ n`（上限是截断保护不是目标，
-  // 采完即转 ✓ 停比）；noisy 保持 `~n skipped` 行，数字定格在失败时刻。
-  // ATS 分支不显数：done/total 在公司数语义轴上，与条数不同口径。
-  const num =
-    isBrowser && s?.total
-      ? state === "swept"
-        ? `✓ ${s.done ?? 0}`
-        : state === "queued"
-          ? `—/${s.total}`
-          : `${s.done ?? 0}/${s.total}`
-      : "";
+  const pct = chipProgressPct(s, state);
+  const countLabel = browserCountLabel(s, state, isBrowser);
   return (
     <div className="co-src__chip" data-engine={isBrowser ? "browser" : "ats"} data-state={state === "noisy" ? "active" : state}>
       {state === "active" ? (
@@ -78,7 +79,7 @@ function SourceChip({ ats, label, s, isBrowser }: { ats: string; label: string; 
       <span className="text-[13px] font-medium text-foreground">{label}</span>
       <div className="ml-auto flex flex-col items-end gap-1">
         {state === "noisy" && <span className="text-[10px] text-faint">~{s?.unreachable} skipped</span>}
-        {num && <span className="co-src__num">{num}</span>}
+        {countLabel && <span className="co-src__num">{countLabel}</span>}
         <div className="co-src__track">
           <div className="co-src__bar" style={{ width: `${pct}%` }} />
         </div>

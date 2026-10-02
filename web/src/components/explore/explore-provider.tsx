@@ -508,9 +508,9 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
       while (tick < maxTicks) {
         tick += 1;
         await new Promise((r) => setTimeout(r, 2000));
-        const prog = await pollProgress();
-        const collected = Number(prog.collected) || 0;
-        const perSource = prog.perSource && typeof prog.perSource === "object" ? prog.perSource : {};
+        const progress = await pollProgress();
+        const collected = Number(progress.collected) || 0;
+        const perSource = progress.perSource && typeof progress.perSource === "object" ? progress.perSource : {};
         let active: string[] = [];
         try {
           const st = await extRequest({ type: "scan-status", scanId });
@@ -530,7 +530,9 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
               next[id] = { ...cur, done: perSource[id] ?? cur.done ?? 0, total: maxSnap[id] ?? cur.total ?? 0 };
               continue;
             }
-            const state = activeSet.has(id) || everActive.has(id) ? (activeSet.has(id) ? "active" : "swept") : "queued";
+            let state: SourceState["state"] = "queued";
+            if (activeSet.has(id)) state = "active";
+            else if (everActive.has(id)) state = "swept";
             next[id] = { ...cur, state, done: perSource[id] ?? 0, total: maxSnap[id] ?? 0 };
           }
           return next;
@@ -542,14 +544,14 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
       // 收尾:标记仍 active/queued 的平台为 swept,取回本 scanId 采集到的最前端显示。
       // 最后一轮再读一次 scan-progress：采完到退出循环之间可能还有批次落表，chip 的
       // ✓n 要定格在真实采到数而不是最后一次轮询快照。
-      const finalProg = await pollProgress();
-      const finalPer = finalProg.perSource && typeof finalProg.perSource === "object" ? finalProg.perSource : {};
+      const finalProgress = await pollProgress();
+      const finalPerSource = finalProgress.perSource && typeof finalProgress.perSource === "object" ? finalProgress.perSource : {};
       setSources((s) => {
         const next = { ...s };
         for (const k of Object.keys(next)) {
           if (failedSet.has(k)) continue;
           if (next[k]?.state === "queued" || next[k]?.state === "active") next[k] = { ...next[k]!, state: "swept" };
-          if (next[k]?.state === "swept") next[k] = { ...next[k]!, done: finalPer[k] ?? next[k]!.done ?? 0, total: maxSnap[k] ?? next[k]!.total ?? 0 };
+          if (next[k]?.state === "swept") next[k] = { ...next[k]!, done: finalPerSource[k] ?? next[k]!.done ?? 0, total: maxSnap[k] ?? next[k]!.total ?? 0 };
         }
         return next;
       });

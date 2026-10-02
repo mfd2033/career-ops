@@ -23,20 +23,21 @@ test("provider: 轮询把 perSource 与分母快照灌进 sources", () => {
   const src = strip(provider);
   assert.match(src, /maxSnapshotByBoard\(driveTargets\)/, "分母快照必须来自 driveTargets（与驱动消息同一份列表）");
   assert.match(src, /driveTargets\.map|sources: driveTargets/, "drive-scan 消息与快照共用 driveTargets");
-  assert.match(src, /prog\.perSource/, "scan-progress 的 perSource 必须被消费");
+  assert.match(src, /progress\.perSource/, "scan-progress 的 perSource 必须被消费");
   assert.match(src, /done: perSource\[id\][\s\S]*total: maxSnap\[id\]/, "每轮轮询按平台灌 done/total");
-  assert.match(src, /finalPer\[k\]/, "收尾要再读一次 scan-progress，✓n 定格在真实采到数");
+  assert.match(src, /finalPerSource\[k\]/, "收尾要再读一次 scan-progress，✓n 定格在真实采到数");
 });
 
 test("provider: active 列表驱动 chip 状态机（浏览器模式不再全程 queued）", () => {
   const src = strip(provider);
   assert.match(src, /everActive\.add\(a\)/, "active 平台要登记，消失即转 swept");
-  assert.match(src, /activeSet\.has\(id\) \? "active" : "swept"/, "状态流转按 active/everActive 判定");
+  assert.match(src, /if \(activeSet\.has\(id\)\) state = "active"/, "active 判定：在 active 列表即 active");
+  assert.match(src, /else if \(everActive\.has\(id\)\) state = "swept"/, "曾 active 后消失即 swept");
 });
 
 test("chips: 数字只在浏览器模式显示，ATS 分支不带数字", () => {
   const src = strip(chips);
-  assert.match(src, /isBrowser && s\?\.total/, "显数门 = 浏览器模式且分母已知");
+  assert.match(src, /!isBrowser \|\| !s\?\.total/, "显数门 = 浏览器模式且分母已知");
   assert.match(src, /`—\/\$\{s\.total\}`/, "queued 显示 —/上限");
   assert.match(src, /`✓ \$\{s\.done \?\? 0\}`/, "swept 显示 ✓ n");
   assert.match(src, /`\$\{s\.done \?\? 0\}\/\$\{s\.total\}`/, "active 显示 n/上限");
