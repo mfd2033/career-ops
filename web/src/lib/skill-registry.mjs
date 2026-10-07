@@ -5,8 +5,12 @@
 //
 // 扫描语义（ADR-0056）：
 //  - 目录清单是常量（决议 1 的五处；新 agent 目录加在这里）；home 可注入，测试用临时目录。
-//  - 直接子目录里有 SKILL.md 才算一个副本；frontmatter 只取 name/version 两个标量
+//  - 子目录里有 SKILL.md 才算一个副本；frontmatter 只取 name/version 两个标量
 //    （不引 YAML 依赖），无 version → null（browser-skill 如实「未标注」，决议 3）。
+//  - 副本形态有两种：技能自己的目录，以及 skills-manager deploy 落的**指向库目录的
+//    链接**。readdir(withFileTypes) 走 lstat 语义，链接的 isDirectory() 恒为 false，
+//    只认真目录会把已部署的技能整批判成未安装（真机踩过：五个候选目录 113 份全链接
+//    → 面板 0 副本、体检指针解析不到）。链接同样收，断链由读不到 SKILL.md 自然筛掉。
 //  - 单目录缺失/失败 → 静默跳过：换机、skills-manager 未 deploy 都不是错误（决议 4）。
 //  - 不做二进制探测、不走 skills-manager-cli（决议 1）；每请求实时扫，无缓存（决议 8）。
 
@@ -67,8 +71,11 @@ export function compareVersions(a, b) {
 /**
  * 扫描本机技能副本。home 可注入（测试用临时目录，不碰真实用户目录）。
  * @param {{ home?: string, candidates?: string[] }} [opts]
- * @returns {Array<{ name: string, version: string | null, path: string, agentDir: string }>}
- *          name 缺 frontmatter 时回退目录名。
+ * @returns {Array<{ name: string, version: string | null, path: string, realPath: string, agentDir: string }>}
+ *          name 缺 frontmatter 时回退目录名。path 是派发侧在 agent 目录下看到的路径
+ *          （agentDir 语义的来源）；realPath 是解析链接后的真实位置（中央库常在 home
+ *          之外，例如 Windows 上库在 `D:\.skills-manager\skills`），展示层用它答
+ *          「到底装在哪」。解析失败（极少：链接目标权限异常）回落 path。
  */
 export function scanSkillRegistry({ home = os.homedir(), candidates = SKILL_DIR_CANDIDATES } = {}) {
   const copies = [];
@@ -81,16 +88,22 @@ export function scanSkillRegistry({ home = os.homedir(), candidates = SKILL_DIR_
       continue; // 目录缺失/不可读：如实缺席，不是错误（决议 1/4）
     }
     for (const entry of entries) {
-      if (!entry.isDirectory()) continue;
+      if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
       const skillMd = path.join(base, entry.name, "SKILL.md");
       let text;
       try {
         text = fs.readFileSync(skillMd, "utf8");
       } catch {
-        continue; // 无 SKILL.md：不是技能副本
+        continue; // 无 SKILL.md（或断链）：不是技能副本
+      }
+      let realPath = skillMd;
+      try {
+        realPath = fs.realpathSync(skillMd);
+      } catch {
+        // 解析不了就如实保留链接路径，展示层不至于空白
       }
       const { name, version } = parseSkillFrontmatter(text);
-      copies.push({ name: name ?? entry.name, version, path: skillMd, agentDir });
+      copies.push({ name: name ?? entry.name, version, path: skillMd, realPath, agentDir });
     }
   }
   return copies;
@@ -99,7 +112,7 @@ export function scanSkillRegistry({ home = os.homedir(), candidates = SKILL_DIR_
 /**
  * 按技能名聚合：每组 { name, topVersion, copies[] }，copies 按版本降序
  * （最高版本在前，即「当前版本」）。
- * @param {Array<{ name: string, version: string | null, path: string, agentDir: string }>} copies
+ * @param {Array<{ name: string, version: string | null, path: string, realPath: string, agentDir: string }>} copies
  */
 export function groupSkills(copies) {
   const byName = new Map();
@@ -118,7 +131,7 @@ export function groupSkills(copies) {
  * 解析某技能的最高版本副本（体检指针用，决议 5）。没有 → null。
  * 全部副本都无版本号时仍返回其一（排序稳定，compare 全 0）——有路径可注入就注入，
  * 版本如实为 null，调用方按「未标注」处理。
- * @param {Array<{ name: string, version: string | null, path: string, agentDir: string }>} copies
+ * @param {Array<{ name: string, version: string | null, path: string, realPath: string, agentDir: string }>} copies
  * @param {string} name
  */
 export function resolveSkillCopy(copies, name) {

@@ -13,6 +13,7 @@ Accepted (2026-09-24)
 ## 决策
 
 1. **技能注册表 = 服务端目录扫描（单一事实源）**：新增纯 `.mjs` 库 `web/src/lib/skill-registry.mjs`（node --test 可锁，同 checkup-live / checkup-request 惯例），扫描固定目录清单（`%USERPROFILE%` 下：`.trae-cn/skills`、`.claude/skills`、`.skills-manager/skills`、`.config/opencode/skills`、`.agents/skills`，常量可扩展），每个直接子目录读 `SKILL.md` frontmatter 的 `name`/`version`。单目录缺失/失败跳过不致 500；frontmatter 无 version → `null`。不做二进制探测（不跑 `bsk --version`），不走 skills-manager-cli（bridge 未发布/桌面端漂移是额外故障面，且覆盖不到野副本）。
+   - **修订 1（2026-10-07，真机踩坑）**：「直接子目录」必须包含**指向库目录的链接**。skills-manager deploy 落到各 agent 目录的是符号链接，`fs.readdirSync(withFileTypes)` 走 lstat 语义，链接的 `isDirectory()` 恒为 false——旧判定把本机五个候选目录下 113 份部署全判成未安装（面板 0 副本、体检指针解析不到、报告页脚静默落回无版本旧句）。现链接同样收，断链由读不到 `SKILL.md` 自然筛掉。中央库不一定在 home 下（本机实际在 `D:\.skills-manager\skills`，home 下的 `.skills-manager` 只有 `bin`），故副本新增 `realPath`（解析后的真实位置，展示层用它答「装在哪」），`path` 保留部署侧路径以维持 `agentDir` 语义与体检指针注入的逐字节兼容。
 2. **展示 = 按技能聚合 + 聚焦白名单**：新增 `/api/skills` 路由返回扫描结果；配置页新增技能面板，按技能聚合——每技能一张卡片，展开列各副本「路径 + 版本 + 所属目录」，最高版本标当前。v1 白名单只渲染 `offer体检` 与 `browser-skill`（常量）；扫描器通用，白名单只控展示面，加技能改白名单不改扫描器。
 3. **browser-skill 版本如实**：frontmatter 无 version → 版本列显示「未标注」，不硬造、不探测。
 4. **缺失降级 = 徽标，不拦截**：技能未安装/副本缺失在面板以徽标如实呈现；体检派发不因技能缺失被拦——`docs/checkup-workflow.md` 第 8 条（提示安装、不硬失败、不自行仿写 7 维）语义不变。

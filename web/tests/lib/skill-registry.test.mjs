@@ -33,6 +33,23 @@ function writeSkill(home, agentDir, skillDir, content) {
   fs.writeFileSync(path.join(dir, "SKILL.md"), content);
 }
 
+// 本机技能库的真实形态：skills-manager deploy 在 agent 目录下放的是**指向库目录的
+// 链接**，不是真目录。Windows 用 junction（普通权限可建，dirent 同样报
+// isSymbolicLink()=true / isDirectory()=false，与真实部署的判定面一致），
+// POSIX 用 dir 符号链接。
+function linkSkill(home, agentDir, skillDir, libraryDir) {
+  const dir = path.join(home, agentDir, skillDir);
+  fs.mkdirSync(path.join(home, agentDir), { recursive: true });
+  fs.symlinkSync(libraryDir, dir, process.platform === "win32" ? "junction" : "dir");
+}
+
+function makeLibrary() {
+  const lib = fs.mkdtempSync(path.join(os.tmpdir(), "skill-library-"));
+  writeSkill(lib, ".", "offer体检", OFFER_FM);
+  writeSkill(lib, ".", "browser-skill", "---\nname: browser-skill\n---\n");
+  return lib;
+}
+
 const OFFER_FM = '---\nname: offer体检\ndescription: 招聘/公司体检技能\nversion: 1.2.0\n---\n\n# offer体检\n';
 
 test("parseSkillFrontmatter: 取 name/version 标量，去引号", () => {
@@ -87,6 +104,47 @@ test("scanSkillRegistry: 跨目录收集副本，缺失目录与无 SKILL.md 的
 test("scanSkillRegistry: 整个 home 为空 → 空表，不抛错", () => {
   const home = makeHome();
   assert.deepEqual(scanSkillRegistry({ home }), []);
+});
+
+// 真机形态回归（用户报告：配置页搜不到技能安装位置，实际在 D:\.skills-manager\skills）。
+// agent 目录下 113 份部署全是符号链接，只认 isDirectory() 的旧判定会把整机判成 0 副本。
+test("scanSkillRegistry: 部署为符号链接的技能目录必须被扫到", () => {
+  const home = makeHome();
+  const lib = makeLibrary();
+  linkSkill(home, ".claude/skills", "offer体检", path.join(lib, "offer体检"));
+  linkSkill(home, ".trae-cn/skills", "browser-skill", path.join(lib, "browser-skill"));
+
+  const copies = scanSkillRegistry({ home });
+  assert.equal(copies.length, 2, "链接形态的副本不能被判成未安装");
+
+  const offer = copies.find((c) => c.name === "offer体检");
+  assert.equal(offer.version, "1.2.0", "经链接读到的 frontmatter 与真目录一致");
+  assert.equal(offer.agentDir, ".claude/skills");
+});
+
+test("scanSkillRegistry: 链接副本的 realPath 指向库里的真实位置（面板「安装位置」用它）", () => {
+  const home = makeHome();
+  const lib = makeLibrary();
+  linkSkill(home, ".claude/skills", "offer体检", path.join(lib, "offer体检"));
+
+  const [offer] = scanSkillRegistry({ home });
+  // 两侧都取 realpath：本机 TEMP 本身可能是指向别的盘的链接（C:\...\Temp → G:\Temp），
+  // 拿未解析的 mkdtemp 路径做等值会比出假失败。
+  assert.equal(
+    offer.realPath,
+    fs.realpathSync(path.join(lib, "offer体检", "SKILL.md")),
+    "realPath 必须解析到中央库，而不是 home 下的链接路径",
+  );
+  assert.ok(offer.path.startsWith(home), "path 保留派发侧看到的部署路径（agentDir 语义不丢）");
+});
+
+test("scanSkillRegistry: 断链（目标不存在）静默跳过，不抛错", () => {
+  const home = makeHome();
+  const lib = makeLibrary();
+  linkSkill(home, ".claude/skills", "offer体检", path.join(lib, "offer体检"));
+  fs.rmSync(path.join(lib, "offer体检"), { recursive: true, force: true });
+
+  assert.deepEqual(scanSkillRegistry({ home }), [], "指向已消失目标的链接不是副本");
 });
 
 test("groupSkills: 按名聚合，topVersion 取最高，copies 版本降序", () => {

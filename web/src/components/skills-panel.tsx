@@ -11,7 +11,7 @@ import { useI18n } from "@/lib/i18n/context";
 // workflow 第 8 条自行降级）。安装/升级是 skills-manager 的职责，这里零动作。
 // 数据来自 GET /api/skills（决议 8：每请求实时扫，无缓存）。
 
-type SkillCopy = { name: string; version: string | null; path: string; agentDir: string };
+type SkillCopy = { name: string; version: string | null; path: string; realPath?: string; agentDir: string };
 type SkillGroup = { name: string; topVersion: string | null; copies: SkillCopy[] };
 
 // 聚焦白名单（决议 2）：扫描器通用，展示面只渲染这几个；加技能改这里即可。
@@ -107,7 +107,10 @@ export function SkillsPanel() {
                             <span className="shrink-0 rounded bg-surface-muted px-1.5 py-0.5 font-mono text-muted">
                               {c.agentDir}
                             </span>
-                            <span className="min-w-0 break-all font-mono text-muted">{c.path}</span>
+                            <span className="min-w-0 break-all font-mono text-muted">
+                              {/* 安装位置取真实路径：deploy 到 agent 目录的是链接，中央库常在 home 之外 */}
+                              {c.realPath || c.path}
+                            </span>
                             {i === 0 && c.version && (
                               <span className="shrink-0 rounded-full bg-brand-soft px-1.5 py-0.5 text-faint">
                                 {t("config.skillsCurrent")}
