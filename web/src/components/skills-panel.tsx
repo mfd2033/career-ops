@@ -9,6 +9,8 @@ import { useI18n } from "@/lib/i18n/context";
 // 聚焦白名单各一张扁平单行卡（对齐已验收原型 .skill）：徽标 + 技能名 +
 // 副行「找到 N 个副本 · 用途说明」+ 右侧「vX.Y.Z · 当前版本」。副本的具体路径
 // 已折叠进「N 个副本」计数——原型是唯一事实来源，如实呈现聚合结果即可。
+// 「装在哪」这一问（ADR-0056 修订 1 的 realPath）不占单行卡版面，改为悬停在
+// 副本计数上的 tooltip 呈现当前（最高版本）副本解析链接后的真实位置。
 // 未安装以徽标如实呈现——不隐藏、不拦截任何功能（体检 worker 读不到技能时按
 // workflow 第 8 条自行降级）。安装/升级是 skills-manager 的职责，这里零动作。
 // 数据来自 GET /api/skills（决议 8：每请求实时扫，无缓存）。
@@ -63,6 +65,9 @@ export function SkillsPanel() {
           {FEATURED_SKILLS.map((name) => {
             const group = byName.get(name);
             const hintKey = SKILL_HINT_KEY[name];
+            // 当前（最高版本）副本的真实安装位置：realPath 优先，解析失败回落 path。
+            const topCopy = group?.copies[0];
+            const location = topCopy ? topCopy.realPath || topCopy.path : null;
             return (
               <div
                 key={name}
@@ -79,7 +84,10 @@ export function SkillsPanel() {
                 <div className="min-w-0 flex-1">
                   <div className="text-[13.5px] font-semibold text-foreground">{name}</div>
                   {group && (
-                    <div className="mt-0.5 truncate text-[11.5px] text-faint">
+                    <div
+                      className="mt-0.5 truncate text-[11.5px] text-faint"
+                      title={location ? t("config.skillsInstallLocation", { path: location }) : undefined}
+                    >
                       {t("config.skillsCopiesCount", { count: group.copies.length })}
                       {hintKey ? ` · ${t(hintKey)}` : ""}
                     </div>
