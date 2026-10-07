@@ -194,14 +194,17 @@ test("resolveCompanyLabel: `?` rows follow the policy, everything else is untouc
 // config-ai-tool-picker.test.mjs document. The regression they pin is "the page
 // let a policy change sit in the client store only".
 
-test("config-form: picking a policy persists it, and the failure is shown", () => {
+test("config-form: picking a policy stages it for the unified save, and the failure is shown", () => {
   const block = FORM.slice(
     FORM.indexOf('t("config.unknownEmployerTitle")'),
     FORM.indexOf("<JobTargetSettings />"),
   );
   assert.ok(block.length > 0, "config-form.tsx shape changed — the unknown-employer block was not found");
-  // 选中即落库: relying on the Save button is how the two stores diverged (#836)
-  assert.match(block, /void persistUnknownEmployer\(policy\)\.then\(\(ok\) => setPolicySyncFailed\(!ok\)\)/);
+  // 选中并入统一保存档位：只改草稿 + touch 计入 pending，不再「选中即落库」
+  assert.match(block, /setUnknownEmployer\("placeholder"\);\s*touch\("unknownEmployer"\)/);
+  assert.match(block, /setUnknownEmployer\("agency"\);\s*touch\("unknownEmployer"\)/);
+  // 落库改由 save() 承担（本地镜像 + 服务端 /api/config 同步），与 logos/applyBehavior 同路
+  assert.match(FORM, /void persistUnknownEmployer\(unknownEmployer\)\.then\(\(ok\) => setPolicySyncFailed\(!ok\)\)/);
   // …and a lost server write must be VISIBLE, not swallowed (the old helper was
   // `pushServerConfig(...).catch(() => {})`)
   assert.match(block, /policySyncFailed && \(/);

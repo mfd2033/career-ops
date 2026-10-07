@@ -945,16 +945,15 @@ export function ConfigForm() {
             <div className="rounded-xl border border-border bg-surface p-4">
               <h3 className="font-display text-[17px] font-medium leading-tight text-landing">{t("config.unknownEmployerTitle")}</h3>
               <p className="mb-3 mt-1 text-xs leading-relaxed text-faint">{t("config.unknownEmployerDesc")}</p>
-              {/* 未知雇主策略：视觉上归入「界面与交互」区，但持久化保持「选中即落库」而非
-                  等保存按钮——依赖保存按钮正是本地镜像与服务端分叉（#836）的根因，评估读的
-                  是服务端值。故不计入统一保存条的 pending（与「默认显示语言」同理：即时生效）。 */}
+              {/* 未知雇主策略：并入「界面与交互」区的统一保存档位——选中只改草稿并计入
+                  pending，点「保存设置」时由 save() 落库（本地镜像 + 服务端 /api/config 同步，
+                  与 logos/applyBehavior 同路）。 */}
               <div className="grid gap-2.5">
                 <RadioChoice
                   selected={unknownEmployer === "placeholder"}
                   onSelect={() => {
-                    const policy: UnknownEmployerPolicy = "placeholder";
-                    setUnknownEmployer(policy);
-                    void persistUnknownEmployer(policy).then((ok) => setPolicySyncFailed(!ok));
+                    setUnknownEmployer("placeholder");
+                    touch("unknownEmployer");
                   }}
                   title={t("config.unknownEmployerPlaceholder")}
                   desc={t("config.unknownEmployerPlaceholderDesc")}
@@ -962,15 +961,13 @@ export function ConfigForm() {
                 <RadioChoice
                   selected={unknownEmployer === "agency"}
                   onSelect={() => {
-                    const policy: UnknownEmployerPolicy = "agency";
-                    setUnknownEmployer(policy);
-                    void persistUnknownEmployer(policy).then((ok) => setPolicySyncFailed(!ok));
+                    setUnknownEmployer("agency");
+                    touch("unknownEmployer");
                   }}
                   title={t("config.unknownEmployerAgency")}
                   desc={t("config.unknownEmployerAgencyDesc")}
                 />
               </div>
-              <p className="mt-2 text-[11px] text-faint">{t("config.immediateNote")}</p>
               {policySyncFailed && (
                 <p className="mt-2 text-xs text-amber-600 dark:text-amber-400" role="alert">
                   {t("config.unknownEmployerSyncFailed")}
