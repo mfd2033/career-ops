@@ -18,7 +18,7 @@ import { CadenceSettings } from "@/components/followups/cadence-settings";
 import { JdRulesSettings } from "@/components/jd-rules-settings";
 import { SkillsPanel } from "@/components/skills-panel";
 import { JobTargetSettings } from "@/components/job-target-settings";
-import { persistCliId, persistModel, pushServerConfig, readSavedCliId, readSavedModel, readSavedUnknownEmployer, persistUnknownEmployer, readServerUnknownEmployer, mirrorUnknownEmployer, type UnknownEmployerPolicy } from "@/lib/saved-cli";
+import { persistCliId, persistModel, pushServerConfig, readSavedCliId, readSavedModel, readSavedUnknownEmployer, persistUnknownEmployer, readServerUnknownEmployer, mirrorUnknownEmployer, pickDefaultInstalled, type UnknownEmployerPolicy } from "@/lib/saved-cli";
 import { readSavedConcurrencyPool, persistConcurrencyPool, CONCURRENCY_POOL_DEFAULT } from "@/lib/saved-cli";
 import { resolveModelPicker } from "@/lib/model-picker.mjs";
 import {
@@ -170,14 +170,13 @@ export function ConfigForm() {
   // 幂等，两条路径的下拉行为必须完全一致。
   function applyClis(list: Cli[]) {
     setClis(list);
-    // Highlight + persist the only installed CLI when Config was never saved.
-    // Highlight-only used to look configured while jobs still read empty localStorage.
+    // 未保存过选择时，默认选中本机安装的第一个可用 CLI 并持久化——
+    // 只高亮不落盘时，派发端（resolveCliId / 服务端镜像）读到的仍是空配置。
     setCliId((prev) => {
       if (prev) return prev;
-      const only = list.filter((c) => c.installed && c.usable !== false);
-      if (only.length !== 1) return list.find((c) => c.installed)?.id || "";
-      if (!readSavedCliId()) persistCliId(only[0].id);
-      return only[0].id;
+      const pick = pickDefaultInstalled(list);
+      if (pick && !readSavedCliId()) persistCliId(pick);
+      return pick || "";
     });
   }
 

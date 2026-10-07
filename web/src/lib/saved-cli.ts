@@ -164,24 +164,36 @@ export async function readSavedConcurrencyPool(): Promise<number> {
   }
 }
 
-export function pickSoleInstalled(
-  clis: { id: string; installed?: boolean }[] | undefined,
+/**
+ * 引擎模式的默认工具：本机安装的第一个可用 CLI。
+ * `usable === false`（装了但 headless 探针无输出，ADR-0028）的先跳过；
+ * 全部不可用时退回第一个 installed，至少让用户看到一个可选值；
+ * 一个都没装才返回 null。以前只在「恰好装了一个」时给默认值，
+ * 多装几个的场景下拉虽高亮但不持久化，派发端读到的是空配置。
+ */
+export function pickDefaultInstalled(
+  clis: { id: string; installed?: boolean; usable?: boolean }[] | undefined,
 ): string | null {
-  const installed = (clis || []).filter((c) => c.installed);
-  return installed.length === 1 ? installed[0].id : null;
+  const list = clis || [];
+  const firstUsable = list.find((c) => c.installed && c.usable !== false);
+  const firstInstalled = list.find((c) => c.installed);
+  const pick = firstUsable || firstInstalled;
+  return pick ? pick.id : null;
 }
 
-/** Saved Config cliId, or the only installed CLI (and persist that pick). */
+/** Saved Config cliId, or the first installed CLI (and persist that pick). */
 export async function resolveCliId(): Promise<string | null> {
   const saved = readSavedCliId();
   if (saved) return saved;
   try {
     const r = await fetch("/api/clis");
-    const d = (await r.json()) as { clis?: { id: string; installed?: boolean }[] };
-    const sole = pickSoleInstalled(d.clis);
-    if (!sole) return null;
-    persistCliId(sole);
-    return sole;
+    const d = (await r.json()) as {
+      clis?: { id: string; installed?: boolean; usable?: boolean }[];
+    };
+    const pick = pickDefaultInstalled(d.clis);
+    if (!pick) return null;
+    persistCliId(pick);
+    return pick;
   } catch {
     return null;
   }
