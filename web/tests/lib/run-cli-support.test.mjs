@@ -11,6 +11,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   accumulateTokens,
+  authExpiredHint,
   codexStreamArgs,
   completedReportNames,
   failureEvidence,
@@ -602,6 +603,38 @@ test("failureEvidence: 非相邻的同一行不折叠，整体字数上限生效
   const ev = failureEvidence(["API Error: x", "Error: y", "API Error: x"].join("\n"));
   assert.equal((ev.match(/API Error: x/g) ?? []).length, 2);
   assert.ok(failureEvidence(`API Error: ${"z".repeat(2000)}`, { maxChars: 120 }).length <= 120);
+});
+
+// 2026-10-06 实捕：CodeBuddy 登录态失效时，死因只走 stdout 正文，result 行 error/result
+// 字段皆空——证据通道不认这句，账本就只剩裸 error_during_execution 哑巴错误。
+const AUTH_REQUIRED_LINE = "Authentication required. Please use /login command to sign in to your account";
+
+test("failureEvidence: 认得认证失效正文（实捕行）", () => {
+  assert.match(failureEvidence(`一些工具回显\n${AUTH_REQUIRED_LINE}`), /Authentication required/);
+});
+
+test("authExpiredHint: 命中失败搭配 → 给出 /login 行动指引", () => {
+  const hint = authExpiredHint(`\n${AUTH_REQUIRED_LINE}`);
+  assert.match(hint, /登录态失效/);
+  assert.match(hint, /\/login/);
+});
+
+test("authExpiredHint: #1974 教训——成功文案与无关正文不得误判", () => {
+  assert.equal(authExpiredHint("Authentication successful. Welcome!"), "");
+  assert.equal(authExpiredHint("正在读取报告并评估匹配度"), "");
+  assert.equal(authExpiredHint(""), "");
+  assert.equal(authExpiredHint(undefined), "");
+  assert.equal(authExpiredHint(null), "");
+});
+
+test("authExpiredHint: not authenticated / /login command 句式也命中", () => {
+  assert.notEqual(authExpiredHint("Error: not authenticated"), "");
+  assert.notEqual(authExpiredHint("please run the /login command first"), "");
+});
+
+test("failureLedgerMsg: 一句话原因 + 认证证据拼成可读终态", () => {
+  const msg = failureLedgerMsg("error_during_execution", { stdoutTail: failureEvidence(AUTH_REQUIRED_LINE) });
+  assert.match(msg, /^error_during_execution ｜ 输出尾部: Authentication required/);
 });
 
 test("failureLedgerMsg: 一句话原因 + 输出尾部", () => {

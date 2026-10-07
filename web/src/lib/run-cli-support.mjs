@@ -732,8 +732,31 @@ export function persistRunOutcome({ kind, cleanExit, sawError, emittedText, pers
 /** 失败证据的候选行（闭集，声明处即权威）。为什么要挑：本机这类失败——代理层的
  *  `API Error: Content block not found`、拒绝语「抱歉，内容可能包含敏感信息…」——走的是
  *  stdout 的 assistant text，而 ADR-0027 的 stderrTail 在本机账本里 0 条命中，信号根本
- *  不在那条通道上。不挑行的话，十几次搜索的空结果与工具回显会把死因淹掉。 */
-const FAILURE_EVIDENCE_RE = /API Error|敏感|refus|rate[ -]?limit|overloaded|\bquota\b|\bError:|timeout|ECONN/i;
+ *  不在那条通道上。不挑行的话，十几次搜索的空结果与工具回显会把死因淹掉。
+ *  2026-10-07 补认证段：CodeBuddy 登录态失效时，死因正文（`Authentication required.
+ *  Please use /login command…`）同样只走 stdout，而 result 行的 error/result 字段皆空，
+ *  账本只剩裸 subtype `error_during_execution` 一条哑巴错误——不加这段，信号永远进不了账本。 */
+const FAILURE_EVIDENCE_RE = /API Error|敏感|refus|rate[ -]?limit|overloaded|\bquota\b|\bError:|timeout|ECONN|\bauthenticat(?:ion|e) (?:required|failed|expired)\b|not authenticated|\/login command/i;
+
+/** 认证失效信号（闭集）。#1974 的教训照旧生效：只匹配失败搭配，不匹配裸 auth/login——
+ *  「Authentication successful」这类正常正文绝不能被判成过期，否则六条运行里五条被误标。
+ *  与 FAILURE_EVIDENCE_RE 的认证段同源，两处若要放宽必须一起改。 */
+const AUTH_EXPIRED_RE = /\bauthenticat(?:ion|e) (?:required|failed|expired)\b|not authenticated|\/login command/i;
+
+/**
+ * 从失败 run 的 stdout/stderr 尾料里识别「登录态失效」，返回可行动的下一步指引。
+ *
+ * 为什么要提示而不是只抄原文：`error_during_execution` 对用户不可读，也不知道该干什么；
+ * 认证失效是唯一「用户侧一步操作即可自愈」的常见终态（其余失败只能重试或换引擎），
+ * 值得把 /login 这句行动指引直接拼进错误消息。纯函数，route 在 error 终态处调用。
+ *
+ * @param {string | null | undefined} text - stderr + agent 可见正文的合并尾料
+ * @returns {string} 中文指引串；未命中返回空串（调用方据此不加）
+ */
+export function authExpiredHint(text) {
+  if (typeof text !== "string" || !AUTH_EXPIRED_RE.test(text)) return "";
+  return "检测到 CLI 登录态失效：请在 WorkBuddy / CodeBuddy 交互界面执行 /login 重新授权，再重试本任务。";
+}
 
 /**
  * 从 agent 的可见正文里挑出失败证据（ADR-0034 决议 2）。

@@ -9,7 +9,7 @@ import path from "node:path";
 import { after } from "next/server";
 import { resolveCli } from "@/lib/clis";
 import { resolveWorkerInvocation } from "@/lib/worker-invocation.mjs";
-import { accumulateTokens, checkupArtifactRowCount, checkupArtifactTodayForTracker, makeCheckupHtmlProbe, failureEvidence, failureLedgerMsg, hasNewCompletedReport, isFatalGenericStderr, persistRunOutcome, PERSISTENCE_GATED_KINDS, withModelFlag } from "@/lib/run-cli-support.mjs";
+import { accumulateTokens, authExpiredHint, checkupArtifactRowCount, checkupArtifactTodayForTracker, makeCheckupHtmlProbe, failureEvidence, failureLedgerMsg, hasNewCompletedReport, isFatalGenericStderr, persistRunOutcome, PERSISTENCE_GATED_KINDS, withModelFlag } from "@/lib/run-cli-support.mjs";
 import { spawnHeadlessCli, terminateCli } from "@/lib/spawn-cli.mjs";
 import { careerOpsRoot, readMemory, findReportFile, readInbox, readScanDates, findCheckupTarget, rootScript } from "@/lib/career-ops";
 import { checkupDispatchText } from "@/lib/checkup-request.mjs";
@@ -422,6 +422,17 @@ async function runPipeline({
   let stdoutTail = "";
   const send = (obj: { type: string; [key: string]: unknown }) => {
     if (terminal) return;
+    if (obj.type === "error") {
+      // 认证失效是唯一「用户一步操作即可自愈」的常见终态，而 CLI 把死因只写在
+      // stdout 正文里（result 行字段皆空），裸 subtype 对读者不可读。命中就把
+      // /login 指引拼进一句话原因——publish 在前，实时卡片与账本同源同文案。
+      const hint = authExpiredHint(`${stderrTail}\n${stdoutTail}`);
+      if (hint) {
+        const base = String(obj.msg ?? "").trim();
+        if (base && !base.includes(hint)) obj = { ...obj, msg: `${base}｜${hint}` };
+        else if (!base) obj = { ...obj, msg: hint };
+      }
+    }
     publish(runId, obj);
     if (obj.type === "done") recordEnd("done");
     else if (obj.type === "error")
