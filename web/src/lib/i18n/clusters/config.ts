@@ -132,6 +132,7 @@ export const en: Dict = {
   "config.navTarget": "Targeting Rules",
   "config.navFollowup": "Follow-up Cadence",
   "config.navSkills": "Agent Skills",
+  "config.navAbout": "About",
   "config.secEngineDesc": "Which AI runs evaluations and workers, and how many at once.",
   "config.secScanDesc": "Which engine the Explore scan runs on, and how much each board collects.",
   "config.secUiDesc": "How the product looks, which language it speaks, and the apply/display interaction details.",
@@ -141,6 +142,18 @@ export const en: Dict = {
   "config.saveButton": "Save",
   "config.persistProfile": "→ config/profile.yml",
   "config.immediateNote": "Applies immediately on selection — no need to press save.",
+
+  // ── 关于区（从旧的左下角悬浮版本胶囊迁入）──
+  "config.secAboutDesc": "What's running on this machine, and where to report a problem.",
+  "config.aboutWebVersion": "Web version",
+  "config.aboutCoreVersion": "Core version",
+  "config.aboutChannel": "Channel",
+  "config.aboutBuild": "Build",
+  "config.aboutBuiltAt": "built",
+  "config.aboutLoading": "Reading version…",
+  "config.aboutBlurb": "career-ops runs entirely on your own machine, on your own AI. Your CV and data never leave your computer — the bug reporter opens a GitHub issue you review before anything is sent.",
+  "config.aboutRepo": "Source on GitHub",
+  "config.aboutSite": "career-ops.org",
 };
 
 // Simplified Chinese strings. Every key in en must have a matching key here.
@@ -273,6 +286,7 @@ export const zh: Dict = {
   "config.navTarget": "定向规则",
   "config.navFollowup": "跟进节奏",
   "config.navSkills": "Agent 技能",
+  "config.navAbout": "关于",
   "config.secEngineDesc": "评估与工作器跑在哪个 AI 上，以及同时能跑多少个。",
   "config.secScanDesc": "探索页「扫描」用什么引擎跑、每个平台采多少。",
   "config.secUiDesc": "产品看起来怎样、用什么语言，以及申请与展示相关的交互细节。",
@@ -282,4 +296,16 @@ export const zh: Dict = {
   "config.saveButton": "保存",
   "config.persistProfile": "→ config/profile.yml",
   "config.immediateNote": "选中即生效，无需点保存。",
+
+  // ── 关于区（从旧的左下角悬浮版本胶囊迁入）──
+  "config.secAboutDesc": "本机正在运行的版本，以及遇到问题时如何反馈。",
+  "config.aboutWebVersion": "Web 版本",
+  "config.aboutCoreVersion": "内核版本",
+  "config.aboutChannel": "发布渠道",
+  "config.aboutBuild": "构建",
+  "config.aboutBuiltAt": "构建于",
+  "config.aboutLoading": "正在读取版本…",
+  "config.aboutBlurb": "career-ops 完全在你自己的机器上、用你自己的 AI 运行。你的简历和数据永不离开电脑——报告问题会打开一个由你确认的 GitHub issue，在你点击之前不会发送任何内容。",
+  "config.aboutRepo": "在 GitHub 查看源码",
+  "config.aboutSite": "career-ops.org",
 };

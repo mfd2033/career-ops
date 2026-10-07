@@ -15,6 +15,7 @@ import { cn } from "@/lib/cn";
 import { CadenceSettings } from "@/components/followups/cadence-settings";
 import { JdRulesSettings } from "@/components/jd-rules-settings";
 import { SkillsPanel } from "@/components/skills-panel";
+import { AboutPanel } from "@/components/about-panel";
 import { JobTargetSettings } from "@/components/job-target-settings";
 import { persistCliId, persistModel, pushServerConfig, readSavedCliId, readSavedModel, readSavedUnknownEmployer, persistUnknownEmployer, readServerUnknownEmployer, mirrorUnknownEmployer, pickDefaultInstalled, type UnknownEmployerPolicy } from "@/lib/saved-cli";
 import { readSavedConcurrencyPool, persistConcurrencyPool, CONCURRENCY_POOL_DEFAULT } from "@/lib/saved-cli";
@@ -85,6 +86,7 @@ const SECTIONS = [
   { id: "target", labelKey: "config.navTarget" },
   { id: "followup", labelKey: "config.navFollowup" },
   { id: "skills", labelKey: "config.navSkills" },
+  { id: "about", labelKey: "config.navAbout" },
 ] as const;
 
 // 只有这三区（●）的草稿改动会进入底部悬浮保存条的 pending 计数；▣ 卡片内保存项各自落库，
@@ -401,9 +403,19 @@ export function ConfigForm() {
         if (UNIFIED_IDS.includes(s.id)) uniIo.observe(el);
       }
     }
+    // 页底兜底：最后一个区（关于）内容短、下方留白有限，滚到底时其顶部往往进不了
+    // navIo 的观察带（视口上中段），高亮会卡在倒数第二个区。滚到页底时强制点亮最后一个区；
+    // 离开页底向上滚时，navIo 会随各区重新进入观察带而纠正高亮。
+    const lastId = SECTIONS[SECTIONS.length - 1].id;
+    const onScroll = () => {
+      const el = document.scrollingElement || document.documentElement;
+      if (el.scrollTop + window.innerHeight >= el.scrollHeight - 4) setActiveId(lastId);
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
     return () => {
       navIo.disconnect();
       uniIo.disconnect();
+      window.removeEventListener("scroll", onScroll);
     };
   }, []);
 
@@ -1018,6 +1030,11 @@ export function ConfigForm() {
         {/* ⑥ Agent 技能（— 只读）：知情展示，不拦截任何功能 */}
         <Section id="skills" title={t("config.navSkills")} desc={t("config.skillsDesc")}>
           <SkillsPanel />
+        </Section>
+
+        {/* ⑦ 关于（— 只读）：版本信息 + 报告问题入口，从旧的左下角悬浮胶囊迁入 */}
+        <Section id="about" title={t("config.navAbout")} desc={t("config.secAboutDesc")}>
+          <AboutPanel />
         </Section>
       </div>
 

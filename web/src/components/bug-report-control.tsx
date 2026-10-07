@@ -34,12 +34,11 @@ async function searchIssues(q: string): Promise<SimilarIssue[]> {
   }
 }
 
-// Beta/RC differentiator: a small version+channel pill (only on a pre-release
-// channel) + a one-click "Report a bug" that opens a PRE-FILLED GitHub issue. No
-// telemetry to any server (local-first / firewall) — the user reviews the exact,
-// PII-scrubbed payload (preview-then-confirm) and clicks to open the issue himself.
-export function BetaBanner() {
-  const [meta, setMeta] = useState<{ version: string; channel: string; sha: string; builtAt?: string } | null>(null);
+// The in-app bug reporter, decoupled from the old floating banner so it can live
+// inside the config page's "About" section. No telemetry to any server
+// (local-first / firewall) — the user reviews the exact, PII-scrubbed payload
+// (preview-then-confirm) and clicks to open the GitHub issue himself.
+export function BugReportControl({ compact = false }: { compact?: boolean }) {
   const [open, setOpen] = useState(false);
   const [desc, setDesc] = useState("");
   const [diag, setDiag] = useState<Diag | null>(null);
@@ -49,7 +48,7 @@ export function BetaBanner() {
 
   // Text search is behind an EXPLICIT click, never as-you-type: the user's
   // words (which can name a company) must not reach api.github.com at keystroke
-  // time — that would break the banner's "nothing is sent until you click"
+  // time — that would break the reporter's "nothing is sent until you click"
   // pledge, and scrub() is a path/secret scrubber, not a free-text one, so it
   // could not remove the company name anyway. The click IS the consent.
   const checkExisting = async () => {
@@ -60,15 +59,6 @@ export function BetaBanner() {
     setSearching(false);
     if (found.length) setSimilar(found);
   };
-
-  useEffect(() => {
-    fetch("/api/version")
-      .then((r) => r.json())
-      .then((d) => {
-        if (d?.channel && d.channel !== "stable") setMeta(d);
-      })
-      .catch(() => {});
-  }, []);
 
   useEffect(() => {
     if (!open) return;
@@ -88,26 +78,18 @@ export function BetaBanner() {
     });
   };
 
-  if (!meta) return null;
-
   return (
     <>
-      <div className="fixed bottom-3 left-3 z-[70] flex items-center gap-2 rounded-full border border-brand/30 bg-surface/90 px-3 py-1.5 text-xs shadow-lg backdrop-blur-md">
-        <span className="flex items-center gap-1.5 font-medium text-brand-text">
-          <span className="size-1.5 animate-pulse rounded-full bg-brand" /> {meta.version} · {meta.channel}
-        </span>
-        {meta.sha && (
-          <span
-            className="hidden font-mono text-faint sm:inline"
-            title={meta.builtAt ? `built ${meta.builtAt}` : undefined}
-          >
-            {meta.sha}
-          </span>
-        )}
-        <button onClick={openReport} className="ml-1 inline-flex items-center justify-center gap-1 rounded-full bg-brand-soft px-2 py-0.5 font-medium text-brand-text transition-colors hover:bg-brand/15 max-sm:min-h-[44px]">
-          <Bug className="size-3" /> {t("shared.beta.reportBug")}
-        </button>
-      </div>
+      <button
+        onClick={openReport}
+        className={
+          compact
+            ? "inline-flex items-center justify-center gap-1.5 rounded-full bg-brand-soft px-3 py-1.5 text-xs font-medium text-brand-text transition-colors hover:bg-brand/15 max-sm:min-h-[44px]"
+            : "inline-flex items-center justify-center gap-1 rounded-full bg-brand-soft px-2 py-0.5 font-medium text-brand-text transition-colors hover:bg-brand/15 max-sm:min-h-[44px]"
+        }
+      >
+        <Bug className={compact ? "size-3.5" : "size-3"} /> {t("shared.beta.reportBug")}
+      </button>
 
       {open && diag && (
         <div className="fixed inset-0 z-[96] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label={t("shared.beta.reportBug")} onClick={() => setOpen(false)}>
