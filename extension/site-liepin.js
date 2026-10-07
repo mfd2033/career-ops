@@ -153,41 +153,72 @@
     return { title, text };
   }
 
+  // CTA 按钮文案黑名单——「继续聊」类元素曾被当作雇主名写入报告 1106（聊天按钮
+  // 在文档序上先于真公司链接，被回退选择器列表首选命中）。命中即弃用该候选。
+  const CTA_TEXTS = ["继续聊", "立即沟通", "打招呼", "投递", "立即应聘", "收藏", "分享", "关注", "举报"];
+
+  /**
+   * 纯函数候选挑选（node 单测直测）：按文档序接收 [{text, href}]，返回首个
+   * 「像公司名」的候选。规则：跳过 javascript: href（聊天/操作按钮形态）；
+   * 文本取首个非空行（公司块常带换行的行业/规模尾巴）、去「· 」前缀；
+   * 空文本或命中 CTA 黑名单即弃。无合格候选返回 ""。
+   */
+  function pickPosterName(candidates) {
+    for (const c of candidates || []) {
+      const href = String((c && c.href) || "").trim();
+      if (/^javascript:/i.test(href)) continue;
+      let t = String((c && c.text) || "")
+        .split("\n")
+        .map((s) => s.trim())
+        .find(Boolean) || "";
+      t = t.replace(/^[·\s.]+\s*/, "").trim();
+      if (!t) continue;
+      if (CTA_TEXTS.some((cta) => t === cta || t.startsWith(cta))) continue;
+      return t.slice(0, 40);
+    }
+    return "";
+  }
+
   /**
    * 尽力提取发帖公司名。详情页公司块在 .recruiter-container a[href*="/company/"]，
    * 文本常带"· "前缀。取不到返回空串（快评跟随策略时退回不前缀）。
    *
    * 策略：先限在职位详情主区域内找，避免页面上推荐职位/侧边推荐等干扰区域的公司名
    * 被首选匹配；找不到再回退全局搜索。
+   *
+   * 回退链两处历史缺陷（实证 2026-10-07，报告 1106 公司名曾被提成「继续聊」）：
+   *   • querySelector(选择器列表) 返回**文档序**首个命中而非选择器优先级——
+   *     招聘者区块的 a.btn-chat（href="javascript:;"，文本「继续聊」）排在
+   *     公司链接之前就会被选中；改 querySelectorAll + pickPosterName 逐候选校验；
+   *   • `[class*="recruiter-container"] a` 会匹配招聘者块内任意 <a>（几乎必然是
+   *     聊天按钮），从回退链移除——招聘块内真公司名仍被 `.recruiter-container
+   *     a[href*="/company/"]` 覆盖。
    */
   function extractPosterName() {
+    const collect = (root, sel) =>
+      Array.from(root.querySelectorAll(sel)).map((el) => ({
+        text: el.innerText || el.textContent || "",
+        href: (el.getAttribute && el.getAttribute("href")) || "",
+      }));
     // 职位详情主区域容器（class 随站点改版可能变化，取宽匹配）。
     const detailArea = document.querySelector(
       '.job-apply-container, [class*="job-apply"], [class*="job-detail"]'
     );
     if (detailArea) {
-      const el = detailArea.querySelector(
-        '.recruiter-container a[href*="/company/"], a[href*="/company/"], [class*="company-name"]'
+      const name = pickPosterName(
+        collect(detailArea, '.recruiter-container a[href*="/company/"], a[href*="/company/"], [class*="company-name"]')
       );
-      if (el) {
-        let t = (el.innerText || el.textContent || "").trim();
-        t = t.replace(/^[·\s.]+\s*/, "").trim();
-        if (t) return t.slice(0, 40);
-      }
+      if (name) return name;
     }
-    // 回退：全局找第一个匹配（最后手段）。
-    const sel = [
-      '.recruiter-container a[href*="/company/"]',
-      'a[href*="/company/"]',
-      '[class*="recruiter-container"] a',
-      '[class*="company-name"]',
-      '.company-info .name',
-    ].join(",");
-    const el = document.querySelector(sel);
-    if (!el) return "";
-    let t = (el.innerText || el.textContent || "").trim();
-    t = t.replace(/^[·\s.]+\s*/, "").trim();
-    return t.slice(0, 40);
+    // 回退：全局逐候选校验（最后手段，仍拒绝按钮类元素）。
+    return pickPosterName(
+      collect(document, [
+        '.recruiter-container a[href*="/company/"]',
+        'a[href*="/company/"]',
+        '[class*="company-name"]',
+        '.company-info .name',
+      ].join(","))
+    );
   }
 
   const LIEPIN_SITE = {
@@ -224,7 +255,7 @@
   // 不引用 window/document/location。
   if (typeof window === "undefined" || !window.__careerExtCore) {
     if (typeof module !== "undefined" && module.exports) {
-      module.exports = { LIEPIN_SITE, isDetailPath, cardIsList, cardUrl, cardMeta, extractDetailJd, extractPosterName, findNextPageBtn, extractSalaryFromCardText };
+      module.exports = { LIEPIN_SITE, isDetailPath, cardIsList, cardUrl, cardMeta, extractDetailJd, extractPosterName, findNextPageBtn, extractSalaryFromCardText, pickPosterName };
     }
     return;
   }

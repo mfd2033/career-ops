@@ -18,7 +18,36 @@ import { fileURLToPath } from "node:url";
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 const mod = await import(pathToFileURL(join(ROOT, "extension", "site-liepin.js")).href);
 // CJS 互操作: module.exports 对象即 default; 具名导出走 cjs-module-lexer 也能拿到。
-const { LIEPIN_SITE, isDetailPath, extractSalaryFromCardText } = mod.default ?? mod;
+const { LIEPIN_SITE, isDetailPath, extractSalaryFromCardText, pickPosterName } = mod.default ?? mod;
+
+test("pickPosterName: 报告 1106 事故回归——「继续聊」聊天按钮不得被当成公司名", () => {
+  // fixture 来自 2026-10-07 对 liepin.com/a/79396987.shtml 登录态 DOM 的真实探针：
+  // 文档序上 a.btn-chat（href="javascript:;"）先于公司链接，旧实现直接把它当结果。
+  const candidates = [
+    { text: "继续聊", href: "javascript:;" },
+    { text: "新文溯科技\n计算机软件 融资未公开 50-99人", href: "https://www.liepin.com/company/2660976/" },
+    { text: "新文溯科技", href: "" },
+  ];
+  assert.equal(pickPosterName(candidates), "新文溯科技");
+});
+
+test("pickPosterName: 候选过滤规则逐条钉住", () => {
+  // javascript: href 即文本像公司名也拒（按钮形态不可信）
+  assert.equal(pickPosterName([{ text: "某某科技", href: "javascript:void(0)" }]), "");
+  // CTA 黑名单：全等与前缀都拒（「立即沟通，了解更多」类变体）
+  assert.equal(pickPosterName([{ text: "立即沟通", href: "" }]), "");
+  assert.equal(pickPosterName([{ text: "立即沟通，了解更多", href: "" }]), "");
+  // 取首个非空行（公司块带换行的行业/规模尾巴）
+  assert.equal(pickPosterName([{ text: "\n  空调国际\n汽车零部件 2000-5000人", href: "" }]), "空调国际");
+  // 去「· 」前缀（ADR-0005 记录的公司链接文本形态）
+  assert.equal(pickPosterName([{ text: "· 天原集团", href: "" }]), "天原集团");
+  // 无合格候选 / 空输入 → 空串（快评退回不前缀）
+  assert.equal(pickPosterName([]), "");
+  assert.equal(pickPosterName(undefined), "");
+  assert.equal(pickPosterName([{ text: "   ", href: "" }]), "");
+  // 截断 40 字符上限保持旧契约
+  assert.equal(pickPosterName([{ text: "字".repeat(50), href: "" }]).length, 40);
+});
 
 test("extractSalaryFromCardText: 猎聘卡片文本级薪资提取（class 选择器落空时的兜底）", () => {
   // 真实卡片文本形态（data/pipeline.md 取证的 title 即 anchor label 全文）
