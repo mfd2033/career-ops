@@ -411,7 +411,7 @@ export function ConfigForm() {
   const showSaveBar = unifiedVisible || pending > 0 || saved;
 
   return (
-    <div className="mx-auto grid max-w-[1320px] gap-10 px-7 pt-9 pb-[140px] max-[1100px]:block max-[1100px]:px-4 min-[1101px]:grid-cols-[220px_minmax(0,1fr)] min-[1101px]:items-start">
+    <div className="mx-auto grid max-w-[1320px] gap-10 px-7 pt-9 pb-[140px] max-[1100px]:block max-[1100px]:px-4 min-[1101px]:grid-cols-[150px_minmax(0,1fr)] min-[1101px]:items-start">
       {/* 窄屏：折叠为顶部横向滚动芯片导航 */}
       <nav className="sticky top-0 z-20 -mx-4 mb-4 flex gap-2 overflow-x-auto border-b border-border bg-background/85 px-4 py-2 backdrop-blur max-[1100px]:flex min-[1101px]:hidden">
         {SECTIONS.map((s) => (
@@ -438,7 +438,7 @@ export function ConfigForm() {
               key={s.id}
               href={`#${s.id}`}
               className={cn(
-                "flex items-center gap-2 rounded-[10px] border-l-[3px] px-3 py-2 text-[13.5px] transition-colors",
+                "flex items-center gap-2 rounded-[10px] border-l-[3px] px-2.5 py-2 text-[13.5px] transition-colors",
                 activeId === s.id
                   ? "border-brand bg-brand-soft font-semibold text-foreground"
                   : "border-transparent text-muted hover:bg-surface-hover hover:text-foreground",
