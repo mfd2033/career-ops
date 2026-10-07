@@ -6,8 +6,8 @@ import { codexStreamArgs, isFatalClaudeStderr, isFatalCodexStderr, isFatalOpenCo
 import { loadOpencodeModels, resetOpencodeModelCache } from "./opencode-models.mjs";
 import { loadQoderModels, resetQoderModelCache } from "./qoder-models.mjs";
 import { cliDisplayName } from "./cli-labels.mjs";
-import { cliSearchDirs, workbuddyBundledCliDirs } from "./cli-bin-dirs.mjs";
-import { spawnTargetFor } from "./spawn-cli.mjs";
+import { cliSearchDirs, npmPrefixDirs, workbuddyBundledCliDirs } from "./cli-bin-dirs.mjs";
+import { isNodeScript, spawnTargetFor } from "./spawn-cli.mjs";
 import { claudeCliArgs } from "./claude-invocation.mjs";
 import { parseQoderEvent, qoderCliArgs } from "./qoder-invocation.mjs";
 import { codebuddyCliArgs, parseCodebuddyEvent } from "./codebuddy-invocation.mjs";
@@ -278,13 +278,15 @@ export const KNOWN: CliSpec[] = [
   // which is where this engine's per-kind tool policy lives — the second
   // runtime with an audited scope, after Claude (ADR-0052 决议 2-4).
   { id: "qoder-cn", name: cliDisplayName("qoder-cn"), bin: "qoderclicn", binDirs: ["~/.qodersec/bin"], run: "qoderclicn -p", url: "https://qoder.com.cn/", args: (p) => ["-p", p], streamArgsFor: qoderCliArgs, parseEvent: parseQoderEvent, model: MODELS["qoder-cn"] },
-  // CodeBuddy Code. Two channels reach it, neither on PATH by default: the
-  // vendor's own installer (documented Windows target
+  // CodeBuddy Code. Three channels reach it: the npm global install (found via
+  // the shared search dirs — PATH plus the resolved npm prefix, see
+  // `npmPrefixDirs`), the vendor's own installer (documented Windows target
   // %USERPROFILE%\AppData\Local\codebuddy\bin) declared as `binDirs`, and the
   // copy WorkBuddy bundles inside its install tree, located lazily by
-  // `fallbackDirs` (ADR-0053). Both are extensionless `#!/usr/bin/env node`
-  // scripts — spawn-cli.mjs runs those through the interpreter, so "resolvable"
-  // and "spawnable" agree, which is the invariant this list must keep.
+  // `fallbackDirs` (ADR-0053). All of them are extensionless `#!/usr/bin/env
+  // node` scripts or npm shims around one — spawn-cli.mjs runs the scripts
+  // through the interpreter, so "resolvable" and "spawnable" agree, which is
+  // the invariant this list must keep.
   { id: "codebuddy", name: cliDisplayName("codebuddy"), bin: "codebuddy", binDirs: ["~/AppData/Local/codebuddy/bin"], fallbackDirs: workbuddyBundledCliDirs, run: "codebuddy -p", url: "https://www.codebuddy.cn/", args: (p) => ["-p", p], streamArgsFor: codebuddyCliArgs, parseEvent: parseCodebuddyEvent, model: MODELS.codebuddy },
 ];
 
@@ -311,8 +313,16 @@ function searchDirs(): string[] {
       path.join(appData, "npm"), // npm global prefix on Windows
     );
   }
+  // A custom npm global prefix (`NPM_CONFIG_PREFIX` / `prefix=` in ~/.npmrc)
+  // is where `npm install -g` REALLY put the binaries, and this process's PATH
+  // snapshot may predate the install entirely (the launcher captured it first).
+  // Without this the npm channel of an engine is invisible to detection and
+  // silently loses to whatever fallback dir resolves — measured on the machine
+  // this was built on, where the CodeBuddy npm install lost to WorkBuddy's
+  // bundled copy until the prefix was folded into the shared dirs.
+  const npmDirs = npmPrefixDirs({ env: process.env, home, readFile: safeReadFile });
   const fromPath = (process.env.PATH || "").split(path.delimiter).filter(Boolean);
-  return [...new Set([...fromPath, ...extra])];
+  return [...new Set([...fromPath, ...extra, ...npmDirs])];
 }
 
 // On Windows, executables carry an extension (claude.exe, claude.cmd, ...).
@@ -356,7 +366,14 @@ function isSpawnable(p: string): boolean {
 // fails `spawn ... ENOENT`, and the `.cmd` fails `EINVAL` on Node < 22.9, or
 // (routed through cmd.exe) mangles a multi-line prompt by truncating it at the
 // first newline. So on Windows resolve the real `.exe` first.
-function findNpmGlobalExe(dir: string, bin: string): string | null {
+//
+// A package with no native binary (CodeBuddy Code ships a `#!/usr/bin/env
+// node` script through its `bin` map) is resolved to that script itself — but
+// only once the content says so (spawn-cli.mjs's `isNodeScript`), which is
+// exactly what spawnHeadlessCli knows how to run through the interpreter. The
+// prefix-root shims beside it stay a pass-2 fallback, never a win here: that
+// keeps "resolvable" and "spawnable" one fact (ADR-0053).
+function findNpmGlobalEntry(dir: string, bin: string): string | null {
   const nm = path.join(dir, "node_modules");
   let packages: string[];
   try {
@@ -380,27 +397,43 @@ function findNpmGlobalExe(dir: string, bin: string): string | null {
         if (sub.startsWith(".")) continue;
         const exe = path.join(nm, pkg, sub, "bin", bin + ".exe");
         if (isSpawnable(exe)) return exe;
+        const script = path.join(nm, pkg, sub, "bin", bin);
+        if (isNodeScript(script)) return script;
       }
     } else {
       const exe = path.join(nm, pkg, "bin", bin + ".exe");
       if (isSpawnable(exe)) return exe;
+      const script = path.join(nm, pkg, "bin", bin);
+      if (isNodeScript(script)) return script;
     }
   }
   return null;
+}
+
+// The one safe file reader detection is allowed to use: `.npmrc` may be
+// absent or unreadable, and "no prefix configured" is the correct answer for
+// all of it — a sweep must never go down because a config file did.
+function safeReadFile(p: string): string | null {
+  try {
+    return fs.readFileSync(p, "utf8");
+  } catch {
+    return null;
+  }
 }
 
 export function findBin(bin: string, dirs = searchDirs()): string | null {
   if (process.platform === "win32") {
     // Prefer a directly-spawnable native binary, since spawn must pass a
     // multi-line prompt intact. Look for a real installer's `{bin}.exe`/`.com`
-    // at each dir root, then npm's real `.exe` under node_modules. The
-    // `.cmd`/`.bat`/extensionless shims below are a detectClis fallback only.
+    // at each dir root, then npm's real entry under node_modules (the `.exe`,
+    // or the package's own node-script). The `.cmd`/`.bat`/extensionless shims
+    // below are a detectClis fallback only.
     for (const dir of dirs) {
       for (const candidate of [bin + ".exe", bin + ".com"]) {
         const p = path.join(dir, candidate);
         if (isSpawnable(p)) return p;
       }
-      const exe = findNpmGlobalExe(dir, bin);
+      const exe = findNpmGlobalEntry(dir, bin);
       if (exe) return exe;
     }
   }

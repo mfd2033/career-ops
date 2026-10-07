@@ -12,16 +12,18 @@ import { platform } from "node:os";
 /**
  * Is this path a `#!…node…` script rather than a native executable?
  *
- * Detection is by CONTENT, and only for extensionless paths: a Windows native
- * executable always carries an extension (`.exe`/`.com`/`.cmd`/`.bat`), so an
- * extensionless entry on disk is a POSIX/node script — which is exactly what
- * npm writes beside every `.cmd` shim, and what CodeBuddy Code ships in both of
- * its channels (ADR-0053).
+ * Windows `spawn()` maps to CreateProcess, which needs an executable extension:
+ * handing it an extensionless `#!/usr/bin/env node` script fails with ENOENT.
+ * Both of CodeBuddy Code's channels ship exactly that (npm's `bin` map and
+ * WorkBuddy's bundle — ADR-0053), so the spawn path, not each caller, has to
+ * know how to start one. Exported for the lookup side of the same contract:
+ * clis.ts's findBin asks this question BEFORE accepting an npm package's
+ * extensionless entry, so "resolvable" and "spawnable" stay one fact.
  *
  * @param {string} p
  * @returns {boolean}
  */
-function isNodeScript(p) {
+export function isNodeScript(p) {
   if (path.extname(p)) return false;
   try {
     const fd = fs.openSync(p, "r");

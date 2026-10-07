@@ -9,7 +9,39 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { spawnHeadlessCli, spawnTargetFor, terminateCli } from "../../src/lib/spawn-cli.mjs";
+import { isNodeScript, spawnHeadlessCli, spawnTargetFor, terminateCli } from "../../src/lib/spawn-cli.mjs";
+
+// --- isNodeScript as a lookup predicate --------------------------------------
+//
+// findBin (clis.ts) now asks the same content question BEFORE accepting an
+// npm package's extensionless entry: "resolvable" must mean "spawnable", and
+// only the shebang can tell a node script from a bash shim wearing the same
+// name. The rules the rest of this file already rely on, pinned directly.
+
+test("isNodeScript recognizes a #!/…node… script by content", () => {
+  const dir = fixtureDir();
+  try {
+    const script = path.join(dir, "codebuddy");
+    fs.writeFileSync(script, "#!/usr/bin/env node\nconsole.log(1);\n");
+    assert.equal(isNodeScript(script), true);
+
+    // A bash shim (what npm writes at the prefix root) must NOT pass: handing
+    // it to the interpreter would fail differently and more quietly.
+    const sh = path.join(dir, "bash-shim");
+    fs.writeFileSync(sh, "#!/bin/sh\necho hi\n");
+    assert.equal(isNodeScript(sh), false);
+
+    // An extension always means a Windows-native form, never a node script:
+    // a `.cmd` whose body mentions node is still a cmd shim.
+    const cmd = path.join(dir, "codebuddy.cmd");
+    fs.writeFileSync(cmd, "@echo off\r\nnode \"%~dp0codebuddy\" %*\r\n");
+    assert.equal(isNodeScript(cmd), false);
+
+    assert.equal(isNodeScript(path.join(dir, "absent")), false, "a missing path is not a script");
+  } finally {
+    cleanup(dir);
+  }
+});
 
 // --- running a resolved entry that is a SCRIPT, not an executable -----------
 //

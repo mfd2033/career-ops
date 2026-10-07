@@ -11,7 +11,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path, { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { cliSearchDirs, expandHome, parseWorkbuddyCliDirs } from "../../src/lib/cli-bin-dirs.mjs";
+import { cliSearchDirs, expandHome, npmPrefixDirs, parseWorkbuddyCliDirs } from "../../src/lib/cli-bin-dirs.mjs";
 
 const HOME = path.join(path.sep, "home", "tester");
 
@@ -74,6 +74,124 @@ test("cliSearchDirs preserves the shared order (PATH precedence is the caller's)
 
 const CLIS_TS = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "src", "lib", "clis.ts");
 const clisSrc = readFileSync(CLIS_TS, "utf8");
+
+// --- the npm global prefix ---------------------------------------------------
+//
+// `npm install -g` honors a custom prefix (NPM_CONFIG_PREFIX, then `prefix=`
+// in ~/.npmrc) and puts the binaries THERE — a PATH snapshot taken before the
+// install (the launcher's, for instance) never learns about it. The cases read
+// the real shape measured on the machine this was built on: `prefix=/root/.npm-
+// global` in ~/.npmrc is drive-RELATIVE on Windows and resolves against the
+// cwd's drive, and the Windows prefix holds shims flat (no `bin/`).
+
+const WIN_CWD = "D:\\workspace\\career-ops";
+const POSIX_CWD = "/home/tester/project";
+
+test("npmPrefixDirs reads the prefix out of the user's .npmrc, drive-relative on Windows", () => {
+  const out = npmPrefixDirs({
+    env: {},
+    home: "C:\\Users\\tester",
+    platform: "win32",
+    cwd: WIN_CWD,
+    readFile: (p) =>
+      p === "C:\\Users\\tester\\.npmrc"
+        ? "registry=https://registry.npmmirror.com\nprefix=/root/.npm-global\ncache=D:/node_global/npm_cache\n"
+        : null,
+  });
+  assert.deepEqual(out, ["D:\\root\\.npm-global"]);
+});
+
+test("npmPrefixDirs lets the environment beat the .npmrc", () => {
+  const out = npmPrefixDirs({
+    env: { NPM_CONFIG_PREFIX: "E:/npm-pref" },
+    home: "C:\\Users\\tester",
+    platform: "win32",
+    cwd: WIN_CWD,
+    readFile: () => "prefix=/root/.npm-global\n",
+  });
+  assert.deepEqual(out, ["E:\\npm-pref"]);
+});
+
+test("npmPrefixDirs accepts the lowercase env spelling Windows can hand over", () => {
+  const out = npmPrefixDirs({
+    env: { npm_config_prefix: "E:\\lower" },
+    platform: "win32",
+    cwd: WIN_CWD,
+    readFile: () => null,
+  });
+  assert.deepEqual(out, ["E:\\lower"]);
+});
+
+test("npmPrefixDirs appends bin/ for a POSIX prefix, nothing for a Windows one", () => {
+  const posix = npmPrefixDirs({
+    env: { NPM_CONFIG_PREFIX: "/home/u/.npm-global" },
+    platform: "linux",
+    cwd: POSIX_CWD,
+    readFile: () => null,
+  });
+  assert.deepEqual(posix, ["/home/u/.npm-global/bin"]);
+});
+
+test("npmPrefixDirs strips quotes around the .npmrc value", () => {
+  const out = npmPrefixDirs({
+    env: {},
+    home: "C:\\Users\\tester",
+    platform: "win32",
+    cwd: WIN_CWD,
+    readFile: () => 'prefix="D:/my npm"\n',
+  });
+  assert.deepEqual(out, ["D:\\my npm"]);
+});
+
+test("npmPrefixDirs ignores commented-out and empty prefix keys", () => {
+  const commented = {
+    env: {},
+    home: "C:\\Users\\tester",
+    platform: "win32",
+    cwd: WIN_CWD,
+    readFile: () => "# prefix=/nope\n; prefix=/also-nope\n",
+  };
+  assert.deepEqual(npmPrefixDirs(commented), []);
+  assert.deepEqual(npmPrefixDirs({ ...commented, readFile: () => "prefix=\n" }), []);
+});
+
+test("npmPrefixDirs is empty when there is no prefix to read", () => {
+  assert.deepEqual(npmPrefixDirs({ env: {}, readFile: () => null }), []);
+  assert.deepEqual(npmPrefixDirs(), [], "callable with no arguments at all");
+});
+
+// --- wiring ------------------------------------------------------------------
+//
+// clis.ts is TypeScript and this suite is .mjs, so the wiring is asserted as
+// text — the same technique the repo's other clis.ts guards use. Comments are
+// stripped first: a guard that counts a string the implementation's own
+// comments also contain is a guard that can never go red.
+
+const stripClisComments = (src) => src.split("\n").filter((l) => !/^\s*\/\//.test(l)).join("\n");
+
+test("searchDirs folds the npm global prefix into the shared dirs", () => {
+  const body = /function searchDirs[\s\S]*?\n}/.exec(stripClisComments(clisSrc));
+  assert.ok(body, "searchDirs is gone — has clis.ts changed shape?");
+  assert.match(body[0], /npmPrefixDirs\(/, "searchDirs must consult the npm global prefix");
+});
+
+test("the npm global walk accepts the package's node-script entry BEFORE the shims", () => {
+  // The npm channel of CodeBuddy ships no `.exe` at all: the real entry is
+  // the extensionless `#!/usr/bin/env node` script under node_modules, and
+  // the prefix-root shims beside it (`.cmd`, the bash one) must never be
+  // what a dispatch receives. So the script must be probed in findBin's
+  // first pass — ahead of the pass that accepts shims by name.
+  const src = stripClisComments(clisSrc);
+  const entry = /function findNpmGlobalEntry[\s\S]*?\n}/.exec(src);
+  assert.ok(entry, "no findNpmGlobalEntry — has the npm walk changed shape?");
+  assert.match(entry[0], /isNodeScript\(/, "the npm walk must accept the node-script entry");
+  const fb = /function findBin[\s\S]*?\n}/.exec(src);
+  assert.ok(fb, "findBin is gone — has clis.ts changed shape?");
+  const first = fb[0].indexOf("findNpmGlobalEntry(");
+  const shims = fb[0].indexOf("binCandidates(bin)");
+  assert.ok(first !== -1 && shims !== -1, "findBin no longer looks like itself");
+  assert.ok(first < shims, "the real npm entry must be probed before the shim fallback");
+});
 
 test("the fixture this guard reads still looks like itself", () => {
   const calls = [...clisSrc.matchAll(/findBin\(/g)];

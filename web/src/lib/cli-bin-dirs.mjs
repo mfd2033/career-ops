@@ -60,6 +60,68 @@ export function cliSearchDirs(sharedDirs, vendorDirs, home) {
   return out;
 }
 
+/**
+ * The bin dir a custom npm global prefix actually puts `npm install -g`
+ * shims in — or an empty list when this machine sets no prefix at all.
+ *
+ * Why this exists: a PATH snapshot taken before an install (the launcher
+ * process captured the user PATH, then the user ran `npm install -g`) never
+ * learns about the new dir, and npm's own default Windows prefix
+ * (`%APPDATA%\npm`) is only one of the search dirs — a user who moved the
+ * prefix in `~/.npmrc` is invisible to detection unless the resolver reads
+ * the same two sources the installer itself read. Reading them costs zero
+ * subprocesses; `npm prefix -g` would put a synchronous npm launch (seconds,
+ * not ms) into every detection sweep.
+ *
+ * Precedence mirrors npm: `NPM_CONFIG_PREFIX` (checked in both spellings —
+ * Windows hands over whatever case the caller set) beats the `prefix=` key
+ * of the user's `~/.npmrc`. Resolution mirrors what npm did on the machine
+ * this was built on: a drive-less value (`/root/.npm-global`) is
+ * drive-RELATIVE on Windows and resolves against the cwd's drive. The
+ * Windows prefix holds binaries flat at its root; a POSIX one gains a `bin`
+ * tier — the layout each platform's npm really writes.
+ *
+ * Pure: the environment, home, platform, cwd and file reader are all
+ * injected, and nothing here throws — an unreadable `.npmrc` is simply
+ * "no prefix set".
+ *
+ * @param {object} [opts]
+ * @param {Record<string, string|undefined>} [opts.env]
+ * @param {string} [opts.home] - the user's home directory (`.npmrc` lives in it)
+ * @param {string} [opts.platform] - `process.platform`
+ * @param {string} [opts.cwd] - the process working directory, for drive-relative resolution
+ * @param {(p: string) => string | null} [opts.readFile] - returns null for anything unreadable
+ * @returns {string[]} zero or one directory
+ */
+export function npmPrefixDirs({
+  env = {},
+  home = "",
+  platform = process.platform,
+  cwd = process.cwd(),
+  readFile = () => null,
+} = {}) {
+  const p = platform === "win32" ? path.win32 : path.posix;
+  let raw = env.NPM_CONFIG_PREFIX ?? env.npm_config_prefix ?? null;
+  if (!raw && home) raw = parseNpmrcPrefix(readFile(p.join(home, ".npmrc")));
+  if (!raw) return [];
+  const value = String(raw).trim().replace(/^["']|["']$/g, "");
+  if (!value) return [];
+  const resolved = p.resolve(cwd, value);
+  return [platform === "win32" ? resolved : p.join(resolved, "bin")];
+}
+
+/** The `prefix=` key of an `.npmrc` text, ignoring `#`/`;` comment lines. */
+function parseNpmrcPrefix(text) {
+  if (!text) return null;
+  for (const line of String(text).split(/\r?\n/)) {
+    const t = line.trim();
+    if (!t || t.startsWith("#") || t.startsWith(";")) continue;
+    const m = /^prefix\s*=\s*(.*)$/.exec(t);
+    if (m) return m[1];
+  }
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // Vendor products that BUNDLE a runtime's CLI inside their own install tree.
 //
