@@ -184,11 +184,7 @@ export function MobileNav() {
 
         <div className="co-msafe mt-auto space-y-3 border-t border-border px-4 pt-4">
           <UsageMeter />
-          <LanguageToggle />
-          <div className="flex items-center justify-between">
-            <span className={`${instrumentSerif.className} text-sm text-faint`}>{t("nav.localFirst")}</span>
-            <ThemeToggle />
-          </div>
+          <LanguageToggle trailing={<ThemeToggle />} />
         </div>
       </aside>
     </>

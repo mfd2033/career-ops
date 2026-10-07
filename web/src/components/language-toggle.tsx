@@ -1,22 +1,25 @@
 "use client";
 
-import { Languages, Pin } from "lucide-react";
+import { Languages } from "lucide-react";
 import { useI18n } from "@/lib/i18n/context";
 import type { Lang } from "@/lib/i18n/types";
 import { cn } from "@/lib/cn";
 
 // Compact language switcher for the app chrome. A segmented EN/中文 control
-// changes the live display language; the pin button marks the current language
-// as the *default* (the one shown on first load / fresh browser before any
-// explicit selection).
+// changes the live display language.
 const OPTIONS: { value: Lang; label: string }[] = [
   { value: "en", label: "EN" },
   { value: "zh", label: "中文" },
 ];
 
-export function LanguageToggle({ className }: { className?: string }) {
-  const { lang, setLang, defaultLang, setDefaultLang, t } = useI18n();
-  const isDefault = defaultLang === lang;
+export function LanguageToggle({
+  className,
+  trailing,
+}: {
+  className?: string;
+  trailing?: React.ReactNode;
+}) {
+  const { lang, setLang, t } = useI18n();
 
   return (
     <div className={cn("space-y-1.5", className)}>
@@ -42,19 +45,7 @@ export function LanguageToggle({ className }: { className?: string }) {
             </button>
           ))}
         </div>
-        <button
-          type="button"
-          onClick={() => setDefaultLang(lang)}
-          aria-pressed={isDefault}
-          aria-label={t("shared.setDefault")}
-          title={isDefault ? t("shared.defaultLangIs", { lang: lang === "en" ? "English" : "简体中文" }) : t("shared.setDefault")}
-          className={cn(
-            "inline-flex min-h-[28px] min-w-[28px] items-center justify-center rounded-md p-1 text-faint transition-colors hover:bg-surface-hover hover:text-foreground",
-            isDefault && "text-brand",
-          )}
-        >
-          <Pin className="size-3.5" />
-        </button>
+        {trailing && <div className="ml-auto">{trailing}</div>}
       </div>
     </div>
   );

@@ -74,11 +74,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
           <div className="mt-auto space-y-3 pt-4">
             <UsageMeter />
-            <LanguageToggle />
-            <div className="flex items-center justify-between px-1">
-              <span className={`${instrumentSerif.className} text-sm text-faint`}>{t("nav.localFirst")}</span>
-              <ThemeToggle />
-            </div>
+            <LanguageToggle trailing={<ThemeToggle />} />
           </div>
         </aside>
         {/* overflow-x-clip（非 hidden）：hidden 会把 overflow-y 计算值强制成 auto，使 main
