@@ -122,6 +122,7 @@ export const en: Dict = {
   "config.skillsCopiesCount": "{count} copies found",
   "config.skillsCurrent": "current",
   "config.skillsOfferHint": "The web checkup worker reads the highest-version copy of this skill for its 7-dimension research; the report footer records that version.",
+  "config.skillsBskHint": "The browser scan (bsk) relies on this skill to drive your logged-in browser.",
   "config.skillsLoadError": "Couldn't scan the skill directories.",
 
   // ── 配置页布局重排（原型落地）：左侧目录导航 + 按保存档位分区 + 悬浮保存条 ──
@@ -262,6 +263,7 @@ export const zh: Dict = {
   "config.skillsCopiesCount": "找到 {count} 个副本",
   "config.skillsCurrent": "当前版本",
   "config.skillsOfferHint": "web 端公司体检 worker 读取此技能的最高版本副本执行 7 维调研，报告页脚会记录该版本号。",
+  "config.skillsBskHint": "浏览器扫描（bsk）依赖此技能驱动你已登录的浏览器。",
   "config.skillsLoadError": "扫描技能目录失败。",
 
   // ── 配置页布局重排（原型落地）：左侧目录导航 + 按保存档位分区 + 悬浮保存条 ──

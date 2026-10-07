@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Check, Loader2 } from "lucide-react";
+import { Check, Loader2, Save } from "lucide-react";
 import { PROFILE_CADENCE_KEYS, type ProfileCadenceKey } from "@/lib/followups";
 import { cn } from "@/lib/cn";
 import { useI18n } from "@/lib/i18n/context";
@@ -162,7 +162,7 @@ export function CadenceSettings() {
                 "disabled:pointer-events-none disabled:opacity-60",
               )}
             >
-              {saving ? <Loader2 className="size-3.5 animate-spin" /> : saved ? <Check className="size-3.5" /> : null}
+              {saving ? <Loader2 className="size-3.5 animate-spin" /> : saved ? <Check className="size-3.5" /> : <Save className="size-3.5" />}
               {saved ? t("followups.saved") : t("config.saveButton")}
             </button>
             <span className="font-mono text-[11px] text-faint">{t("config.persistProfile")}</span>

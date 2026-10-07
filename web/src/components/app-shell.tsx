@@ -82,7 +82,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </div>
           </div>
         </aside>
-        <main className="flex-1 overflow-x-hidden">{children}</main>
+        {/* overflow-x-clip（非 hidden）：hidden 会把 overflow-y 计算值强制成 auto，使 main
+            变成滚动容器，从而破坏页内 sticky 侧栏（配置页 TOC）——clip 同样裁剪横向溢出
+            但不建立滚动容器，sticky 仍相对视口生效。 */}
+        <main className="flex-1 overflow-x-clip">{children}</main>
         <AssistantConsole />
         <FirstScoreView />
         <BetaBanner />

@@ -847,7 +847,9 @@ export function ConfigForm() {
               <span className="block text-[13px] font-semibold text-foreground">{t("config.scanMaxTitle")}</span>
               <p className="mb-2 mt-0.5 text-xs leading-relaxed text-faint">{t("config.scanMaxDesc")}</p>
               <div className="flex flex-col">
-                {(Object.keys(SCAN_MAX_DEFAULT) as BrowserSourceId[]).map((src, i) => {
+                {/* 展示顺序对齐原型：猎聘(1200) 置顶（其默认值是该区要点）→ BOSS直聘 → 智联招聘。
+                    数据 key 与 scan-max.mjs 白名单不变，仅固定渲染顺序，不再跟随 Object.keys 的插入序。 */}
+                {(["liepin", "zhipin", "zhaopin"] as BrowserSourceId[]).map((src, i) => {
                   const label = src === "zhipin" ? "BOSS直聘" : src === "liepin" ? "猎聘" : "智联招聘";
                   return (
                     <div
