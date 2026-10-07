@@ -29,7 +29,7 @@ const WEB = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const FORM = readFileSync(join(WEB, "src", "components", "config-form.tsx"), "utf8");
 const DICT = readFileSync(join(WEB, "src", "lib", "i18n", "clusters", "config.ts"), "utf8");
 
-/** Keys introduced by this change. */
+/** Keys introduced by the AI-tool-picker change. */
 const NEW_KEYS = [
   "config.aiTool",
   "config.aiToolDesc",
@@ -42,6 +42,24 @@ const NEW_KEYS = [
   "config.lastChecked",
   "config.recheck",
   "config.rechecking",
+];
+
+/** Keys introduced by the config-page layout rework (nav + section copy + save bar). */
+const SECTION_KEYS = [
+  "config.navEngine",
+  "config.navScan",
+  "config.navUi",
+  "config.navTarget",
+  "config.navFollowup",
+  "config.navSkills",
+  "config.secEngineDesc",
+  "config.secScanDesc",
+  "config.secUiDesc",
+  "config.secTargetDesc",
+  "config.secFollowupDesc",
+  "config.saveBarCount",
+  "config.saveButton",
+  "config.persistProfile",
 ];
 
 // Both dictionaries live in one file: everything after `export const zh` is the
@@ -70,15 +88,35 @@ test("a CLI that is not installed is never selectable", () => {
 
 test("every dropdown on the config page is the same native select", () => {
   const uses = [...FORM.matchAll(/<SelectField/g)].length;
-  assert.equal(uses, 3, `expected 3 SelectField call sites (AI tool / model / unknown employer), found ${uses}`);
+  // Three pure-numeric/picker dropdowns: AI tool, model, and the global
+  // concurrency limit. The layout rework moved unknown-employer OFF the select
+  // (it is now a radio card) and brought the concurrency limit ONTO one, so the
+  // count stays 3 but the third slot is now concurrency, not unknown employer.
+  assert.equal(uses, 3, `expected 3 SelectField call sites (AI tool / model / concurrency), found ${uses}`);
   // One `relative` wrapper is the component's own; a second means a dropdown
   // was hand-rolled instead of going through SelectField.
   const wrappers = [...FORM.matchAll(/<div className="relative">/g)].length;
   assert.equal(wrappers, 1, `expected the single SelectField wrapper, found ${wrappers}`);
 });
 
+test("single-choice groups are unified as RadioChoice cards, not selects", () => {
+  // Engine mode / quick-eval provider / default language / unknown employer /
+  // apply behavior all render through one shared .choice radio card component.
+  assert.match(FORM, /function RadioChoice\(/, "the shared RadioChoice card component must exist");
+  const choices = [...FORM.matchAll(/<RadioChoice/g)].length;
+  // Source occurrences: engine mode (3) + provider (1, inside the PROVIDERS map)
+  // + language (2) + unknown employer (2) + apply behavior (2) = 10.
+  assert.ok(
+    choices >= 9,
+    `expected the five single-choice groups as RadioChoice cards (>=9 source uses), found ${choices}`,
+  );
+  // Unknown employer left the <select> path: its old native options are gone.
+  assert.doesNotMatch(FORM, /<option value="placeholder">/, "unknown employer must render as a radio card, not a select option");
+  assert.doesNotMatch(FORM, /<option value="agency">/, "unknown employer must render as a radio card, not a select option");
+});
+
 test("the new copy exists in both dictionaries", () => {
-  for (const key of NEW_KEYS) {
+  for (const key of [...NEW_KEYS, ...SECTION_KEYS]) {
     assert.ok(enBlock.includes(`"${key}":`), `English dict is missing ${key}`);
     assert.ok(zhBlock.includes(`"${key}":`), `Chinese dict is missing ${key}`);
   }

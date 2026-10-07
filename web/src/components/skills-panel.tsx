@@ -45,19 +45,14 @@ export function SkillsPanel() {
 
   return (
     <div>
-      <label className="mt-8 mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-muted">
-        {t("config.skillsTitle")}
-      </label>
-      <div className="rounded-xl border border-border bg-surface/50 p-4">
-        <p className="text-xs leading-relaxed text-faint">{t("config.skillsDesc")}</p>
-        {failed ? (
-          <p className="mt-3 text-sm text-red-500">{t("config.skillsLoadError")}</p>
-        ) : skills === null ? (
-          <div className="mt-3 flex items-center gap-2 text-sm text-muted">
-            <Loader2 className="size-4 animate-spin" /> {t("followups.loading")}
-          </div>
-        ) : (
-          <div className="mt-3 space-y-2">
+      {failed ? (
+        <p className="text-sm text-red-500">{t("config.skillsLoadError")}</p>
+      ) : skills === null ? (
+        <div className="flex items-center gap-2 text-sm text-muted">
+          <Loader2 className="size-4 animate-spin" /> {t("followups.loading")}
+        </div>
+      ) : (
+        <div className="space-y-2">
             {FEATURED_SKILLS.map((name) => {
               const group = byName.get(name);
               const open = expanded === name;
@@ -134,7 +129,6 @@ export function SkillsPanel() {
             })}
           </div>
         )}
-      </div>
     </div>
   );
 }

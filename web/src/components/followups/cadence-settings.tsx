@@ -86,71 +86,89 @@ export function CadenceSettings() {
   };
 
   return (
-    <div>
-      <label className="mt-8 mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-muted">
-        {t("followups.cadenceTitle")}
-      </label>
-      <div className="rounded-xl border border-border bg-surface/50 p-4">
-        <p className="text-xs leading-relaxed text-faint">
-          {t("followups.cadenceDescPre")}
-          <span className="text-muted">{t("followups.cadenceFeature")}</span>
-          {t("followups.cadenceDescMid")}
-          <span className="font-mono text-muted">config/profile.yml</span>
-          {t("followups.cadenceDescPost")}
-        </p>
-        {loadError ? (
-          <div className="mt-3 text-sm text-muted">
-            <p className="text-red-500">
-              {t("followups.cadenceLoadErrorPre")}
-              <span className="font-mono">config/profile.yml</span>
-              {t("followups.cadenceLoadErrorPost")}
-            </p>
-            <button
-              type="button"
-              onClick={load}
-              className="mt-2 rounded-md border border-border bg-surface px-3 py-1.5 text-xs font-medium transition-colors hover:bg-surface-hover"
-            >
-              {t("followups.retry")}
-            </button>
+    <div className="rounded-xl border border-border bg-surface p-4">
+      {loadError ? (
+        <div className="text-sm text-muted">
+          <p className="text-red-500">
+            {t("followups.cadenceLoadErrorPre")}
+            <span className="font-mono">config/profile.yml</span>
+            {t("followups.cadenceLoadErrorPost")}
+          </p>
+          <button
+            type="button"
+            onClick={load}
+            className="mt-2 rounded-md border border-border bg-surface px-3 py-1.5 text-xs font-medium transition-colors hover:bg-surface-hover"
+          >
+            {t("followups.retry")}
+          </button>
+        </div>
+      ) : values === null ? (
+        <div className="flex items-center gap-2 text-sm text-muted">
+          <Loader2 className="size-4 animate-spin" /> {t("followups.loading")}
+        </div>
+      ) : (
+        <>
+          {/* 两组并排设置行（已申请阶段 / 回复与面试），窄屏堆叠为单列。 */}
+          <div className="grid grid-cols-2 gap-x-10 max-[640px]:grid-cols-1 max-[640px]:gap-y-6">
+            {([
+              { title: t("followups.cadenceGroupApplied"), fields: FIELDS.slice(0, 3) },
+              { title: t("followups.cadenceGroupReply"), fields: FIELDS.slice(3) },
+            ] as const).map((group) => (
+              <div key={group.title}>
+                <div className="mb-0.5 border-b border-border pb-2 text-[11px] font-bold tracking-wide text-faint">
+                  {group.title}
+                </div>
+                <div className="flex flex-col">
+                  {group.fields.map((f, i) => (
+                    <div
+                      key={f.key}
+                      className={cn(
+                        "flex items-center justify-between gap-4 py-2.5",
+                        i > 0 && "border-t border-border",
+                      )}
+                    >
+                      <div className="min-w-0">
+                        <div className="text-[13px] font-medium text-foreground">{t(f.label)}</div>
+                        <div className="mt-px text-xs text-faint">{t(f.hint)}</div>
+                      </div>
+                      <span className="inline-flex flex-none items-baseline gap-1">
+                        <input
+                          type="number"
+                          min={0}
+                          step={1}
+                          value={values[f.key]}
+                          onChange={(e) => setValues((v) => (v ? { ...v, [f.key]: e.target.value } : v))}
+                          aria-label={t(f.label)}
+                          className="no-number-spin w-24 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-right text-sm tabular-nums text-foreground outline-none transition-colors focus:border-brand/50 focus-visible:ring-2 focus-visible:ring-brand/40"
+                        />
+                        <i className="not-italic text-xs text-muted">
+                          {f.key === "applied_max_followups" ? t("followups.unitTimes") : t("followups.unitDays")}
+                        </i>
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
           </div>
-        ) : values === null ? (
-          <div className="mt-3 flex items-center gap-2 text-sm text-muted">
-            <Loader2 className="size-4 animate-spin" /> {t("followups.loading")}
-          </div>
-        ) : (
-          <>
-            <div className="mt-3 grid gap-3 sm:grid-cols-2">
-              {FIELDS.map((f) => (
-                <label key={f.key} className="block">
-                  <span className="block text-sm font-medium text-foreground">{t(f.label)}</span>
-                  <span className="mt-0.5 block text-xs text-faint">{t(f.hint)}</span>
-                  <input
-                    type="number"
-                    min={0}
-                    step={1}
-                    value={values[f.key]}
-                    onChange={(e) => setValues((v) => (v ? { ...v, [f.key]: e.target.value } : v))}
-                    className="mt-1.5 w-24 rounded-md border border-border bg-surface/60 px-3 py-1.5 text-sm tabular-nums outline-none transition-colors focus:border-brand/50 focus-visible:ring-2 focus-visible:ring-brand/40"
-                  />
-                </label>
-              ))}
-            </div>
-            {error && <p className="mt-3 text-xs text-red-500">{error}</p>}
+          {error && <p className="mt-3 text-xs text-red-500">{error}</p>}
+          <div className="mt-4 flex flex-wrap items-center gap-2.5">
             <button
               type="button"
               onClick={save}
               disabled={saving}
               className={cn(
-                "mt-4 inline-flex items-center gap-2 rounded-md border border-border bg-surface px-3 py-1.5 text-xs font-medium transition-colors hover:bg-surface-hover",
+                "inline-flex items-center gap-2 rounded-[10px] bg-brand px-4 py-2 text-[13px] font-semibold text-brand-foreground transition-colors hover:bg-brand-200",
                 "disabled:pointer-events-none disabled:opacity-60",
               )}
             >
-              {saving ? <Loader2 className="size-3.5 animate-spin" /> : saved ? <Check className="size-3.5 text-emerald-400" /> : null}
-              {saved ? t("followups.saved") : t("followups.saveCadence")}
+              {saving ? <Loader2 className="size-3.5 animate-spin" /> : saved ? <Check className="size-3.5" /> : null}
+              {saved ? t("followups.saved") : t("config.saveButton")}
             </button>
-          </>
-        )}
-      </div>
+            <span className="font-mono text-[11px] text-faint">{t("config.persistProfile")}</span>
+          </div>
+        </>
+      )}
     </div>
   );
 }

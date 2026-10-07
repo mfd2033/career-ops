@@ -123,6 +123,23 @@ export const en: Dict = {
   "config.skillsCurrent": "current",
   "config.skillsOfferHint": "The web checkup worker reads the highest-version copy of this skill for its 7-dimension research; the report footer records that version.",
   "config.skillsLoadError": "Couldn't scan the skill directories.",
+
+  // ── 配置页布局重排（原型落地）：左侧目录导航 + 按保存档位分区 + 悬浮保存条 ──
+  "config.navEngine": "AI Engine",
+  "config.navScan": "Scan Collection",
+  "config.navUi": "Interface & Interaction",
+  "config.navTarget": "Targeting Rules",
+  "config.navFollowup": "Follow-up Cadence",
+  "config.navSkills": "Agent Skills",
+  "config.secEngineDesc": "Which AI runs evaluations and workers, and how many at once.",
+  "config.secScanDesc": "Which engine the Explore scan runs on, and how much each board collects.",
+  "config.secUiDesc": "How the product looks, which language it speaks, and the apply/display interaction details.",
+  "config.secTargetDesc": "Personal rules driving every match score — saving goes straight to config/profile.yml and applies to CLI evaluations too.",
+  "config.secFollowupDesc": "The day counts the follow-up tracker uses to nudge you — saving goes straight to config/profile.yml, and the CLI uses the same values.",
+  "config.saveBarCount": "Save {count} item(s)",
+  "config.saveButton": "Save",
+  "config.persistProfile": "→ config/profile.yml",
+  "config.immediateNote": "Applies immediately on selection — no need to press save.",
 };
 
 // Simplified Chinese strings. Every key in en must have a matching key here.
@@ -246,4 +263,21 @@ export const zh: Dict = {
   "config.skillsCurrent": "当前版本",
   "config.skillsOfferHint": "web 端公司体检 worker 读取此技能的最高版本副本执行 7 维调研，报告页脚会记录该版本号。",
   "config.skillsLoadError": "扫描技能目录失败。",
+
+  // ── 配置页布局重排（原型落地）：左侧目录导航 + 按保存档位分区 + 悬浮保存条 ──
+  "config.navEngine": "AI 引擎",
+  "config.navScan": "扫描采集",
+  "config.navUi": "界面与交互",
+  "config.navTarget": "定向规则",
+  "config.navFollowup": "跟进节奏",
+  "config.navSkills": "Agent 技能",
+  "config.secEngineDesc": "评估与工作器跑在哪个 AI 上，以及同时能跑多少个。",
+  "config.secScanDesc": "探索页「扫描」用什么引擎跑、每个平台采多少。",
+  "config.secUiDesc": "产品看起来怎样、用什么语言，以及申请与展示相关的交互细节。",
+  "config.secTargetDesc": "驱动每次评估匹配度的个人规则——保存直达 config/profile.yml，CLI 评估同样生效。",
+  "config.secFollowupDesc": "跟进追踪器提醒你时用的天数——保存直达 config/profile.yml，CLI 使用相同的值。",
+  "config.saveBarCount": "保存 {count} 项",
+  "config.saveButton": "保存",
+  "config.persistProfile": "→ config/profile.yml",
+  "config.immediateNote": "选中即生效，无需点保存。",
 };

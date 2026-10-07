@@ -80,6 +80,11 @@ export const en: Dict = {
   "followups.saveError": "Could not save.",
   "followups.saveCadence": "Save cadence",
   "followups.saved": "Saved",
+  // 配置页跟进节奏分区：两组并排 setting（已申请阶段 / 回复与面试）。
+  "followups.cadenceGroupApplied": "Applied stage",
+  "followups.cadenceGroupReply": "Reply & interview",
+  "followups.unitDays": "days",
+  "followups.unitTimes": "times",
 
   // ── log-dialog.tsx ──
   "followups.logDialogAria": "Log follow-up for {company}",
@@ -193,6 +198,11 @@ export const zh: Dict = {
   "followups.saveError": "无法保存。",
   "followups.saveCadence": "保存节奏",
   "followups.saved": "已保存",
+  // 配置页跟进节奏分区：两组并排 setting（已申请阶段 / 回复与面试）。
+  "followups.cadenceGroupApplied": "已申请阶段",
+  "followups.cadenceGroupReply": "回复与面试",
+  "followups.unitDays": "天",
+  "followups.unitTimes": "次",
 
   // ── log-dialog.tsx ──
   "followups.logDialogAria": "为 {company} 记录跟进",

@@ -1,12 +1,10 @@
 "use client";
 
-import { useEffect, useId, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import {
   AlertTriangle,
   Check,
-  KeyRound,
-  TerminalSquare,
-  Terminal,
+  Save,
   Loader2,
   ExternalLink,
   ChevronDown,
@@ -70,10 +68,28 @@ const PROVIDERS = [
   { id: "agnes", label: "Agnes AI" },
 ] as const;
 
+// 全局并发上限的可选项（原型：纯数值选择 → <select> 下拉，1–8）。
+const CONCURRENCY_OPTIONS = [1, 2, 3, 4, 5, 6, 7, 8];
+
 const STORAGE_KEY = "career-ops:config";
 // 快评配置独立存储对象：与 career-ops:config 完全隔离，改快评不影响 CLI 评估引擎。
 // 只存 provider/model/baseUrl，密钥绝不进 localStorage（仅服务端 gitignore 文件持有）。
 const QUICK_STORAGE_KEY = "career-ops:quickeval";
+
+// 页内目录导航的六个区段：id 用于 IntersectionObserver 锚点与高亮，tier 是保存档位标记
+// （● 统一保存 / ▣ 卡片内保存 / — 只读）。分组顺序即档位顺序：统一 → 卡片内 → 只读。
+const SECTIONS = [
+  { id: "engine", labelKey: "config.navEngine", tier: "●" },
+  { id: "scan", labelKey: "config.navScan", tier: "●" },
+  { id: "ui", labelKey: "config.navUi", tier: "●" },
+  { id: "target", labelKey: "config.navTarget", tier: "▣" },
+  { id: "followup", labelKey: "config.navFollowup", tier: "▣" },
+  { id: "skills", labelKey: "config.navSkills", tier: "—" },
+] as const;
+
+// 只有这三区（●）的草稿改动会进入底部悬浮保存条的 pending 计数；▣ 卡片内保存项各自落库，
+// — 只读区无改动。默认显示语言虽排在界面区，但 setDefaultLang 即时生效、不经 save()，故不计入。
+const UNIFIED_IDS = ["engine", "scan", "ui"];
 
 export function ConfigForm() {
   const { t, lang, setLang, defaultLang, setDefaultLang } = useI18n();
@@ -113,6 +129,19 @@ export function ConfigForm() {
   // ADR-0015：检测结果的时间戳（null = 本浏览器还没成功检测过）与手动重检进行态。
   const [checkedAt, setCheckedAt] = useState<number | null>(null);
   const [rechecking, setRechecking] = useState(false);
+
+  // 保存条的待保存计数：只登记「统一保存」三区里、经 save() 落库的草稿字段改动。
+  // 用 Set 而非自增计数，保证「保存 N 项」反映的是改动字段数（同一字段反复改只算一项）。
+  // 卡片内保存（求职意向/JD 规则/跟进节奏）在各自子组件里即时落库，天然不进这里。
+  const [dirty, setDirty] = useState<Set<string>>(new Set());
+  const touch = useCallback((key: string) => {
+    setDirty((prev) => (prev.has(key) ? prev : new Set(prev).add(key)));
+  }, []);
+
+  // 页内目录：当前高亮区 + 是否有「统一保存」区进入视口（决定悬浮保存条显隐）。
+  const [activeId, setActiveId] = useState<string>("engine");
+  const [unifiedVisible, setUnifiedVisible] = useState(false);
+  const visibleUnified = useRef<Set<string>>(new Set());
 
   // Load saved prefs
   useEffect(() => {
@@ -230,6 +259,8 @@ export function ConfigForm() {
     persistScanMax(scanMax);
     // 全局并发上限也是服务端配置，任何模式保存都生效（引擎每次 dispatch 时读取）。
     void persistConcurrencyPool(concurrencyPool);
+    // 用户点了保存 → 草稿成为已保存态，清空待计数。
+    setDirty(new Set());
     // 快评（key 模式）：密钥 PUT 到服务端 gitignore 文件，只在前端存非密钥字段。
     if (mode === "key") {
       const savedProvider = provider;
@@ -237,6 +268,26 @@ export function ConfigForm() {
         QUICK_STORAGE_KEY,
         JSON.stringify({ mode, provider: savedProvider, model: quickModel, baseUrl: quickBaseUrl }),
       );
+      // 快评模式下界面/扫描草稿（Logo/申请行为/扫描方式）与引擎无关，也要落库——
+      // 合并写入保留已存的 CLI 引擎字段（cliId/model），避免保存条谎报「已保存 N 项」却丢写。
+      try {
+        const rawUi = localStorage.getItem(STORAGE_KEY);
+        const prevUi = rawUi ? JSON.parse(rawUi) : {};
+        localStorage.setItem(
+          STORAGE_KEY,
+          JSON.stringify({
+            ...prevUi,
+            logos,
+            applyBehavior,
+            scanSource: cleanScanSources(scanSource),
+            unknownEmployer,
+          }),
+        );
+      } catch {
+        /* ignore */
+      }
+      persistApplyBehavior(applyBehavior);
+      persistScanSources(scanSource);
       fetch("/api/quick-config", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -275,6 +326,10 @@ export function ConfigForm() {
         unknownEmployer,
       }),
     );
+    // 申请行为 / 扫描方式各自独立读回（persistApplyBehavior/persistScanSources 保持
+    // 与整包 STORAGE_KEY 写入同值，兼容只读单字段的消费方）。
+    persistApplyBehavior(applyBehavior);
+    persistScanSources(scanSource);
     // The persisted value is now the "current model" — only after Save.
     setSavedModel(nextModel);
     // 同理：保存后下拉选中的工具才成为「当前使用」。
@@ -315,608 +370,744 @@ export function ConfigForm() {
     if (picker.model === "" && modelCliId) setModelCliId("");
   }, [picker, model, modelCliId]);
 
+  // 页内目录导航：高亮当前区 + 追踪「统一保存」区是否进入视口（供悬浮保存条显隐）。
+  // 两个观察器分工：navIo 决定侧栏/芯片哪个条目 active；uniIo 决定保存条是否因区可见而显示。
+  // rootMargin 复刻原型（active 取视口上中段、unified 取上下留白）。
+  useEffect(() => {
+    const byId = (id: string) => document.getElementById(id);
+    const navIo = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) if (e.isIntersecting) setActiveId(e.target.id);
+      },
+      { rootMargin: "-25% 0px -65% 0px", threshold: 0 },
+    );
+    const uniIo = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) {
+          if (e.isIntersecting) visibleUnified.current.add(e.target.id);
+          else visibleUnified.current.delete(e.target.id);
+        }
+        setUnifiedVisible(UNIFIED_IDS.some((id) => visibleUnified.current.has(id)));
+      },
+      { rootMargin: "-12% 0px -12% 0px", threshold: 0 },
+    );
+    for (const s of SECTIONS) {
+      const el = byId(s.id);
+      if (el) {
+        navIo.observe(el);
+        if (UNIFIED_IDS.includes(s.id)) uniIo.observe(el);
+      }
+    }
+    return () => {
+      navIo.disconnect();
+      uniIo.disconnect();
+    };
+  }, []);
+
+  const pending = dirty.size;
+  const showSaveBar = unifiedVisible || pending > 0 || saved;
+
   return (
-    <div className="mx-auto max-w-2xl px-6 py-10">
-      <h1 className="font-display text-2xl tracking-tight text-landing">{t("config.title")}</h1>
-      <p className="mt-1 text-sm text-muted">
-        {t("config.intro")}
-      </p>
+    <div className="mx-auto grid max-w-[1320px] gap-10 px-7 pt-9 pb-[140px] max-[1100px]:block max-[1100px]:px-4 min-[1101px]:grid-cols-[220px_minmax(0,1fr)] min-[1101px]:items-start">
+      {/* 窄屏：折叠为顶部横向滚动芯片导航 */}
+      <nav className="sticky top-0 z-20 -mx-4 mb-4 flex gap-2 overflow-x-auto border-b border-border bg-background/85 px-4 py-2 backdrop-blur max-[1100px]:flex min-[1101px]:hidden">
+        {SECTIONS.map((s) => (
+          <a
+            key={s.id}
+            href={`#${s.id}`}
+            className={cn(
+              "flex-none rounded-full border px-3 py-1.5 text-xs whitespace-nowrap transition-colors",
+              activeId === s.id
+                ? "border-brand bg-brand-soft font-semibold text-foreground"
+                : "border-border bg-surface text-muted",
+            )}
+          >
+            {t(s.labelKey)}
+          </a>
+        ))}
+      </nav>
 
-      {/* Engine mode */}
-      <label className="mt-8 mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-muted">
-        {t("config.aiEngine")}
-      </label>
-      <div className="grid gap-2 sm:grid-cols-3">
-        <ModeCard
-          active={mode === "cli"}
-          onClick={() => setMode("cli")}
-          icon={Terminal}
-          title={t("config.modeCli")}
-          hint={t("config.recommended")}
-        />
-        <ModeCard
-          active={mode === "key"}
-          onClick={() => setMode("key")}
-          icon={KeyRound}
-          title={t("config.modeKey")}
-          hint={t("config.modeKeyHint")}
-        />
-        <ModeCard
-          active={mode === "manual"}
-          onClick={() => setMode("manual")}
-          icon={TerminalSquare}
-          title={t("config.modeManual")}
-          hint={t("config.comingSoon")}
-          disabled
-        />
-      </div>
+      {/* 宽屏：左侧 220px sticky 目录栏（● 统一 / ▣ 卡片内 / — 只读 三档标记） */}
+      <aside className="sticky top-9 hidden self-start max-[1100px]:hidden min-[1101px]:block">
+        <nav className="flex flex-col gap-0.5">
+          {SECTIONS.map((s) => (
+            <a
+              key={s.id}
+              href={`#${s.id}`}
+              className={cn(
+                "flex items-center gap-2 rounded-[10px] border-l-[3px] px-3 py-2 text-[13.5px] transition-colors",
+                activeId === s.id
+                  ? "border-brand bg-brand-soft font-semibold text-foreground"
+                  : "border-transparent text-muted hover:bg-surface-hover hover:text-foreground",
+              )}
+            >
+              <span className="w-3 shrink-0 text-center text-[11px] leading-none text-faint">{s.tier}</span>
+              {t(s.labelKey)}
+            </a>
+          ))}
+        </nav>
+      </aside>
 
-      <div className="mt-6">
-        {mode === "cli" && (
-          <div>
-            <p className="mb-1 text-sm text-muted">
-              {t("config.cliDesc")}
-            </p>
-            <p className="mb-3 text-xs text-faint">{t("config.cliWorksWith")}</p>
-            {clis === null ? (
-              <div className="flex items-center gap-2 text-sm text-muted">
-                <Loader2 className="size-4 animate-spin" /> {t("config.checking")}
-              </div>
-            ) : installed.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-border bg-surface/30 p-4 text-sm text-muted">
-                {t("config.noCli1")} <span className="text-foreground">OpenCode</span> {t("config.noCli2")}{" "}
-                <a href="https://career-ops.org/docs/free-ai-engine" target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 text-brand hover:underline">
-                  {t("config.getOneFree")} <ExternalLink className="size-3" />
-                </a>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                <SelectField
-                  label={t("config.aiTool")}
-                  desc={t("config.aiToolDesc")}
-                  size="md"
-                  value={cliId}
-                  onChange={setCliId}
-                >
-                  <optgroup label={t("config.aiToolGroupInstalled")}>
-                    {installed.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name}
-                        {c.usable === false ? ` — ${t("config.cliUnusable")}` : ""}
-                      </option>
-                    ))}
-                  </optgroup>
-                  {missing.length > 0 && (
-                    // 未安装的工具整组禁用：保留「还能用什么」的知情权，但不可选中。
-                    <optgroup label={t("config.aiToolGroupMissing")} disabled>
-                      {missing.map((c) => (
+      <div className="min-w-0">
+        {/* ① AI 引擎（● 统一保存） */}
+        <Section id="engine" title={t("config.navEngine")} desc={t("config.secEngineDesc")}>
+          <div className="mb-4 grid gap-2.5 sm:grid-cols-3">
+            <RadioChoice
+              selected={mode === "cli"}
+              onSelect={() => {
+                setMode("cli");
+                touch("mode");
+              }}
+              title={t("config.modeCli")}
+              desc={t("config.recommended")}
+            />
+            <RadioChoice
+              selected={mode === "key"}
+              onSelect={() => {
+                setMode("key");
+                touch("mode");
+              }}
+              title={t("config.modeKey")}
+              desc={t("config.modeKeyHint")}
+            />
+            <RadioChoice
+              selected={mode === "manual"}
+              onSelect={() => {
+                setMode("manual");
+                touch("mode");
+              }}
+              title={t("config.modeManual")}
+              desc={t("config.comingSoon")}
+              disabled
+            />
+          </div>
+
+          {mode === "cli" && (
+            <div>
+              <p className="mb-1 text-sm text-muted">{t("config.cliDesc")}</p>
+              <p className="mb-3 text-xs text-faint">{t("config.cliWorksWith")}</p>
+              {clis === null ? (
+                <div className="flex items-center gap-2 text-sm text-muted">
+                  <Loader2 className="size-4 animate-spin" /> {t("config.checking")}
+                </div>
+              ) : installed.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-border bg-surface/30 p-4 text-sm text-muted">
+                  {t("config.noCli1")} <span className="text-foreground">OpenCode</span> {t("config.noCli2")}{" "}
+                  <a
+                    href="https://career-ops.org/docs/free-ai-engine"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-0.5 text-brand hover:underline"
+                  >
+                    {t("config.getOneFree")} <ExternalLink className="size-3" />
+                  </a>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <SelectField
+                    label={t("config.aiTool")}
+                    desc={t("config.aiToolDesc")}
+                    size="md"
+                    value={cliId}
+                    onChange={(v) => {
+                      setCliId(v);
+                      touch("cliId");
+                    }}
+                  >
+                    <optgroup label={t("config.aiToolGroupInstalled")}>
+                      {installed.map((c) => (
                         <option key={c.id} value={c.id}>
                           {c.name}
+                          {c.usable === false ? ` — ${t("config.cliUnusable")}` : ""}
                         </option>
                       ))}
                     </optgroup>
-                  )}
-                </SelectField>
-
-                {currentCli && (
-                  <div className="mt-3 flex items-center gap-2 rounded-lg border border-brand/30 bg-brand-soft/40 px-3 py-2 text-sm">
-                    <Sparkles className="size-4 shrink-0 text-brand" />
-                    <span className="text-muted">{t("config.currentTool")}</span>
-                    <span className="min-w-0 truncate font-medium text-foreground">{currentCli.name}</span>
-                  </div>
-                )}
-
-                {/* ADR-0053 决议 10：探测来源可见。同一个引擎的二进制可能来自
-                    不止一处（CodeBuddy：厂商安装器，或另一个产品捆绑的副本），
-                    而它们会各自升级——路径 + `--version` 让「这次用的是哪一个」
-                    在界面上可回答，而不是只能靠进程表反推。 */}
-                {currentCli?.path && (
-                  <p className="mt-1.5 truncate font-mono text-[11px] text-faint" title={currentCli.path}>
-                    {currentCli.path}
-                    {currentCli.version ? ` · ${currentCli.version}` : ""}
-                  </p>
-                )}
-
-                {/* ADR-0028：installed ≠ usable——headless 无输出的工具派发必败，就地警告。 */}
-                {selectedCli?.usable === false && (
-                  <div className="mt-3 flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-400">
-                    <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-                    <span>{t("config.cliUnusableWarn", { name: currentCli?.name ?? selectedCli.name })}</span>
-                  </div>
-                )}
-
-                {missing.length > 0 && (
-                  <div className="mt-2">
-                    <button
-                      type="button"
-                      onClick={() => setShowInstallLinks((v) => !v)}
-                      aria-expanded={showInstallLinks}
-                      className="flex items-center gap-1.5 text-xs text-faint transition-colors hover:text-foreground max-sm:min-h-[44px]"
-                    >
-                      <ChevronRight
-                        className={cn("size-3.5 transition-transform", showInstallLinks && "rotate-90")}
-                      />
-                      {t("config.aiToolMissingCount", { count: missing.length })}
-                      {" · "}
-                      {showInstallLinks ? t("config.aiToolHideInstall") : t("config.aiToolShowInstall")}
-                    </button>
-                    {showInstallLinks && (
-                      <ul className="mt-2 grid gap-1.5 sm:grid-cols-2">
+                    {missing.length > 0 && (
+                      // 未安装的工具整组禁用：保留「还能用什么」的知情权，但不可选中。
+                      <optgroup label={t("config.aiToolGroupMissing")} disabled>
                         {missing.map((c) => (
-                          <li key={c.id}>
-                            <a
-                              href={c.url}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="flex items-center justify-between gap-2 rounded-lg border border-border/60 bg-surface/30 px-3 py-2 text-xs text-muted transition-colors hover:bg-surface-hover hover:text-foreground"
-                            >
-                              <span className="truncate">{c.name}</span>
-                              <ExternalLink className="size-3 shrink-0 text-brand" />
-                            </a>
-                          </li>
+                          <option key={c.id} value={c.id}>
+                            {c.name}
+                          </option>
                         ))}
-                      </ul>
+                      </optgroup>
                     )}
-                  </div>
-                )}
-                <p className="mt-2 text-[11px] leading-relaxed text-faint">
-                  {t("config.bestOn1")} <span className="text-muted">Claude Code</span> {t("config.bestOn2")}
-                </p>
+                  </SelectField>
 
-                {selectedCli && selectedCli.model?.options.length > 0 && (
-                  <div className="mt-4 rounded-xl border border-border bg-surface/50 p-4">
-                    <SelectField
-                      label={t("config.model")}
-                      desc={t("config.modelDesc")}
-                      size="sm"
-                      value={picker?.model ?? model}
-                      onChange={(v) => {
-                        setModel(v);
-                        setModelCliId(cliId);
-                      }}
-                    >
-                      <option value="">
-                        {t("config.modelDefault", { model: selectedCli.model.default || t("config.modelAuto") })}
-                      </option>
-                      {(picker?.options ?? selectedCli.model.options).map((o) => (
-                        <option key={o.id} value={o.id}>
-                          {o.label}
-                        </option>
-                      ))}
-                    </SelectField>
-                    {selectedCli.model.flag && (
-                      <p className="mt-2 inline-flex items-center gap-1 text-[11px] text-faint">
-                        <Sparkles className="size-3" />
-                        <span className="font-mono">{t("config.modelFlag")} {selectedCli.model.flag}</span>
-                      </p>
-                    )}
-                    {currentModel && (
-                      <div className="mt-3 flex items-center gap-2 rounded-lg border border-brand/30 bg-brand-soft/40 px-3 py-2 text-sm">
-                        <Sparkles className="size-4 shrink-0 text-brand" />
-                        <span className="text-muted">{t("config.currentModel")}</span>
-                        <span className="min-w-0 truncate font-mono text-foreground">{currentModel}</span>
-                      </div>
-                    )}
-                  </div>
-                )}
-                {/* ADR-0052: a runtime whose catalogue is read from the CLI can
-                    legitimately have none to show (not signed in / offline). Say
-                    so instead of rendering nothing at all — a missing picker
-                    with no explanation reads as a broken page. */}
-                {selectedCli && selectedCli.model?.options.length === 0 && (
-                  <p className="mt-4 rounded-xl border border-border bg-surface/50 p-4 text-[11px] leading-relaxed text-faint">
-                    {t("config.modelUnavailable")}
+                  {currentCli && (
+                    <div className="mt-3 flex items-center gap-2 rounded-lg border border-brand/30 bg-brand-soft/40 px-3 py-2 text-sm">
+                      <Sparkles className="size-4 shrink-0 text-brand" />
+                      <span className="text-muted">{t("config.currentTool")}</span>
+                      <span className="min-w-0 truncate font-medium text-foreground">{currentCli.name}</span>
+                    </div>
+                  )}
+
+                  {/* ADR-0053 决议 10：探测来源可见。同一个引擎的二进制可能来自
+                      不止一处（CodeBuddy：厂商安装器，或另一个产品捆绑的副本），
+                      而它们会各自升级——路径 + `--version` 让「这次用的是哪一个」
+                      在界面上可回答，而不是只能靠进程表反推。 */}
+                  {currentCli?.path && (
+                    <p className="mt-1.5 truncate font-mono text-[11px] text-faint" title={currentCli.path}>
+                      {currentCli.path}
+                      {currentCli.version ? ` · ${currentCli.version}` : ""}
+                    </p>
+                  )}
+
+                  {/* ADR-0028：installed ≠ usable——headless 无输出的工具派发必败，就地警告。 */}
+                  {selectedCli?.usable === false && (
+                    <div className="mt-3 flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-400">
+                      <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+                      <span>{t("config.cliUnusableWarn", { name: currentCli?.name ?? selectedCli.name })}</span>
+                    </div>
+                  )}
+
+                  {missing.length > 0 && (
+                    <div className="mt-2">
+                      <button
+                        type="button"
+                        onClick={() => setShowInstallLinks((v) => !v)}
+                        aria-expanded={showInstallLinks}
+                        className="flex items-center gap-1.5 text-xs text-faint transition-colors hover:text-foreground max-sm:min-h-[44px]"
+                      >
+                        <ChevronRight
+                          className={cn("size-3.5 transition-transform", showInstallLinks && "rotate-90")}
+                        />
+                        {t("config.aiToolMissingCount", { count: missing.length })}
+                        {" · "}
+                        {showInstallLinks ? t("config.aiToolHideInstall") : t("config.aiToolShowInstall")}
+                      </button>
+                      {showInstallLinks && (
+                        <ul className="mt-2 grid gap-1.5 sm:grid-cols-2">
+                          {missing.map((c) => (
+                            <li key={c.id}>
+                              <a
+                                href={c.url}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="flex items-center justify-between gap-2 rounded-lg border border-border/60 bg-surface/30 px-3 py-2 text-xs text-muted transition-colors hover:bg-surface-hover hover:text-foreground"
+                              >
+                                <span className="truncate">{c.name}</span>
+                                <ExternalLink className="size-3 shrink-0 text-brand" />
+                              </a>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  )}
+                  <p className="mt-2 text-[11px] leading-relaxed text-faint">
+                    {t("config.bestOn1")} <span className="text-muted">Claude Code</span> {t("config.bestOn2")}
                   </p>
-                )}
-              </div>
-            )}
-            {/* 检测状态行：cli 模式三态（检测中/空/列表）都渲染——空态（一个都没
-                装）恰恰是最需要手动重检入口的场景，刚装好工具后从这里刷新。 */}
-            {clis !== null && (
-              <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-faint">
-                {checkedAt !== null && (
-                  <span>
-                    {t("config.lastChecked", {
-                      time: new Intl.DateTimeFormat(lang === "zh" ? "zh-CN" : "en-US", {
-                        dateStyle: "short",
-                        timeStyle: "short",
-                      }).format(checkedAt),
-                    })}
-                  </span>
-                )}
-                <button
-                  type="button"
-                  onClick={recheck}
-                  disabled={rechecking}
-                  className="flex items-center gap-1 transition-colors hover:text-foreground disabled:opacity-50 max-sm:min-h-[44px]"
-                >
-                  {rechecking && <Loader2 className="size-3.5 animate-spin" />}
-                  {rechecking ? t("config.rechecking") : t("config.recheck")}
-                </button>
-              </div>
-            )}
-          </div>
-        )}
 
-        {mode === "key" && (
-          <div className="space-y-5">
-            <p className="text-xs text-faint">{t("config.quickEvalDesc")}</p>
-            <div>
-              <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-muted">
-                {t("config.provider")}
-              </label>
-              <div className="grid gap-2 sm:grid-cols-2">
-                {PROVIDERS.map((p) => (
+                  {selectedCli && selectedCli.model?.options.length > 0 && (
+                    <div className="mt-4 rounded-xl border border-border bg-surface/50 p-4">
+                      <SelectField
+                        label={t("config.model")}
+                        desc={t("config.modelDesc")}
+                        size="sm"
+                        value={picker?.model ?? model}
+                        onChange={(v) => {
+                          setModel(v);
+                          setModelCliId(cliId);
+                          touch("model");
+                        }}
+                      >
+                        <option value="">
+                          {t("config.modelDefault", { model: selectedCli.model.default || t("config.modelAuto") })}
+                        </option>
+                        {(picker?.options ?? selectedCli.model.options).map((o) => (
+                          <option key={o.id} value={o.id}>
+                            {o.label}
+                          </option>
+                        ))}
+                      </SelectField>
+                      {selectedCli.model.flag && (
+                        <p className="mt-2 inline-flex items-center gap-1 text-[11px] text-faint">
+                          <Sparkles className="size-3" />
+                          <span className="font-mono">{t("config.modelFlag")} {selectedCli.model.flag}</span>
+                        </p>
+                      )}
+                      {currentModel && (
+                        <div className="mt-3 flex items-center gap-2 rounded-lg border border-brand/30 bg-brand-soft/40 px-3 py-2 text-sm">
+                          <Sparkles className="size-4 shrink-0 text-brand" />
+                          <span className="text-muted">{t("config.currentModel")}</span>
+                          <span className="min-w-0 truncate font-mono text-foreground">{currentModel}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {/* ADR-0052: a runtime whose catalogue is read from the CLI can
+                      legitimately have none to show (not signed in / offline). Say
+                      so instead of rendering nothing at all — a missing picker
+                      with no explanation reads as a broken page. */}
+                  {selectedCli && selectedCli.model?.options.length === 0 && (
+                    <p className="mt-4 rounded-xl border border-border bg-surface/50 p-4 text-[11px] leading-relaxed text-faint">
+                      {t("config.modelUnavailable")}
+                    </p>
+                  )}
+                </div>
+              )}
+              {/* 检测状态行：cli 模式三态（检测中/空/列表）都渲染——空态（一个都没
+                  装）恰恰是最需要手动重检入口的场景，刚装好工具后从这里刷新。 */}
+              {clis !== null && (
+                <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-faint">
+                  {checkedAt !== null && (
+                    <span>
+                      {t("config.lastChecked", {
+                        time: new Intl.DateTimeFormat(lang === "zh" ? "zh-CN" : "en-US", {
+                          dateStyle: "short",
+                          timeStyle: "short",
+                        }).format(checkedAt),
+                      })}
+                    </span>
+                  )}
                   <button
-                    key={p.id}
                     type="button"
-                    onClick={() => {
-                      setProvider(p.id);
-                      // 切换 provider 时同步默认端点到 baseUrl 输入框（用户仍可改）。
-                      if (p.id === "agnes") setQuickBaseUrl("https://api.agnes-ai.cn/v1");
-                      if (p.id === "openai") setQuickBaseUrl("https://api.openai.com/v1");
-                      if (p.id === "openrouter") setQuickBaseUrl("https://openrouter.ai/api/v1");
-                    }}
-                    className={cn(
-                      "rounded-xl border px-4 py-2.5 text-left text-sm transition-colors",
-                      provider === p.id
-                        ? "border-brand/50 bg-brand-soft text-foreground"
-                        : "border-border bg-surface/50 text-muted hover:bg-surface-hover hover:text-foreground",
-                    )}
+                    onClick={recheck}
+                    disabled={rechecking}
+                    className="flex items-center gap-1 transition-colors hover:text-foreground disabled:opacity-50 max-sm:min-h-[44px]"
                   >
-                    {p.label}
+                    {rechecking && <Loader2 className="size-3.5 animate-spin" />}
+                    {rechecking ? t("config.rechecking") : t("config.recheck")}
                   </button>
-                ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {mode === "key" && (
+            <div className="space-y-4">
+              <div className="rounded-xl border border-border bg-surface/50 p-4">
+                <p className="mb-3 text-xs leading-relaxed text-faint">{t("config.quickEvalDesc")}</p>
+                <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-muted">
+                  {t("config.provider")}
+                </span>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {PROVIDERS.map((p) => (
+                    <RadioChoice
+                      key={p.id}
+                      selected={provider === p.id}
+                      onSelect={() => {
+                        setProvider(p.id);
+                        // 切换 provider 时同步默认端点到 baseUrl 输入框（用户仍可改）。
+                        if (p.id === "agnes") setQuickBaseUrl("https://api.agnes-ai.cn/v1");
+                        if (p.id === "openai") setQuickBaseUrl("https://api.openai.com/v1");
+                        if (p.id === "openrouter") setQuickBaseUrl("https://openrouter.ai/api/v1");
+                        touch("provider");
+                      }}
+                      title={p.label}
+                    />
+                  ))}
+                </div>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="rounded-xl border border-border bg-surface/50 p-4">
+                  <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-muted">
+                    {t("config.pasteKey")}
+                  </label>
+                  <p className="mb-2 text-xs text-faint">{t("config.bringKey")}</p>
+                  <input
+                    type="password"
+                    value={apiKey}
+                    onChange={(e) => {
+                      setApiKey(e.target.value);
+                      touch("apiKey");
+                    }}
+                    placeholder="sk-…"
+                    autoComplete="off"
+                    className="w-full rounded-lg border border-border bg-surface/60 px-3 py-2 font-mono text-sm outline-none transition-colors placeholder:text-faint focus:border-brand/50"
+                  />
+                  <p className="mt-2 text-xs text-faint">{t("config.keyStored")}</p>
+                </div>
+                <div className="rounded-xl border border-border bg-surface/50 p-4">
+                  <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-muted">
+                    {t("config.quickModel")}
+                  </label>
+                  <input
+                    type="text"
+                    value={quickModel}
+                    onChange={(e) => {
+                      setQuickModel(e.target.value);
+                      touch("quickModel");
+                    }}
+                    placeholder="agnes-2.5-flash"
+                    autoComplete="off"
+                    className="w-full rounded-lg border border-border bg-surface/60 px-3 py-2 font-mono text-sm outline-none transition-colors placeholder:text-faint focus:border-brand/50"
+                  />
+                  <label className="mt-3 mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-muted">
+                    {t("config.quickBaseUrl")}
+                  </label>
+                  <input
+                    type="text"
+                    value={quickBaseUrl}
+                    onChange={(e) => {
+                      setQuickBaseUrl(e.target.value);
+                      touch("quickBaseUrl");
+                    }}
+                    placeholder="https://api.agnes-ai.cn/v1"
+                    autoComplete="off"
+                    className="w-full rounded-lg border border-border bg-surface/60 px-3 py-2 font-mono text-sm outline-none transition-colors placeholder:text-faint focus:border-brand/50"
+                  />
+                  <p className="mt-2 text-xs text-faint">{t("config.quickBaseUrlHint")}</p>
+                </div>
               </div>
             </div>
-            <div>
-              <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-muted">
-                {t("config.pasteKey")}
-              </label>
-              <p className="mb-2 text-xs text-faint">{t("config.bringKey")}</p>
-              <input
-                type="password"
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                placeholder="sk-…"
-                autoComplete="off"
-                className="w-full rounded-xl border border-border bg-surface/60 px-4 py-2.5 font-mono text-sm outline-none transition-colors placeholder:text-faint focus:border-brand/50"
-              />
-              <p className="mt-2 text-xs text-faint">
-                {t("config.keyStored")}
-              </p>
-            </div>
-            <div>
-              <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-muted">
-                {t("config.quickModel")}
-              </label>
-              <input
-                type="text"
-                value={quickModel}
-                onChange={(e) => setQuickModel(e.target.value)}
-                placeholder="agnes-2.5-flash"
-                autoComplete="off"
-                className="w-full rounded-xl border border-border bg-surface/60 px-4 py-2.5 font-mono text-sm outline-none transition-colors placeholder:text-faint focus:border-brand/50"
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-muted">
-                {t("config.quickBaseUrl")}
-              </label>
-              <input
-                type="text"
-                value={quickBaseUrl}
-                onChange={(e) => setQuickBaseUrl(e.target.value)}
-                placeholder="https://api.agnes-ai.cn/v1"
-                autoComplete="off"
-                className="w-full rounded-xl border border-border bg-surface/60 px-4 py-2.5 font-mono text-sm outline-none transition-colors placeholder:text-faint focus:border-brand/50"
-              />
-              <p className="mt-2 text-xs text-faint">{t("config.quickBaseUrlHint")}</p>
-            </div>
-          </div>
-        )}
-
-        {mode === "manual" && (
-          <div className="rounded-xl border border-dashed border-border bg-surface/30 p-4 text-sm text-muted">
-            {t("config.manualDesc")}
-          </div>
-        )}
-      </div>
-
-      {/* Appearance / privacy */}
-      <label className="mt-8 mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-muted">
-        {t("config.appearance")}
-      </label>
-      <button
-        type="button"
-        onClick={() => setLogos((v) => !v)}
-        className="flex w-full items-center justify-between gap-4 rounded-xl border border-border bg-surface/50 px-4 py-3 text-left transition-colors hover:bg-surface-hover"
-      >
-        <span className="min-w-0">
-          <span className="block text-sm font-medium text-foreground">{t("config.companyLogos")}</span>
-          <span className="mt-0.5 block text-xs text-faint">
-            {t("config.logosDesc")}
-          </span>
-        </span>
-        <span
-          className={cn(
-            "relative h-6 w-11 shrink-0 rounded-full transition-colors",
-            logos ? "bg-brand" : "bg-surface-hover",
           )}
-        >
-          <span
-            className={cn(
-              "absolute top-0.5 size-5 rounded-full bg-white shadow transition-transform",
-              logos ? "translate-x-[1.375rem]" : "translate-x-0.5",
-            )}
-          />
-        </span>
-      </button>
 
-      {/* Default display language */}
-      <label className="mt-8 mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-muted">
-        {t("config.defaultLangTitle")}
-      </label>
-      <div className="rounded-xl border border-border bg-surface/50 px-4 py-3">
-        <p className="mb-3 text-xs text-faint">{t("config.defaultLangDesc")}</p>
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setDefaultLang("en")}
-            aria-pressed={defaultLang === "en"}
-            className={cn(
-              "rounded-lg border px-4 py-2 text-sm transition-colors max-sm:min-h-[44px]",
-              defaultLang === "en"
-                ? "border-brand/50 bg-brand-soft text-foreground"
-                : "border-border bg-surface/50 text-muted hover:bg-surface-hover hover:text-foreground",
-            )}
-          >
-            {t("config.langEnglish")}
-          </button>
-          <button
-            type="button"
-            onClick={() => setDefaultLang("zh")}
-            aria-pressed={defaultLang === "zh"}
-            className={cn(
-              "rounded-lg border px-4 py-2 text-sm transition-colors max-sm:min-h-[44px]",
-              defaultLang === "zh"
-                ? "border-brand/50 bg-brand-soft text-foreground"
-                : "border-border bg-surface/50 text-muted hover:bg-surface-hover hover:text-foreground",
-            )}
-          >
-            {t("config.langChinese")}
-          </button>
-          <span className="ml-auto inline-flex items-center gap-1 text-xs text-faint">
-            {t("config.currentLang", {
-              lang: lang === "en" ? t("config.langEnglish") : t("config.langChinese"),
-            })}
-            {lang !== defaultLang && (
-              <button
-                type="button"
-                onClick={() => setLang(defaultLang)}
-                className="text-brand hover:underline"
-              >
-                {t("config.switchNow")}
-              </button>
-            )}
-          </span>
-        </div>
-      </div>
-
-      {/* 申请按钮行为：管道页 Apply 按钮点击后做什么 */}
-      <label className="mt-8 mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-muted">
-        {t("config.applyBehaviorTitle")}
-      </label>
-      <p className="mb-3 text-xs text-faint">{t("config.applyBehaviorDesc")}</p>
-      <div className="grid gap-2 sm:grid-cols-2">
-        <button
-          type="button"
-          onClick={() => setApplyBehavior("link")}
-          className={cn(
-            "rounded-xl border px-4 py-3 text-left transition-colors",
-            applyBehavior === "link"
-              ? "border-brand/50 bg-brand-soft"
-              : "border-border bg-surface/50 hover:bg-surface-hover",
+          {mode === "manual" && (
+            <div className="rounded-xl border border-dashed border-border bg-surface/30 p-4 text-sm text-muted">
+              {t("config.manualDesc")}
+            </div>
           )}
-        >
-          <span className="block text-sm font-medium text-foreground">{t("config.applyBehaviorLink")}</span>
-          <span className="mt-1 block text-xs text-faint">{t("config.applyBehaviorLinkDesc")}</span>
-        </button>
-        <button
-          type="button"
-          onClick={() => setApplyBehavior("form")}
-          className={cn(
-            "rounded-xl border px-4 py-3 text-left transition-colors",
-            applyBehavior === "form"
-              ? "border-brand/50 bg-brand-soft"
-              : "border-border bg-surface/50 hover:bg-surface-hover",
-          )}
-        >
-          <span className="block text-sm font-medium text-foreground">{t("config.applyBehaviorForm")}</span>
-          <span className="mt-1 block text-xs text-faint">{t("config.applyBehaviorFormDesc")}</span>
-        </button>
-      </div>
 
-      {/* 扫描方式：探索页「扫描」tab 内启用哪些引擎（多选，勾选才显示对应子 tab） */}
-      <label className="mt-8 mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-muted">
-        {t("config.scanSourceTitle")}
-      </label>
-      <p className="mb-3 text-xs text-faint">{t("config.scanSourceDesc")}</p>
-      <div className="grid gap-2 sm:grid-cols-2">
-        {SCAN_SOURCES.map((s) => {
-          const on = scanSource.includes(s);
-          return (
-            <button
-              key={s}
-              type="button"
-              onClick={() => {
-                // 至少保留一个启用引擎，避免扫描 tab 无子 tab 可用。
-                const next = on ? scanSource.filter((x) => x !== s) : [...scanSource, s];
-                setScanSource(cleanScanSources(next));
+          {/* 全局并发上限：web 端(web 单卡/批量/浏览器扩展)同时运行的评估 CLI 子进程总数上限。
+              原型规则「纯数值选择 → <select> 下拉」，与 AI 工具/模型共用同一 SelectField。 */}
+          <div className="mt-4">
+            <SelectField
+              label={t("config.concurrencyTitle")}
+              desc={t("config.concurrencyDesc")}
+              size="md"
+              value={String(concurrencyPool)}
+              onChange={(v) => {
+                const n = parseInt(v, 10);
+                setConcurrencyPool(Number.isFinite(n) && n >= 1 ? n : CONCURRENCY_POOL_DEFAULT);
+                touch("concurrencyPool");
               }}
-              aria-pressed={on}
+            >
+              {[
+                ...(CONCURRENCY_OPTIONS.includes(concurrencyPool)
+                  ? CONCURRENCY_OPTIONS
+                  : [...CONCURRENCY_OPTIONS, concurrencyPool].sort((a, b) => a - b)),
+              ].map((n) => (
+                <option key={n} value={String(n)}>
+                  {n}
+                </option>
+              ))}
+            </SelectField>
+            <p className="mt-2 text-xs text-faint">{t("config.concurrencyNote")}</p>
+          </div>
+        </Section>
+
+        {/* ② 扫描采集（● 统一保存） */}
+        <Section id="scan" title={t("config.navScan")} desc={t("config.secScanDesc")}>
+          <div className="grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(min(320px,100%),1fr))]">
+            <div className="rounded-xl border border-border bg-surface p-4">
+              <span className="block text-[13px] font-semibold text-foreground">{t("config.scanSourceTitle")}</span>
+              <p className="mb-3 mt-0.5 text-xs leading-relaxed text-faint">{t("config.scanSourceDesc")}</p>
+              <div className="grid gap-2.5 sm:grid-cols-2">
+                {SCAN_SOURCES.map((s) => {
+                  const on = scanSource.includes(s);
+                  return (
+                    <button
+                      key={s}
+                      type="button"
+                      onClick={() => {
+                        // 至少保留一个启用引擎，避免扫描 tab 无子 tab 可用。
+                        const next = on ? scanSource.filter((x) => x !== s) : [...scanSource, s];
+                        setScanSource(cleanScanSources(next));
+                        touch("scanSource");
+                      }}
+                      aria-pressed={on}
+                      className={cn(
+                        "rounded-xl border px-3.5 py-3 text-left transition-colors",
+                        on ? "border-brand/50 bg-brand-soft" : "border-border bg-surface/50 hover:bg-surface-hover",
+                      )}
+                    >
+                      <span className="block text-sm font-medium text-foreground">
+                        {s === "ats" ? t("config.scanSourceAts") : t("config.scanSourceBsk")}
+                      </span>
+                      <span className="mt-1 block text-xs text-faint">
+                        {s === "ats" ? t("config.scanSourceAtsDesc") : t("config.scanSourceBskDesc")}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-border bg-surface p-4">
+              <span className="block text-[13px] font-semibold text-foreground">{t("config.scanMaxTitle")}</span>
+              <p className="mb-2 mt-0.5 text-xs leading-relaxed text-faint">{t("config.scanMaxDesc")}</p>
+              <div className="flex flex-col">
+                {(Object.keys(SCAN_MAX_DEFAULT) as BrowserSourceId[]).map((src, i) => {
+                  const label = src === "zhipin" ? "BOSS直聘" : src === "liepin" ? "猎聘" : "智联招聘";
+                  return (
+                    <div
+                      key={src}
+                      className={cn(
+                        "flex items-center justify-between gap-4 py-2.5",
+                        i > 0 && "border-t border-border",
+                      )}
+                    >
+                      <span className="min-w-0 text-sm text-foreground">{label}</span>
+                      <input
+                        type="number"
+                        min={1}
+                        step={100}
+                        value={scanMax[src]}
+                        aria-label={`${label} · ${t("config.scanMaxTitle")}`}
+                        onChange={(e) => {
+                          const n = parseInt(e.target.value, 10);
+                          const next = { ...scanMax };
+                          next[src] = Number.isFinite(n) && n > 0 ? n : SCAN_MAX_DEFAULT[src];
+                          setScanMax(next);
+                          touch("scanMax");
+                        }}
+                        className="no-number-spin w-24 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-right text-sm tabular-nums text-foreground outline-none transition-colors focus:border-brand/50 focus-visible:ring-2 focus-visible:ring-brand/40"
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </Section>
+
+        {/* ③ 界面与交互（● 统一保存）——含从旧「申请与跟进」区迁入的未知雇主、申请按钮行为 */}
+        <Section id="ui" title={t("config.navUi")} desc={t("config.secUiDesc")}>
+          <div className="mb-4 flex items-center justify-between gap-4 rounded-xl border border-border bg-surface px-4 py-3">
+            <span className="min-w-0">
+              <span className="block text-sm font-medium text-foreground">{t("config.companyLogos")}</span>
+              <span className="mt-0.5 block text-xs leading-relaxed text-faint">{t("config.logosDesc")}</span>
+            </span>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={logos}
+              aria-label={t("config.companyLogos")}
+              onClick={() => {
+                setLogos((v) => !v);
+                touch("logos");
+              }}
               className={cn(
-                "rounded-xl border px-4 py-3 text-left transition-colors",
-                on ? "border-brand/50 bg-brand-soft" : "border-border bg-surface/50 hover:bg-surface-hover",
+                "relative inline-flex h-6 w-11 shrink-0 items-center rounded-full border transition-colors",
+                logos ? "border-brand bg-brand" : "border-border bg-surface-hover",
               )}
             >
-              <span className="block text-sm font-medium text-foreground">
-                {s === "ats" ? t("config.scanSourceAts") : t("config.scanSourceBsk")}
-              </span>
-              <span className="mt-1 block text-xs text-faint">
-                {s === "ats" ? t("config.scanSourceAtsDesc") : t("config.scanSourceBskDesc")}
-              </span>
-            </button>
-          );
-        })}
-      </div>
-
-      {/* 浏览器扫描每站采集上限：分页型平台(猎聘)大关键词会撞 400 默认上限截掉末页,
-          此处按站点覆盖。猎聘默认 1200, BOSS/智联懒加载保持 400。*/}
-      <label className="mt-8 mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-muted">
-        {t("config.scanMaxTitle")}
-      </label>
-      <p className="mb-3 text-xs text-faint">{t("config.scanMaxDesc")}</p>
-      <div className="grid gap-2 sm:grid-cols-3">
-        {(Object.keys(SCAN_MAX_DEFAULT) as BrowserSourceId[]).map((src) => {
-          const label = src === "zhipin" ? "BOSS直聘" : src === "liepin" ? "猎聘" : "智联招聘";
-          return (
-            <label key={src} className="block rounded-xl border border-border bg-surface/50 px-4 py-3">
-              <span className="mb-1 block text-sm font-medium text-foreground">{label}</span>
-              <input
-                type="number"
-                min={1}
-                step={100}
-                value={scanMax[src]}
-                onChange={(e) => {
-                  const n = parseInt(e.target.value, 10);
-                  const next = { ...scanMax };
-                  next[src] = Number.isFinite(n) && n > 0 ? n : SCAN_MAX_DEFAULT[src];
-                  setScanMax(next);
-                }}
-                className="w-full rounded-lg border border-border bg-surface/60 px-3 py-2 text-sm text-foreground outline-none transition-colors focus:border-brand/50 focus-visible:ring-2 focus-visible:ring-brand/40"
+              <span
+                className={cn(
+                  "absolute size-5 rounded-full bg-white shadow transition-transform",
+                  logos ? "translate-x-[1.375rem]" : "translate-x-0.5",
+                )}
               />
-            </label>
-          );
-        })}
+            </button>
+          </div>
+
+          <div className="grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(min(300px,100%),1fr))]">
+            <div className="rounded-xl border border-border bg-surface p-4">
+              <h3 className="font-display text-[17px] font-medium leading-tight text-landing">{t("config.defaultLangTitle")}</h3>
+              <p className="mb-3 mt-1 text-xs leading-relaxed text-faint">{t("config.defaultLangDesc")}</p>
+              <div className="grid gap-2.5">
+                <RadioChoice
+                  selected={defaultLang === "en"}
+                  onSelect={() => setDefaultLang("en")}
+                  title={t("config.langEnglish")}
+                />
+                <RadioChoice
+                  selected={defaultLang === "zh"}
+                  onSelect={() => setDefaultLang("zh")}
+                  title={t("config.langChinese")}
+                />
+              </div>
+              <p className="mt-3 text-[11px] text-faint">{t("config.immediateNote")}</p>
+              <p className="mt-3 flex flex-wrap items-center gap-1 text-xs text-faint">
+                {t("config.currentLang", {
+                  lang: lang === "en" ? t("config.langEnglish") : t("config.langChinese"),
+                })}
+                {lang !== defaultLang && (
+                  <button type="button" onClick={() => setLang(defaultLang)} className="text-brand hover:underline">
+                    {t("config.switchNow")}
+                  </button>
+                )}
+              </p>
+            </div>
+
+            <div className="rounded-xl border border-border bg-surface p-4">
+              <h3 className="font-display text-[17px] font-medium leading-tight text-landing">{t("config.unknownEmployerTitle")}</h3>
+              <p className="mb-3 mt-1 text-xs leading-relaxed text-faint">{t("config.unknownEmployerDesc")}</p>
+              {/* 未知雇主策略：视觉上归入「界面与交互」区，但持久化保持「选中即落库」而非
+                  等保存按钮——依赖保存按钮正是本地镜像与服务端分叉（#836）的根因，评估读的
+                  是服务端值。故不计入统一保存条的 pending（与「默认显示语言」同理：即时生效）。 */}
+              <div className="grid gap-2.5">
+                <RadioChoice
+                  selected={unknownEmployer === "placeholder"}
+                  onSelect={() => {
+                    const policy: UnknownEmployerPolicy = "placeholder";
+                    setUnknownEmployer(policy);
+                    void persistUnknownEmployer(policy).then((ok) => setPolicySyncFailed(!ok));
+                  }}
+                  title={t("config.unknownEmployerPlaceholder")}
+                  desc={t("config.unknownEmployerPlaceholderDesc")}
+                />
+                <RadioChoice
+                  selected={unknownEmployer === "agency"}
+                  onSelect={() => {
+                    const policy: UnknownEmployerPolicy = "agency";
+                    setUnknownEmployer(policy);
+                    void persistUnknownEmployer(policy).then((ok) => setPolicySyncFailed(!ok));
+                  }}
+                  title={t("config.unknownEmployerAgency")}
+                  desc={t("config.unknownEmployerAgencyDesc")}
+                />
+              </div>
+              <p className="mt-2 text-[11px] text-faint">{t("config.immediateNote")}</p>
+              {policySyncFailed && (
+                <p className="mt-2 text-xs text-amber-600 dark:text-amber-400" role="alert">
+                  {t("config.unknownEmployerSyncFailed")}
+                </p>
+              )}
+            </div>
+
+            <div className="rounded-xl border border-border bg-surface p-4">
+              <h3 className="font-display text-[17px] font-medium leading-tight text-landing">{t("config.applyBehaviorTitle")}</h3>
+              <p className="mb-3 mt-1 text-xs leading-relaxed text-faint">{t("config.applyBehaviorDesc")}</p>
+              <div className="grid gap-2.5">
+                <RadioChoice
+                  selected={applyBehavior === "link"}
+                  onSelect={() => {
+                    setApplyBehavior("link");
+                    touch("applyBehavior");
+                  }}
+                  title={t("config.applyBehaviorLink")}
+                  desc={t("config.applyBehaviorLinkDesc")}
+                />
+                <RadioChoice
+                  selected={applyBehavior === "form"}
+                  onSelect={() => {
+                    setApplyBehavior("form");
+                    touch("applyBehavior");
+                  }}
+                  title={t("config.applyBehaviorForm")}
+                  desc={t("config.applyBehaviorFormDesc")}
+                />
+              </div>
+            </div>
+          </div>
+        </Section>
+
+        {/* ④ 定向规则（▣ 卡片内保存）：求职意向 + JD 评估规则两张并排卡 */}
+        <Section id="target" title={t("config.navTarget")} desc={t("config.secTargetDesc")}>
+          <div className="grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(min(320px,100%),1fr))]">
+            <JobTargetSettings />
+            <JdRulesSettings />
+          </div>
+        </Section>
+
+        {/* ⑤ 跟进节奏（▣ 卡片内保存）：6 天数字段两组并排 */}
+        <Section id="followup" title={t("config.navFollowup")} desc={t("config.secFollowupDesc")}>
+          <CadenceSettings />
+        </Section>
+
+        {/* ⑥ Agent 技能（— 只读）：知情展示，不拦截任何功能 */}
+        <Section id="skills" title={t("config.navSkills")} desc={t("config.skillsDesc")}>
+          <SkillsPanel />
+        </Section>
       </div>
 
-      {/* ADR-0066：旧「扫描收尾」开关已移除——采集改下半屏独立窗口，扫完自动关窗（不可配）。 */}
-
-      {/* 全局并发上限：web 端(web 单卡/批量/浏览器扩展)同时运行的评估 CLI 子进程总数上限 */}
-      <label className="mt-8 mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-muted">
-        {t("config.concurrencyTitle")}
-      </label>
-      <p className="mb-3 text-xs text-faint">{t("config.concurrencyDesc")}</p>
-      <input
-        type="number"
-        min={1}
-        step={1}
-        value={concurrencyPool}
-        onChange={(e) => {
-          const n = parseInt(e.target.value, 10);
-          setConcurrencyPool(Number.isFinite(n) && n >= 1 ? n : CONCURRENCY_POOL_DEFAULT);
-        }}
-        className="w-full rounded-xl border border-border bg-surface/60 px-4 py-2.5 text-sm text-foreground outline-none transition-colors focus:border-brand/50 focus-visible:ring-2 focus-visible:ring-brand/40"
-      />
-      <p className="mt-2 text-xs text-faint">{t("config.concurrencyNote")}</p>
-
-      {/* 未知雇主处理策略：offer 隐藏终端雇主时代招方如何显示 */}
-      <SelectField
-        className="mt-8"
-        label={t("config.unknownEmployerTitle")}
-        desc={t("config.unknownEmployerDesc")}
-        size="md"
-        value={unknownEmployer}
-        onChange={(v) => {
-          const policy = v as UnknownEmployerPolicy;
-          setUnknownEmployer(policy);
-          // 选中即落库，不等「保存」按钮：只改下拉的话本地镜像与服务端会分叉，
-          // 而分叉是静默的——配置页显示新档位，每次评估却仍按服务端旧值走（#836）。
-          void persistUnknownEmployer(policy).then((ok) => setPolicySyncFailed(!ok));
-        }}
-      >
-        <option value="placeholder">{t("config.unknownEmployerPlaceholder")}</option>
-        <option value="agency">{t("config.unknownEmployerAgency")}</option>
-      </SelectField>
-      <p className="mt-2 text-xs text-faint">
-        {unknownEmployer === "placeholder"
-          ? t("config.unknownEmployerPlaceholderDesc")
-          : t("config.unknownEmployerAgencyDesc")}
-      </p>
-      {policySyncFailed && (
-        <p className="mt-1 text-xs text-amber-600 dark:text-amber-400" role="alert">
-          {t("config.unknownEmployerSyncFailed")}
-        </p>
-      )}
-
-      <JobTargetSettings />
-
-      <CadenceSettings />
-
-      <JdRulesSettings />
-
-      {/* Agent 技能面板（ADR-0056）：知情展示，不拦截任何功能 */}
-      <SkillsPanel />
-
-      <div className="mt-8 flex items-center gap-3">
-        <button
-          type="button"
-          onClick={save}
-          className="inline-flex items-center justify-center gap-2 rounded-full bg-brand px-5 py-2 text-sm font-medium text-brand-foreground transition-colors hover:bg-brand-200 max-sm:min-h-[44px]"
-        >
-          {saved ? <Check className="size-4" /> : null}
-          {saved ? t("config.saved") : t("config.saveConfig")}
-        </button>
-        <span className="text-xs text-faint">{t("config.localFirstRoadmap")}</span>
-        {mirrorFailed && (
-          // ADR-0028 决议 3：服务端镜像丢写必须可见（#836 同教训）。
-          <span className="text-xs font-medium text-amber-700 dark:text-amber-400">{t("config.mirrorFailed")}</span>
+      {/* 底部悬浮保存条：仅收「● 统一保存」三区。仅当视口内有统一保存区、或有待保存改动、
+          或刚保存成功时显示；待保存数写进按钮文案；点保存后短暂「已保存」再归零。 */}
+      <div
+        className={cn(
+          "fixed bottom-6 left-1/2 z-30 -translate-x-1/2 transition-all duration-200 max-[640px]:w-[calc(100%-28px)]",
+          showSaveBar ? "opacity-100" : "invisible translate-y-4 opacity-0",
         )}
+      >
+        <div className="flex items-center gap-2 rounded-[14px] bg-[#241b12] px-2 py-2 shadow-[0_14px_40px_rgb(30_20_5/0.30),0_2px_8px_rgb(30_20_5/0.20)] max-[640px]:w-full max-[640px]:justify-center">
+          <button
+            type="button"
+            onClick={save}
+            className="inline-flex items-center gap-2 rounded-[10px] bg-brand px-[18px] py-2.5 text-[13.5px] font-semibold text-brand-foreground transition-colors hover:bg-brand-200"
+          >
+            {saved ? <Check className="size-4" /> : <Save className="size-4" />}
+            {saved
+              ? t("config.saved")
+              : pending > 0
+                ? t("config.saveBarCount", { count: pending })
+                : t("config.saveConfig")}
+          </button>
+          {mirrorFailed && (
+            // ADR-0028 决议 3：服务端镜像丢写必须可见（#836 同教训）。
+            <span className="pr-2 text-xs font-medium text-amber-300">{t("config.mirrorFailed")}</span>
+          )}
+        </div>
       </div>
     </div>
   );
 }
 
-function ModeCard({
-  active,
-  onClick,
-  icon: Icon,
+/** 区段容器：id 供目录导航锚点 + IntersectionObserver 观察；serif 标题 + 简介。
+ *  scroll-mt 让锚点跳转避开顶部（窄屏芯片栏 sticky）。 */
+function Section({
+  id,
   title,
-  hint,
+  desc,
+  children,
+}: {
+  id: string;
+  title: string;
+  desc?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section id={id} className="scroll-mt-24 pt-11 first:pt-0">
+      <h2 className="font-display text-[22px] font-medium tracking-tight text-landing">{title}</h2>
+      {desc ? <p className="mb-3.5 mt-1 text-xs leading-relaxed text-faint">{desc}</p> : null}
+      {children}
+    </section>
+  );
+}
+
+/** 统一「单选卡」控件：圆点 + 标题 + 可选说明。所有带标签的单选项（引擎模式、快评
+ *  provider、默认语言、未知雇主、申请按钮行为）都走这里，视觉一致；多选（扫描方式）
+ *  保留独立切换卡以区分。纯原生 <button> + aria-pressed，键盘/读屏交给原生按钮语义。 */
+function RadioChoice({
+  selected,
+  onSelect,
+  title,
+  desc,
   disabled,
 }: {
-  active: boolean;
-  onClick: () => void;
-  icon: React.ComponentType<{ className?: string }>;
+  selected: boolean;
+  onSelect: () => void;
   title: string;
-  hint: string;
+  desc?: string;
   disabled?: boolean;
 }) {
   return (
     <button
       type="button"
-      onClick={disabled ? undefined : onClick}
       disabled={disabled}
+      aria-pressed={selected}
+      onClick={disabled ? undefined : onSelect}
       className={cn(
-        "flex flex-col gap-1.5 rounded-xl border px-4 py-3 text-left transition-colors",
+        "flex items-start gap-2.5 rounded-xl border px-3.5 py-3 text-left transition-colors",
         disabled
           ? "cursor-not-allowed border-border bg-surface/30 opacity-55"
-          : active
+          : selected
             ? "border-brand/50 bg-brand-soft"
             : "border-border bg-surface/50 hover:bg-surface-hover",
       )}
     >
-      <Icon className={cn("size-4", active && !disabled ? "text-brand" : "text-muted")} />
-      <span className="text-sm font-medium text-foreground">{title}</span>
-      <span className="text-xs text-faint">{hint}</span>
+      <span
+        className={cn(
+          "mt-0.5 grid size-[18px] shrink-0 place-items-center rounded-full border-2 transition-colors",
+          selected && !disabled ? "border-brand" : "border-border",
+        )}
+      >
+        <span className={cn("size-2 rounded-full bg-brand transition-transform", selected ? "scale-100" : "scale-0")} />
+      </span>
+      <span className="min-w-0">
+        <span className="block text-[13.5px] font-semibold text-foreground">{title}</span>
+        {desc ? <span className="mt-0.5 block text-xs leading-relaxed text-faint">{desc}</span> : null}
+      </span>
     </button>
   );
 }
 
 /** 本页所有下拉的统一实现：原生 <select> + 自绘箭头。用原生控件（而非自绘
  *  combobox）是因为它自带键盘/读屏支持与移动端原生选择器，本项目不需要原生
- *  控件给不了的能力。`size` 只区分页内两种既有的视觉档位，不引入第三套。 */
+ *  控件给不了的能力。`size` 只区分页内两种既有的视觉档位，不引入第三套。
+ *  现用于三处纯下拉：AI 工具、模型、全局并发上限。 */
 function SelectField({
   label,
   desc,
@@ -943,7 +1134,7 @@ function SelectField({
       >
         {label}
       </label>
-      {desc ? <p className="mb-2 text-xs text-faint">{desc}</p> : null}
+      {desc ? <p className="mb-2 text-xs leading-relaxed text-faint">{desc}</p> : null}
       <div className="relative">
         <select
           id={id}

@@ -69,56 +69,55 @@ export function JobTargetSettings() {
   };
 
   return (
-    <div>
-      <label className="mt-8 mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-muted">
-        {t("config.jobTargetTitle")}
-      </label>
-      <div className="rounded-xl border border-border bg-surface/50 p-4">
-        <p className="text-xs leading-relaxed text-faint">{t("config.jobTargetDesc")}</p>
-        {loadError ? (
-          <div className="mt-3 text-sm text-muted">
-            <p className="text-red-500">{t("config.jdRulesLoadError")}</p>
-            <button
-              type="button"
-              onClick={load}
-              className="mt-2 rounded-md border border-border bg-surface px-3 py-1.5 text-xs font-medium transition-colors hover:bg-surface-hover"
-            >
-              {t("followups.retry")}
-            </button>
-          </div>
-        ) : !loaded ? (
-          <div className="mt-3 flex items-center gap-2 text-sm text-muted">
-            <Loader2 className="size-4 animate-spin" /> {t("followups.loading")}
-          </div>
-        ) : (
-          <>
-            <label className="mt-3 block">
-              <span className="block text-sm font-medium text-foreground">{t("config.jobTargetRoles")}</span>
-              <span className="mt-0.5 block text-xs text-faint">{t("config.jobTargetHint")}</span>
-              <textarea
-                value={roleText}
-                onChange={(e) => setRoleText(e.target.value)}
-                rows={3}
-                placeholder={t("config.jobTargetPlaceholder")}
-                className="mt-1.5 w-full rounded-md border border-border bg-surface/60 px-3 py-2 text-sm outline-none transition-colors focus:border-brand/50 focus-visible:ring-2 focus-visible:ring-brand/40"
-              />
-            </label>
-            {error && <p className="mt-3 text-xs text-red-500">{error}</p>}
+    <div className="flex flex-col rounded-xl border border-border bg-surface p-4">
+      <h3 className="font-display text-[17px] font-medium leading-tight text-landing">{t("config.jobTargetTitle")}</h3>
+      <p className="mt-1 text-xs leading-relaxed text-faint">{t("config.jobTargetDesc")}</p>
+      {loadError ? (
+        <div className="mt-3 text-sm text-muted">
+          <p className="text-red-500">{t("config.jdRulesLoadError")}</p>
+          <button
+            type="button"
+            onClick={load}
+            className="mt-2 rounded-md border border-border bg-surface px-3 py-1.5 text-xs font-medium transition-colors hover:bg-surface-hover"
+          >
+            {t("followups.retry")}
+          </button>
+        </div>
+      ) : !loaded ? (
+        <div className="mt-3 flex items-center gap-2 text-sm text-muted">
+          <Loader2 className="size-4 animate-spin" /> {t("followups.loading")}
+        </div>
+      ) : (
+        <>
+          <label className="mt-3 flex flex-1 flex-col">
+            <span className="block text-sm font-medium text-foreground">{t("config.jobTargetRoles")}</span>
+            <span className="mt-0.5 block text-xs text-faint">{t("config.jobTargetHint")}</span>
+            <textarea
+              value={roleText}
+              onChange={(e) => setRoleText(e.target.value)}
+              rows={3}
+              placeholder={t("config.jobTargetPlaceholder")}
+              className="mt-1.5 min-h-[74px] w-full flex-1 resize-y rounded-md border border-border bg-surface/60 px-3 py-2 text-sm outline-none transition-colors focus:border-brand/50 focus-visible:ring-2 focus-visible:ring-brand/40"
+            />
+          </label>
+          {error && <p className="mt-3 text-xs text-red-500">{error}</p>}
+          <div className="mt-4 flex flex-wrap items-center gap-2.5 pt-1">
             <button
               type="button"
               onClick={save}
               disabled={saving}
               className={cn(
-                "mt-4 inline-flex items-center gap-2 rounded-md border border-border bg-surface px-3 py-1.5 text-xs font-medium transition-colors hover:bg-surface-hover",
+                "inline-flex items-center gap-2 rounded-[10px] bg-brand px-4 py-2 text-[13px] font-semibold text-brand-foreground transition-colors hover:bg-brand-200",
                 "disabled:pointer-events-none disabled:opacity-60",
               )}
             >
-              {saving ? <Loader2 className="size-3.5 animate-spin" /> : saved ? <Check className="size-3.5 text-emerald-400" /> : null}
-              {saved ? t("config.jobTargetSaved") : t("config.saveJobTarget")}
+              {saving ? <Loader2 className="size-3.5 animate-spin" /> : saved ? <Check className="size-3.5" /> : null}
+              {saved ? t("config.saved") : t("config.saveButton")}
             </button>
-          </>
-        )}
-      </div>
+            <span className="font-mono text-[11px] text-faint">{t("config.persistProfile")}</span>
+          </div>
+        </>
+      )}
     </div>
   );
 }
