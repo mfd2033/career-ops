@@ -49,6 +49,7 @@ import { fileURLToPath } from 'url';
 import { normalizeReportLink } from './tracker-links.mjs';
 import { normalizeUrl } from './url-key.mjs';
 import { withPipelineLock } from './pipeline-lock.mjs';
+import { resolvePdfIndexPath } from './tracker-utils.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 const DRY_RUN = process.argv.includes('--dry-run');
@@ -255,10 +256,44 @@ function resolveScore(stateScore, reportFile) {
   return 'N/A';
 }
 
+// PDF existence is decided by EVIDENCE, never by the free text of the report
+// header. The report's `**PDF:**` line is written once at evaluation time in
+// whatever `language.output` is active, so the old rule — "it's a PDF unless it
+// says 'not generated'" (English) — read every Chinese / `pending` / `❌` wording
+// as "PDF exists" and mis-flagged hundreds of reports. Authoritative source is
+// data/pdf-index.tsv (written by generate-pdf.mjs, the same manifest
+// sync-pdf-flags.mjs / mark-pdf-ready.mjs trust), keyed by report number.
+const PDF_MANIFEST_REPORTS = loadPdfManifestReports(resolvePdfIndexPath(TRACKER_FILE));
+
+// Mirrors how sync-pdf-flags.mjs reads the manifest: strip a leading BOM, skip
+// the `# report …` header line (and any repeated header), and take the first
+// tab-field of every data row as the report number.
+function loadPdfManifestReports(manifestPath) {
+  const nums = new Set();
+  if (!existsSync(manifestPath)) return nums;
+  let raw;
+  try { raw = readFileSync(manifestPath, 'utf-8'); } catch { return nums; }
+  for (const line of raw.replace(/^\uFEFF/, '').split('\n')) {
+    const field = line.split('\t')[0]?.trim();
+    if (!field || field.startsWith('#')) continue;
+    const n = parseInt(field, 10);
+    if (!Number.isNaN(n) && n > 0) nums.add(n);
+  }
+  return nums;
+}
+
 function resolvePdf(reportFile) {
+  if (!reportFile) return '❌';
+  // Evidence 1 (authoritative): a row in the PDF manifest for this report number.
+  const numMatch = reportFile.match(/^(\d+)-/);
+  const num = numMatch ? parseInt(numMatch[1], 10) : NaN;
+  if (!Number.isNaN(num) && PDF_MANIFEST_REPORTS.has(num)) return '✅';
+  // Evidence 2: the report header names a concrete generated PDF path or a ✅.
   const rep = readReportField(reportFile, 'PDF');
-  if (!rep) return '❌';
-  return /not generated/i.test(rep) ? '❌' : '✅';
+  if (rep && (/output\/[^\s]+\.pdf/i.test(rep) || rep.includes('✅'))) return '✅';
+  // No evidence → not generated. Free-text wording (any language) is never
+  // treated as proof that a PDF exists; the default is ❌, not ✅.
+  return '❌';
 }
 
 // The read-modify-write below races scan.mjs's appendToPipeline (the same
