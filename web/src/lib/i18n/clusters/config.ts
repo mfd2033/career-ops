@@ -33,7 +33,6 @@ export const en: Dict = {
   "config.rechecking": "Checking…",
   "config.noCli1": "No AI tool yet? Free options like",
   "config.noCli2": "with Qwen or GLM work great.",
-  "config.getOneFree": "Get one free",
   "config.noCliPath": "No supported CLI found on your PATH. Install one (e.g. Claude Code, Gemini CLI, OpenCode) to get started.",
   "config.bestOn1": "Best on",
   "config.bestOn2": "(live progress, the agentic apply + AI search, reliable evaluation persistence). Other CLIs work for the core flows with reduced features.",
@@ -154,7 +153,6 @@ export const en: Dict = {
   "config.aboutLoading": "Reading version…",
   "config.aboutBlurb": "career-ops runs entirely on your own machine, on your own AI. Your CV and data never leave your computer — the bug reporter opens a GitHub issue you review before anything is sent.",
   "config.aboutRepo": "Source on GitHub",
-  "config.aboutSite": "career-ops.org",
 };
 
 // Simplified Chinese strings. Every key in en must have a matching key here.
@@ -188,7 +186,6 @@ export const zh: Dict = {
   "config.rechecking": "正在检测…",
   "config.noCli1": "还没有 AI 工具？像",
   "config.noCli2": "这样的免费选项配合 Qwen 或 GLM 非常好用。",
-  "config.getOneFree": "免费获取一个",
   "config.noCliPath": "在你的 PATH 中未找到受支持的 CLI。安装一个（例如 Claude Code、Gemini CLI、OpenCode）即可开始。",
   "config.bestOn1": "最佳体验在",
   "config.bestOn2": "（实时进度、agentic 申请 + AI 搜索、可靠的评估持久化）。其他 CLI 也能完成核心流程，但功能有所减少。",
@@ -309,5 +306,4 @@ export const zh: Dict = {
   "config.aboutLoading": "正在读取版本…",
   "config.aboutBlurb": "career-ops 完全在你自己的机器上、用你自己的 AI 运行。你的简历和数据永不离开电脑——报告问题会打开一个由你确认的 GitHub issue，在你点击之前不会发送任何内容。",
   "config.aboutRepo": "在 GitHub 查看源码",
-  "config.aboutSite": "career-ops.org",
 };

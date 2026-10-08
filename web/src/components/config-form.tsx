@@ -505,15 +505,7 @@ export function ConfigForm() {
               ) : installed.length === 0 ? (
                 <>
                   <div className="rounded-xl border border-dashed border-border bg-surface/30 p-4 text-sm text-muted">
-                    {t("config.noCli1")} <span className="text-foreground">OpenCode</span> {t("config.noCli2")}{" "}
-                    <a
-                      href="https://career-ops.org/docs/free-ai-engine"
-                      target="_blank"
-                      rel="noreferrer"
-                      className="inline-flex items-center gap-0.5 text-brand hover:underline"
-                    >
-                      {t("config.getOneFree")} <ExternalLink className="size-3" />
-                    </a>
+                    {t("config.noCli1")} <span className="text-foreground">OpenCode</span> {t("config.noCli2")}
                   </div>
                   {/* 空态（一个都没装）恰恰最需要手动重检入口：刚装好工具时从这里刷新。 */}
                   <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-faint">

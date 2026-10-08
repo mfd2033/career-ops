@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Star, ExternalLink } from "lucide-react";
+import { Star } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { CoMark } from "@/components/co-mark";
 import { BugReportControl } from "@/components/bug-report-control";
@@ -33,6 +33,9 @@ export function AboutPanel() {
   // pre-release（alpha/beta/rc）才给渠道上色，stable 走中性档。
   const isPre = !!channel && channel !== "stable";
   const builtTitle = meta?.builtAt ? `${t("config.aboutBuiltAt")} ${meta.builtAt}` : undefined;
+  // /api/version 的 version 字段自带 "web " 前缀（报告器 payload 依赖那个形态，
+  // 见 lib/version-info.mjs 的单测），这里取裸版本号，避免页面上叠成 "web web 0.7.2"。
+  const webVersion = (meta?.version || "").replace(/^web\s+/i, "");
 
   return (
     <div className="overflow-hidden rounded-[14px] border border-border bg-surface">
@@ -42,7 +45,7 @@ export function AboutPanel() {
         <div className="min-w-0">
           <div className="font-display text-[22px] leading-none tracking-tight text-landing">career-ops</div>
           <p className="mt-1.5 text-xs text-muted">
-            {meta?.version ? `web ${meta.version}` : t("config.aboutLoading")}
+            {webVersion ? `web ${webVersion}` : t("config.aboutLoading")}
             {meta?.coreVersion ? ` · core ${meta.coreVersion}` : ""}
           </p>
         </div>
@@ -56,7 +59,7 @@ export function AboutPanel() {
       {/* 主体：左侧版本芯片网格 + 右侧简介与操作 */}
       <div className="grid gap-5 p-5 [grid-template-columns:repeat(auto-fit,minmax(min(280px,100%),1fr))]">
         <div className="grid grid-cols-2 gap-2.5 self-start">
-          <Chip label={t("config.aboutWebVersion")} value={meta?.version || "—"} mono />
+          <Chip label={t("config.aboutWebVersion")} value={webVersion || "—"} mono />
           <Chip label={t("config.aboutCoreVersion")} value={meta?.coreVersion || "—"} mono />
           <Chip label={t("config.aboutChannel")} value={channel || "—"} accent={isPre} />
           <Chip label={t("config.aboutBuild")} value={meta?.sha || "—"} mono title={builtTitle} />
@@ -74,14 +77,6 @@ export function AboutPanel() {
               className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-3 py-1.5 text-xs font-medium text-muted transition-colors hover:border-brand/40 hover:text-foreground max-sm:min-h-[44px]"
             >
               <Star className="size-3.5 text-brand" /> {t("config.aboutRepo")}
-            </a>
-            <a
-              href="https://career-ops.org"
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-3 py-1.5 text-xs font-medium text-muted transition-colors hover:border-brand/40 hover:text-foreground max-sm:min-h-[44px]"
-            >
-              <ExternalLink className="size-3.5 text-brand" /> {t("config.aboutSite")}
             </a>
           </div>
         </div>
