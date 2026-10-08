@@ -87,8 +87,10 @@ export const en: Dict = {
 
   // ── Score methodology (score-methodology.tsx) ──
   "pipeline.methodologySummary": "How career-ops scored this — and why it's for you",
-  "pipeline.methodologyIntro": "Every role is scored 1.0–5.0 across six dimensions. 4.0 is the apply / don't-apply line — below it, career-ops recommends against applying.",
-  "pipeline.dimensionsTitle": "The six dimensions",
+  "pipeline.methodologyIntro": "Every role is scored on five dimensions, integrated into one global score of 1.0–5.0. 4.0 is the apply / don't-apply line — below it, career-ops recommends against applying.",
+  "pipeline.dimensionsTitle": "Five dimensions, plus the global score",
+  // 站内摘要与 /methodology 全文页共用同一口径：综合分不是第六个维度，而是五个维度的整体判断。
+  "pipeline.methodologyBack": "Back to the report",
   "pipeline.dim.match": "Match",
   "pipeline.dim.matchDesc": "how well your CV maps to the role's requirements",
   "pipeline.dim.northstar": "North-star alignment",
@@ -109,8 +111,9 @@ export const en: Dict = {
   "pipeline.block.e": "Personalization notes for your application",
   "pipeline.block.f": "Interview prep — STAR stories tailored to this job",
   "pipeline.block.g": "Posting legitimacy — a check that the listing is real, not a scam or ghost job",
+  "pipeline.block.h": "Draft application answers — only generated when the global score is 4.5 or above",
   "pipeline.methodologyFull": "Full methodology",
-  "pipeline.methodologyAria": "Full methodology (opens in a new tab)",
+  "pipeline.methodologyAria": "Full methodology (in-app document)",
 
   // ── Status select (status-select.tsx) ──
   "pipeline.statusLabel": "status",
@@ -361,8 +364,10 @@ export const zh: Dict = {
 
   // ── Score methodology (score-methodology.tsx) ──
   "pipeline.methodologySummary": "career-ops 如何为这份职位打分——以及为何是为你而打",
-  "pipeline.methodologyIntro": "每个职位都会从六个维度打出 1.0–5.0 分。4.0 是申请与否的分界线——低于它，career-ops 建议不要申请。",
-  "pipeline.dimensionsTitle": "六个维度",
+  "pipeline.methodologyIntro": "每个职位都会从五个维度评估，并整合成一个 1.0–5.0 的综合分。4.0 是申请与否的分界线——低于它，career-ops 建议不要申请。",
+  "pipeline.dimensionsTitle": "五个评分维度 + 综合分",
+  // 与 /methodology 全文页统一口径：综合分不是第六个维度，而是五个维度的整体判断。
+  "pipeline.methodologyBack": "返回报告",
   "pipeline.dim.match": "匹配度",
   "pipeline.dim.matchDesc": "你的简历与职位要求的契合程度",
   "pipeline.dim.northstar": "北极星对齐",
@@ -383,8 +388,9 @@ export const zh: Dict = {
   "pipeline.block.e": "针对你申请的个性化备注",
   "pipeline.block.f": "面试准备——针对该职位的 STAR 故事",
   "pipeline.block.g": "招聘信息真实性——核实该职位真实存在，而非诈骗或幽灵职位",
+  "pipeline.block.h": "申请表回答草案——仅当综合分 ≥ 4.5 时生成",
   "pipeline.methodologyFull": "完整方法论",
-  "pipeline.methodologyAria": "完整方法论（在新标签页打开）",
+  "pipeline.methodologyAria": "完整方法论（站内文档）",
 
   // ── Status select (status-select.tsx) ──
   "pipeline.statusLabel": "状态",

@@ -1,12 +1,13 @@
 "use client";
 
-import { ChevronDown, ExternalLink } from "lucide-react";
+import Link from "next/link";
+import { ChevronDown, BookOpen } from "lucide-react";
 import { useI18n } from "@/lib/i18n/context";
 
-// Transparency = our differentiator ("why it's a 4.0 for YOU"). The wording is
-// the CANONICAL public text from career-ops.org/methodology + /docs — rendered
-// verbatim, NOT a web reinterpretation of the rubric (whose weights live in the
-// core, modes/_shared.md). Native <details> → no client JS.
+// 透明度 = 我们的差异点（“为什么这份职位对你是 4.0”）。这里是摘要：维度与区块
+// 一速览，全文在站内 /methodology（基于 career-ops.org/methodology 改写，
+// 口径以 modes/_shared.md + modes/oferta.md 为准）。
+// Native <details> → no client JS.
 
 export function ScoreMethodology() {
   const { t } = useI18n();
@@ -28,6 +29,7 @@ export function ScoreMethodology() {
     ["E", t("pipeline.block.e")],
     ["F", t("pipeline.block.f")],
     ["G", t("pipeline.block.g")],
+    ["H", t("pipeline.block.h")],
   ];
 
   return (
@@ -63,15 +65,13 @@ export function ScoreMethodology() {
             ))}
           </ul>
         </div>
-        <a
-          href="https://career-ops.org/methodology"
-          target="_blank"
-          rel="noreferrer"
+        <Link
+          href="/methodology"
           aria-label={t("pipeline.methodologyAria")}
           className="inline-flex min-h-[24px] items-center gap-1 text-xs text-brand transition-colors hover:underline max-sm:min-h-[44px]"
         >
-          {t("pipeline.methodologyFull")} <ExternalLink className="size-3" aria-hidden="true" />
-        </a>
+          {t("pipeline.methodologyFull")} <BookOpen className="size-3" aria-hidden="true" />
+        </Link>
       </div>
     </details>
   );
