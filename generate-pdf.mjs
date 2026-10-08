@@ -34,9 +34,9 @@
  */
 
 import { chromium } from 'playwright';
-import { resolve, dirname, relative, sep, isAbsolute, basename } from 'path';
+import { resolve, dirname, relative, sep, isAbsolute, basename, join } from 'path';
 import { readFile } from 'fs/promises';
-import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'fs';
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync } from 'fs';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { randomUUID } from 'node:crypto';
 import { readStyleTokens, injectThemeStyle, readCvSectionOrder } from './theme-style.mjs';
@@ -1077,6 +1077,63 @@ function updatePDFManifest(reportNum, pdfPath, htmlPath, format) {
 }
 
 /**
+ * Replace the value on a report's `**PDF:**` header line.
+ *
+ * The evaluation writes that line once at scoring time ("pending" / a
+ * not-generated note in the active output language). Nothing backfilled it after
+ * a PDF was actually rendered, so the report kept claiming "not generated" while
+ * the tracker and data/pdf-index.tsv said the PDF existed. This is a pure string
+ * transform (unit-testable without a filesystem or a browser): returns the
+ * content unchanged when there is no `**PDF:**` line, so it never fabricates a
+ * header on a report that does not carry one.
+ *
+ * @param {string} md - Report file content.
+ * @param {string} pdfValue - New value written after `**PDF:** ` (a path or marker).
+ * @returns {string} Content with the PDF line rewritten, or unchanged if absent.
+ */
+export function rewriteReportPdfLine(md, pdfValue) {
+  const re = /^\*\*PDF:\*\*.*$/m;
+  if (!re.test(md)) return md;
+  // Function replacer so a `$` in the path is never read as a replace pattern.
+  return md.replace(re, () => `**PDF:** ${pdfValue}`);
+}
+
+/**
+ * Backfill a report's `**PDF:**` header after a confirmed render (N3).
+ *
+ * Resolves the report file by number the same way the reconcile/merge tooling
+ * does (leading digits of `reports/{NNN}-*.md`, tolerant of zero padding). Like
+ * the manifest write it follows, this is best-effort bookkeeping: a missing
+ * reports dir, no matching file, or a report with no `**PDF:**` line all do
+ * nothing and never throw — the PDF itself already succeeded regardless.
+ *
+ * @param {string|number} reportNum - Report number the PDF was keyed to.
+ * @param {string} pdfRelPath - Workspace-relative PDF path to record in the header.
+ * @param {{reportsDir?: string}} [opts] - reportsDir overrides the workspace default (tests).
+ * @returns {boolean} true when a report header was rewritten.
+ */
+export function backfillReportPdfLine(reportNum, pdfRelPath, { reportsDir } = {}) {
+  const numStr = String(reportNum ?? '').trim();
+  if (!/^\d+$/.test(numStr) || !pdfRelPath) return false;
+  const dir = reportsDir || join(currentWorkspaceRoot(), 'reports');
+  let files;
+  try { files = readdirSync(dir); } catch { return false; }
+  const target = parseInt(numStr, 10);
+  const reportFile = files.find(f => {
+    if (!f.endsWith('.md')) return false;
+    const m = f.match(/^(\d+)-/);
+    return m && parseInt(m[1], 10) === target;
+  });
+  if (!reportFile) return false;
+  const full = join(dir, reportFile);
+  let md;
+  try { md = readFileSync(full, 'utf-8'); } catch { return false; }
+  const updated = rewriteReportPdfLine(md, pdfRelPath);
+  if (updated === md) return false; // no **PDF:** line → nothing to backfill
+  try { writeFileSync(full, updated); return true; } catch { return false; }
+}
+
+/**
  * CLI entrypoint that reads an HTML file, applies ATS-safe normalization, and
  * renders the PDF while preserving report/source metadata for the manifest.
  *
@@ -1612,8 +1669,15 @@ async function renderInPage(browser, html, outputPath, opts = {}) {
     console.log(`📦 Size: ${(pdfBuffer.length / 1024).toFixed(1)} KB`);
 
     try {
-      updatePDFManifest(reportNum, outputPath, inputPath, format);
+      const relPDF = updatePDFManifest(reportNum, outputPath, inputPath, format);
       console.log(`🔗 Manifest: data/pdf-index.tsv updated${reportNum ? ` (report ${reportNum})` : ' (no --report given)'}`);
+      // A confirmed render should also rewrite the report's own `**PDF:**` header,
+      // which is otherwise frozen at whatever the evaluation wrote (N3) — report,
+      // tracker and manifest then agree. Best-effort: backfillReportPdfLine never
+      // throws, and the PDF already succeeded regardless of the outcome here.
+      if (reportNum && backfillReportPdfLine(reportNum, relPDF)) {
+        console.log(`📝 Report header **PDF:** backfilled → ${relPDF}`);
+      }
     } catch (err) {
       // The PDF itself succeeded — never fail the run over manifest bookkeeping.
       console.error(`⚠️  Manifest update failed: ${err.message}`);
