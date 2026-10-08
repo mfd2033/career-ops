@@ -355,6 +355,10 @@ export function ConfigForm() {
     persistScanSources(scanSource);
     // The persisted value is now the "current model" — only after Save.
     setSavedModel(nextModel);
+    // 下拉的在途值必须跟着持久化结果走：守卫洗掉脏模型后若不同步，界面会同时给出
+    // 两个互相矛盾的事实（「模型下拉 hy3」+「当前使用的模型 sonnet」，真机验收抓到）。
+    setModel(nextModel);
+    setModelCliId(picked.modelCliId);
     // 同理：保存后下拉选中的工具才成为「当前使用」，「未保存」提示也到此为止。
     setSavedCliId(cliId);
     setEngineUnsaved(false);

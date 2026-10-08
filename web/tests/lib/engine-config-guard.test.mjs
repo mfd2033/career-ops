@@ -108,6 +108,10 @@ test("both cliId write paths reconcile the model against the engine catalogues",
   assert.ok(persist.includes('if (picked.dropped) patch.model = "";'), "判定为脏组合时没有把 model 一起 POST 掉");
   assert.ok(persist.includes("pushServerConfig(patch)"), "服务端镜像仍在收只带 cliId 的半份配置");
   assert.ok(SAVED.includes("persistCliId(pick, list)"), "resolveCliId 没有把模型目录交给落盘路径（拿不到证据就校正不了）");
+  // 保存后下拉的在途值必须跟着持久化结果走，否则界面会同时给出两个矛盾的模型
+  // （真机验收抓到的：下拉还写着 hy3，「当前使用的模型」已是引擎默认）
+  assert.ok(FORM.includes("setModel(nextModel);"), "save() 没把清洗结果写回模型下拉");
+  assert.ok(FORM.includes("setModelCliId(picked.modelCliId);"), "save() 没同步 modelCliId 状态");
 });
 
 // ── 决议 4：三条派发路由在拼 argv 前清洗模型 ─────────────────────────────────
