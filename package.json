@@ -88,7 +88,7 @@
   "homepage": "https://santifer.io",
   "repository": {
     "type": "git",
-    "url": "https://github.com/santifer/career-ops"
+    "url": "https://github.com/mfd2033/career-ops"
   },
   "license": "MIT",
   "dependencies": {

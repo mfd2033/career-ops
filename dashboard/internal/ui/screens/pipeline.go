@@ -112,7 +112,7 @@ type reportSummary struct {
 	comp      string
 }
 
-const storyTemplateURL = "https://github.com/santifer/career-ops/issues/new?template=i-got-hired.yml"
+const storyTemplateURL = "https://github.com/mfd2033/career-ops/issues/new?template=i-got-hired.yml"
 
 // Sort modes
 const (
