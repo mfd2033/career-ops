@@ -33,7 +33,7 @@ import { registerBatchRun, recordBatchItem, completeBatchRun, getBatchItems } fr
 import { appendRunRecord } from "@/lib/run-ledger.mjs";
 import { buildBatchLedgerRecord } from "@/lib/batch-ledger.mjs";
 import { buildBatchChildRecord } from "@/lib/batch-child-ledger.mjs";
-import { resolveCli } from "@/lib/clis";
+import { resolveCli, dropCrossEngineModel } from "@/lib/clis";
 import {
   withModelFlag,
   isFatalGenericStderr,
@@ -109,7 +109,7 @@ export async function POST(req: Request) {
     return new Response(JSON.stringify({ error: `too many rows (max ${MAX_ITEMS} per batch)` }), { status: 400 });
   }
   const cliId = typeof body.cliId === "string" ? body.cliId : "";
-  const model = typeof body.model === "string" ? body.model : "";
+  const requestedModel = typeof body.model === "string" ? body.model : "";
   const resolved = cliId ? resolveCli(cliId) : null;
   if (!resolved) {
     return new Response(JSON.stringify({ error: `CLI '${cliId}' not found` }), {
@@ -118,6 +118,9 @@ export async function POST(req: Request) {
     });
   }
   const { spec, binPath } = resolved;
+  // ADR-0073 决议 4：跨引擎脏模型守卫，与 /api/run、/api/batch-evaluate 同一道。
+  // 清洗后的值同时用于 argv、并发池快照与台账/子台账；丢弃由「引擎行不显模型」诚实表达。
+  const model = dropCrossEngineModel(cliId, requestedModel);
   const root = careerOpsRoot();
   // The checkup engine lives in the user layer's Custom Workflows — same
   // completeness gate as /api/run's kind:"checkup".

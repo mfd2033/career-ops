@@ -11,6 +11,7 @@ import { isNodeScript, spawnTargetFor } from "./spawn-cli.mjs";
 import { claudeCliArgs } from "./claude-invocation.mjs";
 import { parseQoderEvent, qoderCliArgs } from "./qoder-invocation.mjs";
 import { codebuddyCliArgs, parseCodebuddyEvent } from "./codebuddy-invocation.mjs";
+import { dropForeignModel } from "./model-ownership.mjs";
 
 // Server-only (node imports). The agnostic runtimes career-ops can delegate to
 // in headless mode (AGENTS.md). Install URLs from career-ops-docs.
@@ -251,6 +252,28 @@ const MODELS: Record<string, ModelMeta> = {
     ],
   },
 };
+
+/**
+ * 派发前的跨引擎脏模型守卫（ADR-0073 决议 4）。
+ *
+ * `hy3` 被拼进 `claude --model` 而评估必败，是这条守卫存在的全部理由：配置页那一层
+ * 洗不干净（旧 localStorage、另一个浏览器、清过站点数据、扩展直接读服务端镜像），
+ * 派发点就得自己兜住。
+ *
+ * 只读静态 `MODELS` 表，不 spawn 探针：`detectClis()` 要为 opencode/qoder 的目录起
+ * 子进程，把它挂在派发热路径上换一次守卫不值。动态目录独有的 id 因此走
+ * `modelBelongsToOtherCli` 的第三档（两边都不认识 → 保留），绝不误杀。
+ *
+ * @param {string} cliId - 本次派发的引擎 id
+ * @param {string | undefined} model - 请求带来的模型（可为空）
+ * @returns {string} 清洗后的模型；被判定为别家目录里的脏组合时返回空串
+ */
+export function dropCrossEngineModel(cliId: string, model: string | undefined): string {
+  if (!model) return "";
+  const catalog: { [id: string]: string[] } = {};
+  for (const [id, meta] of Object.entries(MODELS)) catalog[id] = meta.options.map((o) => o.id);
+  return dropForeignModel(catalog, cliId, model);
+}
 
 // `name` comes from cli-labels.mjs (the shared, client-safe source) so the label
 // a user sees here and the one a worker card shows can never drift apart — and

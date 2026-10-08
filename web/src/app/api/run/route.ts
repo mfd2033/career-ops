@@ -7,7 +7,8 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { after } from "next/server";
-import { resolveCli } from "@/lib/clis";
+import { resolveCli, dropCrossEngineModel } from "@/lib/clis";
+import { cliDisplayName } from "@/lib/cli-labels.mjs";
 import { resolveWorkerInvocation } from "@/lib/worker-invocation.mjs";
 import { accumulateTokens, authExpiredHint, checkupArtifactRowCount, checkupArtifactTodayForTracker, makeCheckupHtmlProbe, failureEvidence, failureLedgerMsg, hasNewCompletedReport, isFatalGenericStderr, persistRunOutcome, PERSISTENCE_GATED_KINDS, withModelFlag } from "@/lib/run-cli-support.mjs";
 import { spawnHeadlessCli, terminateCli } from "@/lib/spawn-cli.mjs";
@@ -135,6 +136,19 @@ export async function POST(req: Request) {
   // 既有 status 通道、label 用 `phase:` 前缀约定，前端据此渲染徽章而不入
   // 步骤流；终态不发阶段（阶段只描述进行中）。
   publish(runId, { type: "status", label: "phase:queued" });
+  // ADR-0073 决议 4：跨引擎脏模型守卫。2026-10-08 那次 `claude + hy3` 的评估就是从这里
+  // 漏过去的 —— 配置页那一层洗不干净（旧 localStorage、别的浏览器、清过站点数据、
+  // 扩展直接读服务端镜像），派发点就得自己兜住。
+  // 清洗后的值才是本次真正请求的东西：argv、并发池快照、运行账本三处同用（ADR-0043
+  // 记的是请求值，那现在就是清洗后的请求值；被丢时记 undefined，不谎报一个从未生效的模型）。
+  const knownModel = dropCrossEngineModel(cliId, model);
+  if (model && !knownModel) {
+    // 不静默降级：用户在运行卡上看得见模型被丢这件事（与 ADR-0028 决议 3 同一个原则）。
+    publish(runId, {
+      type: "status",
+      label: `已忽略不属于 ${cliDisplayName(cliId)} 的模型 ${model}，改用该引擎默认`,
+    });
+  }
   // 体检在跑登记（ADR-0033 决议 2）：登记必须在进入并发池**之前**（此时是 queued），
   // 也必须早于 runId 回到客户端——它既是「这一行此刻有没有体检在跑」的唯一权威（前哨
   // 据此拦下按钮），也是「停止」需要的 runId 来源（跨标签页/跨浏览器也成立）。
@@ -168,7 +182,7 @@ export async function POST(req: Request) {
         // ADR-0043 运行引擎：派发时请求的运行时 + 模型（不是实际加载的那个）。老记录
         // 没这两个字段，读取端按「未记录」处理，不回填、不猜测。
         cliId,
-        model: model || undefined,
+        model: knownModel || undefined,
         // 800（原 300）：门禁那一句 checkup 文案就 175 字，300 会把 ADR-0034 的证据
         // 段整段截掉——上限不抬，补丁等于没打。
         msg: msg ? String(msg).slice(0, 800) : undefined,
@@ -200,7 +214,7 @@ export async function POST(req: Request) {
         kind,
         input,
         cliId,
-        model,
+        model: knownModel,
         spec,
         binPath,
         recordEnd,

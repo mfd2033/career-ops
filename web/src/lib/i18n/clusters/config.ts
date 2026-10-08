@@ -27,6 +27,9 @@ export const en: Dict = {
   "config.aiToolShowInstall": "Show install links",
   "config.aiToolHideInstall": "Hide install links",
   "config.currentTool": "Currently using",
+  // ADR-0073 决议 2：nothing has been saved in this browser — the card head shows the
+  // machine default, and must say so instead of claiming it is in use.
+  "config.defaultTool": "This machine's default (not saved)",
   "config.checking": "Checking what's on your computer…",
   "config.lastChecked": "Last checked {time}",
   "config.recheck": "Re-check",
@@ -55,6 +58,9 @@ export const en: Dict = {
   "config.mirrorFailed": "Saved locally, but the server mirror write FAILED — other entry points may still read the old runtime",
   "config.cliUnusable": "installed but headless-unusable",
   "config.cliUnusableWarn": "{name} is installed but produces no headless output (unauthenticated or broken install) — tasks dispatched to it will fail. Fix this CLI or pick another.",
+  // ADR-0073 决议 2：the dropdown shows this machine's default while nothing has ever
+  // been saved here; opening the page no longer rewrites the server-side engine.
+  "config.engineUnsavedHint": "No engine has been saved in this browser yet — the tool shown above is this machine's default, not what evaluations currently run on. Pick one and click Save below to make it take effect.",
   "config.saveConfig": "Save config",
   "config.applyBehaviorTitle": "Apply button behavior",
   "config.applyBehaviorDesc": "What the Apply button on the pipeline page does.",
@@ -180,6 +186,8 @@ export const zh: Dict = {
   "config.aiToolShowInstall": "展开安装链接",
   "config.aiToolHideInstall": "收起安装链接",
   "config.currentTool": "当前使用",
+  // ADR-0073 决议 2：本浏览器还没保存过引擎，头部显示的是本机默认，不能谎称「当前使用」。
+  "config.defaultTool": "本机默认（未保存）",
   "config.checking": "正在检查你的电脑上有什么…",
   "config.lastChecked": "上次检测：{time}",
   "config.recheck": "重新检测",
@@ -208,6 +216,8 @@ export const zh: Dict = {
   "config.mirrorFailed": "已存本机，但服务端镜像写入失败——其它入口可能仍读到旧 runtime",
   "config.cliUnusable": "已安装但 headless 不可用",
   "config.cliUnusableWarn": "{name} 已安装但 headless 无输出（未认证或安装损坏）——派发给它的任务会失败。请修复该 CLI 或改选其它工具。",
+  // ADR-0073 决议 2：从没保存过引擎的浏览器里，下拉显示的是本机默认值。
+  "config.engineUnsavedHint": "这个浏览器还没保存过引擎——上面显示的是本机默认，并不是评估当前在用的那个。选一个并点下方「保存设置」才会生效。",
   "config.saveConfig": "保存设置",
   "config.applyBehaviorTitle": "申请按钮行为",
   "config.applyBehaviorDesc": "管道页面「申请」按钮点击后的功能。",

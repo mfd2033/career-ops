@@ -29,7 +29,7 @@ import { appendRunRecord } from "@/lib/run-ledger.mjs";
 import { buildRunLedgerSteps } from "@/lib/run-steps.mjs";
 import { buildBatchLedgerRecord } from "@/lib/batch-ledger.mjs";
 import { buildBatchChildRecord } from "@/lib/batch-child-ledger.mjs";
-import { resolveCli } from "@/lib/clis";
+import { resolveCli, dropCrossEngineModel } from "@/lib/clis";
 import { withModelFlag, isFatalGenericStderr, parseReservationOutput } from "@/lib/run-cli-support.mjs";
 import { resolveWorkerInvocation } from "@/lib/worker-invocation.mjs";
 import { isReservedReportFile } from "@/lib/report-files.mjs";
@@ -77,7 +77,7 @@ export async function POST(req: Request) {
   }
   const company = typeof body.company === "string" ? body.company : "";
   const cliId = typeof body.cliId === "string" ? body.cliId : "";
-  const model = typeof body.model === "string" ? body.model : "";
+  const requestedModel = typeof body.model === "string" ? body.model : "";
   const resolved = cliId ? resolveCli(cliId) : null;
   if (!resolved) {
     return new Response(JSON.stringify({ error: `CLI '${cliId}' not found` }), {
@@ -86,6 +86,11 @@ export async function POST(req: Request) {
     });
   }
   const { spec, binPath } = resolved;
+  // ADR-0073 决议 4：跨引擎脏模型守卫，与 /api/run 同一道。扩展与旧镜像可能带来一个
+  // 不属于本引擎的模型（那次 `claude + hy3`），拼进 argv 就是必败的 run。
+  // 清洗后的值同时用于 argv、并发池快照与台账/子台账：批量侧不另发 status，
+  // 丢弃这件事由「引擎行只显运行时、不显模型」诚实表达（ADR-0043 决议 4）。
+  const model = dropCrossEngineModel(cliId, requestedModel);
   const root = careerOpsRoot();
   // Same completeness + CV gates as /api/run's evaluate kind.
   for (const f of ["modes/oferta.md", "cv.md"]) {

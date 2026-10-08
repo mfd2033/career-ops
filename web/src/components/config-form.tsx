@@ -5,6 +5,7 @@ import {
   AlertTriangle,
   Check,
   Save,
+  Info,
   Loader2,
   ExternalLink,
   ChevronDown,
@@ -17,9 +18,10 @@ import { JdRulesSettings } from "@/components/jd-rules-settings";
 import { SkillsPanel } from "@/components/skills-panel";
 import { AboutPanel } from "@/components/about-panel";
 import { JobTargetSettings } from "@/components/job-target-settings";
-import { persistCliId, persistModel, pushServerConfig, readSavedCliId, readSavedModel, readSavedUnknownEmployer, persistUnknownEmployer, readServerUnknownEmployer, mirrorUnknownEmployer, pickDefaultInstalled, type UnknownEmployerPolicy } from "@/lib/saved-cli";
+import { persistModel, pushServerConfig, readSavedCliId, readSavedModel, readSavedUnknownEmployer, persistUnknownEmployer, readServerUnknownEmployer, mirrorUnknownEmployer, pickDefaultInstalled, type UnknownEmployerPolicy } from "@/lib/saved-cli";
 import { readSavedConcurrencyPool, persistConcurrencyPool, CONCURRENCY_POOL_DEFAULT } from "@/lib/saved-cli";
 import { resolveModelPicker } from "@/lib/model-picker.mjs";
+import { reconcileEnginePick } from "@/lib/model-ownership.mjs";
 import {
   readApplyBehavior,
   persistApplyBehavior,
@@ -128,6 +130,10 @@ export function ConfigForm() {
   const [showInstallLinks, setShowInstallLinks] = useState(false);
   // 「当前使用」回执读取的是已保存的工具，与 savedModel 同一原则 —— 保存前不跳。
   const [savedCliId, setSavedCliId] = useState("");
+  // ADR-0073 决议 2：本浏览器从没存过 cliId 时，下拉里显示的是「本机默认」而不是
+  // 「生效配置」—— 不写服务端，也就没人打开页面都会把引擎改掉。这个标记把差异如实
+  // 告诉用户：要生效得点保存。
+  const [engineUnsaved, setEngineUnsaved] = useState(false);
   // ADR-0015：检测结果的时间戳（null = 本浏览器还没成功检测过）与手动重检进行态。
   const [checkedAt, setCheckedAt] = useState<number | null>(null);
   const [rechecking, setRechecking] = useState(false);
@@ -151,9 +157,9 @@ export function ConfigForm() {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {
         const v = JSON.parse(raw);
-        // key/manual are not wired yet (nothing reads them) → never restore into
-        // those dead panels; only the Installed-CLI path is functional.
-        if (v.mode === "cli") setMode("cli");
+        // ADR-0073 决议 1：`mode` 的唯一真值源就是主配置。快评（key）早已接线可用，
+        // 所以它也要能被恢复；manual 面板仍是 disabled，旧值回落 cli。
+        if (v.mode === "cli" || v.mode === "key") setMode(v.mode as Mode);
         if (v.cliId) setCliId(v.cliId);
         if (v.model) setModel(v.model);
         // "Current model" reflects the last-saved (persisted) pick, not the
@@ -169,13 +175,15 @@ export function ConfigForm() {
         if (typeof v.logos === "boolean") setLogos(v.logos);
       }
       // 快评配置回显：只读非密钥字段；provider 以快评存储为准（若存在）。
+      // 绝不从这里恢复 `mode`（ADR-0073 决议 1）：历史上快评存储里那一份 `mode`
+      // 在后、主配置那份在前，于是每次打开都落在快评上，而切回 CLI 保存又不碰它 ——
+      // 用户无法自救，就是那个界面缺陷的根因。
       const qraw = localStorage.getItem(QUICK_STORAGE_KEY);
       if (qraw) {
         const q = JSON.parse(qraw);
         if (q.provider) setProvider(q.provider);
         if (q.model) setQuickModel(q.model);
         if (q.baseUrl) setQuickBaseUrl(q.baseUrl);
-        if (q.mode) setMode(q.mode as Mode);
       }
     } catch {
       /* ignore */
@@ -201,14 +209,12 @@ export function ConfigForm() {
   // 幂等，两条路径的下拉行为必须完全一致。
   function applyClis(list: Cli[]) {
     setClis(list);
-    // 未保存过选择时，默认选中本机安装的第一个可用 CLI 并持久化——
-    // 只高亮不落盘时，派发端（resolveCliId / 服务端镜像）读到的仍是空配置。
-    setCliId((prev) => {
-      if (prev) return prev;
-      const pick = pickDefaultInstalled(list);
-      if (pick && !readSavedCliId()) persistCliId(pick);
-      return pick || "";
-    });
+    // ADR-0073 决议 2：打开页面不再写服务端。以前这里会把「本机装的第一个可用 CLI」
+    // 当默认值直接 POST 给 /api/config（`KNOWN` 顺序里 claude 排第一），于是一次页面
+    // 打开就把引擎改成了没人配置过的 claude —— 2026-10-08 那次评估失败的上游就是这个。
+    // 现在只高亮不落盘，靠下面的「未保存」提示要求用户显式点保存。
+    setCliId((prev) => prev || pickDefaultInstalled(list) || "");
+    if (!readSavedCliId()) setEngineUnsaved(true);
   }
 
   // ADR-0015: the runtime list is detected ONCE per browser. A usable
@@ -263,12 +269,14 @@ export function ConfigForm() {
     void persistConcurrencyPool(concurrencyPool);
     // 用户点了保存 → 草稿成为已保存态，清空待计数。
     setDirty(new Set());
-    // 快评（key 模式）：密钥 PUT 到服务端 gitignore 文件，只在前端存非密钥字段。
+    // 快评（key 模式）：密钥 PUT 到服务端 gitignore 文件，前端只存非密钥字段。
     if (mode === "key") {
       const savedProvider = provider;
+      // ADR-0073 决议 1：`mode` 不再写进快评存储（那一份以前会在打开时覆盖主配置）。
+      // 整对象重写顺带清掉旧浏览器里残留的 `mode` 键。
       localStorage.setItem(
         QUICK_STORAGE_KEY,
-        JSON.stringify({ mode, provider: savedProvider, model: quickModel, baseUrl: quickBaseUrl }),
+        JSON.stringify({ provider: savedProvider, model: quickModel, baseUrl: quickBaseUrl }),
       );
       // 快评模式下界面/扫描草稿（Logo/申请行为/扫描方式）与引擎无关，也要落库——
       // 合并写入保留已存的 CLI 引擎字段（cliId/model），避免保存条谎报「已保存 N 项」却丢写。
@@ -279,6 +287,9 @@ export function ConfigForm() {
           STORAGE_KEY,
           JSON.stringify({
             ...prevUi,
+            // 档位本身是唯一真值源在主配置里的那个字段（ADR-0073 决议 1）：不写它，
+            // 下次打开又回到默认档位，快评选择就成了存不住的草稿。
+            mode,
             logos,
             applyBehavior,
             scanSource: cleanScanSources(scanSource),
@@ -313,14 +324,24 @@ export function ConfigForm() {
     // localStorage. Keys belong in the user's own CLI/provider config.
     // model/modelCliId come from the picker: after a CLI switch the picker has
     // already dropped a stale model, so a Save can never resurrect it.
-    const nextModel = picker?.model ?? model;
+    //
+    // picker 那一层只能丢「明确记着属于别家引擎」的模型（modelCliId 与当前 cliId 不同）；
+    // 旧配置里 modelCliId 是空的，它会被无条件保留 —— `claude + hy3` 就是这么存下来的。
+    // 所以保存前再过一道目录证据（ADR-0073 决议 3）：模型躺在别家目录里就洗掉。
+    const picked = reconcileEnginePick({
+      cliId,
+      model: picker?.model ?? model,
+      modelCliId,
+      clis: clis ?? [],
+    });
+    const nextModel = picked.model;
     localStorage.setItem(
       STORAGE_KEY,
       JSON.stringify({
         mode,
         cliId,
         model: nextModel,
-        modelCliId: nextModel ? modelCliId : "",
+        modelCliId: nextModel ? picked.modelCliId : "",
         provider,
         logos,
         applyBehavior,
@@ -334,12 +355,14 @@ export function ConfigForm() {
     persistScanSources(scanSource);
     // The persisted value is now the "current model" — only after Save.
     setSavedModel(nextModel);
-    // 同理：保存后下拉选中的工具才成为「当前使用」。
+    // 同理：保存后下拉选中的工具才成为「当前使用」，「未保存」提示也到此为止。
     setSavedCliId(cliId);
+    setEngineUnsaved(false);
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
     // ADR-0028 决议 3：服务端镜像写入结果必须可见——静默丢写正是
     // 「以为存了 claude、实际派发了 opencode」的根因（#836 同教训）。
+    // 被守卫洗掉的模型 POST 空串，路由对空串就是删除该键（不留脏值）。
     pushServerConfig({ cliId, model: nextModel }).then((ok) => setMirrorFailed(!ok));
   }
 
@@ -347,10 +370,15 @@ export function ConfigForm() {
   // 未安装的工具只作为「还能用什么」的知情信息出现在禁用分组里，不进可选集合。
   const missing = clis?.filter((c) => !c.installed) ?? [];
   const selectedCli = clis?.find((c) => c.id === cliId) ?? null;
-  // The tool the app is actually running on: the last-saved pick, falling back
-  // to the current detection before anything was ever saved (mirrors
-  // `currentModel` falling back to the CLI's own default).
-  const currentCli = clis?.find((c) => c.id === (savedCliId || cliId)) ?? null;
+  // The tool the app is actually running on: the last-saved pick, and NOTHING
+  // else while nothing was saved (ADR-0073 决议 2) —— 未落盘的本机默认不是「当前使用」，
+  // 把它点亮就是那次「没人改过配置但引擎变了」的界面表现。
+  const currentCli = savedCliId ? (clis?.find((c) => c.id === savedCliId) ?? null) : null;
+  // 回执头两种情况下都要出现：已保存的生效引擎，以及「还没保存、先把本机默认摊开
+  // 给用户看」那一次（ADR-0073 决议 2）—— 否则新浏览器里连「重新检测」都找不到。
+  // 但标题必须是「本机默认（未保存）」，不能谎称「当前使用」。
+  const headerCli = currentCli ?? (engineUnsaved ? selectedCli : null);
+  const headerUnsaved = !currentCli && !!headerCli;
   // The model the CLI runs with: the last-saved pick (always preserved — even
   // when the dynamic option list doesn't list it, it's injected back into the
   // dropdown so it renders as the selected value), else the CLI's own default.
@@ -523,19 +551,20 @@ export function ConfigForm() {
                 </>
               ) : (
                 <>
-                  {/* CLI 引擎卡（复刻原型 engine-card）：顶部「当前使用」渐变回执头（工具名 +
-                      版本 + 上次检测 + 重新检测），下方 AI 工具 / 模型 双列选择器。 */}
+                  {/* CLI 引擎卡（复刻原型 engine-card）：顶部渐变回执头（工具名 +
+                      版本 + 上次检测 + 重新检测），下方 AI 工具 / 模型 双列选择器。
+                      未保存时同一张头把标签改成「本机默认（未保存）」（ADR-0073 决议 2）。 */}
                   <div className="overflow-hidden rounded-[14px] border border-border bg-surface">
-                    {currentCli && (
+                    {headerCli && (
                       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-border bg-gradient-to-b from-brand-soft to-transparent px-5 py-3.5">
                         <div className="flex min-w-0 flex-wrap items-baseline gap-2.5">
                           <span className="text-[10.5px] font-bold uppercase tracking-[0.14em] text-brand">
-                            {t("config.currentTool")}
+                            {t(headerUnsaved ? "config.defaultTool" : "config.currentTool")}
                           </span>
-                          <span className="font-display text-[25px] leading-none text-landing">{currentCli.name}</span>
-                          {currentCli.version && (
+                          <span className="font-display text-[25px] leading-none text-landing">{headerCli.name}</span>
+                          {headerCli.version && (
                             <span className="rounded-full border border-border bg-surface px-2.5 py-0.5 font-mono text-[11px] text-muted">
-                              v{currentCli.version}
+                              v{headerCli.version}
                             </span>
                           )}
                         </div>
@@ -589,17 +618,25 @@ export function ConfigForm() {
                             不止一处（CodeBuddy：厂商安装器，或另一个产品捆绑的副本），
                             而它们会各自升级——路径 + `--version` 让「这次用的是哪一个」
                             在界面上可回答，而不是只能靠进程表反推。 */}
-                        {currentCli?.path && (
-                          <p className="mt-1.5 truncate font-mono text-[11px] text-faint" title={currentCli.path}>
-                            {currentCli.path}
-                            {currentCli.version ? ` · ${currentCli.version}` : ""}
+                        {headerCli?.path && (
+                          <p className="mt-1.5 truncate font-mono text-[11px] text-faint" title={headerCli.path}>
+                            {headerCli.path}
+                            {headerCli.version ? ` · ${headerCli.version}` : ""}
                           </p>
                         )}
                         {/* ADR-0028：installed ≠ usable——headless 无输出的工具派发必败，就地警告。 */}
                         {selectedCli?.usable === false && (
                           <div className="mt-3 flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-400">
                             <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-                            <span>{t("config.cliUnusableWarn", { name: currentCli?.name ?? selectedCli.name })}</span>
+                            <span>{t("config.cliUnusableWarn", { name: headerCli?.name ?? selectedCli.name })}</span>
+                          </div>
+                        )}
+                        {/* ADR-0073 决议 2：这个浏览器从没保存过引擎，下拉里只是本机默认。
+                            不写提示就是上次那个隐式行为能潜伏至今的原因：用户以为看到的就是生效的。 */}
+                        {engineUnsaved && (
+                          <div className="mt-3 flex items-start gap-2 rounded-lg border border-border bg-surface/50 px-3 py-2 text-xs leading-relaxed text-muted">
+                            <Info className="mt-0.5 size-4 shrink-0 text-brand" />
+                            <span>{t("config.engineUnsavedHint")}</span>
                           </div>
                         )}
                         {missing.length > 0 && (

@@ -4,6 +4,7 @@ import {
   isUnknownEmployerPolicy,
   resolveUnknownEmployer,
 } from "./unknown-employer.mjs";
+import { reconcileEnginePick } from "./model-ownership.mjs";
 
 export const CONFIG_KEY = "career-ops:config";
 
@@ -38,15 +39,42 @@ export function readSavedCliId(): string | null {
   }
 }
 
-export function persistCliId(cliId: string) {
+/** `/api/clis` 响应里 `persistCliId` 需要的那一小片：模型目录就是归属判定的证据。 */
+export type CliCatalogRow = { id: string; model?: { options?: { id: string }[] } };
+
+/**
+ * 落盘选中的 CLI —— 同时校正 model（ADR-0073 决议 3）。
+ *
+ * 只 POST `{cliId}` 是那次 `claude + hy3` 事故的产地：`hy3` 是 CodeBuddy 目录里的模型，
+ * 而「换了引擎没换模型」在以前这条路径上根本不会被发现。现在带上了 `clis` 目录作证据：
+ * 判定为脏组合时一并 POST `model: ""`（`/api/config` 对空串就是删除该键）。
+ *
+ * @param {string} cliId
+ * @param {CliCatalogRow[]} [clis] - 本机引擎目录；不传 = 没有证据，保守地不动 model
+ */
+export function persistCliId(cliId: string, clis?: CliCatalogRow[]) {
   try {
     const raw = localStorage.getItem(CONFIG_KEY);
     const prev = raw ? JSON.parse(raw) : {};
+    const picked = reconcileEnginePick({
+      cliId,
+      model: typeof prev.model === "string" ? prev.model : "",
+      modelCliId: typeof prev.modelCliId === "string" ? prev.modelCliId : "",
+      clis: clis || [],
+    });
+    const patch: Record<string, string> = { cliId };
+    if (picked.dropped) patch.model = "";
     localStorage.setItem(
       CONFIG_KEY,
-      JSON.stringify({ ...prev, mode: prev.mode || "cli", cliId }),
+      JSON.stringify({
+        ...prev,
+        mode: prev.mode || "cli",
+        cliId,
+        model: picked.model,
+        modelCliId: picked.modelCliId,
+      }),
     );
-    pushServerConfig({ cliId });
+    void pushServerConfig(patch);
   } catch {
     /* quota / private mode */
   }
@@ -172,7 +200,7 @@ export async function readSavedConcurrencyPool(): Promise<number> {
  * 多装几个的场景下拉虽高亮但不持久化，派发端读到的是空配置。
  */
 export function pickDefaultInstalled(
-  clis: { id: string; installed?: boolean; usable?: boolean }[] | undefined,
+  clis: (CliCatalogRow & { installed?: boolean; usable?: boolean })[] | undefined,
 ): string | null {
   const list = clis || [];
   const firstUsable = list.find((c) => c.installed && c.usable !== false);
@@ -181,18 +209,25 @@ export function pickDefaultInstalled(
   return pick ? pick.id : null;
 }
 
-/** Saved Config cliId, or the first installed CLI (and persist that pick). */
+/**
+ * Saved Config cliId, or the first installed CLI (and persist that pick).
+ *
+ * 这条落盘通道只服务派发（ADR-0073 决议 2）：点「评估」是用户的显式动作，而服务端镜像
+ * 必须与派发卡片显示的引擎一致 —— 配置页打开时不再走这里（见 config-form.applyClis）。
+ * 传 `list` 是为了让 persistCliId 拿到模型目录做校正，别把别家的模型带上新引擎。
+ */
 export async function resolveCliId(): Promise<string | null> {
   const saved = readSavedCliId();
   if (saved) return saved;
   try {
     const r = await fetch("/api/clis");
     const d = (await r.json()) as {
-      clis?: { id: string; installed?: boolean; usable?: boolean }[];
+      clis?: (CliCatalogRow & { installed?: boolean; usable?: boolean })[];
     };
-    const pick = pickDefaultInstalled(d.clis);
+    const list = d.clis || [];
+    const pick = pickDefaultInstalled(list);
     if (!pick) return null;
-    persistCliId(pick);
+    persistCliId(pick, list);
     return pick;
   } catch {
     return null;
