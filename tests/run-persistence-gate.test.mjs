@@ -107,6 +107,36 @@ console.log('超时（本地定时器杀）不得被误读');
     fail(`  超时+落盘文案不符: ${JSON.stringify(landed.message)}`);
   }
 
+  // evaluate 超时的产物归属（2026-10-09：persisted 是「窗口内 reports/ 有新增」，
+  // 并发 run 落的报告也会计入——三条并行猎聘 evaluate 都收到 "Its artifact did
+  // land" 而它们各自占的 1110/1112/1113 号从未落盘）。
+  const evalLanded = persistRunOutcome({
+    kind: 'evaluate',
+    cleanExit: false,
+    sawError: false,
+    emittedText: false,
+    persisted: true,
+    timedOut: true,
+  });
+  if (!evalLanded.ok && /A new report did land in reports\//.test(evalLanded.message) && /THIS run/.test(evalLanded.message)) {
+    pass('  evaluate 超时+目录有新增 → 只说目录里有新报告，不断言是本 run 的');
+  } else {
+    fail(`  evaluate 超时+落盘文案不符: ${JSON.stringify(evalLanded.message)}`);
+  }
+  const evalEmpty = persistRunOutcome({
+    kind: 'evaluate',
+    cleanExit: false,
+    sawError: false,
+    emittedText: false,
+    persisted: false,
+    timedOut: true,
+  });
+  if (!evalEmpty.ok && /Nothing was persisted \(no a report entry\)/.test(evalEmpty.message) && /30-minute limit/.test(evalEmpty.message)) {
+    pass('  evaluate 超时+零产物 → 点名 30 分钟上限与报告通道');
+  } else {
+    fail(`  evaluate 超时+零产物文案不符: ${JSON.stringify(evalEmpty.message)}`);
+  }
+
   const readOnly = persistRunOutcome({
     kind: 'research',
     cleanExit: false,

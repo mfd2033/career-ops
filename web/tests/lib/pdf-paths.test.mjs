@@ -130,6 +130,10 @@ test("resolvePdfPaths: a re-evaluated row threads the LINKED report number, not 
     // would match no row and leave the PDF column ❌ (the 「打开定制简历」 bug).
     assert.equal(result.ok, true);
     assert.equal(result.paths.reportNum, "1086");
+    // The exact report path is threaded too, so the pdf prompt can name the file
+    // instead of asking the agent to glob reports/1086-*.md (2026-10-09: a weak
+    // model turned that glob into six envelope-less failures).
+    assert.equal(result.paths.reportFile, join(root, "reports", "1086-xchujibian-software-pm-reval-2026-09-23.md"));
     // Scratch HTML is named by the same resolved number so renderAndMarkPdf's
     // cleanup prefix (cv-web-${reportNum}.) still finds and removes it.
     assert.equal(result.paths.html, join(root, ".career-ops-web", "pdf-tmp", "cv-web-1086.html"));

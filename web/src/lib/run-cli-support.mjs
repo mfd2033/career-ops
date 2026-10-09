@@ -681,11 +681,18 @@ export function persistRunOutcome({ kind, cleanExit, sawError, emittedText, pers
   // 卡片写着 "is it installed and authenticated?"，真因是撞了 checkup 的 1_800_000ms
   // 上限）。这类失败该说的是「换个便宜点的做法」，不是「去查装没装 CLI」。
   if (timedOut) {
-    const limit = kind === "checkup" ? "30-minute checkup limit" : "time limit";
+    const limit = kind === "checkup" ? "30-minute checkup limit" : kind === "evaluate" ? "30-minute limit" : "time limit";
     const head = `This run hit the harness's ${limit} and was stopped — not an install or auth problem.`;
     if (PERSISTENCE_GATED_KINDS.has(kind) && !persisted) {
       const channel = kind === "checkup" ? "data/company-checkups.tsv" : "a report";
       return { ok: false, message: `${head} Nothing was persisted (no ${channel} entry). Re-run it with a smaller research budget.` };
+    }
+    if (kind === "evaluate") {
+      // 「Its artifact did land」对 evaluate 是不可靠归属：persisted = 报告目录在
+      // 窗口内有任何新增，并发 run 落的报告也会计入（2026-10-09 实测：三条并行
+      // 猎聘 evaluate 都收到 "Its artifact did land"，而它们各自占用的
+      // 1110/1112/1113 号从未落盘）。措辞只承诺目录里有新报告，不承诺是本 run 的。
+      return { ok: false, message: `${head} A new report did land in reports/ — check it is THIS run's before re-running.` };
     }
     return {
       ok: false,

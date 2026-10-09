@@ -22,6 +22,7 @@ export function slugify(s) {
 /**
  * @typedef {Object} PdfPaths
  * @property {string} reportNum - The report number the row's Report cell actually links (== the tracker `#` for a never-re-evaluated row, the re-eval's number otherwise). Handed to mark-pdf-ready.mjs / the pdf-index manifest, which resolve by report number.
+ * @property {string} reportFile - Absolute path of the linked evaluation report. Threaded into the pdf prompt so the worker reads the exact file instead of globbing `reports/{num}-*.md` (a weak model turns that glob into minutes of aimless re-globbing and gives up with no CV envelope — 2026-10-09, six failed pdf runs on codebuddy/hy3).
  * @property {string} html - Where the backend writes the tailored HTML it parsed out of the agent's envelope (#2185).
  * @property {string} finalPdf - Where the backend renders the final PDF (output/cv-{candidate}-{company}-{date}.pdf).
  */
@@ -91,6 +92,7 @@ export function resolvePdfPaths(input, today, root, findReportFile) {
     ok: true,
     paths: {
       reportNum,
+      reportFile,
       html: path.join(scratchDir, `cv-web-${reportNum}.html`),
       finalPdf: path.join(root, "output", `cv-${candidateSlug}-${companySlug}-${today}.pdf`),
     },

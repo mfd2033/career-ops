@@ -83,6 +83,27 @@ test("buildPrompt: pdf report glob uses the resolved report number, not the trac
   assert.match(prompt, /application #1079/);
 });
 
+test("buildPrompt: pdf prompt names the exact report file when the server resolved one", () => {
+  // Given the server already resolved the linked report (resolvePdfPaths →
+  // findReportFile): a weak model turned the glob into minutes of aimless
+  // re-globbing and ended with no <<cv-html>> envelope (2026-10-09, six failed
+  // pdf runs on codebuddy/hy3), so the prompt must hand over the path itself
+  const prompt = buildPrompt({
+    kind: "pdf",
+    input: "1079",
+    reportNum: "1086",
+    reportFile: "d:\\workspace\\career-ops\\reports\\1086-x-2026-09-23.md",
+    memory: "",
+    today: "2026-08-04",
+  });
+
+  // Then the exact path is named and the search is forbidden — the agent reads,
+  // it does not hunt
+  assert.match(prompt, /evaluation report at "d:\\workspace\\career-ops\\reports\\1086-x-2026-09-23\.md"/, "must name the exact file");
+  assert.match(prompt, /do NOT search or glob for the report/, "must forbid the hunt");
+  assert.ok(!/reports\/1086-\*\.md/.test(prompt), "the glob wording must be gone when a path is in hand");
+});
+
 test("buildPrompt: every kind ends with exactly one VERDICT instruction", () => {
   // Given each kind — job-store.tsx parses that final line client-side
   for (const kind of ["pdf", "research", "evaluate", "fix-portal"]) {

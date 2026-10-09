@@ -307,7 +307,7 @@ async function runPipeline({
   // 旧版逐字节一致（workflow 第 8 条：技能缺失不硬失败）。决议 8：每派发实时扫。
   const checkupSkill =
     kind === "checkup" ? (resolveSkillCopy(scanSkillRegistry(), OFFER_CHECKUP_SKILL_NAME) ?? undefined) : undefined;
-  const prompt = buildPrompt({ kind, input, memory: readMemory(), today, postedAt, unknownEmployer: readAppConfig().unknownEmployer, checkupCompany, checkupSkill, jdText, company: employer, reportNum: pdfPaths?.reportNum });
+  const prompt = buildPrompt({ kind, input, memory: readMemory(), today, postedAt, unknownEmployer: readAppConfig().unknownEmployer, checkupCompany, checkupSkill, jdText, company: employer, reportNum: pdfPaths?.reportNum, reportFile: pdfPaths?.reportFile });
 
   // Which tools each kind gets, and the whole argv for every runtime that HAS an
   // audited scope, live with those runtimes: claude-invocation.mjs (declared on
@@ -546,12 +546,17 @@ async function runPipeline({
     // OpenCode that chain routinely exceeded the old 285s and the worker was
     // killed mid-report — the reserve sentinel got written but no report, so
     // the honesty gate reported "didn't save a report". Evaluate has no
-    // render phase to reserve headroom for, so give it the full 600s too.
+    // render phase to reserve headroom for, so it shares checkup's allowance.
     // checkup（公司体检，ADR-0027）是重调研：opencode 实测约 10 分钟起步，
     // 600s 的通用 kill 定时器会在它写完 HTML/台账、正要写附录时 SIGTERM
     // （2026-09-15 实测——131/119/124/916 四次「零产物失败」的真根因）。
-    // 30 分钟给足余量；evaluate/pdf 维持 600s。
-    const killMs = kind === "checkup" ? 1_800_000 : 600_000;
+    // 30 分钟给足余量；pdf 维持 600s（信封输出前的 tailoring 本身很快，600s 的
+    // 失败是弱模型打转，加时间救不了——2026-10-09 那条 601s 的 pdf 是唯一例外）。
+    // evaluate 同样提到 1800s：2026-10-09 三条猎聘 evaluate 全部精确死在 600s，
+    // 轨迹显示慢速 CLI（codebuddy/hy3，工具调用间隔可达 1-4 分钟）刚启动报告
+    // Write 就被杀——完整 oferta 链路（browser-extract + WebSearch + reserve +
+    // company-history + 报告/TSV/merge）在 600s 内走不完。
+    const killMs = kind === "checkup" || kind === "evaluate" ? 1_800_000 : 600_000;
     // `killer` is armed AFTER spawn below (the CLI child is null while queued,
     // so there is nothing to kill and terminateCli(null) would throw).
 
