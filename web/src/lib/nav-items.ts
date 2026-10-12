@@ -8,12 +8,11 @@ export type NavItem = {
   href: string;
   labelKey: string;
   icon: ComponentType<SVGProps<SVGSVGElement>>;
-  chipKey?: string;
 };
 
 export const NAV_ITEMS: NavItem[] = [
   { href: "/", labelKey: "nav.today", icon: LayoutDashboard },
-  { href: "/explore", labelKey: "nav.explore", icon: Compass, chipKey: "nav.newChip" },
+  { href: "/explore", labelKey: "nav.explore", icon: Compass },
   { href: "/pipeline", labelKey: "nav.pipeline", icon: ListChecks },
   { href: "/followups", labelKey: "nav.followups", icon: Send },
   { href: "/portals", labelKey: "nav.portals", icon: Radar },

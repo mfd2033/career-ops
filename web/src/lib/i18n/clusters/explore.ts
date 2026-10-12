@@ -6,7 +6,6 @@ import type { Dict } from "../types";
 export const en: Dict = {
   // ── Page header / mode toggle ──
   "explore.title": "Explore",
-  "explore.badgeNew": "New",
   "explore.mode.scan": "Scan",
   "explore.mode.browser": "Browser",
   "explore.mode.aiSearch": "AI search",
@@ -283,7 +282,6 @@ export const en: Dict = {
 export const zh: Dict = {
   // ── 页面标题 / 模式切换 ──
   "explore.title": "探索",
-  "explore.badgeNew": "新",
   "explore.mode.scan": "扫描",
   "explore.mode.browser": "浏览器",
   "explore.mode.aiSearch": "AI 搜索",
