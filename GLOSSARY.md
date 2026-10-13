@@ -38,3 +38,15 @@ _Avoid_: 打分、评分（不区分两套系统时）
 **多份比较（ofertas）**:
 手上已有多个 offer 时的十维加权矩阵，权重公开。与单份评估是两套算法，不可互相引用分数。
 _Avoid_: 批量评估
+
+**体检分数**:
+公司体检台账（`data/company-checkups.tsv`）里某个 tracker# 最近一次的推荐 star（1.0–5.0），
+对外字段名 `checkupStar`。它只为展示与排序而存在，永远不是匹配分的一部分，也不参与任何
+过滤或门禁（ADR-0064）。无台账 → null，界面走占位符。
+_Avoid_: 体检分（易与「评分」混读）、推荐指数（那是报告里的说法）、体检评级
+
+**投递状态**:
+tracker 行在生命周期里的位置，规范集只有 `templates/states.yml` 的 9 个值（Evaluated /
+Applied / Responded / Interview / Offer / Rejected / Discarded / SKIP / Hired）。接口与数据层
+永远用这些原始值；中文标签（已申请/面试中…）只存在于前端字典（ADR-0074）。
+_Avoid_: 进度、阶段（泛指时）、状态码

@@ -16,7 +16,7 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 const mod = await import(pathToFileURL(join(ROOT, "extension", "report-target-pure.js")).href);
-const { pickReportTarget, parseWebTab, reportPath, reportUrl, urlKey, NO_SERVICE_ERROR, WEB_PORT_MIN, WEB_PORT_MAX } = mod.default ?? mod;
+const { pickReportTarget, parseWebTab, reportPath, reportUrl, checkupPath, checkupUrl, urlKey, NO_SERVICE_ERROR, WEB_PORT_MIN, WEB_PORT_MAX } = mod.default ?? mod;
 
 /** 造一个 chrome.tabs.query 形状的标签页。 */
 const tab = (url, { id = 1, windowId = 1, active = false } = {}) => ({ id, windowId, active, url });
@@ -169,4 +169,58 @@ test("reuse 结果同时带 url 与 path：path 是 web 端的前端路由目标
   assert.equal(r.path, "/report/12");
   assert.equal(reportPath("12"), "/report/12");
   assert.ok(r.url.endsWith(r.path), "整页 URL 必须以同一个 path 收尾（回退导航与前端路由指向同一张报告）");
+});
+
+// ---- 次要出口的另一条腿：体检报告落点（ADR-0074 接缝 D）-----------------
+//
+// 弹窗是主阅读路径，「在 web 端打开」降级为次要出口，但它复用同一条 ADR-0055
+// 落点解析。体检报告在 web 端没有前端路由页（它是台账里那份自包含 HTML，经
+// /api/checkup-report 只读提供），所以落点模式与评估报告不同：带 query。
+
+test("checkupPath / checkupUrl 的落点模式：query 携 tracker#，origin 仍是 localhost", () => {
+  assert.equal(checkupPath("42"), "/api/checkup-report?n=42");
+  assert.equal(checkupUrl(3007, "42"), "http://localhost:3007/api/checkup-report?n=42");
+});
+
+test("体检报告号同样只收数字（脏值不拼进 URL）", () => {
+  assert.equal(pickReportTarget({ livePort: 3000, tabs: [], currentWindowId: 1, num: "42/../x", kind: "checkup" }).action, "create");
+  assert.equal(pickReportTarget({ livePort: 3000, tabs: [], currentWindowId: 1, num: "42/../x", kind: "checkup" }).url, "http://localhost:3000/api/checkup-report?n=42");
+  assert.equal(pickReportTarget({ livePort: 3000, tabs: [], currentWindowId: 1, num: "<script>", kind: "checkup" }).action, "error");
+});
+
+test("kind:checkup 走体检落点，kind 缺省 / report 走评估报告（既有行为逐字不变）", () => {
+  const tabs = [tab("http://localhost:3000/pipeline", { id: 5 })];
+  assert.equal(pickReportTarget({ livePort: 3000, tabs, currentWindowId: 1, num: 12, kind: "checkup" }).path, "/api/checkup-report?n=12");
+  assert.equal(pickReportTarget({ livePort: 3000, tabs, currentWindowId: 1, num: 12 }).path, "/report/12");
+  assert.equal(pickReportTarget({ livePort: 3000, tabs, currentWindowId: 1, num: 12, kind: "report" }).url, "http://localhost:3000/report/12");
+});
+
+test("幂等判定对带 query 的落点看见 query：同 pathname 不同 n 不是同一个页", () => {
+  const r = pickReportTarget({
+    livePort: 3000,
+    tabs: [tab("http://localhost:3000/api/checkup-report?n=99", { id: 7 })],
+    currentWindowId: 1,
+    num: 12,
+    kind: "checkup",
+  });
+  assert.equal(r.action, "reuse");
+  assert.equal(r.navigate, true, "已在 n=99 的体检页上，不能只聚焦不导航");
+  const same = pickReportTarget({
+    livePort: 3000,
+    tabs: [tab("http://localhost:3000/api/checkup-report?n=12", { id: 7 })],
+    currentWindowId: 1,
+    num: 12,
+    kind: "checkup",
+  });
+  assert.equal(same.navigate, false, "同一个体检报告才算幂等");
+});
+
+test("不带 query 的落点仍旧只看 origin+pathname（评估报告的幂等口径不漂）", () => {
+  assert.equal(urlKey("http://localhost:3000/report/12"), urlKey("http://localhost:3000/report/12?foo=bar"), "缺省不纳入 query：评估报告页带跟踪参数依旧算同一页");
+  assert.notEqual(
+    urlKey("http://localhost:3000/api/checkup-report?n=1", true),
+    urlKey("http://localhost:3000/api/checkup-report?n=2", true),
+    "显式 withQuery 才能区分两份不同的体检报告"
+  );
+  assert.equal(urlKey("http://localhost:3000/report/12", true), urlKey("http://localhost:3000/report/12"), "显式 withQuery 对无 query 的 URL 无副作用");
 });

@@ -1,6 +1,6 @@
 # Glossary — 浏览器扩展（BOSS直聘 + 猎聘，就地评估）
 
-协同阅读：`docs/adr/0002-boss-zhipin-extension-inline-evaluation.md`、`docs/adr/0005-liepin-extension-adaptation.md`、`docs/adr/0055-report-jump-reuses-open-web-tab.md`
+协同阅读：`docs/adr/0002-boss-zhipin-extension-inline-evaluation.md`、`docs/adr/0005-liepin-extension-adaptation.md`、`docs/adr/0055-report-jump-reuses-open-web-tab.md`、`docs/adr/0074-report-status-contract-and-inpage-reader-modal.md`
 
 ## 扩展本体
 
@@ -20,7 +20,7 @@
 - **归一 URL（normalizeUrl）**：把职位 URL 降为稳定比较键（strip 跟踪参数等），作为「已评估」匹配 key。`web/src/lib/core/url-key.mjs` 是根 `url-key.mjs` 的镜像，必须 byte 对齐。
 - **scoredUrls**：`pipelineSummary()` 内由 reports `**URL:**` header 构建的归一 URL→score 映射，判定「已评估」的现成数据源。
 - **报告号（reportNum）**：tracker 应用行的 `n`，也是报告文件/报告页路由编号，跳转 `http://localhost:{port}/report/{num}` 用。
-- **已评估映射（evaluated map）**：插件每次加载拉取的 `{归一URL → {score, reportNum}}` 集合；评估完成后主动刷新。
+- **已评估映射（evaluated map）**：插件每次加载拉取的 `{归一URL → {score, reportNum, status, checkupStar}}` 集合；评估完成后主动刷新。`status` 是 tracker 行的**原始规范值**（语言不进契约），`checkupStar` 只供展示。一个 URL 命中多行时首个 app 胜出，四个字段同取自行。契约见 `docs/adr/0074-report-status-contract-and-inpage-reader-modal.md`。
 
 ## 站点解耦与内联评估
 
@@ -40,3 +40,10 @@
 - **web 端标签页复用（reuse open web tab）**：`open-report` 的目标解析策略——已开着 web 端标签页时不再新建标签页，而是激活它并把报告开在它里面（前端路由跳转，不刷新）；目标标签页已在同一报告 URL 时只聚焦不跳转；解析不到任何 web 端标签页才退回 `chrome.tabs.create`；端口探测失败则维持报错 toast、不做任何跳转。决策见 `docs/adr/0055-report-jump-reuses-open-web-tab.md`（含 2026-09-23 修订）。
 - **报告跳转目标解析（report target resolution）**：从浏览器已开标签页里挑出跳转目标的纯逻辑——候选筛选（协议 http + 主机 `localhost`/`127.0.0.1` + 端口落在 3000-3040 的粗判，不做身份握手）、优先级排序（存活端口优先 → 当前窗口 active → 当前窗口首个 → 全库首个）、同 URL 幂等判定、无候选兜底判定，并产出成对的 `path`（前端路由目标）与 `url`（回退整页导航目标）。抽在 `*-pure.js`（不引用 `chrome`/`window`/`document`）供 node 单测，`chrome.tabs`/`chrome.windows` 调用层仅手工验证。
 - **扩展 → web 前端路由跳转（extension→web route navigation）**：SW 请 web 端自己跳到某张报告、避免整页刷新的反向通道（ADR-0055 修订；ADR-0007 的桥自此双向）。链路：SW `chrome.tabs.sendMessage({type:"career-navigate", path})` → web-bridge.js 转成页面消息 `__careerExt:nav` → 根 layout 的 `ExtNavBridge` 监听后 `router.push(path)` → 回 `__careerExt:nav-ack` → web-bridge 据此应答 SW。页面 800ms 不应答（旧版 web / 未 hydrate）时 SW 回退整页导航；页面只接受 `/report/{数字}` 目标，白名单外不应答。
+
+## 详情页浮窗与阅读弹窗（ADR-0074）
+
+- **职位浮窗（detail panel）**：职位详情页上取代旧四个独立固定元素（已评估徽章 / 快评徽章 / 评估按钮 / 快评按钮）的**单个**可拖拽、可收起浮窗。展开态四行读数（已评估分数 + 报告号 / 快评 / 投递状态 / 体检）+ 两个动作，收起态一枚药丸只留状态色点与总分。只在 `isDetailPath` 为真的详情页出现，位置不持久化；视图态集中在 `extension/detail-panel-pure.js`。
+- **页内阅读弹窗（in-page reader modal）**：在招聘站页面内弹出的居中遮罩大 modal，读评估报告（markdown，扩展侧渲染成浅色阅读版式 + 右侧可收起目录）与体检报告（自包含 HTML，进 `sandbox=""` 的 `srcdoc` iframe）。正文经 background SW 代发 `fetch` 取得（避开 https 页内拉 `http://localhost` 的混合内容拦截），弹窗严格只读。
+- **次要出口（secondary exit）**：弹窗标题栏的「↗ 在 web 端打开」——弹窗是主阅读路径，需要站内导航/PDF/改状态/重跑体检时回 web 端。目标解析仍走 ADR-0055（评估报告 `/report/{n}` 可前端路由，体检 `/api/checkup-report?n=` 走整页导航）。
+- **双份状态字典（intentional duplicate status dictionary）**：投递状态的中文/色值映射在 web（TS i18n `pipeline.status.*`）与扩展（`detail-panel-pure.js`）各一份。content script 是纯 JS、无法 import TS，所以这不是待合并的重复；两份都以 `templates/states.yml` 为真值，各自被自己的测试锁住。

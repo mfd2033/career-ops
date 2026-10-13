@@ -2,7 +2,7 @@
 //
 // 与原 BOSS 单文件 content.js 的差异：站点相关部分（选择器、JD 提取、右栏
 // 面板按钮）移入 site-boss.js / site-liepin.js，通过 site 适配对象注入。
-// 本文件只承载站点无关逻辑：归一 URL、徽章/按钮注入、评估/快评消息、
+// 本文件只承载站点无关逻辑：归一 URL、徽章/浮窗注入、评估/快评消息、
 // MutationObserver、diag。每站入口文件（site-*.js）末尾调用
 // window.__careerExtCore.init(site) 启动。
 //
@@ -18,6 +18,9 @@
   // scan-pure.js 的纯逻辑层(先于本文件加载,window.__careerScanPure)。node 无此
   // 上下文;scan mode 全部走 SCAN.* 守卫,缺失即静默不提供采集。
   let SCAN = null;
+  // detail-panel-pure.js 的纯逻辑层（同样先于本文件加载）：详情页浮窗「显示什么」
+  // 的全景判断在那边，core 只做 DOM 胶水。缺失时浮窗静默不提供。
+  let PANEL = null;
 
   // The evaluated map lives in the background; this mirrors it locally on refresh.
   let evaluated = {}; // normalizedUrl → { score, reportNum }
@@ -59,7 +62,6 @@
 
   // ---- 共享状态 ------------------------------------------------------------
   const selectedKeys = new Set();
-  let detailInjected = false;
   let detailEvaluating = false;
   let quickEvaluating = false;
   let resolvedOnce = false;
@@ -126,7 +128,8 @@
     box = document.createElement("div");
     box.id = QUICK_ERR_ID;
     box.style.cssText =
-      "position:fixed;top:88px;right:16px;z-index:2147483647;max-width:420px;" +
+      // 避开右上角的详情页浮窗（top:80/right:20）与右下角的 toast：落到左下角。
+      "position:fixed;left:16px;bottom:16px;z-index:2147483647;max-width:420px;" +
       "background:#d93026;color:#fff;border-radius:8px;box-shadow:0 6px 18px rgba(0,0,0,.35);" +
       "font-family:system-ui,sans-serif;font-size:12px;padding:10px 12px;line-height:1.5;";
     const label = document.createElement("div");
@@ -174,8 +177,10 @@
 
   // 跳转落点（复用已打开的 web 端 / 新开标签页）由 background 解析（ADR-0055）：
   // 成功时把结果交给 onDone，调用方据此按实际落点写文案；失败仍是同一句 toast。
-  function openReport(num, onDone) {
-    sendMsg({ type: "open-report", num }, (res) => {
+  // kind 决定落点是评估报告页还是体检报告页（"report" 缺省 / "checkup"），
+  // 在弹窗里它是「在 web 端打开」这个次要出口的去处。
+  function openReport(num, onDone, kind) {
+    sendMsg({ type: "open-report", num, kind }, (res) => {
       if (chrome.runtime.lastError || !res || !res.ok) {
         showToast(res && res.error ? res.error : "本地报告打不开：本地 web 服务可能未运行", true);
         return;
@@ -260,133 +265,642 @@
     });
   }
 
-  // ---- detail page button ---------------------------------------------------
-
-  const DETAIL_BADGE_ID = "career-ext-detail-badge";
-  const DETAIL_QUICK_BADGE_ID = "career-ext-detail-quick-badge";
+  // ---- 详情页浮窗（ADR-0074）-----------------------------------------------
+  // 曾经是右侧四个各自 position:fixed 的独立元素（已评估徽章 / 快评徽章 / 评估按钮 /
+  // 快评按钮），靠互相测距堆叠，谁出现谁消失。合并成单个浮窗后：
+  //   • 「显示什么」（占位符、分色、按钮文案、收起药丸取哪个分）全在 detail-panel-pure.js；
+  //   • 本段只做 DOM 胶水 —— 建一次骨架、把视图态涂上去、接拖拽/收起/动作事件。
+  // 动作按钮沿用原 id：评估收尾（settleButtons）与快评消息处理器认的就是这两个 id。
+  const DETAIL_PANEL_ID = "career-ext-detail-panel";
+  const DETAIL_PANEL_CSS_ID = "career-ext-detail-panel-css";
   const DETAIL_EVAL_BTN_ID = "career-ext-eval-btn";
   const DETAIL_QUICK_BTN_ID = "career-ext-quick-btn";
 
-  function injectDetailButton() {
-    if (detailInjected) return;
-    detailInjected = true;
-    const btn = makeButton({
-      id: DETAIL_EVAL_BTN_ID,
-      text: "评估本职位",
-      css:
-        "position:fixed;right:20px;top:80px;z-index:2147483647;" +
-        "padding:10px 16px;border:none;border-radius:8px;cursor:pointer;" +
-        "background:#00c68d;color:#fff;font-size:14px;font-weight:600;" +
-        "font-family:system-ui,sans-serif;box-shadow:0 4px 12px rgba(0,0,0,.3);",
-    });
-    btn.addEventListener("click", () => {
-      if (detailEvaluating) return;
-      detailEvaluating = true;
-      btn.disabled = true;
-      btn.textContent = "评估中...";
-      // 站点声明 evaluateInlineJd 时(猎聘等登录墙站),详情页评估直接带 DOM 提取
-      // 的 JD 全文 + 雇主名,绕开服务端二次抓取;BOSS 不声明,行为保持原样。
-      const extra = {};
-      if (site.evaluateInlineJd) {
-        const { title, text } = site.extractDetailJd();
-        if (text) {
-          extra.jdText = [title, text].filter(Boolean).join("\n").trim().slice(0, 12000);
-          extra.company = site.extractPosterName();
-        }
+  // 类名一律带 ce- 前缀，且每条规则锁在 #career-ext-detail-panel 之下 —— 招聘站样式表
+  // 里躺着 .row / .panel / .btn 这类名字的概率极高，撞上一个就被反向污染。
+  // 不用 color-mix()：manifest 的 minimum_chrome_version 是 110，而它要 111+。
+  const PANEL_CSS = [
+    `#${DETAIL_PANEL_ID}{position:fixed;top:80px;right:20px;z-index:2147483647;width:230px;`,
+    "background:rgba(18,22,28,.92);color:#eef2f7;border:1px solid #1d2430;border-radius:14px;",
+    "box-shadow:0 12px 34px rgba(0,0,0,.38);backdrop-filter:blur(6px);font-size:13px;user-select:none;",
+    'font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif}',
+    `#${DETAIL_PANEL_ID} *,#${DETAIL_PANEL_ID} *::before,#${DETAIL_PANEL_ID} *::after{box-sizing:border-box;margin:0}`,
+    // 标题栏 —— 唯一拖拽热区
+    `#${DETAIL_PANEL_ID} .ce-bar{display:flex;align-items:center;gap:8px;padding:9px 10px 9px 12px;`,
+    "cursor:grab;border-bottom:1px solid rgba(255,255,255,.08)}",
+    `#${DETAIL_PANEL_ID}.ce-collapsed .ce-bar{border-bottom:none}`,
+    `#${DETAIL_PANEL_ID} .ce-bar:active{cursor:grabbing}`,
+    `#${DETAIL_PANEL_ID} .ce-grip{color:#8a929c;letter-spacing:-2px;font-weight:700}`,
+    `#${DETAIL_PANEL_ID} .ce-title{font-weight:600;font-size:12px;letter-spacing:.02em;flex:1;color:#eef2f7}`,
+    `#${DETAIL_PANEL_ID} .ce-toggle{appearance:none;-webkit-appearance:none;border:0;width:22px;height:22px;`,
+    "background:rgba(255,255,255,.08);color:#eef2f7;border-radius:6px;cursor:pointer;font-size:12px;",
+    "line-height:1;display:grid;place-items:center;font-family:inherit}",
+    `#${DETAIL_PANEL_ID} .ce-toggle:hover{background:rgba(255,255,255,.16)}`,
+    `#${DETAIL_PANEL_ID} .ce-toggle:focus-visible{outline:2px solid #4aa3ff;outline-offset:1px}`,
+    // 读数行 —— 签名元素：左侧语义色轨 + 等宽数字；最后一列固定宽，链接藏而不删
+    `#${DETAIL_PANEL_ID} .ce-body{padding:6px 12px 12px}`,
+    `#${DETAIL_PANEL_ID}.ce-collapsed .ce-body{display:none}`,
+    `#${DETAIL_PANEL_ID} .ce-row{display:grid;grid-template-columns:4px 62px 1fr 22px;align-items:center;`,
+    "gap:9px;padding:7px 0;border-bottom:1px solid rgba(255,255,255,.05)}",
+    `#${DETAIL_PANEL_ID} .ce-row:last-child{border-bottom:none}`,
+    `#${DETAIL_PANEL_ID} .ce-rail{width:4px;height:22px;border-radius:2px;background:#8a8f98}`,
+    `#${DETAIL_PANEL_ID} .ce-k{color:#8a929c;font-size:12px}`,
+    `#${DETAIL_PANEL_ID} .ce-v{font-variant-numeric:tabular-nums;font-weight:600;text-align:right;color:#eef2f7;`,
+    "overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
+    `#${DETAIL_PANEL_ID} .ce-v em{font-style:normal;color:#8a929c;font-weight:500}`,
+    `#${DETAIL_PANEL_ID} .ce-rpt{color:#8a929c;font-weight:500;font-size:11px;margin-left:6px}`,
+    `#${DETAIL_PANEL_ID} .ce-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;`,
+    "vertical-align:1px}",
+    `#${DETAIL_PANEL_ID} .ce-link{background:none;border:0;color:#4aa3ff;cursor:pointer;font-size:14px;`,
+    "padding:2px 4px;border-radius:5px;width:22px;font-family:inherit}",
+    `#${DETAIL_PANEL_ID} .ce-link:hover{background:rgba(74,163,255,.16)}`,
+    `#${DETAIL_PANEL_ID} .ce-link:focus-visible{outline:2px solid #4aa3ff;outline-offset:1px}`,
+    // 动作区
+    `#${DETAIL_PANEL_ID} .ce-acts{display:flex;gap:8px;margin-top:12px}`,
+    `#${DETAIL_PANEL_ID} .ce-btn{flex:1;border:0;border-radius:9px;padding:9px 8px;font:inherit;`,
+    "font-weight:600;font-size:12.5px;cursor:pointer;color:#fff;transition:filter .15s ease}",
+    `#${DETAIL_PANEL_ID} .ce-btn:hover{filter:brightness(1.08)}`,
+    `#${DETAIL_PANEL_ID} .ce-btn:focus-visible{outline:2px solid #fff;outline-offset:-3px}`,
+    `#${DETAIL_PANEL_ID} .ce-btn-eval{background:#00c68d}`,
+    `#${DETAIL_PANEL_ID} .ce-btn-quick{background:#7c5cff}`,
+    `#${DETAIL_PANEL_ID} .ce-btn[disabled]{opacity:.6;cursor:default;filter:none}`,
+    // 收起态药丸
+    `#${DETAIL_PANEL_ID} .ce-pill{display:none;align-items:center;gap:8px;padding:10px 12px}`,
+    `#${DETAIL_PANEL_ID}.ce-collapsed .ce-pill{display:flex}`,
+    `#${DETAIL_PANEL_ID} .ce-pill .ce-score{font-variant-numeric:tabular-nums;font-weight:700;`,
+    "margin-left:auto;color:#eef2f7}",
+    `#${DETAIL_PANEL_ID} .ce-expand{background:rgba(255,255,255,.1);border:0;color:#eef2f7;border-radius:6px;`,
+    "padding:3px 8px;font-size:11px;cursor:pointer;font-family:inherit}",
+    `#${DETAIL_PANEL_ID} .ce-expand:hover{background:rgba(255,255,255,.2)}`,
+    "@media (prefers-reduced-motion:reduce){", `#${DETAIL_PANEL_ID} *,#${DETAIL_PANEL_ID} *::before,`,
+    `#${DETAIL_PANEL_ID} *::after{transition:none!important;animation:none!important}}`,
+  ].join("");
+
+  // 骨架一次建好，之后只改 textContent/style，绝不重建节点 —— 换职位时拖拽位置与
+  // 展开/收起态要保持不变。四行读数恒定存在，缺值走占位符，行结构不跳动。
+  const PANEL_HTML = [
+    '<div class="ce-bar">',
+    '<span class="ce-grip" title="拖动">⠿</span>',
+    '<span class="ce-title">career-ops</span>',
+    '<button class="ce-toggle" type="button" title="收起" aria-label="收起浮窗">–</button>',
+    "</div>",
+    '<div class="ce-body">',
+    '<div class="ce-row"><span class="ce-rail" data-r="eval"></span><span class="ce-k">已评估</span>',
+    '<span class="ce-v" data-v="eval"></span>',
+    '<button class="ce-link" type="button" data-link="eval" title="打开评估报告">↗</button></div>',
+    '<div class="ce-row"><span class="ce-rail" data-r="quick"></span><span class="ce-k">快评</span>',
+    '<span class="ce-v" data-v="quick"></span><span></span></div>',
+    '<div class="ce-row"><span class="ce-rail" data-r="status"></span><span class="ce-k">状态</span>',
+    '<span class="ce-v" data-v="status"></span><span></span></div>',
+    '<div class="ce-row"><span class="ce-rail" data-r="checkup"></span><span class="ce-k">体检</span>',
+    '<span class="ce-v" data-v="checkup"></span>',
+    '<button class="ce-link" type="button" data-link="checkup" title="打开体检报告">↗</button></div>',
+    '<div class="ce-acts">',
+    `<button class="ce-btn ce-btn-eval" type="button" id="${DETAIL_EVAL_BTN_ID}">评估本职位</button>`,
+    `<button class="ce-btn ce-btn-quick" type="button" id="${DETAIL_QUICK_BTN_ID}">快评</button>`,
+    "</div></div>",
+    '<div class="ce-pill">',
+    '<span class="ce-dot" data-pill="dot"></span><span class="ce-k" data-pill="status"></span>',
+    '<span class="ce-score" data-pill="score"></span>',
+    '<button class="ce-expand" type="button" data-pill="expand">展开</button></div>',
+  ].join("");
+
+  let panelEl = null;
+  let panelRefs = null;
+  let panelCollapsed = false; // 收起态在本标签页内延续（位置不持久化，刷新回默认位）
+  let panelSig = null; // 上次渲染的视图指纹，用于跳过无变化的重涂
+  let panelReportNum = null; // ↗ 的去处，随当前职位更新
+
+  function injectPanelStyles() {
+    if (document.getElementById(DETAIL_PANEL_CSS_ID)) return;
+    const s = document.createElement("style");
+    s.id = DETAIL_PANEL_CSS_ID;
+    s.textContent = PANEL_CSS;
+    (document.head || document.documentElement).appendChild(s);
+  }
+
+  function setPanelCollapsed(c) {
+    panelCollapsed = c;
+    if (!panelEl) return;
+    panelEl.classList.toggle("ce-collapsed", c);
+    const t = panelRefs.toggle;
+    t.textContent = c ? "+" : "–";
+    t.title = c ? "展开" : "收起";
+    t.setAttribute("aria-label", c ? "展开浮窗" : "收起浮窗");
+  }
+
+  function removeDetailPanel() {
+    if (!panelEl) return;
+    panelEl.remove();
+    panelEl = null;
+    panelRefs = null;
+    panelSig = null;
+    // 浮窗没了，压在上面的阅读弹窗也就没了载体（SPA 从详情页切回列表页时）。
+    removeReader();
+  }
+
+  /** 完整评估：与旧固定按钮同一套流程（inline JD 直传 + 轮询收尾兜底）。 */
+  function onPanelEvalClick() {
+    const btn = panelRefs.btnEval;
+    if (detailEvaluating || btn.disabled) return;
+    detailEvaluating = true;
+    btn.disabled = true;
+    btn.textContent = "评估中...";
+    // 站点声明 evaluateInlineJd 时(猎聘等登录墙站),详情页评估直接带 DOM 提取
+    // 的 JD 全文 + 雇主名,绕开服务端二次抓取;BOSS 不声明,行为保持原样。
+    const extra = {};
+    if (site.evaluateInlineJd) {
+      const { title, text } = site.extractDetailJd();
+      if (text) {
+        extra.jdText = [title, text].filter(Boolean).join("\n").trim().slice(0, 12000);
+        extra.company = site.extractPosterName();
       }
-      sendSingleEvaluate(location.href, (err) => {
+    }
+    sendSingleEvaluate(
+      location.href,
+      (err) => {
         detailEvaluating = false;
         btn.disabled = false;
-        btn.textContent = "评估本职位";
         stopEvalPoll();
+        renderDetailPanel();
         showToast(err, true);
-      }, extra);
-      // 登记轮询收尾:SW 死亡等消息路径失效时,轮询保证按钮能恢复。
-      startEvalPoll(location.href);
-    });
-    document.body.appendChild(btn);
+      },
+      extra
+    );
+    // 登记轮询收尾:SW 死亡等消息路径失效时,轮询保证按钮能恢复。
+    startEvalPoll(location.href);
+  }
 
-    // 「快评」— 独立按钮，秒出分数徽章，只读（不写 tracker/报告/CV）。
-    const qbtn = makeButton({
-      id: DETAIL_QUICK_BTN_ID,
-      text: "快评",
-      css:
-        "position:fixed;right:20px;top:80px;z-index:2147483647;" +
-        "padding:10px 16px;border:none;border-radius:8px;cursor:pointer;" +
-        "background:#7c5cff;color:#fff;font-size:14px;font-weight:600;" +
-        "font-family:system-ui,sans-serif;box-shadow:0 4px 12px rgba(0,0,0,.3);",
+  /** 快评：秒出分数，只读（不写 tracker/报告/CV）；分数落在快评行而非按钮上。 */
+  function onPanelQuickClick() {
+    const btn = panelRefs.btnQuick;
+    if (quickEvaluating || btn.disabled) return;
+    const { title, text } = site.extractDetailJd();
+    if (!text) {
+      showToast("快评：未能提取职位描述文本", true);
+      return;
+    }
+    quickEvaluating = true;
+    btn.disabled = true;
+    btn.textContent = "快评中...";
+    sendQuickEval({ url: location.href, title, text, poster: site.extractPosterName() }, (err) => {
+      quickEvaluating = false;
+      btn.disabled = false;
+      btn.textContent = "快评";
+      showQuickError(err);
     });
-    qbtn.addEventListener("click", () => {
-      if (quickEvaluating || qbtn.disabled) return;
-      const { title, text } = site.extractDetailJd();
-      if (!text) {
-        showToast("快评：未能提取职位描述文本", true);
+  }
+
+  function buildDetailPanel() {
+    injectPanelStyles();
+    const el = document.createElement("div");
+    el.id = DETAIL_PANEL_ID;
+    el.innerHTML = PANEL_HTML;
+    document.body.appendChild(el);
+    panelEl = el;
+    const q = (sel) => el.querySelector(sel);
+    panelRefs = {
+      bar: q(".ce-bar"),
+      toggle: q(".ce-toggle"),
+      btnEval: el.querySelector(`#${DETAIL_EVAL_BTN_ID}`),
+      btnQuick: el.querySelector(`#${DETAIL_QUICK_BTN_ID}`),
+      rails: { eval: q('[data-r="eval"]'), quick: q('[data-r="quick"]'), status: q('[data-r="status"]'), checkup: q('[data-r="checkup"]') },
+      vals: { eval: q('[data-v="eval"]'), quick: q('[data-v="quick"]'), status: q('[data-v="status"]'), checkup: q('[data-v="checkup"]') },
+      links: { eval: q('[data-link="eval"]'), checkup: q('[data-link="checkup"]') },
+      pill: { dot: q('[data-pill="dot"]'), status: q('[data-pill="status"]'), score: q('[data-pill="score"]'), expand: q('[data-pill="expand"]') },
+    };
+
+    // 拖拽：只有标题栏是热区；切成 left/top 定位才能自由移动，位置不写进 storage。
+    let drag = null;
+    panelRefs.bar.addEventListener("pointerdown", (e) => {
+      if (e.target.closest(".ce-toggle")) return; // 收起按钮不该顺手把面板拖走
+      const r = el.getBoundingClientRect();
+      drag = { dx: e.clientX - r.left, dy: e.clientY - r.top };
+      el.style.right = "auto";
+      el.style.left = `${r.left}px`;
+      el.style.top = `${r.top}px`;
+      panelRefs.bar.setPointerCapture(e.pointerId);
+      e.preventDefault();
+    });
+    panelRefs.bar.addEventListener("pointermove", (e) => {
+      if (!drag) return;
+      el.style.left = `${e.clientX - drag.dx}px`;
+      el.style.top = `${e.clientY - drag.dy}px`;
+    });
+    const endDrag = () => {
+      drag = null;
+    };
+    panelRefs.bar.addEventListener("pointerup", endDrag);
+    panelRefs.bar.addEventListener("pointercancel", endDrag);
+
+    panelRefs.toggle.addEventListener("click", () => setPanelCollapsed(!panelCollapsed));
+    panelRefs.pill.expand.addEventListener("click", () => setPanelCollapsed(false));
+    panelRefs.btnEval.addEventListener("click", onPanelEvalClick);
+    panelRefs.btnQuick.addEventListener("click", onPanelQuickClick);
+    // 详情页读报告的主路径：页内弹窗（ADR-0074），不再把用户丢到另一个标签页。
+    for (const name of ["eval", "checkup"]) {
+      panelRefs.links[name].addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        openReader(name === "checkup" ? "checkup" : "report", panelReportNum);
+      });
+    }
+    setPanelCollapsed(panelCollapsed);
+  }
+
+  /**
+   * 一行的视图态 → DOM。缺值走 <em> 占位符（纯层用 PLACEHOLDER_* 表达缺值），
+   * ↗ 用 visibility 而非移除，保证列宽不因为哪一行有值而跳。
+   */
+  function paintRow(name, row) {
+    panelRefs.rails[name].style.background = row.color;
+    const v = panelRefs.vals[name];
+    v.textContent = "";
+    if (row.dot) {
+      const d = document.createElement("span");
+      d.className = "ce-dot";
+      d.style.background = row.color;
+      v.appendChild(d);
+    }
+    const isPlaceholder = !row.text || row.text === PANEL.PLACEHOLDER_STATUS || row.text === PANEL.PLACEHOLDER_DASH;
+    if (isPlaceholder) {
+      const em = document.createElement("em");
+      em.textContent = row.text || PANEL.PLACEHOLDER_DASH;
+      v.appendChild(em);
+    } else {
+      v.appendChild(document.createTextNode(row.text));
+    }
+    if (row.reportNum) {
+      const s = document.createElement("span");
+      s.className = "ce-rpt";
+      s.textContent = `#${row.reportNum}`;
+      v.appendChild(s);
+    }
+    v.title = row.title || "";
+    const link = panelRefs.links[name];
+    if (link) {
+      link.style.visibility = row.openable ? "visible" : "hidden";
+      // 悬停提示落在真正可点的 ↗ 上（而不是只落在读数上），提示与点击目标对齐；
+      // 没给 title 的行（已评估）保留骨架里的静态文案，不拿空串把它抹掉。
+      if (row.title) link.title = row.title;
+    }
+  }
+
+  function renderDetailPanel() {
+    if (!site || !PANEL) return; // 纯层缺失（异常注入顺序）→ 静默不提供浮窗，同 SCAN 口径
+    if (!site.isDetailPath(location.pathname)) {
+      removeDetailPanel();
+      return;
+    }
+    const key = normalizeUrl(location.href);
+    const view = PANEL.panelView({ entry: evaluated[key] || null, quick: quickMap[key] || null });
+    // 同一职位、同一状态不重涂：MutationObserver 在懒加载页上打得很密。
+    // panelEl 还要确认仍在 DOM 里：站点 SPA 如果把 body 直接子节点摘掉重装，光判变量
+    // 非空会让浮窗永不重建（与 ensureReader 同一个口径）。
+    const sig = [
+      key,
+      view.evalRow.text,
+      view.evalRow.reportNum,
+      view.quickRow.text,
+      view.statusRow.text,
+      view.checkupRow.text,
+      view.evalBtnLabel,
+      detailEvaluating,
+      view.pill.scoreText,
+    ].join("|");
+    if (panelEl && document.body.contains(panelEl) && sig === panelSig) return;
+    if (!panelEl || !document.body.contains(panelEl)) buildDetailPanel();
+    panelSig = sig;
+    panelReportNum = view.evalRow.reportNum;
+    paintRow("eval", view.evalRow);
+    paintRow("quick", view.quickRow);
+    paintRow("status", view.statusRow);
+    paintRow("checkup", view.checkupRow);
+    if (!detailEvaluating) panelRefs.btnEval.textContent = view.evalBtnLabel;
+    panelRefs.pill.dot.style.background = view.pill.dotColor;
+    panelRefs.pill.status.textContent = view.pill.statusText;
+    panelRefs.pill.score.textContent = view.pill.scoreText;
+    panelRefs.pill.score.style.color = view.pill.scoreColor;
+  }
+
+  // ---- 页内阅读弹窗（ADR-0074）-----------------------------------------
+  //
+  // 详情页读报告的主路径：点浮窗行尾 ↗ 就在本页弹出居中 modal，不再把用户丢到另一个
+  // 标签页（ADR-0055 的跳转降级为标题栏的「在 web 端打开」次要出口）。
+  //   • 评估报告（markdown）→ 纯层 mdToHtml 渲染；正文浅色阅读版式，不跟随 web 端的深色
+  //     主题（阅读体验跟这个页面绑定，不跟另一个产品的主题色绑定），右侧目录默认展开。
+  //   • 体检报告（自包含 HTML）→ iframe srcdoc + sandbox=""：无脚本、不透明源，第三方
+  //     生成的 HTML 只当数据读，绝不进本页 DOM。
+  // 正文一律经 background 代取（https 页面 fetch http://localhost 被混合内容规则拦下）。
+  // 类名带 cr- 前缀且每条规则锁在 #career-ext-reader 之下 —— 同浮窗的样式隔离纪律。
+  const READER_ID = "career-ext-reader";
+  const READER_CSS_ID = "career-ext-reader-css";
+
+  const READER_CSS = [
+    `#${READER_ID}{position:fixed;inset:0;z-index:2147483647;display:none;align-items:center;justify-content:center;`,
+    "padding:32px;background:rgba(9,11,15,.62);backdrop-filter:blur(2px);",
+    'font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif}',
+    `#${READER_ID}.cr-open{display:flex}`,
+    `#${READER_ID} *,#${READER_ID} *::before,#${READER_ID} *::after{box-sizing:border-box;margin:0}`,
+    `#${READER_ID} .cr-modal{width:min(1120px,80vw);height:min(880px,85vh);display:flex;flex-direction:column;`,
+    "background:#fff;border-radius:16px;overflow:hidden;border:1px solid rgba(0,0,0,.18);",
+    "box-shadow:0 24px 60px rgba(0,0,0,.45)}",
+    // 标题栏 —— 唯一保留深色 chrome 的地方
+    `#${READER_ID} .cr-bar{display:flex;align-items:center;gap:10px;padding:11px 14px;flex:0 0 auto;`,
+    "background:rgba(18,22,28,.97);color:#eef2f7}",
+    `#${READER_ID} .cr-kind{font-size:11px;font-weight:700;letter-spacing:.04em;padding:3px 9px;border-radius:999px;`,
+    "background:rgba(255,255,255,.12);color:#eef2f7;flex:0 0 auto}",
+    `#${READER_ID} .cr-kind-eval{background:rgba(0,198,141,.2);color:#00c68d}`,
+    `#${READER_ID} .cr-kind-check{background:rgba(255,203,82,.2);color:#ffcb52}`,
+    `#${READER_ID} .cr-title{font-size:13px;font-weight:600;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}`,
+    `#${READER_ID} .cr-rpt{color:#8a929c;font-size:12px;font-variant-numeric:tabular-nums;flex:0 0 auto}`,
+    `#${READER_ID} .cr-act{appearance:none;-webkit-appearance:none;border:1px solid rgba(255,255,255,.14);`,
+    "background:rgba(255,255,255,.06);color:#eef2f7;border-radius:7px;padding:4px 9px;font-size:11.5px;",
+    "cursor:pointer;display:inline-flex;align-items:center;gap:5px;white-space:nowrap;font-family:inherit;flex:0 0 auto}",
+    `#${READER_ID} .cr-act:hover{background:rgba(255,255,255,.16)}`,
+    `#${READER_ID} .cr-act[hidden]{display:none}`,
+    `#${READER_ID} .cr-close{appearance:none;-webkit-appearance:none;border:0;background:rgba(255,255,255,.08);`,
+    "color:#eef2f7;width:26px;height:26px;border-radius:7px;cursor:pointer;font-size:16px;line-height:1;",
+    "display:grid;place-items:center;font-family:inherit;flex:0 0 auto}",
+    `#${READER_ID} .cr-close:hover{background:rgba(255,255,255,.18)}`,
+    `#${READER_ID} .cr-act:focus-visible,#${READER_ID} .cr-close:focus-visible,#${READER_ID} .cr-toc-i:focus-visible{`,
+    "outline:2px solid #4aa3ff;outline-offset:1px}",
+    // 正文区：恒定 flex，iframe / 滚动区才拿得到确定高度
+    `#${READER_ID} .cr-body{flex:1 1 auto;display:flex;overflow:hidden;background:#f7f8fa}`,
+    `#${READER_ID} .cr-scroll{flex:1 1 auto;overflow:auto;min-width:0}`,
+    `#${READER_ID} .cr-body iframe{display:block;width:100%;height:100%;border:0;background:#f7f8fa}`,
+    `#${READER_ID} .cr-load,#${READER_ID} .cr-err{flex:1;display:grid;place-items:center;padding:28px;`,
+    "color:#6b7280;font-size:13px;text-align:center;line-height:1.6}",
+    `#${READER_ID} .cr-err{color:#b42318}`,
+    // 右侧目录（默认展开，标题栏一键收起）
+    `#${READER_ID} .cr-toc{flex:0 0 220px;overflow:auto;background:#fff;border-left:1px solid #e5e7eb;padding:16px 12px}`,
+    `#${READER_ID}.cr-toc-off .cr-toc{display:none}`,
+    `#${READER_ID} .cr-toc h4{margin:0 0 10px;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:#6b7280}`,
+    `#${READER_ID} .cr-toc-i{display:block;font-size:12.5px;color:#374151;padding:5px 8px;border-radius:6px;`,
+    "border-left:2px solid transparent;line-height:1.4;cursor:pointer;background:none;border-top:0;border-right:0;",
+    "border-bottom:0;width:100%;text-align:left;font-family:inherit}",
+    `#${READER_ID} .cr-toc-i:hover{background:#eef2f7}`,
+    `#${READER_ID} .cr-toc-i.cr-l3{padding-left:18px;font-size:12px;color:#6b7280}`,
+    `#${READER_ID} .cr-toc-i.cr-active{background:#eaf1ff;color:#2b5fd9;border-left-color:#3370ff;font-weight:600}`,
+    // 评估报告阅读版式 —— 浅色，与体检报告的卡片语言对齐
+    `#${READER_ID} .cr-md{max-width:880px;margin:0 auto;padding:28px 20px 48px;color:#1f2329;line-height:1.65}`,
+    `#${READER_ID} .cr-md h1{font-size:23px;margin:0 0 10px;padding-bottom:12px;border-bottom:2px solid #3370ff}`,
+    `#${READER_ID} .cr-md h2{font-size:17px;margin:26px 0 10px;border-left:4px solid #3370ff;padding-left:10px;scroll-margin-top:12px}`,
+    `#${READER_ID} .cr-md h3{font-size:15px;margin:18px 0 8px;color:#374151;scroll-margin-top:12px}`,
+    `#${READER_ID} .cr-md h4{font-size:14px;margin:14px 0 6px;color:#4b525b}`,
+    `#${READER_ID} .cr-md p{font-size:14px;margin:8px 0;color:#374151}`,
+    `#${READER_ID} .cr-md ul,#${READER_ID} .cr-md ol{margin:8px 0 8px 22px;padding:0}`,
+    `#${READER_ID} .cr-md li{font-size:14px;margin:4px 0;color:#374151}`,
+    `#${READER_ID} .cr-md hr{border:0;border-top:1px solid #e5e7eb;margin:22px 0}`,
+    `#${READER_ID} .cr-md a{color:#3370ff;text-decoration:none;border-bottom:1px solid rgba(51,112,255,.3)}`,
+    `#${READER_ID} .cr-md code{background:#eef0f3;border-radius:4px;padding:1px 5px;font-size:12.5px;`,
+    "font-family:ui-monospace,Consolas,monospace;color:#b3261e}",
+    `#${READER_ID} .cr-md pre{background:#1f2329;color:#e6e9ef;border-radius:10px;padding:14px 16px;overflow:auto;`,
+    "font-size:12.5px;line-height:1.55}",
+    `#${READER_ID} .cr-md pre code{background:none;color:inherit;padding:0}`,
+    `#${READER_ID} .cr-md details{margin:10px 0}`,
+    `#${READER_ID} .cr-md summary{cursor:pointer;font-size:12.5px;color:#6b7280;user-select:text}`,
+    `#${READER_ID} .cr-md details[open]>summary{margin-bottom:8px}`,
+    `#${READER_ID} .cr-md table{width:100%;border-collapse:collapse;margin:12px 0;background:#fff;font-size:13.5px;`,
+    "border:1px solid #e5e7eb;border-radius:8px;overflow:hidden}",
+    `#${READER_ID} .cr-md th{background:#eef2f7;text-align:left;font-weight:600;color:#374151;width:34%}`,
+    `#${READER_ID} .cr-md th,#${READER_ID} .cr-md td{padding:9px 12px;border-bottom:1px solid #eef0f3;vertical-align:top}`,
+    `#${READER_ID} .cr-md tr:last-child td{border-bottom:0}`,
+    `#${READER_ID} .cr-md blockquote{margin:10px 0;padding:8px 14px;background:#fff8e6;border-left:4px solid #f0a020;`,
+    "border-radius:0 8px 8px 0;font-size:14px;color:#5c4a1e}",
+    // 报告头部元信息网格
+    `#${READER_ID} .cr-kvs{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:6px 18px;`,
+    "background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:14px 18px;margin:0 0 18px}",
+    `#${READER_ID} .cr-kv{display:flex;gap:8px;font-size:13px;line-height:1.6}`,
+    `#${READER_ID} .cr-kv b{color:#6b7280;font-weight:600;flex:0 0 auto}`,
+    `#${READER_ID} .cr-kv span{color:#1f2329;word-break:break-all}`,
+    "@media (prefers-reduced-motion:reduce){", `#${READER_ID} *,#${READER_ID} *::before,`,
+    `#${READER_ID} *::after{transition:none!important;animation:none!important}}`,
+  ].join("");
+
+  // 弹窗只建一次、常驻 DOM（靠 display 开关）：重建会把已取回的正文再 fetch 一遍，
+  // 也抹不掉用户的展开/收起轨迹。
+  const READER_HTML = [
+    '<div class="cr-modal" role="dialog" aria-modal="true">',
+    '<div class="cr-bar">',
+    '<span class="cr-kind" data-r="kind"></span>',
+    '<span class="cr-title" data-r="title"></span>',
+    '<span class="cr-rpt" data-r="rpt"></span>',
+    '<button class="cr-act" type="button" data-r="toc" hidden>☰ 目录</button>',
+    '<button class="cr-act" type="button" data-r="web" title="在本地 web 端打开">↗ 在 web 端打开</button>',
+    '<button class="cr-close" type="button" data-r="close" aria-label="关闭报告弹窗">×</button>',
+    "</div>",
+    '<div class="cr-body" data-r="body"></div>',
+    "</div>",
+  ].join("");
+
+  let readerEl = null;
+  let readerRefs = null;
+  let readerOpen = false;
+  let readerKind = null; // "report" | "checkup"
+  let readerNum = null;
+  let readerLastTrigger = null;
+  let readerPrevOverflow = ""; // 打开前的 body.style.overflow，关闭时原样归还
+  let readerReqSeq = 0; // 只认最后一次请求：连点两个 ↗ 时，旧响应不能盖新正文
+  let readerKeyWired = false;
+
+  function ensureReader() {
+    if (readerEl && document.body.contains(readerEl)) return;
+    if (!document.getElementById(READER_CSS_ID)) {
+      const s = document.createElement("style");
+      s.id = READER_CSS_ID;
+      s.textContent = READER_CSS;
+      (document.head || document.documentElement).appendChild(s);
+    }
+    const el = document.createElement("div");
+    el.id = READER_ID;
+    el.innerHTML = READER_HTML;
+    document.body.appendChild(el);
+    readerEl = el;
+    const q = (sel) => el.querySelector(sel);
+    readerRefs = {
+      modal: q(".cr-modal"),
+      kind: q('[data-r="kind"]'),
+      title: q('[data-r="title"]'),
+      rpt: q('[data-r="rpt"]'),
+      tocBtn: q('[data-r="toc"]'),
+      webBtn: q('[data-r="web"]'),
+      closeBtn: q('[data-r="close"]'),
+      body: q('[data-r="body"]'),
+    };
+    readerRefs.closeBtn.addEventListener("click", closeReader);
+    readerRefs.tocBtn.addEventListener("click", () => el.classList.toggle("cr-toc-off"));
+    // 次要出口：弹窗是主阅读路径，但回 web 端看完整页（那里有导航与操作区）仍保留。
+    readerRefs.webBtn.addEventListener("click", () => openReport(readerNum, null, readerKind));
+    // 点遮罩本身（不是 modal）也算关 —— 但只有落在遮罩自身体才关，不抢正文里的点击。
+    el.addEventListener("click", (e) => {
+      if (e.target === el) closeReader();
+    });
+    if (!readerKeyWired) {
+      // 挂在 document 而不是弹窗上：弹窗内只有一个按钮时 Tab 很容易跑到遮罩后面，
+      // 那里根本没焦点、弹窗自己的监听器也听不到。
+      document.addEventListener("keydown", readerKeydown, true);
+      readerKeyWired = true;
+    }
+  }
+
+  function readerKeydown(e) {
+    if (!readerOpen) return;
+    if (e.key === "Escape") {
+      closeReader();
+      return;
+    }
+    if (e.key !== "Tab") return;
+    const f = readerRefs.modal.querySelectorAll(`button:not([hidden]),.cr-toc-i,a`);
+    if (!f.length) return;
+    const first = f[0];
+    const last = f[f.length - 1];
+    if (!readerEl.contains(document.activeElement)) {
+      e.preventDefault();
+      first.focus();
+      return;
+    }
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
+    // 已知局限：sandboxed iframe 内是嵌套浏览上下文，本页的监听器看不到它内部的焦点，
+    // Tab 从 iframe 里出来时会落到弹窗外 —— 浏览器标准行为（无脚本沙箱无法反向接管
+    // 焦点），不在正式代码里绕。
+  }
+
+  function openReader(kind, num) {
+    if (!PANEL || !num) return; // 纯层缺失 → 不渲染（宁可不读，也不把未转义的报告灌进页面）
+    const nextKind = kind === "checkup" ? "checkup" : "report";
+    const nextNum = String(num);
+    // 重入守卫：同一份报告重复点开（评估收尾自动弹 + 用户手点 ↗ 会撞上）直接返回 ——
+    // 不短路的话下面会把“已是 hidden 的 overflow”当成打开前的原值抢下来，关掉弹窗后
+    // 页面再也滚不动，焦点归还也会落到弹窗自己内部的节点上。
+    if (readerOpen && readerKind === nextKind && readerNum === nextNum) return;
+    // 换读另一份：先按正确顺序归还 overflow / 焦点 / 在途请求，再重新打开。
+    if (readerOpen) closeReader();
+    ensureReader();
+    readerKind = nextKind;
+    readerNum = nextNum;
+    readerLastTrigger = document.activeElement;
+    readerEl.classList.remove("cr-toc-off");
+    readerRefs.kind.textContent = readerKind === "checkup" ? "公司体检" : "评估报告";
+    readerRefs.kind.className = "cr-kind " + (readerKind === "checkup" ? "cr-kind-check" : "cr-kind-eval");
+    readerRefs.title.textContent = "…加载中";
+    readerRefs.rpt.textContent = `#${readerNum}`;
+    readerRefs.tocBtn.hidden = readerKind !== "report";
+    readerRefs.body.innerHTML = '<div class="cr-load">加载中…</div>';
+    readerEl.classList.add("cr-open");
+    readerOpen = true;
+    // 遮罩期间锁背景滚动；归还时写回原来的 inline 值而不是直接清空 —— 站点可能本来就设了。
+    readerPrevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    readerRefs.closeBtn.focus();
+    const seq = ++readerReqSeq;
+    sendMsg({ type: "fetch-report-content", num: readerNum, kind: readerKind }, (res) => {
+      if (seq !== readerReqSeq) return; // 已关 / 已在读另一份 —— 这一份到手也没用了
+      if (chrome.runtime.lastError || !res || !res.ok) {
+        readerRefs.title.textContent = "…加载失败";
+        readerRefs.body.innerHTML = "";
+        const err = document.createElement("div");
+        err.className = "cr-err";
+        err.textContent = (res && res.error) || "本地报告打不开：本地 web 服务可能未运行";
+        readerRefs.body.appendChild(err);
         return;
       }
-      quickEvaluating = true;
-      qbtn.disabled = true;
-      qbtn.textContent = "快评中...";
-      sendQuickEval({ url: location.href, title, text, poster: site.extractPosterName() }, (err) => {
-        quickEvaluating = false;
-        qbtn.disabled = false;
-        qbtn.textContent = "快评";
-        showQuickError(err);
-      });
+      renderReaderBody(readerKind, res.text || "");
     });
-    document.body.appendChild(qbtn);
-    updateButtonPosition();
   }
 
-  // Keep the eval + quick buttons vertically stacked under the detail badge; when
-  // no badge is present they sit in the badge's own spot (top:80px). Re-measured
-  // whenever the badge appears/disappears so an evaluation repositions them.
-  function updateButtonPosition() {
-    const btn = document.getElementById(DETAIL_EVAL_BTN_ID);
-    const qbtn = document.getElementById(DETAIL_QUICK_BTN_ID);
-    let top = 80;
-    const badge = document.getElementById(DETAIL_BADGE_ID);
-    const qbadge = document.getElementById(DETAIL_QUICK_BADGE_ID);
-    if (badge) {
-      const r = badge.getBoundingClientRect();
-      top = Math.round(r.bottom + 8);
-    }
-    if (qbadge) {
-      qbadge.style.top = `${top}px`;
-      top = Math.round(qbadge.getBoundingClientRect().bottom + 8);
-    }
-    if (btn) btn.style.top = `${top}px`;
-    if (qbtn) qbtn.style.top = btn ? `${top + btn.offsetHeight + 10}px` : `${top}px`;
-  }
+  function renderReaderBody(kind, text) {
+    const scroll = document.createElement("div");
+    scroll.className = "cr-scroll";
+    readerRefs.body.innerHTML = "";
 
-  function refreshQuickDetailBadge() {
-    if (!site.isDetailPath(location.pathname)) return;
-    const q = quickMap[normalizeUrl(location.href)];
-    const existing = document.getElementById(DETAIL_QUICK_BADGE_ID);
-    if (!q || q.score == null) {
-      if (existing) existing.remove();
-      updateButtonPosition();
+    if (kind === "checkup") {
+      // 体检报告是台账里那份自包含 HTML：无脚本、不透明源，只当数据读。
+      const t = (/<title>([^<]*)<\/title>/.exec(text) || [])[1] || "公司体检报告";
+      readerRefs.title.textContent = t.trim();
+      const f = document.createElement("iframe");
+      f.setAttribute("sandbox", "");
+      f.setAttribute("title", t.trim());
+      f.srcdoc = text;
+      scroll.appendChild(f);
+      readerRefs.body.appendChild(scroll);
       return;
     }
-    const label = `快评 ${q.score}/5`.trim();
-    if (existing) {
-      if (existing.textContent !== label) {
-        existing.textContent = label;
-        existing.title = q.reason ? `快评：${q.grade} — ${q.reason}` : `快评：${q.grade}`;
-        updateButtonPosition();
+
+    const h1 = /^#\s+(.*)$/m.exec(text);
+    readerRefs.title.textContent = (h1 ? h1[1].replace(/^Evaluation:\s*/, "").trim() : "") || "评估报告";
+    const rendered = PANEL.mdToHtml(text);
+    const box = document.createElement("div");
+    box.className = "cr-md";
+    // 安全前提在纯层：mdToHtml 先整体转义再上标记，报告里任何 HTML 都只当文字。
+    box.innerHTML = rendered.html;
+    scroll.appendChild(box);
+    readerRefs.body.appendChild(scroll);
+
+    if (!rendered.toc.length) {
+      readerRefs.tocBtn.hidden = true; // 这份报告没 h2/h3，目录开关也就没意义
+      return;
+    }
+    const aside = document.createElement("aside");
+    aside.className = "cr-toc";
+    const h4 = document.createElement("h4");
+    h4.textContent = "目录";
+    aside.appendChild(h4);
+    for (const t of rendered.toc) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "cr-toc-i" + (t.level === 3 ? " cr-l3" : "");
+      b.textContent = t.text; // 纯文本走 textContent，不再走一次 innerHTML
+      b.dataset.t = t.id;
+      b.addEventListener("click", () => {
+        const target = box.querySelector(`#${CSS.escape(t.id)}`);
+        if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+      aside.appendChild(b);
+    }
+    readerRefs.body.appendChild(aside);
+
+    // 滚动时高亮当前节：抽成函数，渲染完先跑一次（否则刚打开时目录无一高亮）。
+    const markActiveToc = () => {
+      const hs = box.querySelectorAll("h2,h3");
+      let act = null;
+      for (const h of hs) {
+        if (h.getBoundingClientRect().top <= 140) act = h;
+        else break;
       }
-      return;
-    }
-    const badge = document.createElement("div");
-    badge.id = DETAIL_QUICK_BADGE_ID;
-    badge.textContent = label;
-    badge.title = q.reason ? `快评：${q.grade} — ${q.reason}` : `快评：${q.grade}`;
-    badge.style.cssText =
-      "position:fixed;top:80px;right:20px;z-index:2147483646;" +
-      "cursor:default;font-size:13px;line-height:1;padding:8px 12px;border-radius:999px;" +
-      "background:#7c5cff;color:#fff;font-weight:600;" +
-      "box-shadow:0 4px 12px rgba(0,0,0,.3);font-family:system-ui,sans-serif;";
-    document.body.appendChild(badge);
-    updateButtonPosition();
+      for (const b of aside.querySelectorAll(".cr-toc-i")) {
+        b.classList.toggle("cr-active", !!act && b.dataset.t === act.id);
+      }
+    };
+    scroll.addEventListener("scroll", markActiveToc, { passive: true });
+    markActiveToc();
+  }
+
+  function closeReader() {
+    if (!readerEl || !readerOpen) return;
+    readerEl.classList.remove("cr-open");
+    readerOpen = false;
+    readerReqSeq++; // 在途响应到此作废
+    document.body.style.overflow = readerPrevOverflow || "";
+    // 立刻放掉正文（尤其是 iframe）：体检 HTML 的文档上下文不该在关掉后还挂着。
+    readerRefs.body.innerHTML = "";
+    if (readerLastTrigger && document.body.contains(readerLastTrigger)) readerLastTrigger.focus();
+    readerLastTrigger = null;
+  }
+
+  /** 离开详情页（SPA 导航到列表）时连同弹窗一起摘掉，不留一个压在列表页上的遮罩。 */
+  function removeReader() {
+    if (!readerEl) return;
+    closeReader();
+    readerEl.remove();
+    readerEl = null;
+    readerRefs = null;
   }
 
   function refreshQuick() {
@@ -403,48 +917,14 @@
     });
   }
 
-  function refreshDetailBadge() {
-    if (!site.isDetailPath(location.pathname)) return;
-    const entry = evaluated[normalizeUrl(location.href)];
-    const existing = document.getElementById(DETAIL_BADGE_ID);
-    if (!entry) {
-      if (existing) existing.remove();
-      updateButtonPosition();
-      return;
-    }
-    if (existing) {
-      if (existing.textContent !== `已评估 ${entry.score || ""}`.trim()) {
-        existing.textContent = `已评估 ${entry.score || ""}`.trim();
-        updateButtonPosition();
-      }
-      return;
-    }
-    const badge = document.createElement("div");
-    badge.id = DETAIL_BADGE_ID;
-    badge.textContent = `已评估 ${entry.score || ""}`.trim();
-    badge.title = `点击打开报告 #${entry.reportNum}`;
-    badge.style.cssText =
-      "position:fixed;top:80px;right:20px;z-index:2147483647;" +
-      "cursor:pointer;font-size:13px;line-height:1;padding:8px 12px;border-radius:999px;" +
-      `background:${scoreColor(entry.score)};color:#fff;font-weight:600;` +
-      "box-shadow:0 4px 12px rgba(0,0,0,.3);font-family:system-ui,sans-serif;";
-    badge.addEventListener("click", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      openReport(entry.reportNum);
-    });
-    document.body.appendChild(badge);
-    updateButtonPosition();
-  }
-
-  // 统一重置所有评估按钮(detail 固定按钮 + BOSS 列表右栏按钮)。幂等:按钮
-  // 不在 DOM 时(如 SPA 导航后)无操作,评估中的按钮恢复可点。
+  // 统一重置所有评估动作(浮窗内的评估按钮 + BOSS 列表右栏按钮)。幂等:浮窗
+  // 不在 DOM 时(如 SPA 导航后)无操作,评估中的按钮恢复可点 —— 文案交给
+  // panelView,已评估过的职位恢复后显示「重新评估」而不是硬写回「评估本职位」。
   function settleButtons() {
     detailEvaluating = false;
-    const btn = document.getElementById(DETAIL_EVAL_BTN_ID);
-    if (btn) {
-      btn.disabled = false;
-      btn.textContent = "评估本职位";
+    if (panelRefs) {
+      panelRefs.btnEval.disabled = false;
+      renderDetailPanel();
     }
     const listBtn = site.ids && document.getElementById(site.ids.listEvalBtn);
     if (listBtn) {
@@ -496,17 +976,26 @@
     settleButtons();
     stopEvalPoll();
     if (entry) {
-      // 评估完成自动打开报告页（用户确认过的手势：单职位评估结束后直接看报告，
+      // 评估完成自动打开报告（用户确认过的手势：单职位评估结束后直接看报告，
       // 不再弹 confirm 让用户多点一次；confirm 在后台标签页还可能被浏览器拦截）。
-      // 文案按实际落点写：复用已打开的 web 端，或没找到 web 端标签页而新开（ADR-0055）。
-      setTimeout(
-        () =>
-          openReport(entry.reportNum, (res) => {
+      // 详情页浮窗在场 → 就地开页内阅读弹窗（主路径，ADR-0074）；列表页没有浮窗
+      // 载体 → 仍按 ADR-0055 跳转，文案按实际落点写（复用 web 端 / 新开标签页）。
+      const onDetailPage = !!(site && site.isDetailPath) && site.isDetailPath(location.pathname);
+      setTimeout(() => {
+        if (onDetailPage && PANEL) {
+          openReader("report", entry.reportNum);
+          showToast(`已评估 ${entry.score || ""}，报告 #${entry.reportNum}`.trim());
+          return;
+        }
+        openReport(
+          entry.reportNum,
+          (res) => {
             const where = res.mode === "created" ? "已在新标签页打开" : "已在本地 web 端打开";
             showToast(`已评估 ${entry.score || ""}，报告 #${entry.reportNum}，${where}`.trim());
-          }),
-        400
-      );
+          },
+          "report"
+        );
+      }, 400);
     }
   }
 
@@ -576,9 +1065,8 @@
         }
       }
     });
-    if (site.isDetailPath(location.pathname)) injectDetailButton();
-    refreshDetailBadge();
-    refreshQuickDetailBadge();
+    // 详情页浮窗：四行读数 + 两个动作，取代过去的四个独立固定元素。
+    renderDetailPanel();
     if (typeof site.ensureRightPaneButton === "function") site.ensureRightPaneButton();
   }
 
@@ -946,11 +1434,12 @@
       // 也能立刻显示快评徽章。不覆盖完整评估。
       quickEvaluating = false;
       refreshQuick();
+      // 浮窗里的快评按钮只负责触发，分数落在「快评」行上（refreshQuick 回来后
+      // 由 renderDetailPanel 涂）；这里只把按钮解锁回默认文案。
       const qbtn = document.getElementById(DETAIL_QUICK_BTN_ID);
       if (qbtn) {
         qbtn.disabled = false;
-        qbtn.textContent = `快评 ${msg.score}/5`;
-        qbtn.title = msg.reason ? `快评：${msg.grade} — ${msg.reason}` : `快评：${msg.grade}`;
+        qbtn.textContent = "快评";
       }
       const lqbtn = site.ids && document.getElementById(site.ids.listQuickBtn);
       if (lqbtn) {
@@ -1029,6 +1518,9 @@
     inited = true;
     // scan-pure.js 先行加载;取不到(异常注入顺序)则 scan mode 静默不可用。
     SCAN = (typeof window !== "undefined" && window.__careerScanPure) || null;
+    // detail-panel-pure.js 同理：拿不到就不提供浮窗（而不是退回旧的四个固定元素，
+    // 两套 UI 同时存在比没有 UI 更难解释）。
+    PANEL = (typeof window !== "undefined" && window.__careerOpsDetailPanelPure) || null;
 
     // Diag: snapshot + report DOM state to the background (BOSS blocks DevTools
     // by resizing/kicking the page, so the popup reads this instead). Re-sent on
@@ -1062,12 +1554,12 @@
       }
       __diag.ancestorChain = chain;
       // Detail-page diagnosis: does THIS posting exist in the evaluated map, and
-      // does the detail badge element actually get injected? (badges/boxes above
-      // only count list-card spans/checkboxes, not the detail badge div.)
+      // does the detail panel actually get injected? (badges/boxes above only count
+      // list-card spans/checkboxes, not the panel.)
       __diag.detailUrl = site.isDetailPath(location.pathname) ? location.href : null;
       __diag.detailKey = site.isDetailPath(location.pathname) ? normalizeUrl(location.href) : null;
       __diag.detailHit = __diag.detailKey ? Object.prototype.hasOwnProperty.call(evaluated, __diag.detailKey) : null;
-      __diag.detailBadgeEl = !!document.getElementById(DETAIL_BADGE_ID);
+      __diag.detailPanelEl = !!document.getElementById(DETAIL_PANEL_ID);
       // List-page right pane (BOSS /web/geek/jobs shows the selected job's detail
       // beside the list). Diagnose where the current selection's URL lives and what
       // container holds the description area so we can anchor the inline eval button.
@@ -1130,6 +1622,10 @@
     // Fresh page → drop any selection the previous load left on this tab.
     sendMsg({ type: "selection-update", urls: [] });
 
+    // 浮窗先常驻建起来（不依赖本地 web 服务地图拉回）：服务未起时用户仍看得到
+    // 入口，点了会得到「本地 web 服务未运行」的 toast，而不是整块 UI 消失。
+    renderDetailPanel();
+
     observer = new MutationObserver((records) => {
       let touched = 0;
       for (const rec of records) {
@@ -1141,6 +1637,9 @@
       // The right pane (.job-detail-body) re-renders when the selection changes;
       // re-check it on every mutation batch so the eval button survives the swap.
       if (typeof site.ensureRightPaneButton === "function") site.ensureRightPaneButton();
+      // SPA 换职位 / 离开详情页时浮窗跟着当前 URL 走。视图指纹没变时直接返回，
+      // 所以这一行在懒加载页的密集变更里也便宜。
+      renderDetailPanel();
     });
     observer.observe(document.body, { childList: true, subtree: true });
 

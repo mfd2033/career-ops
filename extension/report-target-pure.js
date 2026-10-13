@@ -34,24 +34,43 @@
     return `/report/${reportNum}`;
   }
 
+  /**
+   * 体检报告在 web 端的落点（ADR-0074 接缝 D）。与评估报告不同：它没有前端路由
+   * 页（台账里那份自包含 HTML 经 /api/checkup-report 只读提供），所以落点带 query。
+   */
+  function checkupPath(reportNum) {
+    return `/api/checkup-report?n=${reportNum}`;
+  }
+
   /** 报告页 URL（一律 localhost，家规）。 */
   function reportUrl(port, reportNum) {
     return `http://localhost:${port}${reportPath(reportNum)}`;
   }
 
+  /** 体检报告 URL（同一条 localhost 家规，只是 path 不同）。 */
+  function checkupUrl(port, reportNum) {
+    return `http://localhost:${port}${checkupPath(reportNum)}`;
+  }
+
   /**
-   * URL 比较键：origin + 去尾斜杠的 pathname，忽略 query / hash。
+   * URL 比较键：origin + 去尾斜杠的 pathname，缺省忽略 query / hash。
    * 幂等判定（决策 6）只在「同一个报告页」这一粒度上成立，带不带跟踪参数不该
    * 触发一次整页重载。
+   *
+   * @param {string} rawUrl
+   * @param {boolean} [withQuery] 带 query 的落点（体检报告：同一个 pathname 下不同的 n）
+   *   必须连 query 一起比，否则 n=99 的页面会被当成 n=12 的页面「已在原位」，
+   *   只聚焦不导航 —— 用户点了半天看的还是上一家。评估报告的路由不带 query，依旧走缺省分支。
    */
-  function urlKey(rawUrl) {
+  function urlKey(rawUrl, withQuery) {
     let u;
     try {
       u = new URL(rawUrl);
     } catch {
       return "";
     }
-    return `${u.origin}${u.pathname.replace(/\/+$/, "")}`;
+    const path = u.pathname.replace(/\/+$/, "");
+    return withQuery && u.search ? `${u.origin}${path}${u.search}` : `${u.origin}${path}`;
   }
 
   /**
@@ -59,7 +78,7 @@
    * 口径：http 协议 + 主机 localhost/127.0.0.1 + 显式端口落在 3000-3040。
    * 不带端口（默认 80）、https、招聘站页、chrome:// 等一律不是候选。
    * @param {{id?:number, windowId?:number, active?:boolean, url?:string}} tab
-   * @returns {?{id:number, windowId:(number|null), active:boolean, port:number, url:string, key:string}}
+   * @returns {?{id:number, windowId:(number|null), active:boolean, port:number, url:string, key:string, keyWithQuery:string}}
    */
   function parseWebTab(tab) {
     if (!tab || typeof tab.url !== "string") return null;
@@ -80,6 +99,9 @@
       port,
       url: tab.url,
       key: urlKey(tab.url),
+      // 两个粒度各算一份：评估报告比 key（忽略跟踪参数），带 query 的体检落点比
+      // keyWithQuery（不然同 pathname 的不同报告会互相认成同一个页）。
+      keyWithQuery: urlKey(tab.url, true),
     };
   }
 
@@ -90,7 +112,9 @@
    * @param {?number}  p.livePort          ensureLivePort() 的结果（null = 端口探测失败）
    * @param {Array}    p.tabs              chrome.tabs.query({}) 的结果
    * @param {?number}  p.currentWindowId   「当前窗口」（最近聚焦窗口，退化用发起 tab 所在窗口）
-   * @param {string|number} p.num          报告号
+   * @param {string|number} p.num          报告号（对体检而言就是 tracker#）
+   * @param {string}   [p.kind]            "report"（缺省）| "checkup" —— 只换落点，
+   *   候选筛选 / 端口优先 / 幂等规则两条出口共用
    * @returns {{action:"error", error:string}
    *          |{action:"create", url:string, path:string}
    *          |{action:"reuse", tabId:number, windowId:(number|null), url:string, path:string, navigate:boolean}}
@@ -100,13 +124,16 @@
    *              navigate=true 时调用方优先把它当「前端路由目标」（交给 web 端自己跳，
    *              不刷新页面），web 端没应声才回退用 url 整页导航
    */
-  function pickReportTarget({ livePort, tabs, currentWindowId, num } = {}) {
+  function pickReportTarget({ livePort, tabs, currentWindowId, num, kind } = {}) {
     const reportNum = String(num == null ? "" : num).replace(/[^0-9]/g, "");
     if (!reportNum) return { action: "error", error: "无效报告号" };
     if (livePort == null) return { action: "error", error: NO_SERVICE_ERROR };
 
-    const url = reportUrl(livePort, reportNum);
-    const path = reportPath(reportNum);
+    const isCheckup = kind === "checkup";
+    // 带 query 的落点（体检）把 query 也纳入幂等比较；不带的（评估报告）行为逐字不变。
+    const withQuery = isCheckup;
+    const url = isCheckup ? checkupUrl(livePort, reportNum) : reportUrl(livePort, reportNum);
+    const path = isCheckup ? checkupPath(reportNum) : reportPath(reportNum);
 
     const candidates = (Array.isArray(tabs) ? tabs : []).map(parseWebTab).filter(Boolean);
     if (candidates.length === 0) return { action: "create", url, path };
@@ -128,7 +155,7 @@
       windowId: tab.windowId,
       url,
       path,
-      navigate: tab.key !== urlKey(url),
+      navigate: (withQuery ? tab.keyWithQuery : tab.key) !== urlKey(url, withQuery),
     };
   }
 
@@ -138,6 +165,8 @@
     NO_SERVICE_ERROR,
     reportPath,
     reportUrl,
+    checkupPath,
+    checkupUrl,
     urlKey,
     parseWebTab,
     pickReportTarget,

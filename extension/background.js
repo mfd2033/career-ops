@@ -13,6 +13,8 @@
 //   • load + refresh the "evaluated" map (/api/report-status)
 //   • run batch evaluation (/api/batch-evaluate) and stream NDJSON to the popup
 //   • open the web report page for an evaluated position
+//   • fetch report bodies (markdown / checkup HTML) on behalf of the detail-page
+//     reader modal —— the page itself cannot (https 页面拉 http 本地服务被混合内容拦下)
 
 // ---- port probing ---------------------------------------------------------
 
@@ -22,6 +24,9 @@ const PORT_MAX = 3040;
 // 不发 OPTIONS，同一浏览器进程内仅首次生效）。900ms 超时会恰好截断冷启动探测，
 // 导致"服务未运行"误报，故放宽到 3s。
 const PROBE_TIMEOUT_MS = 3000;
+// 报告正文比版本探活大得多，也要等 Next 真的读完盘、渲染完响应，给 10s：超了就是
+// 服务挂了 / 盘在另一台机器上转不动，报错比让用户盯着一个空弹窗强。
+const FETCH_CONTENT_TIMEOUT_MS = 10000;
 
 let cachedPort = null;
 let probing = null;
@@ -791,7 +796,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             currentWindowId = typeof sender.tab.windowId === "number" ? sender.tab.windowId : null;
           }
 
-          const target = REPORT_TARGET.pickReportTarget({ livePort: port, tabs, currentWindowId, num: msg.num });
+          const target = REPORT_TARGET.pickReportTarget({
+            livePort: port,
+            tabs,
+            currentWindowId,
+            num: msg.num,
+            kind: msg.kind,
+          });
           if (target.action === "error") {
             sendResponse({ ok: false, error: target.error });
             break;
@@ -809,11 +820,60 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           if (target.windowId != null) {
             await chrome.windows.update(target.windowId, { focused: true }).catch(() => {});
           }
+          // 体检报告的落点是一个 API 端点（直接返回那份自包含 HTML），不是 web 端的应用
+          // 路由：让页面自己 router.push 过去会撞上 404 页，只能整页导航。评估报告仍走前端路由。
+          if (target.navigate && msg.kind === "checkup") {
+            await chrome.tabs.update(target.tabId, { url: target.url, active: true });
+            sendResponse({ ok: true, reportUrl: target.url, mode: "reloaded" });
+            break;
+          }
           // 已在同一报告页（navigate=false）就只聚焦，连消息都不发。
           const mode = target.navigate ? await navigateInWebTab(target.tabId, target.path, target.url) : "focused";
           sendResponse({ ok: true, reportUrl: target.url, mode });
         } catch (err) {
           sendResponse({ ok: false, error: err.message });
+        }
+        break;
+      }
+      case "fetch-report-content": {
+        // 页内阅读弹窗的正文来源（ADR-0074）。招聘站页面是 https，在它里面直接
+        // fetch http://localhost 会被混合内容规则拦掉（不是 CORS 问题，绕不过）；
+        // service worker 有 host_permissions，由它代发再把文本回给 content script。
+        // 这里只当搬运工：报告 markdown / 体检 HTML 都原样透传，渲染口径在 content
+        // script 一侧（markdown 先转义再上标记，HTML 进 sandbox iframe）。超时必须有：
+        // 开发服务器挂住时没有超时 = 弹窗永远停在「加载中」，比报错更让用户以为坏了。
+        const num = String(msg.num == null ? "" : msg.num).replace(/[^0-9]/g, "");
+        if (!num) {
+          sendResponse({ ok: false, error: "无效报告号" });
+          break;
+        }
+        const apiPath = msg.kind === "checkup" ? REPORT_TARGET.checkupPath(num) : `/api/report-source?n=${num}`;
+        try {
+          const port = await ensureLivePort().catch(() => null);
+          if (port == null) {
+            sendResponse({ ok: false, error: REPORT_TARGET.NO_SERVICE_ERROR });
+            break;
+          }
+          const ctrl = new AbortController();
+          const timer = setTimeout(() => ctrl.abort(), FETCH_CONTENT_TIMEOUT_MS);
+          let res;
+          let text;
+          try {
+            res = await fetch(`http://127.0.0.1:${port}${apiPath}`, { signal: ctrl.signal });
+            // 读体也必须在超时保护里：开发服务器可能头已发出、正文卡住不写完，那时
+            // 早一步 clearTimeout 等于没有超时，弹窗永远停在「加载中」。
+            text = await res.text();
+          } finally {
+            clearTimeout(timer);
+          }
+          if (!res.ok) {
+            // 404 = 这一号没有可读的报告文件；其余状态一律当作读不出来报给用户。
+            sendResponse({ ok: false, error: `本地报告读不出来（${res.status}）` });
+            break;
+          }
+          sendResponse({ ok: true, text, kind: msg.kind === "checkup" ? "checkup" : "report" });
+        } catch (err) {
+          sendResponse({ ok: false, error: `本地报告取正文失败：${(err && err.message) || err}` });
         }
         break;
       }
