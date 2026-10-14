@@ -372,7 +372,7 @@ async function runPipeline({
   // ADR-0043：cliId/model 随任务入池，扩展派发的卡片凭 /api/active-runs 也能显示引擎。
   // 影子卡片接通：runId 同步入池——别的页签/刷新后的前端凭快照里的这个 UUID
   // 把 /api/events 的帧接到接管卡片上，否则单任务永远只显示「处理中」占位。
-  const poolHandle = acquire({ url: input, title: input, source: "run", cliId, model: model || undefined, runId });
+  const poolHandle = acquire({ url: input, title: input, source: "run", cliId, model: model || undefined, runId, kind });
 
   // Spawned/guarded only AFTER the pool grants a slot. `child`/`writeToken` are
   // outer lets so cancel() can reach them whether the run is queued

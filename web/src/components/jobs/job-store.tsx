@@ -6,7 +6,7 @@ import { readSavedCliId, readSavedModel, resolveCliId } from "@/lib/saved-cli";
 import { useI18n } from "@/lib/i18n/context";
 import { reconcileJobsWithLedger } from "@/lib/job-ledger-reconcile.mjs";
 import { canRetryJob, nextAttempt, resetJobForRetry } from "@/lib/job-retry.mjs";
-import { pickAdoptableRuns } from "@/lib/job-adopt.mjs";
+import { pickAdoptableRuns, ADOPT_PREFIX } from "@/lib/job-adopt.mjs";
 
 export type JobStep = { kind: "tool" | "status"; label: string; ts: number };
 // ADR-0042 决议 5：批量逐项结论（batch-evaluate/batch-checkup 的 item 事件）。
@@ -47,6 +47,9 @@ type PoolEntry = {
   // 影子卡片接通：/api/run 的事件总线 runId——把 /api/events 的帧接到接管
   // 卡片的键（见 lib/job-adopt.mjs）；批量 worker 不带。
   runId?: string;
+  // 任务类型（evaluate/pdf/checkup…）——随 meta 入池后快照才能带出，
+  // 接管卡凭它显示真实 kind，而不是一律误标 batch-evaluate。
+  kind?: string;
 };
 type PoolRunning = PoolEntry & { startedAt: number; enqueuedAt?: number };
 type PoolQueued = PoolEntry & { enqueuedAt: number; position: number };
@@ -188,6 +191,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
   const jobsRef = useRef<Job[]>([]); // retryJob 读最新卡的镜像（回调闭包不追 jobs，避免 stale）
   const channelCtl = useRef<AbortController | null>(null); // /api/events 当前连接（每次重连新建一个）
   const replayChannel = useRef<() => void>(() => {}); // abort 当前连接 → 重连循环服务端全量重放缓冲区
+  const terminalRunIds = useRef(new Set<string>()); // 本页签已收到终态的 runId——轮询响应晚于 done 落地时防重建定局卡
   const seq = useRef(0);
   const loaded = useRef(false);
   const { t } = useI18n();
@@ -235,21 +239,23 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
     const adoptables = pickAdoptableRuns(activeRuns, {
       mappedRunIds: new Set(runIds.current.keys()),
       localActiveInputs,
+      terminalRunIds: terminalRunIds.current,
     });
     let adopted = false;
     const now = Date.now();
     for (const a of adoptables) {
-      const jobId = `adopt-${a.runId}`;
-      // 刷新后重新接管同一 run：先剔除同 id 旧卡（restore 猜标的 interrupted 卡）再落新卡，
-      // 绝不让同一 run 在列表里出现两张。
-      accs.current.set(jobId, { opts: { title: a.title, kind: "batch-evaluate", input: a.url, page: "/jobs" }, text: "", verdictLine: "", doneTokens: 0, doneCostUsd: null, steps: [], lastSeq: 0 });
+      const jobId = `${ADOPT_PREFIX}${a.runId}`;
+      const kind = a.kind ?? "batch-evaluate"; // 快照没带 kind（旧服务端）时回退展示型默认值
+      // 刷新后重新接管同一 run：先剔除同 id 旧卡、以及 restore 恢复出的同
+      // runId 旧卡（interrupted 猜标牌），绝不让同一 run 在列表里出现两张。
+      accs.current.set(jobId, { opts: { title: a.title, kind, input: a.url, page: "/jobs" }, text: "", verdictLine: "", doneTokens: 0, doneCostUsd: null, steps: [], lastSeq: 0 });
       runIds.current.set(a.runId, jobId);
       const card: Job = {
         id: jobId,
         title: a.title,
         page: "/jobs",
         input: a.url,
-        kind: "batch-evaluate",
+        kind,
         cliId: a.cliId,
         model: a.model,
         runId: a.runId,
@@ -261,7 +267,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
         startedAt: a.startedAt,
         enqueuedAt: a.enqueuedAt,
       };
-      setJobs((js) => [card, ...js.filter((j) => j.id !== jobId)]);
+      setJobs((js) => [card, ...js.filter((j) => j.id !== jobId && j.runId !== a.runId)]);
       adopted = true;
     }
     // 快照同步：接管的排队卡获槽后翻成 running（handleEvent 的 phase 只更新
@@ -269,11 +275,14 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
     const snapStatus = new Map<string, "running" | "queued">();
     for (const r of activeRuns.running) if (r.runId) snapStatus.set(r.runId, "running");
     for (const q of activeRuns.queued) if (q.runId) snapStatus.set(q.runId, "queued");
+    // 终态守卫剪枝：run 已从池快照消失（settle 后被 unregister）时，它的
+    // terminal 标记不再有意义——集合必须随快照有界，防长跑页面无限增长。
+    for (const rid of terminalRunIds.current) if (!snapStatus.has(rid)) terminalRunIds.current.delete(rid);
     if (snapStatus.size) {
       setJobs((js) => {
         let changed = false;
         const next = js.map((j) => {
-          if (!j.id.startsWith("adopt-") || !j.runId) return j;
+          if (!j.id.startsWith(ADOPT_PREFIX) || !j.runId) return j;
           if (j.status !== "running" && j.status !== "queued") return j;
           const s = snapStatus.get(j.runId);
           if (!s || s === j.status) return j;
@@ -298,7 +307,13 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
     // 连接级 controller 改为每次尝试新建：abort 当前连接后，下面的重连循环会
     // 重新建连，服务端对新连接全量重放所有在册 run 的缓冲区——接管卡凭这个
     // 回填历史步骤（既有卡靠 acc.lastSeq 去重，不会二次应用）。
-    replayChannel.current = () => channelCtl.current?.abort();
+    // replayRequested：接管触发的故意 abort 走 0 退避立即重连（回填不该等
+    // 2s），只有意外断流才吃 2s 退避；标志在消费时复位。
+    let replayRequested = false;
+    replayChannel.current = () => {
+      replayRequested = true;
+      channelCtl.current?.abort();
+    };
 
     const finishJob = (id: string, status: "done" | "error", lastLabel?: string) => {
       const acc = accs.current.get(id);
@@ -317,7 +332,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
       if (status === "done") {
         // 接管卡不另落一条历史：服务端 run 台账已记了这个 run（recordEnd +
         // ADR-0047 步骤折叠），发起页签也会各自 save——再写就是同一 run 双份。
-        if (!id.startsWith("adopt-")) {
+        if (!id.startsWith(ADOPT_PREFIX)) {
           fetch("/api/runs/save", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -331,7 +346,13 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
         }
       }
       accs.current.delete(id);
-      for (const [runId, jid] of runIds.current) if (jid === id) runIds.current.delete(runId);
+      for (const [runId, jid] of runIds.current) {
+        if (jid !== id) continue;
+        runIds.current.delete(runId);
+        // 记住本页签已见终态的 runId：轮询响应可能晚于这个 done 事件落地，
+        // adopt 选取凭它跳过，绝不把定局卡重建成「处理中」抹掉结论。
+        terminalRunIds.current.add(runId);
+      }
     };
 
     const handleEvent = (jobId: string, ev: { type: string; [key: string]: unknown }) => {
@@ -469,7 +490,9 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
           /* dropped — fall through to the backoff */
         }
         if (!live) return;
-        await new Promise((r) => setTimeout(r, 2000));
+        const wait = replayRequested ? 0 : 2000;
+        replayRequested = false;
+        await new Promise((r) => setTimeout(r, wait));
       }
     };
     connect();
@@ -604,9 +627,13 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
     if (!loaded.current) return;
     try {
       // ADR-0042 决议 3：持久化时步骤截断到最近 20 条，防 localStorage 膨胀。
+      // 接管卡不落盘：active 卡永不持久化是既有不变量（「inferred card」投影
+      // 刷新后由快照 + 重放重建），落盘只会留下幽灵 error 卡污染下次启动。
       localStorage.setItem(
         JOBS_KEY,
-        JSON.stringify(jobs.slice(0, 40).map((j) => ({ ...j, steps: j.steps.slice(-STEPS_CAP_PERSIST) }))),
+        JSON.stringify(
+          jobs.filter((j) => !j.id.startsWith(ADOPT_PREFIX)).slice(0, 40).map((j) => ({ ...j, steps: j.steps.slice(-STEPS_CAP_PERSIST) })),
+        ),
       );
     } catch {
       /* quota */

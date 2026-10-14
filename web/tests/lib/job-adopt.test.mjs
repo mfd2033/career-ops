@@ -26,10 +26,16 @@ test("a running single-run entry with an unmapped runId is adopted with its fact
     { mappedRunIds: new Set(), localActiveInputs: new Set() });
   assert.equal(out.length, 1);
   assert.deepEqual(out[0], {
-    poolId: "pool-2", runId: "u1", url: "https://x/1", title: "https://x/1",
+    runId: "u1", url: "https://x/1", title: "https://x/1", kind: undefined,
     cliId: "claude", model: undefined, status: "running",
     startedAt: 100, enqueuedAt: 90, queuedPos: undefined,
   });
+});
+
+test("the real kind rides along for the adopted card (no more blanket batch-evaluate)", () => {
+  const out = pickAdoptableRuns({ running: [running({ runId: "u1", kind: "pdf" })], queued: [] },
+    { mappedRunIds: new Set(), localActiveInputs: new Set() });
+  assert.equal(out[0].kind, "pdf");
 });
 
 test("queued entries are adopted too (the bus registers before the pool grants a slot)", () => {
@@ -44,6 +50,13 @@ test("queued entries are adopted too (the bus registers before the pool grants a
 test("already-mapped runIds are never re-adopted (idempotent across polls)", () => {
   const out = pickAdoptableRuns({ running: [running({ runId: "u1" })], queued: [] },
     { mappedRunIds: new Set(["u1"]), localActiveInputs: new Set() });
+  assert.equal(out.length, 0);
+});
+
+test("runIds that already settled on this tab are never rebuilt (terminal guard)", () => {
+  // 轮询响应可能晚于 done 事件落地：不拦住就会把定局卡重建成「处理中」。
+  const out = pickAdoptableRuns({ running: [running({ runId: "u1" })], queued: [] },
+    { mappedRunIds: new Set(), localActiveInputs: new Set(), terminalRunIds: new Set(["u1"]) });
   assert.equal(out.length, 0);
 });
 

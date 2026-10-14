@@ -12,12 +12,17 @@
  * NDJSON 响应流、从不发布到总线，接管它们只会得到另一张死卡。
  */
 
+/** 接管卡的 id 前缀（id = 前缀 + runId）——job-store 的建卡/同步/免存盘
+ *  守卫共用这一个常量，不各自拼字面量。 */
+export const ADOPT_PREFIX = "adopt-";
+
 /**
  * @typedef {Object} AdoptableRun
- * @property {string} poolId        池条目 id（取消排队时仍走 active-runs/cancel 用得上）
  * @property {string} runId         事件总线 UUID——接 /api/events 帧的键
  * @property {string} url           任务输入（影子卡与本地卡去重的依据）
  * @property {string} title
+ * @property {string|undefined} kind  任务类型（evaluate/pdf/checkup…）——随 meta
+ *   入池后快照才能带出；缺失时调用方回退展示型 kind。
  * @property {string|undefined} cliId
  * @property {string|undefined} model
  * @property {"running"|"queued"} status
@@ -29,30 +34,33 @@
 /**
  * 从一次 active-runs 快照里挑出应接管的单任务条目。
  *
- * 幂等约束（轮询每 3s 一次）：已接管的凭 mappedRunIds 跳过；发起页签在
- * POST /api/run 往返窗口里（本地卡已建、runId 尚未回）凭 localActiveInputs
- * 的 URL 跳过——那段时间映射表还拦不住，不跳会给同一个 run 建两张卡。
+ * 幂等约束（轮询每 3s 一次）：已接管的凭 mappedRunIds 跳过；本页签已收到
+ * 终态事件的凭 terminalRunIds 跳过（轮询响应可能晚于 done 事件落地，
+ * 不拦会把定局卡重建成「处理中」并抹掉结论）；发起页签在 POST /api/run
+ * 往返窗口里（本地卡已建、runId 尚未回）凭 localActiveInputs 的 URL 跳过——
+ * 那段时间映射表还拦不住，不跳会给同一个 run 建两张卡。
  *
  * @param {{ running?: unknown[], queued?: unknown[] } | null | undefined} snapshot
- * @param {{ mappedRunIds: Set<string>, localActiveInputs: Set<string> }} guards
+ * @param {{ mappedRunIds: Set<string>, localActiveInputs: Set<string>, terminalRunIds?: Set<string> }} guards
  * @returns {AdoptableRun[]} running 在前、queued 在后（与工作器列表的既有顺序一致）
  */
 export function pickAdoptableRuns(snapshot, guards) {
   const out = [];
   if (!snapshot || typeof snapshot !== "object") return out;
-  const { mappedRunIds, localActiveInputs } = guards || {};
+  const { mappedRunIds, localActiveInputs, terminalRunIds } = guards || {};
   const isAdoptable = (e) => {
     if (!e || typeof e !== "object") return false;
     if (e.source !== "run") return false;
     if (typeof e.runId !== "string" || !e.runId) return false;
     if (mappedRunIds?.has(e.runId)) return false;
+    if (terminalRunIds?.has(e.runId)) return false;
     if (typeof e.url === "string" && localActiveInputs?.has(e.url)) return false;
     return true;
   };
   for (const r of Array.isArray(snapshot.running) ? snapshot.running : []) {
     if (!isAdoptable(r)) continue;
     out.push({
-      poolId: r.id, runId: r.runId, url: r.url, title: r.title,
+      runId: r.runId, url: r.url, title: r.title, kind: r.kind,
       cliId: r.cliId, model: r.model, status: "running",
       startedAt: r.startedAt ?? r.enqueuedAt, enqueuedAt: r.enqueuedAt,
       queuedPos: undefined,
@@ -61,7 +69,7 @@ export function pickAdoptableRuns(snapshot, guards) {
   for (const q of Array.isArray(snapshot.queued) ? snapshot.queued : []) {
     if (!isAdoptable(q)) continue;
     out.push({
-      poolId: q.id, runId: q.runId, url: q.url, title: q.title,
+      runId: q.runId, url: q.url, title: q.title, kind: q.kind,
       cliId: q.cliId, model: q.model, status: "queued",
       startedAt: q.enqueuedAt, enqueuedAt: q.enqueuedAt,
       queuedPos: q.position,

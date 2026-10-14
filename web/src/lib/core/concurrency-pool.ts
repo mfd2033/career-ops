@@ -59,6 +59,10 @@ export type PoolTaskMeta = {
   // source "run" 的单任务携带（批量 worker 走自己的 NDJSON 响应，不经过总线）。
   // Display-only fact：池不检查它，只把它带进快照。
   runId?: string;
+  // 影子卡片接通的配套：/api/run 的任务类型（evaluate/pdf/checkup…）。
+  // 接管卡没有 kind 就会被误标成展示型批量卡，重试判定与 co-job-done 事件
+  // 都跟着错；同 runId 一样只由单任务路由携带，池本身不消费。
+  kind?: string;
 };
 
 export type PoolHandle = {
@@ -78,6 +82,7 @@ type Entry = {
   cliId?: string;
   model?: string;
   runId?: string;
+  kind?: string;
   enqueuedAt: number;
   // ADR-0044: the moment this entry was granted a slot and its CLI spawned.
   // Distinct from enqueuedAt (dispatch/receive time, which includes any queue
@@ -131,6 +136,7 @@ export function acquire(meta: PoolTaskMeta): PoolHandle {
     cliId: meta.cliId,
     model: meta.model,
     runId: meta.runId,
+    kind: meta.kind,
     enqueuedAt: Date.now(),
     running: false,
     cancelled: false,
@@ -194,6 +200,7 @@ export type PoolRunningTask = {
   cliId?: string;
   model?: string;
   runId?: string;
+  kind?: string;
   startedAt: number;
   // ADR-0044: enqueue time kept alongside the corrected startedAt so a reader
   // can tell how long a running task waited for a slot (startedAt - enqueuedAt).
@@ -208,6 +215,7 @@ export type PoolQueuedTask = {
   cliId?: string;
   model?: string;
   runId?: string;
+  kind?: string;
   enqueuedAt: number;
   position: number; // 1-based slot in the FIFO queue
 };
@@ -224,6 +232,7 @@ export function listPool(): { running: PoolRunningTask[]; queued: PoolQueuedTask
       cliId: e.cliId,
       model: e.model,
       runId: e.runId,
+      kind: e.kind,
       // ADR-0044: real execution start (slot granted). A running entry always
       // has startedAt set by dispatch(); the enqueuedAt fallback is defensive
       // for an entry captured mid-transition and keeps the field non-optional.
@@ -239,6 +248,7 @@ export function listPool(): { running: PoolRunningTask[]; queued: PoolQueuedTask
       cliId: e.cliId,
       model: e.model,
       runId: e.runId,
+      kind: e.kind,
       enqueuedAt: e.enqueuedAt,
       position: i + 1,
     })),
