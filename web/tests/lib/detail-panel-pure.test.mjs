@@ -17,7 +17,7 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 const mod = await import(pathToFileURL(join(ROOT, "extension", "detail-panel-pure.js")).href);
-const { panelView, scoreBand, STATUS_DICT, statusLabel, mdToHtml, CHECKUP_GOLD, SCORE_NEUTRAL, QUICK_PURPLE } = mod.default ?? mod;
+const { panelView, scoreBand, STATUS_DICT, statusLabel, mdToHtml, readerErrorText, CHECKUP_GOLD, SCORE_NEUTRAL, QUICK_PURPLE } = mod.default ?? mod;
 
 /** 造一条 /api/report-status 的 evaluated map 条目。 */
 const entry = (o = {}) => ({ score: "4.3/5", reportNum: "1121", ...o });
@@ -390,5 +390,37 @@ test("畸形表格行（`|` 开头但下一行不是分隔行）当普通段落�
     const { html } = mdToHtml(src);
     assert.ok(html.includes("<p>"), `${JSON.stringify(src)} 应落成段落`);
     assert.ok(html.includes(needle), `${JSON.stringify(src)} 的文本不得被吞掉`);
+  }
+});
+
+// ---- 弹窗错误文案（版本错配必须可操作，不能丢开发者黑话） -------------------
+
+test("旧 service worker 回 unknown message type → 翻成「重新加载扩展」提示", () => {
+  // 这条错配是就地改扩展文件迭代的常态：content script 每次注入现读磁盘（新），
+  // MV3 的 SW 注册在扩展加载时（不点重新加载就一直跑旧代码）。用户看到英文黑话
+  // 只会以为功能坏了，不会想到去 chrome://extensions。
+  const msg = readerErrorText({ ok: false, error: "unknown message type" }, "兜底文案");
+  assert.match(msg, /重新加载/, "必须给出下一步动作");
+  assert.match(msg, /chrome:\/\/extensions/, "必须指出在哪里操作");
+  assert.ok(!msg.includes("unknown message type"), "开发者黑话不得进用户可见正文");
+});
+
+test("错配靠 code 认，不靠英文散文（后台改了措辞也不退化）", () => {
+  const byCode = readerErrorText({ ok: false, code: "unknown-message-type", error: "whatever the SW says" }, "兜底");
+  assert.match(byCode, /重新加载/);
+  assert.ok(!byCode.includes("whatever"));
+});
+
+test("后台已经给出可操作中文时原样透出，不改写、不编造", () => {
+  const ns = readerErrorText({ ok: false, error: "本地 web 服务未运行（扫描 127.0.0.1:3000-3040 未命中）" }, "兜底");
+  assert.equal(ns, "本地 web 服务未运行（扫描 127.0.0.1:3000-3040 未命中）");
+  const nf = readerErrorText({ ok: false, error: "本地报告读不出来（404）" }, "兜底");
+  assert.equal(nf, "本地报告读不出来（404）");
+});
+
+test("没有可用错误串（端口关闭 / lastError / 非字符串）→ 用调用方兜底文案", () => {
+  const fb = "本地报告打不开：本地 web 服务可能未运行";
+  for (const res of [null, undefined, {}, { ok: false }, { ok: false, error: "" }, { ok: false, error: 42 }]) {
+    assert.equal(readerErrorText(res, fb), fb, JSON.stringify(res) ?? String(res));
   }
 });

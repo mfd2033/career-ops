@@ -1195,7 +1195,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         break;
       }
       default:
-        sendResponse({ ok: false, error: "unknown message type" });
+        // 带上 code：content script 侧要靠它识别「页面注入的是新代码、SW 还是重载前的
+        // 旧代码」这种版本错配，并翻成可操作提示（detail-panel-pure.js 的
+        // readerErrorText）。英文散文是通用兜底措辞，改动不该让那条提示退化。
+        sendResponse({ ok: false, error: "unknown message type", code: "unknown-message-type" });
     }
   })();
   return true; // async sendResponse

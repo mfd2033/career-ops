@@ -807,7 +807,9 @@
         readerRefs.body.innerHTML = "";
         const err = document.createElement("div");
         err.className = "cr-err";
-        err.textContent = (res && res.error) || "本地报告打不开：本地 web 服务可能未运行";
+        // 文案口径在纯层：页面没重载扩展时，跑着的还是旧 service worker，它会把这条
+        // 消息当成未知类型回一句英文黑话 —— readerErrorText 把它翻成「去重载扩展」。
+        err.textContent = PANEL.readerErrorText(res, "本地报告打不开：本地 web 服务可能未运行");
         readerRefs.body.appendChild(err);
         return;
       }

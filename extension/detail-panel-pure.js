@@ -350,6 +350,28 @@
     return { html: out.join("\n"), toc };
   }
 
+  /**
+   * 后台回给 content script 的错误 → 用户看得懂、且知道下一步该做什么的一句话。
+   *
+   * 只特殊处理一种情况：`unknown message type`（background.js 监听器的 default 分支）。
+   * 在这条链路上它只有一个成因：页面里注入的 content script 是新的（每次注入现读
+   * 磁盘），而 service worker 还是扩展重载前注册的旧版本，根本不认识这个消息类型。
+   * 本 fork 就是就地改扩展文件迭代的，这个错配是常态；而原文是英文开发者黑话，用户
+   * 既看不懂也不会想到去 chrome://extensions，所以翻成可操作提示。
+   *
+   * 认 code 不认散文：那句英文是后台的通用兜底措辞，将来改动不该让这条提示退化。
+   * 其余错误串一律原样透出 —— 后台自己产出的都是可操作中文（服务未运行、读不出来
+   * （404）），改写它们只会编造出我们其实并不知道的原因。
+   */
+  function readerErrorText(res, fallback) {
+    if (!res || typeof res !== "object") return fallback;
+    const err = typeof res.error === "string" ? res.error.trim() : "";
+    if (res.code === "unknown-message-type" || err === "unknown message type") {
+      return "扩展与页面版本不一致：请到 chrome://extensions 重新加载「职位评估」扩展，再刷新本页。";
+    }
+    return err || fallback;
+  }
+
   const api = {
     SCORE_GREEN,
     SCORE_AMBER,
@@ -364,6 +386,7 @@
     scoreBand,
     panelView,
     mdToHtml,
+    readerErrorText,
   };
 
   // content script（页面全局）：挂 window / self。
