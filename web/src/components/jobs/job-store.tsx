@@ -6,6 +6,7 @@ import { readSavedCliId, readSavedModel, resolveCliId } from "@/lib/saved-cli";
 import { useI18n } from "@/lib/i18n/context";
 import { reconcileJobsWithLedger } from "@/lib/job-ledger-reconcile.mjs";
 import { canRetryJob, nextAttempt, resetJobForRetry } from "@/lib/job-retry.mjs";
+import { pickAdoptableRuns } from "@/lib/job-adopt.mjs";
 
 export type JobStep = { kind: "tool" | "status"; label: string; ts: number };
 // ADR-0042 决议 5：批量逐项结论（batch-evaluate/batch-checkup 的 item 事件）。
@@ -43,6 +44,9 @@ type PoolEntry = {
   // ADR-0043 运行引擎：池快照携带的派发请求值（扩展源卡片唯一的来源）。
   cliId?: string;
   model?: string;
+  // 影子卡片接通：/api/run 的事件总线 runId——把 /api/events 的帧接到接管
+  // 卡片的键（见 lib/job-adopt.mjs）；批量 worker 不带。
+  runId?: string;
 };
 type PoolRunning = PoolEntry & { startedAt: number; enqueuedAt?: number };
 type PoolQueued = PoolEntry & { enqueuedAt: number; position: number };
@@ -182,6 +186,8 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
   const accs = useRef(new Map<string, RunAcc>());
   const removed = useRef(new Set<string>()); // cards removed before their POST /api/run even returned
   const jobsRef = useRef<Job[]>([]); // retryJob 读最新卡的镜像（回调闭包不追 jobs，避免 stale）
+  const channelCtl = useRef<AbortController | null>(null); // /api/events 当前连接（每次重连新建一个）
+  const replayChannel = useRef<() => void>(() => {}); // abort 当前连接 → 重连循环服务端全量重放缓冲区
   const seq = useRef(0);
   const loaded = useRef(false);
   const { t } = useI18n();
@@ -215,6 +221,71 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
+  // 影子卡片接管（adopt）：别的页签/扩展发起、或本页签刷新后失配的单任务，
+  // 以前只有轮询合成的「处理中」占位卡——/api/events 的帧按 run UUID 索引，
+  // 而影子卡按 pool id 键控，两套 ID 之间没有连接。现在快照携带 runId，因
+  // 此这里为它建一张真卡（id = adopt-<runId>，不落轮询投影）、登记映射、
+  // 装好事件累加器，然后重连一次事件通道让服务端重放缓冲区——历史步骤
+  // 从此回填（seq 去重保护既有卡）。选取规则与幂等守卫在 lib/job-adopt.mjs。
+  useEffect(() => {
+    const localActiveInputs = new Set<string>();
+    for (const j of jobsRef.current) {
+      if ((j.status === "running" || j.status === "queued") && j.input) localActiveInputs.add(j.input);
+    }
+    const adoptables = pickAdoptableRuns(activeRuns, {
+      mappedRunIds: new Set(runIds.current.keys()),
+      localActiveInputs,
+    });
+    let adopted = false;
+    const now = Date.now();
+    for (const a of adoptables) {
+      const jobId = `adopt-${a.runId}`;
+      // 刷新后重新接管同一 run：先剔除同 id 旧卡（restore 猜标的 interrupted 卡）再落新卡，
+      // 绝不让同一 run 在列表里出现两张。
+      accs.current.set(jobId, { opts: { title: a.title, kind: "batch-evaluate", input: a.url, page: "/jobs" }, text: "", verdictLine: "", doneTokens: 0, doneCostUsd: null, steps: [], lastSeq: 0 });
+      runIds.current.set(a.runId, jobId);
+      const card: Job = {
+        id: jobId,
+        title: a.title,
+        page: "/jobs",
+        input: a.url,
+        kind: "batch-evaluate",
+        cliId: a.cliId,
+        model: a.model,
+        runId: a.runId,
+        status: a.status,
+        active: true,
+        queuedPos: a.queuedPos,
+        steps: [{ kind: "status", label: a.status === "queued" ? t("jobs.queued") : t("jobs.working"), ts: now }],
+        text: "",
+        startedAt: a.startedAt,
+        enqueuedAt: a.enqueuedAt,
+      };
+      setJobs((js) => [card, ...js.filter((j) => j.id !== jobId)]);
+      adopted = true;
+    }
+    // 快照同步：接管的排队卡获槽后翻成 running（handleEvent 的 phase 只更新
+    // 徽章字段，不改 status；终态卡不回翻，避免 done 与快照的竞态覆盖结论）。
+    const snapStatus = new Map<string, "running" | "queued">();
+    for (const r of activeRuns.running) if (r.runId) snapStatus.set(r.runId, "running");
+    for (const q of activeRuns.queued) if (q.runId) snapStatus.set(q.runId, "queued");
+    if (snapStatus.size) {
+      setJobs((js) => {
+        let changed = false;
+        const next = js.map((j) => {
+          if (!j.id.startsWith("adopt-") || !j.runId) return j;
+          if (j.status !== "running" && j.status !== "queued") return j;
+          const s = snapStatus.get(j.runId);
+          if (!s || s === j.status) return j;
+          changed = true;
+          return { ...j, status: s, queuedPos: s === "queued" ? j.queuedPos : undefined };
+        });
+        return changed ? next : js;
+      });
+    }
+    if (adopted) replayChannel.current();
+  }, [activeRuns, t]);
+
   // The ONE worker-event channel (ADR-0020): every single-run worker publishes
   // its tool/status/text/done/error events to /api/events tagged with its
   // runId, and this effect holds ONE connection for all of them (with
@@ -224,7 +295,10 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
   // on the page stalled until tasks finished.
   useEffect(() => {
     let live = true;
-    const controller = new AbortController();
+    // 连接级 controller 改为每次尝试新建：abort 当前连接后，下面的重连循环会
+    // 重新建连，服务端对新连接全量重放所有在册 run 的缓冲区——接管卡凭这个
+    // 回填历史步骤（既有卡靠 acc.lastSeq 去重，不会二次应用）。
+    replayChannel.current = () => channelCtl.current?.abort();
 
     const finishJob = (id: string, status: "done" | "error", lastLabel?: string) => {
       const acc = accs.current.get(id);
@@ -241,11 +315,15 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
       );
       // persist a readable log file so the CLI/assistant can read past runs
       if (status === "done") {
-        fetch("/api/runs/save", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ id, title: acc.opts.title, subtitle: acc.opts.subtitle, page: acc.opts.page, input: acc.opts.input, result, cost, steps: acc.steps, output: acc.text }),
-        }).catch(() => {});
+        // 接管卡不另落一条历史：服务端 run 台账已记了这个 run（recordEnd +
+        // ADR-0047 步骤折叠），发起页签也会各自 save——再写就是同一 run 双份。
+        if (!id.startsWith("adopt-")) {
+          fetch("/api/runs/save", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id, title: acc.opts.title, subtitle: acc.opts.subtitle, page: acc.opts.page, input: acc.opts.input, result, cost, steps: acc.steps, output: acc.text }),
+          }).catch(() => {});
+        }
         // Tell server-snapshot surfaces (Today, pipeline) to refetch — the
         // worker just wrote a real tracker row / report they don't yet see.
         if (typeof window !== "undefined" && ["evaluate", "pdf", "batch-evaluate", "checkup"].includes(acc.opts.kind)) {
@@ -347,7 +425,9 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
       for (;;) {
         if (!live) return;
         try {
-          const res = await fetch("/api/events", { signal: controller.signal, cache: "no-store" });
+          const ctl = new AbortController();
+          channelCtl.current = ctl;
+          const res = await fetch("/api/events", { signal: ctl.signal, cache: "no-store" });
           if (!res.ok || !res.body) throw new Error(`events channel unavailable (${res.status})`);
           const reader = res.body.getReader();
           const dec = new TextDecoder();
@@ -395,7 +475,8 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
     connect();
     return () => {
       live = false;
-      controller.abort();
+      channelCtl.current?.abort();
+      replayChannel.current = () => {};
     };
     // finishJob/handleEvent close over `t` (stable per locale) and refs only.
     // eslint-disable-next-line react-hooks/exhaustive-deps

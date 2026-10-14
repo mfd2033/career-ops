@@ -370,7 +370,9 @@ async function runPipeline({
   // CLI — ADR-0014 Q1/Q4. Queued tasks no longer hold an HTTP response: their
   // status reaches the client through the /api/events channel (ADR-0020).
   // ADR-0043：cliId/model 随任务入池，扩展派发的卡片凭 /api/active-runs 也能显示引擎。
-  const poolHandle = acquire({ url: input, title: input, source: "run", cliId, model: model || undefined });
+  // 影子卡片接通：runId 同步入池——别的页签/刷新后的前端凭快照里的这个 UUID
+  // 把 /api/events 的帧接到接管卡片上，否则单任务永远只显示「处理中」占位。
+  const poolHandle = acquire({ url: input, title: input, source: "run", cliId, model: model || undefined, runId });
 
   // Spawned/guarded only AFTER the pool grants a slot. `child`/`writeToken` are
   // outer lets so cancel() can reach them whether the run is queued

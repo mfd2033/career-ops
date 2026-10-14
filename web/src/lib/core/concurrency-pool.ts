@@ -53,6 +53,12 @@ export type PoolTaskMeta = {
   // Display-only facts: the pool never inspects them, it just holds them.
   cliId?: string;
   model?: string;
+  // 影子卡片接通：/api/run 的事件总线 runId（UUID）。/api/events 的帧按这个
+  // UUID 索引，而工作器卡片按 pool id 键控——快照不带它，前端就无法把别的
+  // 页签/扩展发起的单任务接到步骤流上，卡片永远停在「处理中」占位。仅
+  // source "run" 的单任务携带（批量 worker 走自己的 NDJSON 响应，不经过总线）。
+  // Display-only fact：池不检查它，只把它带进快照。
+  runId?: string;
 };
 
 export type PoolHandle = {
@@ -71,6 +77,7 @@ type Entry = {
   source: PoolSource;
   cliId?: string;
   model?: string;
+  runId?: string;
   enqueuedAt: number;
   // ADR-0044: the moment this entry was granted a slot and its CLI spawned.
   // Distinct from enqueuedAt (dispatch/receive time, which includes any queue
@@ -123,6 +130,7 @@ export function acquire(meta: PoolTaskMeta): PoolHandle {
     source: meta.source,
     cliId: meta.cliId,
     model: meta.model,
+    runId: meta.runId,
     enqueuedAt: Date.now(),
     running: false,
     cancelled: false,
@@ -185,6 +193,7 @@ export type PoolRunningTask = {
   source: PoolSource;
   cliId?: string;
   model?: string;
+  runId?: string;
   startedAt: number;
   // ADR-0044: enqueue time kept alongside the corrected startedAt so a reader
   // can tell how long a running task waited for a slot (startedAt - enqueuedAt).
@@ -198,6 +207,7 @@ export type PoolQueuedTask = {
   source: PoolSource;
   cliId?: string;
   model?: string;
+  runId?: string;
   enqueuedAt: number;
   position: number; // 1-based slot in the FIFO queue
 };
@@ -213,6 +223,7 @@ export function listPool(): { running: PoolRunningTask[]; queued: PoolQueuedTask
       source: e.source,
       cliId: e.cliId,
       model: e.model,
+      runId: e.runId,
       // ADR-0044: real execution start (slot granted). A running entry always
       // has startedAt set by dispatch(); the enqueuedAt fallback is defensive
       // for an entry captured mid-transition and keeps the field non-optional.
@@ -227,6 +238,7 @@ export function listPool(): { running: PoolRunningTask[]; queued: PoolQueuedTask
       source: e.source,
       cliId: e.cliId,
       model: e.model,
+      runId: e.runId,
       enqueuedAt: e.enqueuedAt,
       position: i + 1,
     })),

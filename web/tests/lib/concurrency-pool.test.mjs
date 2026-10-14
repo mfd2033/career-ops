@@ -156,6 +156,29 @@ test("ADR-0044: a queued-then-granted task reports a startedAt later than its en
   assert.equal(rb.enqueuedAt, bq.enqueuedAt, "enqueue time is preserved alongside the corrected start");
 });
 
+test("shadow-card fix: a single run's event-bus runId rides along in the snapshot", async () => {
+  // /api/events frames are keyed by the run UUID while the worker list keys
+  // cards by pool id — without this field the frontend cannot join the two,
+  // so foreign-tab runs stay permanent 「处理中」 placeholders.
+  __setPoolSizeForTest(1);
+  const running = acquire({ url: "a", title: "a", source: "run", runId: "uuid-running" });
+  const queued = acquire({ url: "b", title: "b", source: "run", runId: "uuid-queued" });
+  assert.equal(await running.ready, true);
+
+  assert.equal(listPool().running[0].runId, "uuid-running");
+  assert.equal(listPool().queued[0].runId, "uuid-queued", "queued entries carry it too — the bus registers before the pool grants");
+});
+
+test("shadow-card fix: batch workers and pre-feature callers carry no runId", async () => {
+  __setPoolSizeForTest(2);
+  const batch = acquire({ url: "b1", title: "b1", source: "batch" });
+  const legacy = acquire(meta("b2"));
+  assert.equal(await batch.ready, true);
+  const [r1, r2] = listPool().running;
+  assert.equal(r1.runId, undefined, "batch workers stream on their own NDJSON response, not the bus");
+  assert.equal(r2.runId, undefined);
+});
+
 test("ADR-0044: an immediately-granted task has startedAt ~= enqueuedAt (no meaningful queue wait)", async () => {
   __setPoolSizeForTest(2);
   const h = acquire(meta("x"));
