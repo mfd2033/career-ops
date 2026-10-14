@@ -538,7 +538,7 @@ async function runPipeline({
     // (renderPdf, below) starts only after this timer's window and has no
     // timeout of its own, so an agent that runs close to its full budget
     // would otherwise leave the platform's hard maxDuration cutoff to kill
-    // generate-pdf.mjs mid-render. 600s agent / ~200s render is ample —
+    // generate-pdf.mjs mid-render. 720s agent / ~80s render is still ample —
     // a Chromium PDF render normally takes low tens of seconds even with a
     // cold Playwright launch.
     //
@@ -552,13 +552,16 @@ async function runPipeline({
     // checkup（公司体检，ADR-0027）是重调研：opencode 实测约 10 分钟起步，
     // 600s 的通用 kill 定时器会在它写完 HTML/台账、正要写附录时 SIGTERM
     // （2026-09-15 实测——131/119/124/916 四次「零产物失败」的真根因）。
-    // 30 分钟给足余量；pdf 维持 600s（信封输出前的 tailoring 本身很快，600s 的
-    // 失败是弱模型打转，加时间救不了——2026-10-09 那条 601s 的 pdf 是唯一例外）。
+    // 30 分钟给足余量。pdf 提到 720s（2026-10-14）：曾以为「600s 的失败都是弱模型
+    // 打转、加时间救不了」，但 1129/1130 的轨迹暴露了另一类失败——大 CV 正文已开始内联
+    // 输出、却在 600s 边缘被截（信封 never closed）。run-prompts 的 pdf 提示词已禁止 agent
+    // 去读渲染内部文件、把预算留给输出，尾部再留 120s 让长简历吐完闭合；720s 仍在
+    // maxDuration(800) 之内，给渲染留 ~80s 余量。「纯打转、始终没吐信封」那类靠提示词修，不靠加时间。
     // evaluate 同样提到 1800s：2026-10-09 三条猎聘 evaluate 全部精确死在 600s，
     // 轨迹显示慢速 CLI（codebuddy/hy3，工具调用间隔可达 1-4 分钟）刚启动报告
     // Write 就被杀——完整 oferta 链路（browser-extract + WebSearch + reserve +
     // company-history + 报告/TSV/merge）在 600s 内走不完。
-    const killMs = kind === "checkup" || kind === "evaluate" ? 1_800_000 : 600_000;
+    const killMs = kind === "checkup" || kind === "evaluate" ? 1_800_000 : kind === "pdf" ? 720_000 : 600_000;
     // `killer` is armed AFTER spawn below (the CLI child is null while queued,
     // so there is nothing to kill and terminateCli(null) would throw).
 

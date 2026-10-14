@@ -104,6 +104,21 @@ test("buildPrompt: pdf prompt names the exact report file when the server resolv
   assert.ok(!/reports\/1086-\*\.md/.test(prompt), "the glob wording must be gone when a path is in hand");
 });
 
+test("buildPrompt: the pdf prompt forbids the renderer-internals rabbit hole (600s blowout)", () => {
+  // Given the 1129/1130/1131 pdf runs (2026-10-14) that spent the whole 600s cap
+  // opening build-cv-html.mjs / cv-sections-core.mjs / templates/sections/* and
+  // re-grepping cv.md instead of emitting the envelope. The only difference vs the
+  // runs that succeeded at ~508s was whether the agent wandered into the renderer,
+  // so the prompt must now bound the reads to the four known inputs and forbid the
+  // renderer files by name.
+  const prompt = buildPrompt({ kind: "pdf", ...ARGS });
+
+  assert.match(prompt, /Read ONLY those four/, "must bound the reads to the four known inputs");
+  assert.match(prompt, /do NOT open build-cv-html\.mjs/, "must forbid the renderer entry point");
+  assert.match(prompt, /cv-sections-core\.mjs/, "must name the section-core file it must not read");
+  assert.match(prompt, /templates\/sections/, "must name the section partials it must not read");
+});
+
 test("buildPrompt: every kind ends with exactly one VERDICT instruction", () => {
   // Given each kind — job-store.tsx parses that final line client-side
   for (const kind of ["pdf", "research", "evaluate", "fix-portal"]) {
