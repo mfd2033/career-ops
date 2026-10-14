@@ -7,6 +7,7 @@ import { useI18n } from "@/lib/i18n/context";
 import { reconcileJobsWithLedger } from "@/lib/job-ledger-reconcile.mjs";
 import { canRetryJob, nextAttempt, resetJobForRetry } from "@/lib/job-retry.mjs";
 import { pickAdoptableRuns, ADOPT_PREFIX } from "@/lib/job-adopt.mjs";
+import { ledgerRunsToCards } from "@/lib/ledger-display.mjs";
 
 export type JobStep = { kind: "tool" | "status"; label: string; ts: number };
 // ADR-0042 决议 5：批量逐项结论（batch-evaluate/batch-checkup 的 item 事件）。
@@ -83,6 +84,9 @@ export type Job = {
   // For a server-sourced (pool) card: its pool id + whether it was queued, so the
   // dismiss action can route to the right cancel path (dequeue via API).
   active?: boolean;
+  // 纯台账卡（ledgerRunsToCards 生成）：不是本地状态，不进 jobs state、
+  // 不落盘；托盘凭这个标记不挂「✕ 忽略」这种对台账行无效的死按钮。
+  ledgerOnly?: boolean;
   queuedPos?: number; // 1-based FIFO position while waiting for a pool slot
   // ADR-0042 决议 1：当前粗阶段（仅进行中任务有；终态清除）。
   phase?: JobPhase;
@@ -119,8 +123,31 @@ export type Job = {
 
 type StartOpts = { title: string; subtitle?: string; kind: string; input: string; page?: string; batchId?: string; urls?: string[]; ns?: string[]; reportNum?: string };
 
+// /api/runs/history 的台账行形状（服务端 run 账本，终态）。tolerant reader：
+// 旧行可能缺字段（ADR-0043 前无 cliId/model，ADR-0045 前无 items/total）。
+// /jobs 主列表与侧栏托盘共用 ledgerRunsToCards 这一份映射。
+type RunLedgerRow = {
+  id?: string;
+  kind?: string;
+  input?: string;
+  title?: string;
+  page?: string;
+  status?: string;
+  startedAt?: number;
+  finishedAt?: number;
+  msg?: string;
+  cliId?: string;
+  model?: string;
+  items?: JobItem[];
+  total?: number;
+  parentId?: string;
+};
+
 type Ctx = {
   jobs: Job[];
+  // 跨页签/扩展发起、本页签没有卡的终态任务（从服务端台账派生）——
+  // /jobs 主列表与侧栏托盘都合并它，去重口径本地卡胜出。
+  ledgerOnlyJobs: Job[];
   startJob: (opts: StartOpts) => string | null;
   retryJob: (job: Job) => void;
   removeJob: (id: string) => void;
@@ -184,6 +211,7 @@ type RunAcc = {
 export function JobsProvider({ children }: { children: React.ReactNode }) {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [activeRuns, setActiveRuns] = useState<ActiveRunApi>({ running: [], queued: [] });
+  const [ledgerRuns, setLedgerRuns] = useState<RunLedgerRow[]>([]); // 终态台账行（reconcile 轮询顺带刷新）
   const batchControllers = useRef(new Map<string, AbortController>()); // batch jobs only — they still hold their own NDJSON stream
   const runIds = useRef(new Map<string, string>()); // server runId -> local jobId (single-run workers, ADR-0020)
   const accs = useRef(new Map<string, RunAcc>());
@@ -567,6 +595,11 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
   });
   const visibleJobs: Job[] = [...activeCards, ...localDisplay];
 
+  // 纯台账卡：去重口径与 /jobs 主列表同一份（ledgerRunsToCards 内部走
+  // ledgerOnlyRuns，本地卡凭 runId/serverBatchId 胜出）。派生而非入 jobs
+  // state：不落盘、不被 clearFinished 假删，刷新后凭台账重拉重建。
+  const ledgerOnlyJobs = ledgerRunsToCards(visibleJobs, ledgerRuns, t) as Job[];
+
   // restore history
   useEffect(() => {
     try {
@@ -601,6 +634,14 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
         if (!res.ok) return;
         const data = (await res.json()) as { runs?: unknown[] };
         const runs = Array.isArray(data.runs) ? data.runs : [];
+        // 台账行顺带存下来：托盘要合并 ledger-only 终态卡（跨页签/扩展发起
+        // 的任务在本页签没有卡）。15s 节奏对展示端足够，不另开轮询。
+        // 台账是追加式（新终态行只出现在头部）：长度 + 首行 id 未变即无增量，
+        // 保持旧引用——稳态下不每 15s 惊动整个 Context 消费方重渲染（与下面
+        // 「无 heal 就返回原 js」的既有口径同构）。
+        setLedgerRuns((prev) =>
+          prev.length === runs.length && prev[0]?.id === (runs[0] as RunLedgerRow | undefined)?.id ? prev : (runs as RunLedgerRow[]),
+        );
         setJobs((js) => {
           const r = reconcileJobsWithLedger(js, runs as never[], {
             now: Date.now(),
@@ -1036,5 +1077,5 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
 
   const clearFinished = useCallback(() => setJobs((js) => js.filter((j) => j.status === "running" || j.status === "queued")), []);
 
-  return <JobsContext.Provider value={{ jobs: visibleJobs, startJob, retryJob, removeJob, cancelJob, clearFinished }}>{children}</JobsContext.Provider>;
+  return <JobsContext.Provider value={{ jobs: visibleJobs, ledgerOnlyJobs, startJob, retryJob, removeJob, cancelJob, clearFinished }}>{children}</JobsContext.Provider>;
 }

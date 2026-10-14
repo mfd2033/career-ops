@@ -12,8 +12,6 @@ import { fmtStartedAt } from "@/lib/started-at.mjs";
 import { doneDurationSeconds, useJobTiming } from "@/lib/eval-duration-client";
 import { ReportNumLink } from "@/components/report-num-link";
 import { formatRunEngine } from "@/lib/cli-labels.mjs";
-import { ledgerOnlyRuns } from "@/lib/ledger-merge.mjs";
-import { ledgerCardFields } from "@/lib/ledger-display.mjs";
 import { batchSummary } from "@/lib/batch-summary.mjs";
 import { mergeBatchItems, shouldPollBatch } from "@/lib/batch-live.mjs";
 import { BatchItemList } from "@/components/jobs/batch-item-list";
@@ -34,70 +32,15 @@ const STATUS_LABEL: Record<string, string> = {
   error: "jobs.statusError",
 };
 
-/** Shape of one server run-ledger entry (producer: web/src/lib/run-ledger.mjs
- *  via GET /api/runs/history — ADR-0027 follow-up observability fix). */
-type RunLedgerEntry = {
-  id: string;
-  kind: string;
-  input: string;
-  title: string;
-  page?: string;
-  status: "done" | "error";
-  startedAt: number;
-  finishedAt: number;
-  msg?: string;
-  // ADR-0043 运行引擎：本功能前的记录没有这两个字段（按「未记录」处理）。
-  cliId?: string;
-  model?: string;
-  // ADR-0045 决议 2/6：批量行的逐项快照与选中总数。功能前的旧行没有这两个
-  // 字段（tolerant reader 照常解析），展示端按「无逐项数据」处理，不回填。
-  items?: JobItem[];
-  total?: number;
-  // ADR-0047：单任务台账行的重建步骤流（列表不渲染，仅类型对齐；详情页读回）。
-  steps?: { kind: "tool" | "status"; label: string; ts?: number }[];
-};
-
 export default function JobsHistory() {
-  const { jobs, clearFinished } = useJobs();
+  const { jobs, ledgerOnlyJobs, clearFinished } = useJobs();
   const { t } = useI18n();
 
   // Server run ledger (ADR-0027 follow-up): terminated runs dispatched outside
   // this browser (API, script, another tab) exist only in the server ledger.
-  // Merge them in, deduped by runId — a card that knows its runId wins (it has
-  // richer live state); ledger-only rows fill the gaps so a finished checkup
-  // can never vanish from history again.
-  const [ledgerRuns, setLedgerRuns] = useState<RunLedgerEntry[]>([]);
-  useEffect(() => {
-    fetch("/api/runs/history")
-      .then((r) => (r.ok ? r.json() : { runs: [] }))
-      .then((d) => setLedgerRuns(d.runs ?? []))
-      .catch(() => {});
-  }, []);
-
-  // ADR-0045 推定结论：去重键扩展到批量——单次 run 认 runId，批量认
-  // serverBatchId（= 批量台账行的 id），同一批量本地卡胜出、绝不出双行。
-  const ledgerOnly: Job[] = ledgerOnlyRuns(jobs, ledgerRuns).map((r) => ({
-    id: r.id,
-    // ADR-0051 补丁（方案 A）：ledger-only 行是扩展/CLI/脚本发起的任务，没有
-    // 本地卡，只能用服务端那个 `${kind} ${input}` 兜底标题。在读取端派生成与
-    // 派发端同一个 i18n 标签，两种来源的历史卡才长得一样（不回填台账、不改记录）。
-    ...ledgerCardFields({ kind: r.kind, input: r.input, title: r.title, page: r.page, t }),
-    input: r.input,
-    kind: r.kind,
-    runId: r.id,
-    cliId: r.cliId,
-    model: r.model,
-    status: r.status === "done" ? "done" : "error",
-    steps: [],
-    text: r.msg || "",
-    startedAt: r.startedAt,
-    endedAt: r.finishedAt,
-    // ADR-0045：台账落盘的逐项快照随 ledger-only 行带出，供列表展开/详情页
-    // 消费；旧行无 items 时为 undefined，展示端自行保持诚实空白。
-    items: r.items,
-    batchTotal: r.total,
-  }));
-  const merged = [...jobs, ...ledgerOnly].sort((a, b) => b.startedAt - a.startedAt);
+  // 映射与去重已抽到 job-store 的 ledgerOnlyJobs（托盘与主列表吃同一份，
+  // 本地卡凭 runId/serverBatchId 胜出），这里只剩合并排序。
+  const merged = [...jobs, ...ledgerOnlyJobs].sort((a, b) => b.startedAt - a.startedAt);
 
   return (
     <div className="mx-auto max-w-4xl px-6 py-10">

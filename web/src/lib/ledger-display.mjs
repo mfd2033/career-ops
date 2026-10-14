@@ -15,6 +15,8 @@
  * Plain .mjs：node --test 锁定（同 ledger-merge.mjs）。
  */
 
+import { ledgerOnlyRuns } from "./ledger-merge.mjs";
+
 /** 派发端用的标题 i18n 键；缺这个键的种类一律原样显示标题。 */
 const KIND_TITLE_KEY = {
   evaluate: "jobs.evaluateTitle",
@@ -69,4 +71,40 @@ export function ledgerCardFields({ kind, input, title, page, t } = {}) {
     if (host) out.subtitle = host;
   }
   return out;
+}
+
+/**
+ * 台账行 → 展示卡片的单一映射（/jobs 主列表与侧栏托盘共用）。
+ *
+ * 以前这段映射内联在 page.tsx 里；托盘要合并同一批 ledger-only 行时必然
+ * 复制粘贴（Duplicated Code），抽出来两边吃同一个形状。去重口径不变：
+ * 本地卡（凭 runId/serverBatchId）胜出，批量子行不进列表。生成的卡标
+ * `ledgerOnly: true`——它不是本地状态，托盘凭这个标记不挂「✕ 忽略」
+ * 这种对台账行无效的死按钮，详情页凭 id 未命中本地卡走 ledger 兑底。
+ *
+ * @param {Array<{runId?: string, serverBatchId?: string}>} jobs 本地卡（含池投影）
+ * @param {Array<{id?: string, kind?: string, input?: string, title?: string, page?: string, status?: string, startedAt?: number, finishedAt?: number, msg?: string, cliId?: string, model?: string, items?: unknown[], total?: number, parentId?: string}>} ledgerRuns /api/runs/history 的行
+ * @param {(k: string, p?: Record<string, string | number>) => string} [t] i18n 翻译（缺失时保留裸标题）
+ * @returns {Array<Record<string, unknown>>} 台账序（最新在前）的终态卡
+ */
+export function ledgerRunsToCards(jobs, ledgerRuns, t) {
+  return ledgerOnlyRuns(jobs, ledgerRuns).map((r) => ({
+    id: r.id,
+    ...ledgerCardFields({ kind: r.kind, input: r.input, title: r.title, page: r.page, t }),
+    input: r.input,
+    kind: r.kind,
+    runId: r.id,
+    cliId: r.cliId,
+    model: r.model,
+    status: r.status === "done" ? "done" : "error",
+    steps: [],
+    text: r.msg || "",
+    startedAt: r.startedAt,
+    endedAt: r.finishedAt,
+    // ADR-0045：台账落盘的逐项快照随卡带出，供列表展开/详情页消费；
+    // 旧行无 items 时为 undefined，展示端自行保持诚实空白。
+    items: r.items,
+    batchTotal: r.total,
+    ledgerOnly: true,
+  }));
 }
