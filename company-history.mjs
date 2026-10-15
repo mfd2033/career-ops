@@ -46,7 +46,7 @@
  *      node company-history.mjs --self-test
  */
 
-import { readFileSync, existsSync, writeFileSync, mkdtempSync, rmSync } from 'fs';
+import { realpathSync,  readFileSync, existsSync, writeFileSync, mkdtempSync, rmSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { createHash } from 'crypto';
@@ -1737,7 +1737,13 @@ async function runSelfTest() {
 }
 
 // --- Run (CLI only; guarded so the module is safely importable for tests) ---
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+// try/catch: realpathSync throws on non-path argv[1] (e.g. a file:/// URL passed via
+// `node -e` when this module is imported by a test) -- treat any throw as "not main".
+let isMainEntry = false;
+try {
+  isMainEntry = process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href;
+} catch { isMainEntry = false; }
+if (isMainEntry) {
   const { summaryMode, selfTestMode, company, silenceWindowArg, includeStale, scanHistoryOverride, followupsOverride, emitSignal } =
     parseArgs(process.argv);
 

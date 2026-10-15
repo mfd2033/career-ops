@@ -25,7 +25,7 @@
  * through an injectable `fetchJson`, so the pure logic is testable offline.
  */
 
-import { existsSync, readFileSync } from 'fs';
+import { realpathSync,  existsSync, readFileSync } from 'fs';
 import { dirname, resolve } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import * as yaml from 'js-yaml';
@@ -757,7 +757,13 @@ async function main() {
 
 // Only run main() when invoked directly (`node verify-portals.mjs`), not when
 // imported by tests. `|| ''` guards `node -e` invocations with no script arg.
-if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
+// try/catch: realpathSync throws on non-path argv[1] (e.g. a file:/// URL passed via
+// `node -e` when this module is imported by a test) -- treat any throw as "not main".
+let isMainEntry = false;
+try {
+  isMainEntry = Boolean(process.argv[1]) && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href;
+} catch { isMainEntry = false; }
+if (isMainEntry) {
   main().catch((err) => {
     console.error(`verify-portals failed: ${err.message}`);
     process.exit(1);

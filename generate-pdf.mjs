@@ -1773,7 +1773,12 @@ export async function renderBatch(entries, opts = {}) {
   }
 }
 
-const isMain = process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1]);
+// try/catch: realpathSync throws on non-path argv[1] (e.g. a file:/// URL passed via
+// `node -e` when this module is imported by a test) -- treat any throw as "not main".
+let isMain = false;
+try {
+  isMain = process.argv[1] && fileURLToPath(import.meta.url) === realpathSync(process.argv[1]);
+} catch { isMain = false; }
 if (isMain) {
   generatePDF().catch((err) => {
     console.error('❌ PDF generation failed:', err.message);

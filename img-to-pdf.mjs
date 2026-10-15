@@ -27,7 +27,7 @@
 import { chromium } from 'playwright';
 import { resolve, dirname, extname } from 'path';
 import { readFile, writeFile, mkdir } from 'fs/promises';
-import { existsSync } from 'fs';
+import { realpathSync,  existsSync } from 'fs';
 import { fileURLToPath } from 'url';
 
 const MIME_TYPES = {
@@ -253,7 +253,12 @@ async function main() {
   }
 }
 
-const isMain = process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1]);
+// try/catch: realpathSync throws on non-path argv[1] (e.g. a file:/// URL passed via
+// `node -e` when this module is imported by a test) -- treat any throw as "not main".
+let isMain = false;
+try {
+  isMain = process.argv[1] && fileURLToPath(import.meta.url) === realpathSync(process.argv[1]);
+} catch { isMain = false; }
 if (isMain) {
   main();
 }

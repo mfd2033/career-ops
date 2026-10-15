@@ -31,7 +31,7 @@
  * Issue #1864 — github.com/santifer/career-ops
  */
 
-import { readFileSync, existsSync, writeFileSync } from 'fs';
+import { realpathSync,  readFileSync, existsSync, writeFileSync } from 'fs';
 import { dirname, join, resolve } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import * as yaml from 'js-yaml';
@@ -1058,7 +1058,13 @@ async function main() {
 }
 
 // --- Run (CLI only; guarded so the module is safely importable for tests) ---
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+// try/catch: realpathSync throws on non-path argv[1] (e.g. a file:/// URL passed via
+// `node -e` when this module is imported by a test) -- treat any throw as "not main".
+let isMainEntry = false;
+try {
+  isMainEntry = process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href;
+} catch { isMainEntry = false; }
+if (isMainEntry) {
   main().catch((err) => {
     console.error(`discover-ats: ${err?.stack || err?.message || err}`);
     process.exit(1);

@@ -111,4 +111,10 @@ if (!APPLY) console.log("\n（干跑未写盘；先 local\\backup-data.cmd，再
 }
 
 // 直接被运行时才扫描写盘；被 import（测试）时只暴露上面的纯函数。
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) runScanAndMaybeApply();
+// try/catch: realpathSync throws on non-path argv[1] (e.g. a file:/// URL passed via
+// `node -e` when this module is imported by a test) -- treat any throw as "not main".
+let isMainEntry = false;
+try {
+  isMainEntry = process.argv[1] && import.meta.url === pathToFileURL(fs.realpathSync(process.argv[1])).href;
+} catch { isMainEntry = false; }
+if (isMainEntry) runScanAndMaybeApply();

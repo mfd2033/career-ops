@@ -13,7 +13,7 @@ try {
   config(); 
 } catch (e) {}
 
-import { readFileSync, existsSync } from 'fs';
+import { realpathSync,  readFileSync, existsSync } from 'fs';
 import { pathToFileURL } from 'url';
 import * as yaml from 'js-yaml';
 import { GoogleGenerativeAI } from '@google/generative-ai';
@@ -118,6 +118,12 @@ async function main() {
   }
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
+// try/catch: realpathSync throws on non-path argv[1] (e.g. a file:/// URL passed via
+// `node -e` when this module is imported by a test) -- treat any throw as "not main".
+let isMainEntry = false;
+try {
+  isMainEntry = Boolean(process.argv[1]) && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href;
+} catch { isMainEntry = false; }
+if (isMainEntry) {
   main().catch(err => { console.error("Fatal:", err.message); process.exit(1); });
 }

@@ -153,7 +153,7 @@
  *   node story-provenance-check.mjs --self-test
  */
 
-import { readFileSync, existsSync } from 'fs';
+import { realpathSync,  readFileSync, existsSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { flagValue } from './lib/cli-flags.mjs';
 
@@ -706,7 +706,13 @@ Brings 15 years of unrelated professional background in adult education prior to
 
 // ── Main ─────────────────────────────────────────────────────────────
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+// try/catch: realpathSync throws on non-path argv[1] (e.g. a file:/// URL passed via
+// `node -e` when this module is imported by a test) -- treat any throw as "not main".
+let isMainEntry = false;
+try {
+  isMainEntry = Boolean(process.argv[1]) && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url);
+} catch { isMainEntry = false; }
+if (isMainEntry) {
   if (selfTestMode) {
     runSelfTest();
   } else {

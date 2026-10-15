@@ -480,6 +480,12 @@ function main() {
   }
 }
 
-if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
+// try/catch: realpathSync throws on non-path argv[1] (e.g. a file:/// URL passed via
+// `node -e` when this module is imported by a test) -- treat any throw as "not main".
+let isMainEntry = false;
+try {
+  isMainEntry = process.argv[1] && pathToFileURL(realpathSync(process.argv[1])).href === import.meta.url;
+} catch { isMainEntry = false; }
+if (isMainEntry) {
   main();
 }

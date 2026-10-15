@@ -4,7 +4,7 @@
 // Backward-compatible: with no config and no named files, resolves the base
 // templates/cv-template.html (name "standard"), identical to prior behavior.
 
-import { readdirSync, readFileSync, existsSync } from 'fs';
+import { realpathSync,  readdirSync, readFileSync, existsSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import * as yaml from 'js-yaml';
@@ -160,7 +160,12 @@ export function resolveTemplate(kind, name, opts = {}) {
 }
 
 // ---- CLI ----
-const isMain = process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+// try/catch: realpathSync throws on non-path argv[1] (e.g. a file:/// URL passed via
+// `node -e` when this module is imported by a test) -- treat any throw as "not main".
+let isMain = false;
+try {
+  isMain = process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url);
+} catch { isMain = false; }
 if (isMain) {
   const argv = process.argv.slice(2);
   const cmd = argv[0];

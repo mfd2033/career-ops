@@ -19,7 +19,7 @@
 // drift); the URL + title are always extracted reliably, and the downstream
 // `pipeline` mode re-fetches each URL to evaluate the real JD.
 
-import { readFileSync, readdirSync, existsSync } from 'fs';
+import { realpathSync,  readFileSync, readdirSync, existsSync } from 'fs';
 import path from 'path';
 import { pathToFileURL } from 'url';
 import * as yaml from 'js-yaml';
@@ -311,7 +311,12 @@ async function main() {
   console.log(`\n→ Run /career-ops pipeline to evaluate new offers.`);
 }
 
-const isMain = import.meta.url === pathToFileURL(process.argv[1] || '').href;
+// try/catch: realpathSync throws on non-path argv[1] (e.g. a file:/// URL passed via
+// `node -e` when this module is imported by a test) -- treat any throw as "not main".
+let isMain = false;
+try {
+  isMain = Boolean(process.argv[1]) && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href;
+} catch { isMain = false; }
 if (isMain) {
   main().catch((err) => {
     console.error('Fatal:', err.message);

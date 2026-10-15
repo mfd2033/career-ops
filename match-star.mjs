@@ -14,7 +14,7 @@
  *   node match-star.mjs --list    # list all stories with their tags
  */
 
-import { readFileSync, existsSync } from 'fs';
+import { realpathSync,  readFileSync, existsSync } from 'fs';
 import { fileURLToPath } from 'url';
 
 // ── Config ──────────────────────────────────────────────────────────
@@ -199,7 +199,13 @@ export { parseStories, tokenize, score, STOPWORDS };
 
 // ── Main ─────────────────────────────────────────────────────────────
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+// try/catch: realpathSync throws on non-path argv[1] (e.g. a file:/// URL passed via
+// `node -e` when this module is imported by a test) -- treat any throw as "not main".
+let isMainEntry = false;
+try {
+  isMainEntry = Boolean(process.argv[1]) && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url);
+} catch { isMainEntry = false; }
+if (isMainEntry) {
 if (!existsSync(STORY_BANK_PATH)) {
   console.error(`Error: ${STORY_BANK_PATH} not found.`);
   console.error('Run /career-ops interview-prep on a role first to populate your story bank.');

@@ -22,6 +22,7 @@
  *       [--login-timeout S] [--wheel-timeout S] [--timeout MS]
  */
 
+import { realpathSync } from 'fs';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { rejectPrivateOrInvalid } from './liveness-browser.mjs';
@@ -526,6 +527,12 @@ process.on('SIGTERM', () => {
 });
 
 // 仅直接执行时跑 main()（被测试 import 时静默导出纯函数）。
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+// try/catch: realpathSync throws on non-path argv[1] (e.g. a file:/// URL passed via
+// `node -e` when this module is imported by a test) -- treat any throw as "not main".
+let isMainEntry = false;
+try {
+  isMainEntry = process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href;
+} catch { isMainEntry = false; }
+if (isMainEntry) {
   main();
 }

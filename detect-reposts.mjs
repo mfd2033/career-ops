@@ -56,7 +56,7 @@
  * Issue #1205 — github.com/santifer/career-ops
  */
 
-import { readFileSync, existsSync, writeFileSync, mkdtempSync, rmSync } from 'fs';
+import { realpathSync,  readFileSync, existsSync, writeFileSync, mkdtempSync, rmSync } from 'fs';
 import { join, dirname } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath, pathToFileURL } from 'url';
@@ -784,7 +784,13 @@ function runSelfTest() {
 }
 
 // --- Run (CLI only; guarded so the module is safely importable for tests) ---
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+// try/catch: realpathSync throws on non-path argv[1] (e.g. a file:/// URL passed via
+// `node -e` when this module is imported by a test) -- treat any throw as "not main".
+let isMainEntry = false;
+try {
+  isMainEntry = process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href;
+} catch { isMainEntry = false; }
+if (isMainEntry) {
   // Replaces a bare --help check that never looked at the other flags, so a
   // mistyped --window was ignored and the scan silently used the 90-day
   // default instead of the window that was asked for (#2919). validateFlags

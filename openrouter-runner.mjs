@@ -798,8 +798,13 @@ async function cmdApply(ref, ctx) {
 // ---------------------------------------------------------------------------
 // Only run the CLI when invoked directly (`node openrouter-runner.mjs ...`), so the
 // module can be imported (e.g. by test-all.mjs) without executing a command.
-const invokedDirectly = process.argv[1] &&
-  path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+// try/catch: realpathSync throws on non-path argv[1] (e.g. a file:/// URL passed via
+// `node -e` when this module is imported by a test) -- treat any throw as "not main".
+let invokedDirectly = false;
+try {
+  invokedDirectly = process.argv[1] &&
+fs.realpathSync(process.argv[1]) === fileURLToPath(import.meta.url);
+} catch { invokedDirectly = false; }
 const [,, command, ...args] = invokedDirectly ? process.argv : [];
 const ctx = invokedDirectly ? loadContext() : null;
 

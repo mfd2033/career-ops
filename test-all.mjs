@@ -16925,15 +16925,17 @@ try {
   }
 
   // Read-only import boundary: the ONLY fs capabilities the script may hold
-  // are readFileSync / readdirSync / existsSync. No write-capable named
-  // imports, no fs/promises, no require(), no dynamic import of fs — so a
+  // are readFileSync / readdirSync / existsSync / realpathSync. No write-capable
+  // named imports, no fs/promises, no require(), no dynamic import of fs — so a
   // future edit that adds a write path fails CI instead of shipping quietly.
-  const FS_READ_WHITELIST = new Set(['readFileSync', 'readdirSync', 'existsSync']);
+  // realpathSync was whitelisted for the junction-safe entry guard (2026-10-15):
+  // it is a pure query API with no mutation surface.
+  const FS_READ_WHITELIST = new Set(['readFileSync', 'readdirSync', 'existsSync', 'realpathSync']);
   const fsImports = [...freshnessSrc.matchAll(/import\s*\{([^}]*)\}\s*from\s*['"](?:node:)?fs['"]/g)];
   const fsNames = fsImports.flatMap(m => m[1].split(',').map(s => s.trim()).filter(Boolean));
   const nonWhitelisted = fsNames.filter(n => !FS_READ_WHITELIST.has(n));
   if (fsImports.length > 0 && nonWhitelisted.length === 0) {
-    pass('check-table-freshness.mjs fs imports are read-only (readFileSync/readdirSync/existsSync only)');
+    pass('check-table-freshness.mjs fs imports are read-only (readFileSync/readdirSync/existsSync/realpathSync only)');
   } else {
     fail(`check-table-freshness.mjs fs import boundary violated: ${nonWhitelisted.join(', ') || 'no fs import matched'}`);
   }
@@ -17011,7 +17013,9 @@ try {
   // from a whitelist of read-only APIs (no default/namespace import that
   // would smuggle in fs.writeFileSync/fs.promises), no require(), and no
   // dynamic import of fs — so no mutation API is reachable at all.
-  const READ_ONLY_FS = new Set(['readFileSync', 'existsSync']);
+  // realpathSync whitelisted for the junction-safe entry guard (2026-10-15);
+  // it is a pure query API with no mutation surface.
+  const READ_ONLY_FS = new Set(['readFileSync', 'existsSync', 'realpathSync']);
   const fsImports = [...rejectionLatencySrc.matchAll(/import\s*(.*?)\s*from\s*['"]((?:node:)?fs(?:\/promises)?)['"]/g)];
   const fsImportViolations = [];
   for (const [, clause, module] of fsImports) {

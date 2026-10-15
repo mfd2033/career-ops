@@ -37,7 +37,7 @@
  * Issue #2129 — github.com/santifer/career-ops
  */
 
-import { readFileSync, existsSync, readdirSync, mkdtempSync, writeFileSync, rmSync } from 'fs';
+import { realpathSync,  readFileSync, existsSync, readdirSync, mkdtempSync, writeFileSync, rmSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import * as yaml from 'js-yaml';
@@ -669,7 +669,13 @@ const USAGE = `Usage:
 Both bounds are optional; supplying one without the other is rejected rather
 than silently widened.`;
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+// try/catch: realpathSync throws on non-path argv[1] (e.g. a file:/// URL passed via
+// `node -e` when this module is imported by a test) -- treat any throw as "not main".
+let isMainEntry = false;
+try {
+  isMainEntry = process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href;
+} catch { isMainEntry = false; }
+if (isMainEntry) {
   const args = process.argv.slice(2);
 
   // The script had no --help and no unrecognized-flag check at all, so a

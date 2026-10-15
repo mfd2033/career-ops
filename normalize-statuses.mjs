@@ -11,7 +11,7 @@
  * Run: node career-ops/normalize-statuses.mjs [--dry-run]
  */
 
-import { readFileSync, copyFileSync, existsSync, mkdirSync } from 'fs';
+import { realpathSync,  readFileSync, copyFileSync, existsSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import {
@@ -109,8 +109,13 @@ export { normalizeStatus };
 // run it: the import alone opened a tracker transaction and rewrote applications.md.
 // That is why tests could only scrape this file's source with regexes instead of
 // calling the function, and why the rechazado gap went unnoticed.
-const IS_CLI = process.argv[1]
-  && pathToFileURL(process.argv[1]).href === import.meta.url;
+// try/catch: realpathSync throws on non-path argv[1] (e.g. a file:/// URL passed via
+// `node -e` when this module is imported by a test) -- treat any throw as "not main".
+let IS_CLI = false;
+try {
+  IS_CLI = process.argv[1]
+&& pathToFileURL(realpathSync(process.argv[1])).href === import.meta.url;
+} catch { IS_CLI = false; }
 
 if (IS_CLI) {
 // Read applications.md

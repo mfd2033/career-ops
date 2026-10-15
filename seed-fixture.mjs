@@ -11,7 +11,7 @@
  *   node seed-fixture.mjs --self-test
  */
 import { createHash } from 'crypto';
-import { cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, existsSync, mkdirSync } from 'fs';
+import { realpathSync,  cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, existsSync, mkdirSync } from 'fs';
 import { tmpdir } from 'os';
 import { join, dirname, relative, sep } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
@@ -101,7 +101,13 @@ function selfTest() {
   process.exit(failed ? 1 : 0);
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+// try/catch: realpathSync throws on non-path argv[1] (e.g. a file:/// URL passed via
+// `node -e` when this module is imported by a test) -- treat any throw as "not main".
+let isMainEntry = false;
+try {
+  isMainEntry = import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href;
+} catch { isMainEntry = false; }
+if (isMainEntry) {
   const args = process.argv.slice(2);
   if (args[0] === '--self-test') selfTest();
   else if (args[0] && !args[0].startsWith('--')) {

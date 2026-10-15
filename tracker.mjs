@@ -34,7 +34,7 @@
  * so the index can never serve stale reads.
  */
 
-import { readFileSync, copyFileSync, existsSync, mkdirSync, statSync } from 'fs';
+import { realpathSync,  readFileSync, copyFileSync, existsSync, mkdirSync, statSync } from 'fs';
 import { createHash } from 'crypto';
 import { dirname, resolve, join } from 'path';
 import { pathToFileURL } from 'url';
@@ -561,7 +561,13 @@ async function main() {
   await fn(args);
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
+// try/catch: realpathSync throws on non-path argv[1] (e.g. a file:/// URL passed via
+// `node -e` when this module is imported by a test) -- treat any throw as "not main".
+let isMainEntry = false;
+try {
+  isMainEntry = Boolean(process.argv[1]) && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href;
+} catch { isMainEntry = false; }
+if (isMainEntry) {
   main().catch(err => {
     console.error('Fatal:', err.message);
     process.exit(1);

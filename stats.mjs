@@ -19,7 +19,7 @@ import { validateFlags } from './lib/cli-flags.mjs';
  * #1604 PR-2) — null until the first non-dry scan creates the file.
  */
 
-import { readFileSync, existsSync } from 'fs';
+import { realpathSync,  readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import * as yaml from 'js-yaml';
@@ -597,7 +597,13 @@ const USAGE = `Usage:
   node stats.mjs --summary   # human-readable table
   node stats.mjs --help|-h   # print this usage block and exit`;
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+// try/catch: realpathSync throws on non-path argv[1] (e.g. a file:/// URL passed via
+// `node -e` when this module is imported by a test) -- treat any throw as "not main".
+let isMainEntry = false;
+try {
+  isMainEntry = process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href;
+} catch { isMainEntry = false; }
+if (isMainEntry) {
   const args = process.argv.slice(2);
 
   validateFlags(args, KNOWN_FLAGS, USAGE);

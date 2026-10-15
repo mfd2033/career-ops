@@ -9,7 +9,7 @@
  *   node jd-similarity.mjs new-jd.txt previous-jd-or-cv.txt
  */
 
-import { readFileSync } from 'fs';
+import { realpathSync,  readFileSync } from 'fs';
 import { pathToFileURL } from 'url';
 
 const STOP_WORDS = new Set([
@@ -166,7 +166,13 @@ function parseArgs(argv) {
   return { newJdPath, previousPath };
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+// try/catch: realpathSync throws on non-path argv[1] (e.g. a file:/// URL passed via
+// `node -e` when this module is imported by a test) -- treat any throw as "not main".
+let isMainEntry = false;
+try {
+  isMainEntry = process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href;
+} catch { isMainEntry = false; }
+if (isMainEntry) {
   const { newJdPath, previousPath } = parseArgs(process.argv);
   try {
     const result = recommendCvReuse(readFileSync(newJdPath, 'utf8'), readFileSync(previousPath, 'utf8'));

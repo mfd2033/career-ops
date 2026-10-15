@@ -16,7 +16,7 @@
 import { readFile, writeFile, stat, copyFile, rm } from 'fs/promises';
 import { resolve, basename, dirname, join } from 'path';
 import { execFileSync } from 'child_process';
-import { existsSync, mkdirSync } from 'fs';
+import { realpathSync,  existsSync, mkdirSync } from 'fs';
 import { fileURLToPath, pathToFileURL } from 'url';
 
 const MIN_SECTIONS = 4;
@@ -249,6 +249,12 @@ async function main() {
   process.exit(report.compiled ? 0 : (report.valid ? 1 : 1));
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
+// try/catch: realpathSync throws on non-path argv[1] (e.g. a file:/// URL passed via
+// `node -e` when this module is imported by a test) -- treat any throw as "not main".
+let isMainEntry = false;
+try {
+  isMainEntry = Boolean(process.argv[1]) && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href;
+} catch { isMainEntry = false; }
+if (isMainEntry) {
   main();
 }

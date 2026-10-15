@@ -11,7 +11,7 @@
  *      node followup-cadence.mjs --applied-days 10
  */
 
-import { readFileSync, existsSync } from 'fs';
+import { realpathSync,  readFileSync, existsSync } from 'fs';
 import { join, dirname, relative, sep } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import * as yaml from 'js-yaml';
@@ -954,7 +954,13 @@ const USAGE = `Usage:
   node followup-cadence.mjs --help|-h          # print this usage block and exit`;
 
 // --- Run (CLI only; guarded so the module is safely importable for tests) ---
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+// try/catch: realpathSync throws on non-path argv[1] (e.g. a file:/// URL passed via
+// `node -e` when this module is imported by a test) -- treat any throw as "not main".
+let isMainEntry = false;
+try {
+  isMainEntry = process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href;
+} catch { isMainEntry = false; }
+if (isMainEntry) {
   // Must run inside this guard, not at module top level: CADENCE (above) is a
   // module-level singleton built at import time, and test-all.mjs section 12
   // dynamic-imports this module in-process to read it — validating the host

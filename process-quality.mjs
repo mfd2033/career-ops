@@ -33,7 +33,7 @@
  * Issue #1466 — github.com/santifer/career-ops
  */
 
-import { readFileSync, existsSync } from 'fs';
+import { realpathSync,  readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { flagValue, validateFlags } from './lib/cli-flags.mjs';
@@ -354,7 +354,13 @@ const USAGE = `Usage:
   node process-quality.mjs --self-test            # run the built-in fixtures
   node process-quality.mjs --help                 # show this message`;
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+// try/catch: realpathSync throws on non-path argv[1] (e.g. a file:/// URL passed via
+// `node -e` when this module is imported by a test) -- treat any throw as "not main".
+let isMainEntry = false;
+try {
+  isMainEntry = process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href;
+} catch { isMainEntry = false; }
+if (isMainEntry) {
   // Inside the main-module guard, not at import time: rejection-latency.mjs
   // imports parseActiveInterviews from here, so a top-level check would judge
   // the IMPORTER's argv and reject its flags as unrecognized (#2919).

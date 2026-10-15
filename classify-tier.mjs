@@ -14,6 +14,7 @@
  */
 
 import path from 'path';
+import { realpathSync } from 'fs';
 import { fileURLToPath } from 'url';
 
 import { validateFlags } from './lib/cli-flags.mjs';
@@ -194,8 +195,13 @@ export function classifyTier(title) {
 export default classifyTier;
 
 // CLI and inline test mode
-const isDirect = process.argv[1] &&
-  (path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url)));
+// try/catch: realpathSync throws on non-path argv[1] (e.g. a file:/// URL passed via
+// `node -e` when this module is imported by a test) -- treat any throw as "not main".
+let isDirect = false;
+try {
+  isDirect = process.argv[1] &&
+    (realpathSync(path.resolve(process.argv[1])) === realpathSync(fileURLToPath(import.meta.url)));
+} catch { isDirect = false; }
 
 // The title is the only positional, so `--help` was classified as a job title
 // and answered `mid` at exit 0 (#2852). Validated up front via

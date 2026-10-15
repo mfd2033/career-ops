@@ -35,7 +35,7 @@
  *   node scan-ats-full.mjs --help               # print this usage block and exit
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, statSync, unlinkSync } from 'fs';
+import { realpathSync,  readFileSync, writeFileSync, existsSync, mkdirSync, statSync, unlinkSync } from 'fs';
 import { pathToFileURL } from 'url';
 import { createHash } from 'crypto';
 import path from 'path';
@@ -1131,7 +1131,13 @@ async function main() {
 }
 
 // Only run main() when invoked directly, not when imported by tests.
-if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
+// try/catch: realpathSync throws on non-path argv[1] (e.g. a file:/// URL passed via
+// `node -e` when this module is imported by a test) -- treat any throw as "not main".
+let isMainEntry = false;
+try {
+  isMainEntry = Boolean(process.argv[1]) && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href;
+} catch { isMainEntry = false; }
+if (isMainEntry) {
   main().catch(err => {
     console.error('Fatal:', err.message);
     process.exit(1);

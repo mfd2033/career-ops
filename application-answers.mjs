@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { readFileSync, writeFileSync } from 'fs';
+import { realpathSync,  readFileSync, writeFileSync } from 'fs';
 import { resolve } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -394,7 +394,13 @@ async function main() {
   console.log(JSON.stringify({ report: reportPath, date: normalized.date, state: normalized.state }, null, 2));
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+// try/catch: realpathSync throws on non-path argv[1] (e.g. a file:/// URL passed via
+// `node -e` when this module is imported by a test) -- treat any throw as "not main".
+let isMainEntry = false;
+try {
+  isMainEntry = process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url);
+} catch { isMainEntry = false; }
+if (isMainEntry) {
   main().catch((err) => {
     console.error(err.message);
     process.exitCode = 1;

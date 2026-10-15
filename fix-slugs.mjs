@@ -30,7 +30,7 @@
  *   node fix-slugs.mjs --help        # show this message (-h is an alias)
  */
 
-import { existsSync, readFileSync, writeFileSync } from 'fs';
+import { realpathSync,  existsSync, readFileSync, writeFileSync } from 'fs';
 import { resolve } from 'path';
 import { pathToFileURL } from 'url';
 
@@ -370,7 +370,13 @@ async function main() {
 }
 
 // Only run main() when invoked directly, not when imported by tests.
-if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
+// try/catch: realpathSync throws on non-path argv[1] (e.g. a file:/// URL passed via
+// `node -e` when this module is imported by a test) -- treat any throw as "not main".
+let isMainEntry = false;
+try {
+  isMainEntry = Boolean(process.argv[1]) && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href;
+} catch { isMainEntry = false; }
+if (isMainEntry) {
   main().catch((err) => {
     console.error(`fix-slugs failed: ${err.message}`);
     process.exit(1);

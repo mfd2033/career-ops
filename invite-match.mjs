@@ -33,7 +33,7 @@
  * Issue #1495, #2098 — github.com/santifer/career-ops
  */
 
-import { readFileSync, existsSync } from 'fs';
+import { realpathSync,  readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { execFileSync } from 'child_process';
@@ -82,7 +82,13 @@ const USAGE = `Usage:
 // silent-ignore failure mode this issue exists to close, just moved to a
 // different spelling. Leaving them out means that form is rejected loudly
 // as an unrecognized flag instead.
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+// try/catch: realpathSync throws on non-path argv[1] (e.g. a file:/// URL passed via
+// `node -e` when this module is imported by a test) -- treat any throw as "not main".
+let isMainEntry = false;
+try {
+  isMainEntry = process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href;
+} catch { isMainEntry = false; }
+if (isMainEntry) {
   validateFlags(args, KNOWN_FLAGS, USAGE);
 }
 
@@ -1117,7 +1123,8 @@ function runSelfTest() {
 }
 
 // --- Run (CLI only; guarded so the module is safely importable for tests) ---
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+// 同文件顶部已计算过完全相同的入口守卫（含 try/catch），直接复用，不重复声明。
+if (isMainEntry) {
   if (selfTestMode) {
     runSelfTest();
   } else {

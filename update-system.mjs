@@ -20,7 +20,7 @@
  */
 
 import { execFile, execFileSync, execSync } from 'child_process';
-import { copyFileSync, readFileSync, writeFileSync, existsSync, unlinkSync, rmSync } from 'fs';
+import { realpathSync,  copyFileSync, readFileSync, writeFileSync, existsSync, unlinkSync, rmSync } from 'fs';
 import { join, dirname, posix as pathPosix } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 
@@ -2198,7 +2198,13 @@ function dismiss() {
 // Only run the CLI when executed directly, so importing this module
 // (e.g. from test-all.mjs to exercise SEMVER_RE) does not trigger a
 // live update check.
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+// try/catch: realpathSync throws on non-path argv[1] (e.g. a file:/// URL passed via
+// `node -e` when this module is imported by a test) -- treat any throw as "not main".
+let isMainEntry = false;
+try {
+  isMainEntry = process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href;
+} catch { isMainEntry = false; }
+if (isMainEntry) {
   const cmd = process.argv[2] || 'check';
 
   try {

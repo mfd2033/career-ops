@@ -8,7 +8,7 @@
  * the JD, source CV, tailored CV, PDF, and reuse decision stay together.
  */
 
-import { mkdirSync, writeFileSync } from 'fs';
+import { realpathSync,  mkdirSync, writeFileSync } from 'fs';
 import { join, resolve } from 'path';
 import { parseArgs } from 'util';
 import { fileURLToPath } from 'url';
@@ -127,7 +127,13 @@ async function main() {
   console.log(JSON.stringify(paths, null, 2));
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
+// try/catch: realpathSync throws on non-path argv[1] (e.g. a file:/// URL passed via
+// `node -e` when this module is imported by a test) -- treat any throw as "not main".
+let isMainEntry = false;
+try {
+  isMainEntry = process.argv[1] && fileURLToPath(import.meta.url) === realpathSync(process.argv[1]);
+} catch { isMainEntry = false; }
+if (isMainEntry) {
   main().catch((error) => {
     console.error(`application-artifacts: ${error.message}`);
     process.exitCode = 1;

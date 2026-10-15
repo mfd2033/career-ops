@@ -405,7 +405,12 @@ function runSelfTest() {
   process.exit(failed > 0 ? 1 : 0);
 }
 
-const isMain = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
+// try/catch: realpathSync throws on non-path argv[1] (e.g. a file:/// URL passed via
+// `node -e` when this module is imported by a test) -- treat any throw as "not main".
+let isMain = false;
+try {
+  isMain = process.argv[1] && Boolean(process.argv[1]) && fileURLToPath(import.meta.url) === realpathSync(process.argv[1]);
+} catch { isMain = false; }
 
 // A function, not a bare `if (isMain)` block, so the success paths can `return`
 // instead of calling process.exit(0). `--text` writes a whole CV to stdout and

@@ -14,7 +14,7 @@
  * (renderHtmlToPdf is imported lazily inside main).
  */
 
-import { readFileSync, existsSync, mkdirSync } from "fs";
+import { realpathSync,  readFileSync, existsSync, mkdirSync } from "fs";
 import { dirname, resolve, join, relative, isAbsolute } from "path";
 import { fileURLToPath, pathToFileURL } from "url";
 import { parseArgs } from "util";
@@ -347,5 +347,10 @@ Usage:
   }
 }
 
-const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+// try/catch: realpathSync throws on non-path argv[1] (e.g. a file:/// URL passed via
+// `node -e` when this module is imported by a test) -- treat any throw as "not main".
+let isMain = false;
+try {
+  isMain = process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href;
+} catch { isMain = false; }
 if (isMain) main();

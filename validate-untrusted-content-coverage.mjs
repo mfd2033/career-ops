@@ -24,7 +24,7 @@
  * Exit 0 = clean. Exit 1 = coverage gap listed.
  */
 
-import { readFileSync, existsSync, globSync } from 'fs';
+import { realpathSync,  readFileSync, existsSync, globSync } from 'fs';
 import { dirname, join, sep } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { USER_PATHS } from './update-system.mjs';
@@ -142,7 +142,13 @@ export function hasCanonicalHeading(text) {
 // Everything below is the CLI. Guarded so importing this module for its pure
 // helpers (deriveIngestingModes, isUserLayerPath, hasDirectiveMarker) does not
 // run the validation and process.exit() out from under the importer.
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+// try/catch: realpathSync throws on non-path argv[1] (e.g. a file:/// URL passed via
+// `node -e` when this module is imported by a test) -- treat any throw as "not main".
+let isMainEntry = false;
+try {
+  isMainEntry = process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href;
+} catch { isMainEntry = false; }
+if (isMainEntry) {
   if (process.argv.includes('--self-test')) {
     console.log('Running validate-untrusted-content-coverage.mjs self-tests...');
 

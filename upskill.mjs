@@ -845,7 +845,12 @@ async function validateUrlSecurity(urlString) {
 // nothing — the same edge contacts.test.mjs documents on macOS. Every caller
 // (test-all.mjs, the modes, package scripts) uses the real path, and matching the
 // repo convention is worth more here than covering a path nothing takes.
-const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+// try/catch: realpathSync throws on non-path argv[1] (e.g. a file:/// URL passed via
+// `node -e` when this module is imported by a test) -- treat any throw as "not main".
+let isMain = false;
+try {
+  isMain = process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href;
+} catch { isMain = false; }
 
 // An unrecognized or mistyped flag (e.g. `--min-report` for `--min-reports`)
 // used to fall through silently: the aggregate branch just ran with its

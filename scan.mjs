@@ -37,7 +37,7 @@
  *   node scan.mjs --help                       # print this usage block and exit
  */
 
-import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync } from 'fs';
+import { realpathSync,  readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync } from 'fs';
 import { pathToFileURL, fileURLToPath } from 'url';
 import path from 'path';
 import * as yaml from 'js-yaml';
@@ -3017,8 +3017,16 @@ async function main() {
 }
 
 // Only run main() when invoked directly (`node scan.mjs`), not when imported by tests.
-// `|| ''` guards the case where Node is invoked without a script arg (e.g. `node -e`).
-if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
+// realpath-resolve argv[1] so the match survives symlinked/junctioned repo roots
+// (D:\workspace -> F:\workspace: argv[1] keeps the call-side drive letter while
+// import.meta.url is realpath-resolved by the ESM loader). realpathSync throws on
+// non-path argv[1] (e.g. tests pass a file:/// URL via `node -e`), so an
+// unresolvable arg means "not a direct run" — never crash the process.
+let isDirectRun = false;
+try {
+  isDirectRun = Boolean(process.argv[1]) && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href;
+} catch { isDirectRun = false; }
+if (isDirectRun) {
   main().catch(err => {
     console.error('Fatal:', err.message);
     writeRunFailureRow('failed');

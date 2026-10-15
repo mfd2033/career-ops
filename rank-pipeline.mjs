@@ -29,7 +29,7 @@
  *   node rank-pipeline.mjs --self-test         # in-memory suite; spawns no subprocess
  */
 
-import { readFileSync, writeFileSync, existsSync } from 'fs';
+import { realpathSync,  readFileSync, writeFileSync, existsSync } from 'fs';
 import { execFileSync } from 'child_process';
 import { dirname, join } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
@@ -461,7 +461,13 @@ function selfTest() {
   return fail === 0 ? 0 : 1;
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+// try/catch: realpathSync throws on non-path argv[1] (e.g. a file:/// URL passed via
+// `node -e` when this module is imported by a test) -- treat any throw as "not main".
+let isMainEntry = false;
+try {
+  isMainEntry = process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href;
+} catch { isMainEntry = false; }
+if (isMainEntry) {
   const args = process.argv.slice(2);
   if (args.includes('--self-test')) {
     process.exit(selfTest());

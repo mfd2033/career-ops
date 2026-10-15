@@ -361,6 +361,12 @@ async function main() {
   }
 }
 
-if (import.meta.url === (await import('url')).pathToFileURL(process.argv[1] || '').href) {
+// try/catch: realpathSync throws on non-path argv[1] (e.g. a file:/// URL passed via
+// `node -e` when this module is imported by a test) -- treat any throw as "not main".
+let isMainEntry = false;
+try {
+  isMainEntry = process.argv[1] && import.meta.url === (await import('url')).pathToFileURL((await import('fs')).realpathSync(process.argv[1])).href;
+} catch { isMainEntry = false; }
+if (isMainEntry) {
   main().catch(err => { console.error('Fatal:', err.message); process.exit(1); });
 }
