@@ -18,10 +18,11 @@ import { fileURLToPath } from "node:url";
 
 const APP = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "src", "app");
 
-/** ReportView 的 props 契约里，体检相关的必传项（形状单一来源 career-ops.ts）。
- *  suggestedCheckup（ADR-0041 决议 2 延伸）也是体检数据：漏传的后果是「建议体检」
- *  角标在某条报告路由上静默消失，与按钮消失同病同治。 */
-const REQUIRED_PROPS = ["checkup", "checkupTarget", "suggestedCheckup"];
+/** ReportView 的 props 契约里，从路由必传的 props（形状单一来源 career-ops.ts：
+ *  体检一族 + 「记录跟进」entry）。suggestedCheckup（ADR-0041 决议 2 延伸）是体检数据：
+ *  漏传的后果是「建议体检」角标在某条报告路由上静默消失；followupEntry（ADR-0075）
+ *  同理——漏传即「记录跟进」入口静默消失，同病同治。 */
+const REQUIRED_PROPS = ["checkup", "checkupTarget", "suggestedCheckup", "followupEntry"];
 
 function collectPageFiles(dir) {
   const out = [];
@@ -59,7 +60,7 @@ for (const { file, props } of hosts) {
       assert.match(
         props,
         new RegExp(`\\b${prop}=\\{`),
-        `${rel} 的 <ReportView> 缺少 ${prop}={…}——体检按钮会静默消失（ADR-0032）`,
+        `${rel} 的 <ReportView> 缺少 ${prop}={…}——对应按钮会静默消失（ADR-0032 / ADR-0075）`,
       );
     }
   });

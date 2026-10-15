@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { readReport, findApplication, readApplications, withReportSalaries, withCheckupStars, trackerCanDelete, readEvalTimings, findCheckupTarget, readCheckupFor, readCheckupSuggestion } from "@/lib/career-ops";
+import { readFollowupEntry } from "@/lib/followups-server";
 import { evalTimingKey } from "@/lib/eval-timing-key.mjs";
 import { navNeighbors, buildContextQuery } from "@/lib/pipeline-order.mjs";
 import { ReportView } from "@/components/report-view";
@@ -90,6 +91,9 @@ export default async function ReportPage({
   const checkupTarget = findCheckupTarget(id);
   // 「建议体检」角标（ADR-0041 决议 2 延伸）：详情页与列表页同一口径判定
   const suggestedCheckup = readCheckupSuggestion(id);
+  // 「记录跟进」入口（ADR-0075）：本行在 core cadence 输出里的 entry（存在即可跟进），
+  // 判定与联系人建议同源；core 不可用 → null（入口隐藏）。
+  const followupEntry = await readFollowupEntry(id);
 
   return (
     <>
@@ -107,6 +111,7 @@ export default async function ReportPage({
         checkup={checkup}
         checkupTarget={checkupTarget}
         suggestedCheckup={suggestedCheckup}
+        followupEntry={followupEntry}
       />
       <div className="mx-auto max-w-3xl px-6 pb-10">
         <EvalTimingPanel entry={timing} />

@@ -50,3 +50,10 @@ tracker 行在生命周期里的位置，规范集只有 `templates/states.yml` 
 Applied / Responded / Interview / Offer / Rejected / Discarded / SKIP / Hired）。接口与数据层
 永远用这些原始值；中文标签（已申请/面试中…）只存在于前端字典（ADR-0074）。
 _Avoid_: 进度、阶段（泛指时）、状态码
+
+**可跟进状态**:
+能被记录跟进、并在报告页显示「记录跟进」入口的行集合：归一化后为 applied / responded /
+interview 三者之一（core `followup-cadence.mjs` 的 ACTIONABLE_STATUSES，派生自
+`templates/states.yml`；ADR-0075）。Offer、Hired、Rejected、Discarded、SKIP 均不在内——
+口语里「Applied 及之后」会把它误含，勿按字面理解。
+_Avoid_: 已申请及之后、可记录的行（泛指时；字面会误含 Offer 等）

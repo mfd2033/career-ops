@@ -1,6 +1,10 @@
+import { execFile } from "node:child_process";
+import fs from "node:fs";
 import path from "node:path";
-import { careerOpsRoot } from "@/lib/career-ops";
+import { careerOpsRoot, rootScript } from "@/lib/career-ops";
 import { withFollowupsLock, FollowupsBusyError } from "@/lib/core/followups-lock";
+import { parseCadenceStdout } from "@/lib/followup-cadence-read.mjs";
+import type { CadenceEntry } from "@/lib/followups";
 
 export { FollowupsBusyError };
 
@@ -65,4 +69,45 @@ export function followupsWriteError(e: unknown, fallback = "write failed"): Resp
     );
   }
   return Response.json({ error: e instanceof Error ? e.message : fallback }, { status: 500 });
+}
+
+// ── Cadence verdicts（followup-cadence.mjs --json） ──────────────────────────
+// The ONE reader of the cadence verdict: /api/followups and the report pages'
+// 「记录跟进」entry (ADR-0075 决议 7) both come through here. Never throws —
+// missing script / spawn failure / bad stdout collapse to available:false, and
+// every caller fails closed (entry hidden, route reports unavailable).
+
+const CADENCE_TIMEOUT_MS = 12_000;
+
+export type CadencePayload = {
+  available: boolean;
+  metadata: unknown;
+  entries: CadenceEntry[];
+  cadenceConfig?: unknown;
+};
+
+export async function readCadencePayload(): Promise<CadencePayload> {
+  const script = rootScript("followup-cadence");
+  if (!fs.existsSync(script)) return { available: false, metadata: null, entries: [] };
+  const stdout = await new Promise<string>((resolve) => {
+    execFile("node", [script, "--json"], { cwd: careerOpsRoot(), timeout: CADENCE_TIMEOUT_MS }, (_e, out) => resolve(out || ""));
+  });
+  const parsed = parseCadenceStdout(stdout);
+  if (!parsed) return { available: false, metadata: null, entries: [] };
+  return {
+    available: true,
+    metadata: parsed.metadata,
+    entries: parsed.entries as CadenceEntry[],
+    cadenceConfig: parsed.cadenceConfig,
+  };
+}
+
+/** 报告页「记录跟进」的读取（ADR-0075 决议 2/3）：本行的 cadence entry —— 可判定性
+ *  与联系人建议在同一份同源输出里 —— 或 null（不可跟进 / core 不可用，fail-closed）。 */
+export async function readFollowupEntry(id: string): Promise<CadenceEntry | null> {
+  const num = Number.parseInt(id, 10);
+  if (!Number.isInteger(num)) return null;
+  const payload = await readCadencePayload();
+  if (!payload.available) return null;
+  return payload.entries.find((e) => e.num === num) ?? null;
 }

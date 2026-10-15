@@ -108,6 +108,9 @@ export const en: Dict = {
   "followups.logError": "Could not log the follow-up.",
   "followups.cancel": "Cancel",
 
+  // ── log-followup-button.tsx（报告页入口，ADR-0075）──
+  "followups.loggedToast": "Follow-up logged",
+
   // ── next-date-dialog.tsx ──
   "followups.pinDialogAria": "Pin next follow-up date for {company}",
   "followups.pinDialogTitle": "Pin next follow-up",
@@ -224,6 +227,9 @@ export const zh: Dict = {
   "followups.notesPlaceholder": "你说了什么、在等待什么……",
   "followups.logError": "无法记录跟进。",
   "followups.cancel": "取消",
+
+  // ── log-followup-button.tsx（报告页入口，ADR-0075）──
+  "followups.loggedToast": "已记录",
 
   // ── next-date-dialog.tsx ──
   "followups.pinDialogAria": "为 {company} 固定下次跟进日期",

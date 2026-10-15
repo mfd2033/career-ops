@@ -13,6 +13,7 @@ import { UNKNOWN_EMPLOYER_SENTINEL, resolveCompanyLabel } from "@/lib/unknown-em
 import type { Application } from "@/lib/career-ops";
 import { CheckupRequestButton, type CheckupTarget } from "@/components/checkup-request-button";
 import type { CheckupEntry } from "@/lib/format";
+import type { CadenceEntry } from "@/lib/followups";
 import { Badge } from "@/components/ui/badge";
 import { scoreTone, scoreNum, legitimacyTone, parseReport } from "@/lib/format";
 import { cleanHeading, splitSections } from "@/lib/report-sections.mjs";
@@ -25,6 +26,7 @@ import { OpenCvFolderButton } from "@/components/open-cv-folder-button";
 import { ApplyButton } from "@/components/apply-button";
 import { DeleteFromTracker } from "@/components/delete-from-tracker";
 import { SkipFromTracker } from "@/components/skip-from-tracker";
+import { LogFollowupButton } from "@/components/followups/log-followup-button";
 import { useI18n } from "@/lib/i18n/context";
 
 // Progressive disclosure of the report. The core writes prose blocks
@@ -73,6 +75,7 @@ export function ReportView({
   checkup = null,
   checkupTarget = null,
   suggestedCheckup = false,
+  followupEntry = null,
 }: {
   id: string;
   app: Application | null;
@@ -99,6 +102,9 @@ export function ReportView({
   /** 「建议体检」角标（ADR-0041 决议 2 延伸）：服务端按 suggestsCheckup 口径
    *  判定（score≥4.0 或 Block G ⚠ 且无体检记录）。纯静态提示，零联动零分影响。 */
   suggestedCheckup?: boolean;
+  /** 「记录跟进」入口（ADR-0075）：本行的 cadence entry（存在 = 可跟进），由
+   *  路由经 followups-server 的同源读取装配；null = 不渲染入口（fail-closed）。 */
+  followupEntry?: CadenceEntry | null;
 }) {
   const { t } = useI18n();
   const router = useRouter();
@@ -545,6 +551,8 @@ export function ReportView({
           {checkupTarget && (
             <CheckupRequestButton n={id} checkup={checkup} target={checkupTarget} />
           )}
+          {/* 「记录跟进」（ADR-0075）：entry 存在即渲染；弹窗与 /followups 完全同一枚 */}
+          {followupEntry && <LogFollowupButton entry={followupEntry} />}
         </div>
 
         {app && canDelete && (

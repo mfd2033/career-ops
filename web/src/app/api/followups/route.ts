@@ -1,6 +1,4 @@
-import { execFile } from "node:child_process";
-import fs from "node:fs";
-import { careerOpsRoot, rootScript } from "@/lib/career-ops";
+import { readCadencePayload } from "@/lib/followups-server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -12,21 +10,17 @@ export const dynamic = "force-dynamic";
 // (entries + metadata + cadenceConfig) for the /followups tracker page.
 export async function GET(req: Request) {
   const full = new URL(req.url).searchParams.get("full") === "1";
-  const script = rootScript("followup-cadence");
-  if (!fs.existsSync(script)) return Response.json({ available: false, metadata: null, entries: [] });
-  const stdout = await new Promise<string>((resolve) => {
-    execFile("node", [script, "--json"], { cwd: careerOpsRoot(), timeout: 12_000 }, (_e, out) => resolve(out || ""));
-  });
+  // 读取（spawn + 解析 + fail-closed）的唯一实现在 followups-server.ts
+  // （ADR-0075 决议 7）：报告页的「记录跟进」入口读的就是这一份判定。
+  const payload = await readCadencePayload();
+  if (!payload.available) return Response.json({ available: false, metadata: null, entries: [] });
   try {
-    const start = stdout.indexOf("{");
-    const j = JSON.parse(stdout.slice(start));
-    const entries = Array.isArray(j.entries) ? j.entries : [];
     if (full) {
       return Response.json({
         available: true,
-        metadata: j.metadata ?? null,
-        entries,
-        cadenceConfig: j.cadenceConfig ?? null,
+        metadata: payload.metadata,
+        entries: payload.entries,
+        cadenceConfig: payload.cadenceConfig ?? null,
       });
     }
     // Overdue first; cap for the home (full list lives in /followups).
@@ -35,9 +29,11 @@ export async function GET(req: Request) {
     // Important: return empty when no overdue/urgent — do NOT fall back to
     // all active entries, otherwise waiting/cold items leak into the home
     // "follow-ups due" section after the user has already followed up.
-    const overdue = entries.filter((e: { urgency?: string; status?: string }) => /overdue|urgent/i.test(`${e.urgency ?? ""} ${e.status ?? ""}`)).slice(0, 8);
-    return Response.json({ available: true, metadata: j.metadata ?? null, entries: overdue });
+    const overdue = payload.entries.filter((e) => /overdue|urgent/i.test(`${e.urgency ?? ""} ${e.status ?? ""}`)).slice(0, 8);
+    return Response.json({ available: true, metadata: payload.metadata, entries: overdue });
   } catch {
+    // 组装期异常一律 fail-closed 成 available:false（与工单 01 之前的整体
+    // try/catch 行为等价），而不是让路由 500。
     return Response.json({ available: false, metadata: null, entries: [] });
   }
 }
