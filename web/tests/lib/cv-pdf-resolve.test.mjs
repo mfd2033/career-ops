@@ -181,3 +181,23 @@ test("resolveLatestCvPdf: returns the absolute path under root/output", () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("resolveCvPdfByReport: an ADR-0076 short-name PDF resolves by report number", () => {
+  // Given a CV generated with the flat short name (cv-{report number}-{role}.pdf):
+  // the name plays no part in lookup — the report-number manifest is the authority.
+  const root = makeRoot();
+  try {
+    mkdirSync(join(root, "data"), { recursive: true });
+    writeFileSync(
+      join(root, "data", "pdf-index.tsv"),
+      "042\toutput/cv-042-售前经理.pdf\toutput/cv-042-售前经理.html\ta4\t2026-10-15\n",
+    );
+    // When resolving its report number (zero-padding tolerated)
+    const hit = resolveCvPdfByReport("0042", root);
+    // Then the short-name PDF resolves exactly
+    assert.equal(hit.ok, true);
+    assert.equal(hit.path, join(root, "output", "cv-042-售前经理.pdf"));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

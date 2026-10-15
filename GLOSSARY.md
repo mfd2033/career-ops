@@ -57,3 +57,10 @@ interview 三者之一（core `followup-cadence.mjs` 的 ACTIONABLE_STATUSES，�
 `templates/states.yml`；ADR-0075）。Offer、Hired、Rejected、Discarded、SKIP 均不在内——
 口语里「Applied 及之后」会把它误含，勿按字面理解。
 _Avoid_: 已申请及之后、可记录的行（泛指时；字面会误含 Offer 等）
+
+**简历短名**:
+扁平布局定制简历（PDF 与其伴生 HTML）的文件名：`cv-{报告号}-{职位}`，含 `.pdf` 整体
+≤ 20 字符（Unicode 码点，汉字算 1）；职位超限从尾部丢词、词内硬截断，括号注记整段丢弃。
+它是展示名——解析永远走报告号索引（`data/pdf-index.tsv`）；无报告号的一次性 CV 与 bundle
+布局（`cv/tailored/vNNN/cv.pdf`）不适用（ADR-0076）。
+_Avoid_: 短文件名（泛指时）、文件名缩写（那指缩词规则本身）

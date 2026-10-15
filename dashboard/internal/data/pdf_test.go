@@ -64,6 +64,24 @@ func TestResolvePDFsPrefersManifest(t *testing.T) {
 	}
 }
 
+// ADR-0076: flat tailored-CV names are cv-{report number}-{role}.pdf. The CJK
+// company makes the legacy filename glob unable to serve this row (empty slug
+// fails closed), so the match can only come through the report-number manifest —
+// the rename must not require touching the dashboard's resolution logic.
+func TestResolvePDFsShortNameViaManifest(t *testing.T) {
+	root := t.TempDir()
+	writeFixture(t, root, "output/cv-042-售前经理.pdf", "pdf")
+	writeFixture(t, root, "output/cv-043-产品经理.pdf", "pdf")
+	writeFixture(t, root, "data/pdf-index.tsv",
+		"042\toutput/cv-042-售前经理.pdf\toutput/cv-042-售前经理.html\ta4\t2026-10-15\n")
+
+	app := model.CareerApplication{Company: "某某科技", Role: "售前经理", ReportNumber: "042"}
+	got := ResolvePDFs(root, app, LoadPDFManifest(root))
+	if len(got) != 1 || got[0] != "output/cv-042-售前经理.pdf" {
+		t.Fatalf("expected the short-name manifest hit only, got %v", got)
+	}
+}
+
 func TestResolvePDFsManifestEntryWithMissingFileFallsBackToGlob(t *testing.T) {
 	root := t.TempDir()
 	writeFixture(t, root, "output/cv-jane-doe-acme-2026-06-01.pdf", "pdf")

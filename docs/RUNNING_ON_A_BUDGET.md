@@ -353,7 +353,7 @@ node openai-tailor.mjs \
 
 ### Step 5: Generate ATS-Optimized PDF (0 Tokens)
 
-Once you have the tailored HTML file, the PDF generator uses Playwright to compile it into a tailored CV PDF.
+Once you have the tailored HTML file, the PDF generator uses Playwright to compile it into a tailored CV PDF. This budget path predates, and stays outside, ADR-0076's flat short-name rule — its example filenames are legacy on purpose.
 
 ```bash
 node generate-pdf.mjs output/cv-candidate-companyname.html output/cv-candidate-companyname-2026-07-07.pdf --format=letter --report=001

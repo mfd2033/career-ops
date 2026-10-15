@@ -1,5 +1,6 @@
 /**
- * pdf-paths.mjs — deterministic scratch + final paths for a web "pdf" run (#2172).
+ * pdf-paths.mjs — deterministic scratch + final paths for a web "pdf" run (#2172),
+ * including the flat tailored-CV short name (cvShortStem, ADR-0076).
  *
  * Plain .mjs (same pattern as clean-chips.mjs / tracker-table.mjs) so this can
  * be unit-tested with `node --test`, no TypeScript build step. `careerOpsRoot`
@@ -8,15 +9,68 @@
  */
 import fs from "node:fs";
 import path from "node:path";
-import * as yaml from "js-yaml";
+
+// ── Flat tailored-CV short name (ADR-0076) ──────────────────────────
+// The flat output name is cv-{report number}-{role}; the WHOLE filename
+// (stem + ".pdf") must stay within 20 Unicode code points, so a Chinese
+// character counts 1. modes/pdf.md documents the same algorithm for the CLI
+// path — keep the two in sync (drift guard: the unit suite plus the test-all
+// doc assertion).
+
+/** Hard cap on the whole flat filename, extension INCLUDED (ADR-0076). */
+const CV_FILENAME_MAX = 20;
+/** ".pdf" is the extension the short name is written with. */
+const CV_PDF_EXT = ".pdf";
+
+/** Code-point length: an emoji is 2 UTF-16 units but 1 code point —
+ * Array.from keeps the count honest for non-BMP text. */
+function cpLength(s) {
+  return Array.from(s).length;
+}
 
 /**
- * Lowercase, non-alphanumeric runs -> single hyphen, trimmed.
- * @param {string} s
+ * Normalize a role for the short filename: NFKC (full-width -> ASCII), drop
+ * parenthetical notes whole, lowercase, non-letter/digit runs -> single "-",
+ * trim the ends. Letters from any script survive, so a Chinese role stays
+ * readable instead of being transliterated or dropped.
+ * @param {string} role
  * @returns {string}
  */
-export function slugify(s) {
-  return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+function normalizeRoleForFilename(role) {
+  return String(role ?? "")
+    .normalize("NFKC")
+    .replace(/[（(][^（）()]*[）)]/g, " ")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+/**
+ * Flat tailored-CV basename `cv-{report number}-{role}` (no extension),
+ * guaranteed to keep `${stem}.pdf` within 20 code points for report numbers
+ * up to 6 digits. Shrinking order (ADR-0076): drop whole hyphenated words
+ * from the tail, then hard-truncate the last remaining word. A role that is
+ * empty or normalizes away yields the bare `cv-{report number}`; the report
+ * number itself is never truncated — it is the unique key data/pdf-index.tsv
+ * resolves by.
+ * @param {string} reportNum
+ * @param {string} role
+ * @returns {string}
+ */
+export function cvShortStem(reportNum, role) {
+  const prefix = `cv-${String(reportNum ?? "").trim()}`;
+  const budget = CV_FILENAME_MAX - CV_PDF_EXT.length;
+  const normalized = normalizeRoleForFilename(role);
+  if (!normalized) return prefix;
+
+  const words = normalized.split("-");
+  while (words.length > 1 && cpLength(`${prefix}-${words.join("-")}`) > budget) {
+    words.pop();
+  }
+  const available = budget - cpLength(prefix) - 1;
+  if (available <= 0) return prefix; // pathological number; the key wins
+  const last = Array.from(words.join("-")).slice(0, available).join("");
+  return last ? `${prefix}-${last}` : prefix;
 }
 
 /**
@@ -24,15 +78,19 @@ export function slugify(s) {
  * @property {string} reportNum - The report number the row's Report cell actually links (== the tracker `#` for a never-re-evaluated row, the re-eval's number otherwise). Handed to mark-pdf-ready.mjs / the pdf-index manifest, which resolve by report number.
  * @property {string} reportFile - Absolute path of the linked evaluation report. Threaded into the pdf prompt so the worker reads the exact file instead of globbing `reports/{num}-*.md` (a weak model turns that glob into minutes of aimless re-globbing and gives up with no CV envelope — 2026-10-09, six failed pdf runs on codebuddy/hy3).
  * @property {string} html - Where the backend writes the tailored HTML it parsed out of the agent's envelope (#2185).
- * @property {string} finalPdf - Where the backend renders the final PDF (output/cv-{candidate}-{company}-{date}.pdf).
+ * @property {string} finalPdf - Where the backend renders the final PDF — the flat ADR-0076 short name (output/cv-{report number}-{role}.pdf, ≤20 chars, cvShortStem below).
  */
 
 /**
  * Precompute the scratch HTML and final PDF paths for a
  * "pdf" run, so the agent never chooses its own filenames — the backend owns
- * naming, writing (#2185) and rendering. Resolves the report (for the company slug)
- * and config/profile.yml (for the candidate slug) — same naming convention
- * modes/pdf.md documents, so web and CLI output stay byte-identical.
+ * naming, writing (#2185) and rendering. The final PDF carries the flat
+ * ADR-0076 short name (cv-{report number}-{role}, ≤20 chars) built from the
+ * number the report file actually carries plus the caller-supplied tracker
+ * Role; the scratch HTML stays keyed by the report number so renderAndMarkPdf's
+ * cleanup prefix (cv-web-${reportNum}.) still finds it. modes/pdf.md documents
+ * the same short-name algorithm for the CLI path, so web and CLI output stay
+ * byte-identical.
  *
  * Framework-agnostic: returns a result instead of constructing a Response, so
  * the caller (a Next.js route today) decides how to surface `ok: false`.
@@ -42,17 +100,18 @@ export function slugify(s) {
  * NOT a pure path computation, despite the name.
  *
  * @param {string} input - The report number (e.g. "018").
- * @param {string} today - YYYY-MM-DD.
  * @param {string} root - careerOpsRoot().
  * @param {(input: string) => string | null} findReportFile - career-ops.ts's findReportFile.
+ * @param {string} [role] - The tracker row's Role column; feeds cvShortStem (ADR-0076). Empty/missing → cv-{report number}.pdf.
  * @returns {{ok: true, paths: PdfPaths} | {ok: false, error: string}}
  */
-export function resolvePdfPaths(input, today, root, findReportFile) {
+export function resolvePdfPaths(input, root, findReportFile, role = "") {
   // Reject anything but a bare report number before it ever reaches a path.
   // findReportFile()'s parseInt-based matching can still resolve a crafted
   // selector like "123/../../etc/passwd" to a legitimate report file, but the
-  // raw string is also used verbatim below to build cv-web-${input}.html —
-  // path.join would then honor those ".." segments and escape scratchDir.
+  // raw string is also mirrored below into cv-web-${input}.html when the
+  // report filename carries no leading number — path.join would then honor
+  // those ".." segments and escape scratchDir.
   if (!/^\d+$/.test(input)) {
     return { ok: false, error: `Invalid report selector: "${input}"` };
   }
@@ -61,8 +120,6 @@ export function resolvePdfPaths(input, today, root, findReportFile) {
     return { ok: false, error: `No report #${input} found — evaluate this posting first.` };
   }
   const reportBase = path.basename(reportFile);
-  const companyMatch = reportBase.match(/^\d+-(.+)-\d{4}-\d{2}-\d{2}\.md$/);
-  const companySlug = companyMatch ? companyMatch[1] : "company";
   // The tracker `#` (input) diverges from the report number the row links after a
   // re-evaluation (row #1079 repointed to report 1086). mark-pdf-ready.mjs and the
   // pdf-index manifest resolve BY REPORT NUMBER, so thread the number the report
@@ -70,22 +127,6 @@ export function resolvePdfPaths(input, today, root, findReportFile) {
   // PDF column ❌ (the 「打开定制简历所在位置」 button never appears). Falls back to
   // the raw selector when the filename carries no leading number.
   const reportNum = reportBase.match(/^(\d+)-/)?.[1] ?? String(input);
-  let candidateSlug = "candidate";
-  try {
-    // js-yaml v4's load() uses the safe default schema (no arbitrary type
-    // construction, unlike Python's PyYAML) — same pattern already used in
-    // web/src/app/api/profile/route.ts and portals/route.ts.
-    const profile = yaml.load(fs.readFileSync(path.join(root, "config", "profile.yml"), "utf8"));
-    if (profile?.candidate?.full_name) candidateSlug = slugify(profile.candidate.full_name);
-  } catch (err) {
-    // A missing profile.yml is expected (not every checkout has one yet) and
-    // falls back silently. Anything else — a real YAML syntax error in the
-    // user's own file — should not fail silently forever; it would otherwise
-    // produce a wrong-but-plausible-looking filename with zero signal.
-    if (err?.code !== "ENOENT") {
-      console.warn(`resolvePdfPaths: could not read/parse config/profile.yml, defaulting candidate slug: ${err.message}`);
-    }
-  }
   const scratchDir = path.join(root, ".career-ops-web", "pdf-tmp");
   fs.mkdirSync(scratchDir, { recursive: true });
   return {
@@ -94,7 +135,10 @@ export function resolvePdfPaths(input, today, root, findReportFile) {
       reportNum,
       reportFile,
       html: path.join(scratchDir, `cv-web-${reportNum}.html`),
-      finalPdf: path.join(root, "output", `cv-${candidateSlug}-${companySlug}-${today}.pdf`),
+      // ADR-0076 flat short name: cv-{report number}-{role}, ≤20 chars with the
+      // extension. The tracker row's Role is handed in by the caller; an empty
+      // role degrades to cv-{report number}.pdf.
+      finalPdf: path.join(root, "output", `${cvShortStem(reportNum, role)}.pdf`),
     },
   };
 }

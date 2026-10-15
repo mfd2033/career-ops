@@ -89,7 +89,7 @@ templates/cv-template.html → PDF generation template
 ## File Naming Conventions
 
 - Reports: `{###}-{company-slug}-{YYYY-MM-DD}.md` (3-digit zero-padded)
-- PDFs: `cv-candidate-{company-slug}-{YYYY-MM-DD}.pdf`
+- Flat tailored-CV PDFs: `cv-{report number}-{role}.pdf` — the ADR-0076 short name, whole filename ≤20 chars; bundle CVs are `cv/tailored/vNNN/cv.pdf`; a one-off CV without a report keeps `cv-{candidate}-{company}-{YYYY-MM-DD}.pdf`
 - Tracker TSVs: `batch/tracker-additions/{id}.tsv`
 
 ## Pipeline Integrity

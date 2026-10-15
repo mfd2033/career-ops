@@ -12,7 +12,7 @@ import { cliDisplayName } from "@/lib/cli-labels.mjs";
 import { resolveWorkerInvocation } from "@/lib/worker-invocation.mjs";
 import { accumulateTokens, authExpiredHint, checkupArtifactRowCount, checkupArtifactTodayForTracker, makeCheckupHtmlProbe, failureEvidence, failureLedgerMsg, hasNewCompletedReport, isFatalGenericStderr, persistRunOutcome, PERSISTENCE_GATED_KINDS, withModelFlag } from "@/lib/run-cli-support.mjs";
 import { spawnHeadlessCli, terminateCli } from "@/lib/spawn-cli.mjs";
-import { careerOpsRoot, readMemory, findReportFile, readInbox, readScanDates, findCheckupTarget, rootScript } from "@/lib/career-ops";
+import { careerOpsRoot, readMemory, findReportFile, readInbox, readScanDates, findCheckupTarget, readApplications, rootScript } from "@/lib/career-ops";
 import { checkupDispatchText } from "@/lib/checkup-request.mjs";
 import { registerCheckup, markCheckupRunning, clearCheckup, attachCheckupExit } from "@/lib/checkup-live.mjs";
 import { OFFER_CHECKUP_SKILL_NAME, resolveSkillCopy, scanSkillRegistry } from "@/lib/skill-registry.mjs";
@@ -242,6 +242,27 @@ export async function POST(req: Request) {
   return Response.json({ runId });
 }
 
+/** ADR-0076: the flat tailored-CV short name carries the tracker row's Role
+ *  column. The selector is the tracker `#` (what GeneratePdfButton sends) or a
+ *  report number (a worker landing on /report/{n}) — resolve the row directly
+ *  by number first, then through the linked report file the selector resolves
+ *  to. A missing row/role is fine: the name degrades to cv-{report number}.pdf. */
+function roleForPdfShortName(selector: string): string {
+  const apps = readApplications();
+  const target = parseInt(selector, 10);
+  if (!Number.isNaN(target)) {
+    const direct = apps.find((a) => parseInt(a.n, 10) === target);
+    if (direct?.role) return direct.role;
+  }
+  const file = findReportFile(selector);
+  if (file) {
+    const base = path.basename(file);
+    const linked = apps.find((a) => (a.report ?? "").includes(base));
+    if (linked?.role) return linked.role;
+  }
+  return "";
+}
+
 /** The old streaming pipeline, unchanged in substance — only the transport
  * moved from "this response's ReadableStream" to the run-events bus. */
 async function runPipeline({
@@ -283,7 +304,7 @@ async function runPipeline({
   // no longer told these paths, so a stale file cannot survive into a render.
   let pdfPaths: PdfPaths | undefined;
   if (kind === "pdf") {
-    const pathsResult = resolvePdfPaths(input, today, careerOpsRoot(), findReportFile);
+    const pathsResult = resolvePdfPaths(input, careerOpsRoot(), findReportFile, roleForPdfShortName(input));
     if (!pathsResult.ok) {
       publish(runId, { type: "error", msg: pathsResult.error });
       completeRun(runId);

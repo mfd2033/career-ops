@@ -364,7 +364,7 @@ Report header:
 **Legitimacy:** {High Confidence | Proceed with Caution | Suspicious}
 **Work Auth:** {✅ Sponsors | ➖ Not needed | ⚠️ Unstated | ⛔ No sponsorship}
 **URL:** {{URL}}
-**PDF:** {output/cv-candidate-{company-slug}-{{DATE}}.pdf if score >= resolved auto_pdf_score_threshold, otherwise a localized equivalent of `not generated — run /career-ops pdf {company-slug} to create on demand` in `language.output`}
+**PDF:** {the flat short name `output/cv-{{REPORT_NUM}}-{role}.pdf` (≤20 chars, Step 4 rule) if score >= resolved auto_pdf_score_threshold, otherwise a localized equivalent of `not generated — run /career-ops pdf {company-slug} to create on demand` in `language.output`}
 **Batch ID:** {{ID}}
 
 
@@ -443,16 +443,18 @@ If score is greater than or equal to the threshold:
 8. Reorder experience bullets by relevance.
 9. Build a 6-8 item competency grid.
 10. Inject keywords ethically into existing achievements; never invent skills or metrics.
-11. Write HTML to `output/cv-candidate-{company-slug}.html`.
+11. Write HTML to `output/cv-{{REPORT_NUM}}-{role}.html` — the flat short name (Step 4 rule below).
 12. Run:
 
 ```bash
 node generate-pdf.mjs \
-  output/cv-candidate-{company-slug}.html \
-  output/cv-candidate-{company-slug}-{{DATE}}.pdf \
+  output/cv-{{REPORT_NUM}}-{role}.html \
+  output/cv-{{REPORT_NUM}}-{role}.pdf \
   --format={letter|a4} \
   --report={{REPORT_NUM}}
 ```
+
+**Flat short name (ADR-0076, same algorithm as the web backend).** `{role}` is the row's Role column value. Keep the WHOLE filename, `.pdf` included, within 20 characters — Chinese characters count 1. Normalize the role first: NFKC, drop parenthetical notes whole, lowercase, every run of non-letter/digit characters → a single `-`, trim the ends. If it still overflows, drop whole hyphenated words from the tail; only when a single word remains and still overflows, hard-truncate that word. An empty role → `cv-{{REPORT_NUM}}.pdf`. The report number is never truncated.
 
 On success, use `pdf_emoji` = `✅` and set `"pdf"` to the output path in the final JSON.
 

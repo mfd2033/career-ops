@@ -2636,6 +2636,22 @@ if (
   fail('_custom.md read-path regressed: missing Sources of Truth row, honor rule in _shared.md, or the pre-generation read in pdf.md (#1388 would reopen)');
 }
 
+// --- ADR-0076 flat tailored-CV short name: modes/pdf.md must document the same
+// algorithm the web backend implements (cvShortStem in web/src/lib/pdf-paths.mjs).
+// Web and CLI names are meant to stay byte-identical, so a doc-side drift is a
+// defect, not a wording preference — the unit suite cannot see the CLI side. ---
+if (
+  pdfModeCustom.includes('cv-{report number}-{role}') &&
+  pdfModeCustom.includes('20 characters') &&
+  pdfModeCustom.includes('NFKC') &&
+  pdfModeCustom.includes('whole hyphenated words from the tail') &&
+  pdfModeCustom.includes('cv-{report number}.pdf')
+) {
+  pass('modes/pdf.md documents the ADR-0076 flat short name (≤20 chars, same algorithm as cvShortStem)');
+} else {
+  fail('modes/pdf.md lost the ADR-0076 flat short-name rule — web and CLI naming will drift');
+}
+
 for (const skillPath of ['.claude/skills/career-ops/SKILL.md', '.agents/skills/career-ops/SKILL.md']) {
   if (!fileExists(skillPath)) {
     fail(`${skillPath} is missing`);
