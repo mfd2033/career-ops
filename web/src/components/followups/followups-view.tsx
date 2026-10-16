@@ -8,14 +8,15 @@ import { Badge } from "@/components/ui/badge";
 import { CompanyLogo } from "@/components/company-logo";
 import { LogDialog } from "@/components/followups/log-dialog";
 import { NextDateDialog } from "@/components/followups/next-date-dialog";
+import { StatusPill } from "@/components/followups/status-pill";
 import { scoreTone } from "@/lib/format";
 import { channelLabel } from "@/lib/followup-channel.mjs";
+import { describeStatusWriteError, offlineStatusWriteError } from "@/lib/status-write-error.mjs";
 import {
   type CadenceEntry,
   type CadenceMetadata,
   type Urgency,
   daysHeatClass,
-  followupStatusTone,
   oxfordJoin,
   relativeDays,
   urgencyRank,
@@ -91,6 +92,21 @@ export function FollowupsView() {
   const [dialogFor, setDialogFor] = useState<CadenceEntry | null>(null);
   const [pinFor, setPinFor] = useState<CadenceEntry | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  // Inline status edit (ADR-0077): the undo toast. The write itself is always
+  // real (POST /api/status), undo included — status-log records both legs.
+  const [statusToast, setStatusToast] = useState<{
+    n: number;
+    company: string;
+    from: string;
+    to: string;
+    seq: number;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!statusToast) return;
+    const timer = setTimeout(() => setStatusToast(null), 5000);
+    return () => clearTimeout(timer);
+  }, [statusToast]);
 
   const refetch = useCallback(() => {
     fetch("/api/followups?full=1")
@@ -154,6 +170,44 @@ export function FollowupsView() {
       return ((av as number) - (bv as number)) * dir;
     });
   }, [entries, tab, q, sortKey, dir]);
+
+  // ADR-0077: inline status edit callbacks handed down to each row's StatusPill.
+  const handleStatusChange = (entry: CadenceEntry, to: string, from: string) => {
+    setStatusToast((prev) => ({
+      n: entry.num,
+      company: entry.company,
+      from,
+      to,
+      seq: (prev?.seq ?? 0) + 1,
+    }));
+    refetch(); // cadence re-folds: the row may leave the tracker (non-actionable state)
+  };
+
+  const handleStatusError = (err: { key: string; detail?: string }) => {
+    setActionError(t(err.key, err.detail ? { detail: err.detail } : undefined));
+  };
+
+  // Undo = a second real write back to the previous state (never a memory-only
+  // revert — the list refetches and must agree with the data layer).
+  const undoStatus = async (n: number, from: string) => {
+    setStatusToast(null);
+    setActionError(null);
+    try {
+      const res = await fetch("/api/status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ n: String(n), status: from }),
+      });
+      if (!res.ok) {
+        const err = describeStatusWriteError(res.status, await res.json().catch(() => null));
+        setActionError(t(err.key, err.detail ? { detail: err.detail } : undefined));
+      }
+    } catch {
+      const err = offlineStatusWriteError();
+      setActionError(t(err.key));
+    }
+    refetch();
+  };
 
   const removeLogged = async (num: number) => {
     setActionError(null);
@@ -287,6 +341,8 @@ export function FollowupsView() {
                   onLog={() => setDialogFor(e)}
                   onPin={() => setPinFor(e)}
                   onRemove={removeLogged}
+                  onStatusChange={(to, from) => handleStatusChange(e, to, from)}
+                  onStatusError={handleStatusError}
                 />
               ))}
             </tbody>
@@ -296,6 +352,30 @@ export function FollowupsView() {
 
       {dialogFor && <LogDialog entry={dialogFor} onClose={() => setDialogFor(null)} onLogged={refetch} />}
       {pinFor && <NextDateDialog entry={pinFor} onClose={() => setPinFor(null)} onChanged={refetch} />}
+
+      {statusToast && (
+        <div className="fixed inset-x-0 bottom-6 z-40 flex justify-center px-4">
+          <div
+            role="status"
+            className="inline-flex items-center gap-3 rounded-full border border-border bg-surface px-4 py-2 text-sm shadow-lg"
+          >
+            <span className="text-muted">
+              {t("followups.statusChanged", {
+                company: statusToast.company,
+                from: statusToast.from,
+                to: statusToast.to,
+              })}
+            </span>
+            <button
+              type="button"
+              onClick={() => undoStatus(statusToast.n, statusToast.from)}
+              className="text-xs font-medium text-brand transition-colors hover:underline"
+            >
+              {t("followups.statusUndo")}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -346,6 +426,8 @@ function FollowupRow({
   onLog,
   onPin,
   onRemove,
+  onStatusChange,
+  onStatusError,
 }: {
   entry: CadenceEntry;
   expanded: boolean;
@@ -353,9 +435,10 @@ function FollowupRow({
   onLog: () => void;
   onPin: () => void;
   onRemove: (num: number) => void;
+  onStatusChange: (to: string, from: string) => void;
+  onStatusError: (err: { key: string; detail?: string }) => void;
 }) {
   const { t } = useI18n();
-  const statusLabel = e.status.charAt(0).toUpperCase() + e.status.slice(1);
   const Chevron = expanded ? ChevronDown : ChevronRight;
   return (
     <>
@@ -392,7 +475,9 @@ function FollowupRow({
           <Badge tone={scoreTone(e.score)}>{e.score || "—"}</Badge>
         </td>
         <td className="px-2.5 py-3">
-          <Badge tone={followupStatusTone(e.status)}>{statusLabel}</Badge>
+          {/* ADR-0077: the status badge IS the write control — click to change
+              state inline (same gate as the report page's StatusSelect). */}
+          <StatusPill n={String(e.num)} status={e.status} onStatusChange={onStatusChange} onError={onStatusError} />
         </td>
         <td className="px-2.5 py-3">
           <Badge tone={urgencyTone(e.urgency)}>{e.urgency}</Badge>

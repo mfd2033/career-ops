@@ -1,4 +1,4 @@
-﻿import type { Dict } from "../types";
+import type { Dict } from "../types";
 
 // Cluster: followups
 // English (source) strings. Each key is dotted and namespaced by cluster, e.g.
@@ -47,6 +47,10 @@ export const en: Dict = {
   "followups.removeTitle": "Remove this logged follow-up (added by mistake?)",
   "followups.removeAria": "Remove follow-up logged {date}",
   "followups.removeError": "Couldn't remove the follow-up.",
+  // ── status-pill.tsx (ADR-0077) ──
+  "followups.statusMenuAria": "Change application status",
+  "followups.statusChanged": "Status updated: {company} {from} → {to}",
+  "followups.statusUndo": "Undo",
   "followups.narrativeOverdue": "Overdue follow-ups: {n}",
   "followups.narrativeUrgent": "Urgent: {n}",
   "followups.narrativePressing": "most pressing today: {list}",
@@ -168,6 +172,10 @@ export const zh: Dict = {
   "followups.removeTitle": "移除这条已记录的跟进（加错了？）",
   "followups.removeAria": "移除于 {date} 记录的跟进",
   "followups.removeError": "无法移除该跟进。",
+  // ── status-pill.tsx (ADR-0077) ──
+  "followups.statusMenuAria": "更改投递状态",
+  "followups.statusChanged": "状态已更新：{company} {from} → {to}",
+  "followups.statusUndo": "撤销",
   "followups.narrativeOverdue": "已逾期跟进：{n}",
   "followups.narrativeUrgent": "紧急：{n}",
   "followups.narrativePressing": "今日最紧急：{list}",
