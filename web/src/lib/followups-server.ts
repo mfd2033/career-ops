@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { careerOpsRoot, rootScript } from "@/lib/career-ops";
+import { careerOpsRoot, findApplication, readApplicationUrl, rootScript } from "@/lib/career-ops";
 import { withFollowupsLock, FollowupsBusyError } from "@/lib/core/followups-lock";
 import { parseCadenceStdout } from "@/lib/followup-cadence-read.mjs";
 import { parseScripts, fillScripts, groupOrder } from "@/lib/followup-scripts.mjs";
@@ -138,13 +138,21 @@ export type FollowupScriptsPayload = {
   available: boolean;
   groups: string[];
   scripts: FollowupScript[];
+  /** 本行报告头 `**URL:**` 的原始职位链接（仅 http(s) 才留，否则 null）——「打开职位」
+   *  按钮外站打开的目标（ADR-0081）。报告缺失 / 非 http(s) / 行不存在 → null（按钮置灰）。 */
+  postingUrl: string | null;
 };
 
 /** fail-closed：文件缺失 / 读失败 / 解析出零条 / 本行 entry 取不到 → available:false。
  *  最后一条最要紧——没有 entry 就没有 {投递日}{岗位名} 的值，只回一堆空模板等于
  *  给了个填不了的话术，不如让 UI 安静地说一句「暂不可用」。 */
 export async function readFollowupScripts(row: CadenceEntry | null): Promise<FollowupScriptsPayload> {
-  const empty: FollowupScriptsPayload = { available: false, groups: [], scripts: [] };
+  // 「打开职位」的目标（ADR-0081）：复用 readApplicationUrl —— 报告头 `**URL:**` 的
+  // 单点提取（http(s)-only，非 http 返回 undefined），不另写一份报告头解析。行不存在
+  // / 报告缺失 / 非 http(s) → null（按钮置灰）。
+  const app = row ? findApplication(String(row.num)) : null;
+  const postingUrl = app ? (readApplicationUrl(app) ?? null) : null;
+  const empty: FollowupScriptsPayload = { available: false, groups: [], scripts: [], postingUrl };
   if (!row) return empty;
   const file = followupScriptsPath();
   if (!fs.existsSync(file)) return empty;
@@ -160,5 +168,6 @@ export async function readFollowupScripts(row: CadenceEntry | null): Promise<Fol
     available: true,
     groups: groupOrder(parsed) as string[],
     scripts: fillScripts(parsed, row) as FollowupScript[],
+    postingUrl,
   };
 }

@@ -1,22 +1,23 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, ChevronDown, Copy, Loader2 } from "lucide-react";
+import { Check, ChevronDown, Copy, ExternalLink, Loader2 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { useI18n } from "@/lib/i18n/context";
 import type { CadenceEntry } from "@/lib/followups";
 import { groupLabel, scriptsInGroup, shortName } from "@/lib/followup-scripts.mjs";
 import type { FollowupScript, FollowupScriptsPayload } from "@/lib/followups-server";
 
-// 「生成话术」（ADR-0080）：LogDialog 底部默认收起的可折叠区。一级 chips 选轮次
-// （四个场景桶），二级 chips 选变体（该桶 ≥2 条时才出现），正文按「事实／意向／
-// 下一步」三行标注——纪律就长在界面上，不用另写说明。
+// 「生成话术」（ADR-0080）：LogDialog 底部的可折叠区，**默认展开**（ADR-0082）——
+// 它是 复制话术 → 打开职位 → 粘贴 → 发送 闭环的起点，不该藏在一次点击之后。
+// 一级 chips 选轮次（四个场景桶），二级 chips 选变体（该桶 ≥2 条时才出现），正文按
+// 「事实／意向／下一步」三行标注——纪律就长在界面上，不用另写说明。
 //
 // 边界：复制只进剪贴板，系统只生成不代发。不写备注、不写 data/follow-ups.md、
 // 不调任何写接口——用户必须自己粘、自己发。
 export function GenerateScriptPanel({ entry }: { entry: CadenceEntry }) {
   const { t } = useI18n();
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(true); // ADR-0082：默认展开
   const [payload, setPayload] = useState<FollowupScriptsPayload | null>(null);
   const [loading, setLoading] = useState(false);
   const [groupIdx, setGroupIdx] = useState(0);
@@ -28,6 +29,13 @@ export function GenerateScriptPanel({ entry }: { entry: CadenceEntry }) {
   useEffect(() => () => {
     if (timerRef.current !== null) window.clearTimeout(timerRef.current);
   }, []);
+
+  // 默认展开（ADR-0082）后没有「点开」这一动作，挂载即补一次拉取；payload 已有缓存
+  // 就不重复请求（折叠后再展开仍走 toggle 的同一条惰性路径）。
+  useEffect(() => {
+    if (open && !payload && !loading) void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   const groups = payload?.groups ?? [];
   const activeGroup = groups[groupIdx] ?? null;
@@ -44,9 +52,9 @@ export function GenerateScriptPanel({ entry }: { entry: CadenceEntry }) {
     try {
       const res = await fetch(`/api/followups/scripts?num=${entry.num}`);
       const json = (await res.json().catch(() => null)) as FollowupScriptsPayload | null;
-      setPayload(json?.available ? json : { available: false, groups: [], scripts: [] });
+      setPayload(json?.available ? json : { available: false, groups: [], scripts: [], postingUrl: null });
     } catch {
-      setPayload({ available: false, groups: [], scripts: [] });
+      setPayload({ available: false, groups: [], scripts: [], postingUrl: null });
     } finally {
       setLoading(false);
     }
@@ -187,20 +195,48 @@ export function GenerateScriptPanel({ entry }: { entry: CadenceEntry }) {
                 </div>
               </div>
 
-              <div className="mt-2 flex items-center justify-between gap-2">
+              <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
                 <span className="text-[11px] leading-relaxed text-faint">{t("followups.scriptNoSend")}</span>
-                <button
-                  type="button"
-                  onClick={copy}
-                  className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-brand px-3 py-1.5 text-sm font-medium text-brand-text transition-colors hover:bg-brand-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
-                >
-                  {copied === "copied" ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
-                  {copied === "copied"
-                    ? t("followups.scriptCopied")
-                    : copied === "selected"
-                      ? t("followups.scriptManualCopy")
-                      : t("followups.scriptCopy")}
-                </button>
+                {/* 动作行 = 闭环的两步（ADR-0081）：复制话术 → 打开职位。两个独立按钮，
+                    顺序即用户陈述的流程顺序；打开只到 <a target="_blank">，绝不代发。 */}
+                <div className="flex shrink-0 items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={copy}
+                    className="inline-flex items-center gap-1.5 rounded-md border border-brand px-3 py-1.5 text-sm font-medium text-brand-text transition-colors hover:bg-brand-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
+                  >
+                    {copied === "copied" ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+                    {copied === "copied"
+                      ? t("followups.scriptCopied")
+                      : copied === "selected"
+                        ? t("followups.scriptManualCopy")
+                        : t("followups.scriptCopy")}
+                  </button>
+                  {payload.postingUrl ? (
+                    <a
+                      href={payload.postingUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-sm font-medium text-muted transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
+                    >
+                      <ExternalLink className="size-3.5" />
+                      {t("followups.scriptOpenJob")}
+                    </a>
+                  ) : (
+                    // 无 http(s) 链接时置灰不隐藏（用户决策）：title 挂在可悬停的 span 上，
+                    // disabled 元素不派发指针事件，挂按钮上提示不显示。
+                    <span title={t("followups.scriptOpenJobHint")} className="inline-flex">
+                      <button
+                        type="button"
+                        disabled
+                        className="inline-flex cursor-not-allowed items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-sm font-medium text-faint opacity-60"
+                      >
+                        <ExternalLink className="size-3.5" />
+                        {t("followups.scriptOpenJob")}
+                      </button>
+                    </span>
+                  )}
+                </div>
               </div>
             </>
           )}

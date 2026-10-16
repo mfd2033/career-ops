@@ -89,11 +89,12 @@ export function LogDialog({
         if (e.target === e.currentTarget) onClose();
       }}
     >
+      {/* ADR-0082：话术区默认展开后弹窗变高，矮屏需能滚动，否则底部「记录」按钮不可达。 */}
       <div
         role="dialog"
         aria-modal="true"
         aria-label={t("followups.logDialogAria", { company: entry.company })}
-        className="w-full max-w-md rounded-2xl border border-border bg-surface p-5 shadow-xl"
+        className="max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-y-auto rounded-2xl border border-border bg-surface p-5 shadow-xl"
       >
         <div className="flex items-start justify-between gap-4">
           <div>
@@ -164,7 +165,7 @@ export function LogDialog({
             />
             {t("followups.unreadCheckbox")}
           </label>
-          {/* ADR-0080：话术区默认收起，展开后只读模板文件 + 本行 entry；复制走剪贴板，
+          {/* ADR-0080 + ADR-0082：话术区默认展开，只读模板文件 + 本行 entry；复制走剪贴板，
               不写备注、不写 follow-ups.md（用户决策「不联动」）。 */}
           <GenerateScriptPanel entry={entry} />
           <div className="flex justify-end gap-2 pt-1">

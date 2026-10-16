@@ -18,6 +18,6 @@ export async function GET(req: Request) {
     const entry = await readFollowupEntry(num);
     return Response.json(await readFollowupScripts(entry));
   } catch {
-    return Response.json({ available: false, groups: [], scripts: [] });
+    return Response.json({ available: false, groups: [], scripts: [], postingUrl: null });
   }
 }

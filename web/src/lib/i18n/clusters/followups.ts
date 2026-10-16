@@ -154,6 +154,9 @@ export const en: Dict = {
   "followups.scriptCopy": "Copy script",
   "followups.scriptCopied": "Copied",
   "followups.scriptManualCopy": "Selected — press Ctrl+C",
+  // ADR-0081：闭环的第二步——在新标签页打开该行报告里的原始职位链接。
+  "followups.scriptOpenJob": "Open posting",
+  "followups.scriptOpenJobHint": "No posting link in this row's report",
   "followups.scriptGroup.首轮跟进": "First follow-up",
   "followups.scriptGroup.二轮保岗": "Second check-in",
   "followups.scriptGroup.售前问出差": "Travel question",
@@ -325,6 +328,9 @@ export const zh: Dict = {
   "followups.scriptCopy": "复制话术",
   "followups.scriptCopied": "已复制",
   "followups.scriptManualCopy": "已选中，按 Ctrl+C",
+  // ADR-0081：闭环的第二步——在新标签页打开该行报告里的原始职位链接。
+  "followups.scriptOpenJob": "打开职位",
+  "followups.scriptOpenJobHint": "该行报告里没有职位链接",
   "followups.scriptGroup.首轮跟进": "首轮跟进",
   "followups.scriptGroup.二轮保岗": "二轮保岗",
   "followups.scriptGroup.售前问出差": "售前问出差",
