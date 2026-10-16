@@ -141,6 +141,8 @@ data/model-blacklist.json
 .idea/
 .vscode/
 .trae/
+# Trae HTML 预览分享打包产物（机器本地、临时性）
+.trae-html-share-packages/
 
 # Agent skill storage (local installations; share via skills-lock.json)
 .agents/skills/*
