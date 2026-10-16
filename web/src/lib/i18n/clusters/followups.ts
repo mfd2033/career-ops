@@ -139,6 +139,29 @@ export const en: Dict = {
   "followups.logError": "Could not log the follow-up.",
   "followups.cancel": "Cancel",
 
+  // ── generate-script-panel.tsx（生成话术，ADR-0080）──
+  // 分组名与行标签是数据里的中文规范值（templates/followup-scripts.md 与
+  // followup-scripts.mjs 的 SCRIPT_GROUPS/LINE_LABELS），所以键名带字面量——
+  // 与 channel.* 同款。话术正文本身不进 i18n：那是用户的中文资产，不是界面文案。
+  "followups.scriptTitle": "Generate a script",
+  "followups.scriptLoading": "Loading scripts…",
+  "followups.scriptUnavailable": "Scripts unavailable — check templates/followup-scripts.md.",
+  "followups.scriptDiscipline": "Three sentences: fact + intent + next step ｜ ask about travel before the interview ｜ never three in a row at one company",
+  "followups.scriptPickGroup": "Pick the round",
+  "followups.scriptPickVariant": "Pick a variant",
+  "followups.scriptSource": "Filled from row #{num} · dashed box = yours to complete",
+  "followups.scriptNoSend": "Generated only — you paste and send it yourself",
+  "followups.scriptCopy": "Copy script",
+  "followups.scriptCopied": "Copied",
+  "followups.scriptManualCopy": "Selected — press Ctrl+C",
+  "followups.scriptGroup.首轮跟进": "First follow-up",
+  "followups.scriptGroup.二轮保岗": "Second check-in",
+  "followups.scriptGroup.售前问出差": "Travel question",
+  "followups.scriptGroup.留档": "Archive",
+  "followups.scriptLine.事实": "Fact",
+  "followups.scriptLine.意向": "Intent",
+  "followups.scriptLine.下一步": "Next step",
+
   // ── log-followup-button.tsx（报告页入口，ADR-0075）──
   "followups.loggedToast": "Follow-up logged",
 
@@ -289,6 +312,26 @@ export const zh: Dict = {
   "followups.notesPlaceholder": "你说了什么、在等待什么……",
   "followups.logError": "无法记录跟进。",
   "followups.cancel": "取消",
+
+  // ── generate-script-panel.tsx（生成话术，ADR-0080；与 en 段同键）──
+  "followups.scriptTitle": "生成话术",
+  "followups.scriptLoading": "正在读取话术…",
+  "followups.scriptUnavailable": "话术模板暂不可用——请检查 templates/followup-scripts.md。",
+  "followups.scriptDiscipline": "三句话：事实 ＋ 意向 ＋ 下一步 ｜ 售前先问出差 ｜ 同公司别三连发",
+  "followups.scriptPickGroup": "选这一轮",
+  "followups.scriptPickVariant": "选一句变体",
+  "followups.scriptSource": "已按 #{num} 自动填入 · 虚线框 = 复制后你自己补",
+  "followups.scriptNoSend": "系统只生成，粘贴发送由你自己来",
+  "followups.scriptCopy": "复制话术",
+  "followups.scriptCopied": "已复制",
+  "followups.scriptManualCopy": "已选中，按 Ctrl+C",
+  "followups.scriptGroup.首轮跟进": "首轮跟进",
+  "followups.scriptGroup.二轮保岗": "二轮保岗",
+  "followups.scriptGroup.售前问出差": "售前问出差",
+  "followups.scriptGroup.留档": "留档",
+  "followups.scriptLine.事实": "事实",
+  "followups.scriptLine.意向": "意向",
+  "followups.scriptLine.下一步": "下一步",
 
   // ── log-followup-button.tsx（报告页入口，ADR-0075）──
   "followups.loggedToast": "已记录",

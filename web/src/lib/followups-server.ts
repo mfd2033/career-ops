@@ -4,6 +4,7 @@ import path from "node:path";
 import { careerOpsRoot, rootScript } from "@/lib/career-ops";
 import { withFollowupsLock, FollowupsBusyError } from "@/lib/core/followups-lock";
 import { parseCadenceStdout } from "@/lib/followup-cadence-read.mjs";
+import { parseScripts, fillScripts, groupOrder } from "@/lib/followup-scripts.mjs";
 import type { CadenceEntry } from "@/lib/followups";
 
 export { FollowupsBusyError };
@@ -13,6 +14,12 @@ export { FollowupsBusyError };
 /** data/follow-ups.md — the follow-up log + next-date pins (user layer). */
 export function followupsLogPath(): string {
   return path.join(careerOpsRoot(), "data", "follow-ups.md");
+}
+
+/** templates/followup-scripts.md — 跟进话术模板库（ADR-0080）。实体是用户个人资产
+ *  （话术是他自己的口径），只是路径落在 templates/ 下；不得被系统更新覆盖。 */
+export function followupScriptsPath(): string {
+  return path.join(careerOpsRoot(), "templates", "followup-scripts.md");
 }
 
 // In-process serialization of follow-up mutations: POST log derives the next
@@ -110,4 +117,48 @@ export async function readFollowupEntry(id: string): Promise<CadenceEntry | null
   const payload = await readCadencePayload();
   if (!payload.available) return null;
   return payload.entries.find((e) => e.num === num) ?? null;
+}
+
+// ── 跟进话术模板（templates/followup-scripts.md，ADR-0080）────────────────────
+// 「生成话术」区块的读取：解析 + 按本行 cadence entry 填占位符。只读，无锁——
+// 复制走剪贴板、不落任何文件，所以这里是唯一一条不碰 data/ 的 followups 路径。
+
+export type FollowupScriptLine = { label: string; text: string };
+
+export type FollowupScript = {
+  name: string;
+  group: string;
+  scenario: string;
+  lines: FollowupScriptLine[];
+  /** 取不到值的占位符（含 {城市}{原因}{时间} 这种无数据源的手填键），原样留在文本里。 */
+  missing: string[];
+};
+
+export type FollowupScriptsPayload = {
+  available: boolean;
+  groups: string[];
+  scripts: FollowupScript[];
+};
+
+/** fail-closed：文件缺失 / 读失败 / 解析出零条 / 本行 entry 取不到 → available:false。
+ *  最后一条最要紧——没有 entry 就没有 {投递日}{岗位名} 的值，只回一堆空模板等于
+ *  给了个填不了的话术，不如让 UI 安静地说一句「暂不可用」。 */
+export async function readFollowupScripts(row: CadenceEntry | null): Promise<FollowupScriptsPayload> {
+  const empty: FollowupScriptsPayload = { available: false, groups: [], scripts: [] };
+  if (!row) return empty;
+  const file = followupScriptsPath();
+  if (!fs.existsSync(file)) return empty;
+  let markdown: string;
+  try {
+    markdown = fs.readFileSync(file, "utf8");
+  } catch {
+    return empty;
+  }
+  const parsed = parseScripts(markdown);
+  if (!parsed.length) return empty;
+  return {
+    available: true,
+    groups: groupOrder(parsed) as string[],
+    scripts: fillScripts(parsed, row) as FollowupScript[],
+  };
 }

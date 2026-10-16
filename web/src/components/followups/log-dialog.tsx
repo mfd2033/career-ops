@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Loader2, X } from "lucide-react";
 import { CHANNELS, DEFAULT_CHANNEL, channelLabel } from "@/lib/followup-channel.mjs";
+import { GenerateScriptPanel } from "@/components/followups/generate-script-panel";
 import { localISODate, type CadenceEntry, type Channel } from "@/lib/followups";
 import { cn } from "@/lib/cn";
 import { useI18n } from "@/lib/i18n/context";
@@ -163,6 +164,9 @@ export function LogDialog({
             />
             {t("followups.unreadCheckbox")}
           </label>
+          {/* ADR-0080：话术区默认收起，展开后只读模板文件 + 本行 entry；复制走剪贴板，
+              不写备注、不写 follow-ups.md（用户决策「不联动」）。 */}
+          <GenerateScriptPanel entry={entry} />
           <div className="flex justify-end gap-2 pt-1">
             <button type="button" onClick={onClose} className="rounded-md px-3 py-2 text-sm text-muted transition hover:text-foreground">
               {t("followups.cancel")}
