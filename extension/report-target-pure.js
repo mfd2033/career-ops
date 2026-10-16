@@ -6,6 +6,8 @@
 //   • parseWebTab       —— 一个标签页算不算本项目 web 端（origin + 端口区间粗判）；
 //   • pickReportTarget  —— 候选池 → 目标标签页（端口优先 / 「最近活跃」近似规则 /
 //                          同 URL 幂等 / 无候选兜底 / 端口探测失败的报错分支）；
+//   • pickWebTarget     —— 浮窗面板级 🌐 的落点解析（ADR-0078）：同一套候选规则，
+//                          落点是 /pipeline 收件箱，没有报告号参与；
 //   • reportPath / reportUrl —— 报告页的客户端路由与整页 URL（家规：打开给用户看的
 //                               页面一律用 localhost）。
 //
@@ -27,11 +29,18 @@
   const WEB_PORT_MAX = 3040;
   const WEB_HOSTS = ["localhost", "127.0.0.1"];
   // 端口探测失败时的用户可见文案：与 core.js 的兜底 toast 同文（维持今天的报错口径）。
+  // 浮窗面板级 🌐 走 WEB_SERVICE_ERROR —— 那条链路上没有「报告」可打不开（ADR-0078）。
   const NO_SERVICE_ERROR = "本地报告打不开：本地 web 服务可能未运行";
+  const WEB_SERVICE_ERROR = "Web 端打不开：本地 web 服务可能未运行";
 
   /** 报告页在 web 端里的客户端路由（扩展→web 前端路由跳转用，ADR-0055 修订）。 */
   function reportPath(reportNum) {
     return `/report/${reportNum}`;
+  }
+
+  /** 收件箱在 web 端里的客户端路由：面板级 🌐 的固定落点（ADR-0078）。 */
+  function pipelinePath() {
+    return "/pipeline";
   }
 
   /**
@@ -45,6 +54,11 @@
   /** 报告页 URL（一律 localhost，家规）。 */
   function reportUrl(port, reportNum) {
     return `http://localhost:${port}${reportPath(reportNum)}`;
+  }
+
+  /** 收件箱 URL（同一条 localhost 家规，只是 path 不同）。 */
+  function pipelineUrl(port) {
+    return `http://localhost:${port}${pipelinePath()}`;
   }
 
   /** 体检报告 URL（同一条 localhost 家规，只是 path 不同）。 */
@@ -106,6 +120,24 @@
   }
 
   /**
+   * 候选池 → 目标标签页，pickReportTarget / pickWebTarget 共用（ADR-0055 / ADR-0078）：
+   * 端口优先 → 当前窗口内 active 优先 → 全库 active 优先 → 全库首个。没有候选返回 null。
+   */
+  function pickWebTab({ livePort, tabs, currentWindowId } = {}) {
+    const candidates = (Array.isArray(tabs) ? tabs : []).map(parseWebTab).filter(Boolean);
+    if (candidates.length === 0) return null;
+    // 端口优先：先把跳转交给「本次探测到的那个存活端口」上的 web 页，避免开进另一个实例。
+    const livePortNum = Number(livePort);
+    const samePort = candidates.filter((c) => c.port === livePortNum);
+    const pool = samePort.length ? samePort : candidates;
+    // 「最近活跃」的近似规则（决策 4）：当前窗口内的候选优先，其中 active 的最高；
+    // 当前窗口没有候选才看全库，同样 active 优先。不依赖 tab.lastAccessed。
+    const inWindow = currentWindowId == null ? [] : pool.filter((c) => c.windowId === currentWindowId);
+    const scope = inWindow.length ? inWindow : pool;
+    return scope.find((c) => c.active) || scope[0];
+  }
+
+  /**
    * 解析一次 open-report 的跳转目标（ADR-0055 决策 3-6、8）。
    *
    * @param {object}   p
@@ -135,19 +167,8 @@
     const url = isCheckup ? checkupUrl(livePort, reportNum) : reportUrl(livePort, reportNum);
     const path = isCheckup ? checkupPath(reportNum) : reportPath(reportNum);
 
-    const candidates = (Array.isArray(tabs) ? tabs : []).map(parseWebTab).filter(Boolean);
-    if (candidates.length === 0) return { action: "create", url, path };
-
-    // 端口优先：先把报告交给「本次探测到的那个存活端口」上的 web 页，避免开进另一个实例。
-    const livePortNum = Number(livePort);
-    const samePort = candidates.filter((c) => c.port === livePortNum);
-    const pool = samePort.length ? samePort : candidates;
-
-    // 「最近活跃」的近似规则（决策 4）：当前窗口内的候选优先，其中 active 的最高；
-    // 当前窗口没有候选才看全库，同样 active 优先。不依赖 tab.lastAccessed。
-    const inWindow = currentWindowId == null ? [] : pool.filter((c) => c.windowId === currentWindowId);
-    const scope = inWindow.length ? inWindow : pool;
-    const tab = scope.find((c) => c.active) || scope[0];
+    const tab = pickWebTab({ livePort, tabs, currentWindowId });
+    if (!tab) return { action: "create", url, path };
 
     return {
       action: "reuse",
@@ -159,17 +180,53 @@
     };
   }
 
+  /**
+   * 解析一次 open-web 的跳转目标：浮窗标题栏 🌐 的面板级落点（ADR-0078）。
+   *
+   * 与 pickReportTarget 同一套候选规则（pickWebTab），但落点是 /pipeline 收件箱、
+   * 没有报告号参与——所以不塞进 pickReportTarget 的 kind 参数，独立成函数：
+   * 那边的 num 校验与 report/checkup 双落点分支是既有单测的契约，不为第三落点改签名。
+   *
+   * @param {object}  [p]
+   * @param {?number} p.livePort          ensureLivePort() 的结果（null = 端口探测失败）
+   * @param {Array}   p.tabs              chrome.tabs.query({}) 的结果
+   * @param {?number} p.currentWindowId   「当前窗口」（同 pickReportTarget 口径）
+   * @returns {{action:"error", error:string}
+   *          |{action:"create", url:string, path:string}
+   *          |{action:"reuse", tabId:number, windowId:(number|null), url:string, path:string, navigate:boolean}}
+   *   出口语义与 pickReportTarget 一致；幂等粒度 = origin+pathname（/pipeline 无 query）。
+   */
+  function pickWebTarget({ livePort, tabs, currentWindowId } = {}) {
+    if (livePort == null) return { action: "error", error: WEB_SERVICE_ERROR };
+    const url = pipelineUrl(livePort);
+    const path = pipelinePath();
+    const tab = pickWebTab({ livePort, tabs, currentWindowId });
+    if (!tab) return { action: "create", url, path };
+    return {
+      action: "reuse",
+      tabId: tab.id,
+      windowId: tab.windowId,
+      url,
+      path,
+      navigate: tab.key !== urlKey(url),
+    };
+  }
+
   const api = {
     WEB_PORT_MIN,
     WEB_PORT_MAX,
     NO_SERVICE_ERROR,
+    WEB_SERVICE_ERROR,
     reportPath,
     reportUrl,
+    pipelinePath,
+    pipelineUrl,
     checkupPath,
     checkupUrl,
     urlKey,
     parseWebTab,
     pickReportTarget,
+    pickWebTarget,
   };
 
   // service worker（经典脚本，background.js 经 importScripts 引入）：挂 self。

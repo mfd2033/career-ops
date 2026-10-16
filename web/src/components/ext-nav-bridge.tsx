@@ -11,11 +11,13 @@ import { useRouter, usePathname } from "next/navigation";
 // 滚动位置都留着。跳转后回 __careerExt:nav-ack，扩展据此知道有人接：收不到 ack 的
 // web 端（旧版本 / 尚未 hydrate）会由扩展回退成整页导航，功能不会因此消失。
 //
-// 只认 /report/{数字}：窗口消息对页面内任何脚本可见，路由目标必须白名单化——Next 文档
+// 只认白名单内的 path（报告页 /report/{n} 与收件箱 /pipeline，ADR-0055 修订 /
+// ADR-0078）：窗口消息对页面内任何脚本可见，路由目标必须白名单化——Next 文档
 // 也明确禁止把未消毒的 URL 交给 router.push（javascript: 之类会在本页上下文执行）。
+// 白名单本体在 lib/ext-nav-paths.mjs（无依赖、可被 node 单测直接门住）。
+import { isExtNavPath } from "@/lib/ext-nav-paths.mjs";
 const NAV_TAG = "__careerExt:nav";
 const NAV_ACK_TAG = "__careerExt:nav-ack";
-const REPORT_PATH_RE = /^\/report\/[0-9]{1,6}$/;
 
 /** 挂在根 layout：徽章可能在任何页面被点击，监听器必须在全局。 */
 export function ExtNavBridge() {
@@ -29,7 +31,7 @@ export function ExtNavBridge() {
       const d = e.data as { tag?: unknown; id?: unknown; path?: unknown } | null;
       if (!d || d.tag !== NAV_TAG || typeof d.path !== "string") return;
       // 不认识的目标不应答：让扩展走整页导航回退，去它自己拼好的那个 URL。
-      if (!REPORT_PATH_RE.test(d.path)) return;
+      if (!isExtNavPath(d.path)) return;
       // 已经在目标报告上就不 push——省一次多余的历史记录（扩展侧通常已幂等，
       // 这里只是兜住「页面自己先跳过去」的竞态）。
       if (d.path !== pathnameRef.current) router.push(d.path);

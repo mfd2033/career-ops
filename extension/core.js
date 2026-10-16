@@ -297,6 +297,13 @@
     "line-height:1;display:grid;place-items:center;font-family:inherit}",
     `#${DETAIL_PANEL_ID} .ce-toggle:hover{background:rgba(255,255,255,.16)}`,
     `#${DETAIL_PANEL_ID} .ce-toggle:focus-visible{outline:2px solid #4aa3ff;outline-offset:1px}`,
+    // 面板级 Web 端入口（ADR-0078）：规格同 .ce-toggle，但 hover/focus 用蓝色词汇
+    // （与行内报告链接同源）——🌐 是彩色 emoji 不吃 currentColor，色彩信号由底色承担。
+    `#${DETAIL_PANEL_ID} .ce-web{appearance:none;-webkit-appearance:none;border:0;width:22px;height:22px;`,
+    "background:rgba(255,255,255,.08);color:#eef2f7;border-radius:6px;cursor:pointer;font-size:12px;",
+    "line-height:1;display:grid;place-items:center;font-family:inherit;padding:0}",
+    `#${DETAIL_PANEL_ID} .ce-web:hover{background:rgba(74,163,255,.16)}`,
+    `#${DETAIL_PANEL_ID} .ce-web:focus-visible{outline:2px solid #4aa3ff;outline-offset:1px}`,
     // 读数行 —— 签名元素：左侧语义色轨 + 等宽数字；最后一列固定宽，链接藏而不删
     `#${DETAIL_PANEL_ID} .ce-body{padding:6px 12px 12px}`,
     `#${DETAIL_PANEL_ID}.ce-collapsed .ce-body{display:none}`,
@@ -342,6 +349,7 @@
     '<div class="ce-bar">',
     '<span class="ce-grip" title="拖动">⠿</span>',
     '<span class="ce-title">career-ops</span>',
+    '<button class="ce-web" type="button" title="在 Web 端打开这份职位报告" aria-label="在 Web 端打开职位报告">🌐</button>',
     '<button class="ce-toggle" type="button" title="收起" aria-label="收起浮窗">–</button>',
     "</div>",
     '<div class="ce-body">',
@@ -462,6 +470,7 @@
     panelRefs = {
       bar: q(".ce-bar"),
       toggle: q(".ce-toggle"),
+      web: q(".ce-web"),
       btnEval: el.querySelector(`#${DETAIL_EVAL_BTN_ID}`),
       btnQuick: el.querySelector(`#${DETAIL_QUICK_BTN_ID}`),
       rails: { eval: q('[data-r="eval"]'), quick: q('[data-r="quick"]'), status: q('[data-r="status"]'), checkup: q('[data-r="checkup"]') },
@@ -473,7 +482,7 @@
     // 拖拽：只有标题栏是热区；切成 left/top 定位才能自由移动，位置不写进 storage。
     let drag = null;
     panelRefs.bar.addEventListener("pointerdown", (e) => {
-      if (e.target.closest(".ce-toggle")) return; // 收起按钮不该顺手把面板拖走
+      if (e.target.closest(".ce-toggle, .ce-web")) return; // 按钮不该顺手把面板拖走
       const r = el.getBoundingClientRect();
       drag = { dx: e.clientX - r.left, dy: e.clientY - r.top };
       el.style.right = "auto";
@@ -494,6 +503,17 @@
     panelRefs.bar.addEventListener("pointercancel", endDrag);
 
     panelRefs.toggle.addEventListener("click", () => setPanelCollapsed(!panelCollapsed));
+    // 面板级 Web 端入口（ADR-0078 修订）：行级 ↗ 是页内弹窗阅读，🌐 是切去 web 端
+    // 的这份职位报告（/report/{n}，num 来自已评估行，未评估为 null）；无报告号时
+    // SW 兜底进 /pipeline 收件箱。目标解析走 open-report 同一条链（复用已开标签页 →
+    // 前端路由优先 → 双兜底），这里只管发消息与兜底报错。
+    panelRefs.web.addEventListener("click", () => {
+      sendMsg({ type: "open-web", num: panelReportNum || null }, (res) => {
+        if (chrome.runtime.lastError || !res || !res.ok) {
+          showToast(res && res.error ? res.error : "Web 端打不开：本地 web 服务可能未运行", true);
+        }
+      });
+    });
     panelRefs.pill.expand.addEventListener("click", () => setPanelCollapsed(false));
     panelRefs.btnEval.addEventListener("click", onPanelEvalClick);
     panelRefs.btnQuick.addEventListener("click", onPanelQuickClick);

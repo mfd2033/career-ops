@@ -709,6 +709,78 @@ async function navigateInWebTab(tabId, path, url) {
   return "reloaded";
 }
 
+/**
+ * open-report / open-web 共用的候选池与「当前窗口」采集（ADR-0055 / ADR-0078）。
+ * 「当前窗口」取最近聚焦窗口，取不到则退化用发起本次点击的招聘站 tab 所在窗口
+ * （content script 的 sender.tab 就是它）。
+ */
+async function collectWebTabContext(sender) {
+  const tabs = await chrome.tabs.query({}).catch(() => []);
+  let currentWindowId = null;
+  try {
+    const w = await chrome.windows.getLastFocused({});
+    currentWindowId = w && typeof w.id === "number" ? w.id : null;
+  } catch {
+    /* 窗口接口不可用：退到 sender.tab（下面兜） */
+  }
+  if (currentWindowId == null && sender && sender.tab) {
+    currentWindowId = typeof sender.tab.windowId === "number" ? sender.tab.windowId : null;
+  }
+  return { tabs, currentWindowId };
+}
+
+/**
+ * 复用分支的统一 choreography（ADR-0055 修订 / ADR-0078）：先把 web 端标签页提到
+ * 前台（聚焦先于跳转，点击立即有反馈），再按落点性质决定怎么「到达」。返回最终 mode。
+ *   - forceReload：落点不是前端路由页（体检 API 端点）→ 整页导航；
+ *   - 其余：navigate=true 走前端路由（无 ack 回退整页），false 只聚焦不重载。
+ * 不 tabs.move 搬家，也不关不动招聘站页面——用户切回去仍在原职位页。
+ */
+async function revealWebTab(target, forceReload) {
+  await chrome.tabs.update(target.tabId, { active: true });
+  if (target.windowId != null) {
+    await chrome.windows.update(target.windowId, { focused: true }).catch(() => {});
+  }
+  if (forceReload) {
+    await chrome.tabs.update(target.tabId, { url: target.url, active: true });
+    return "reloaded";
+  }
+  return target.navigate ? await navigateInWebTab(target.tabId, target.path, target.url) : "focused";
+}
+
+/**
+ * open-report 的落点解析与跳转编排（ADR-0055 修订 / ADR-0078）。open-web 带报告号
+ * 时也走这条链（🌐 的主落点是当前职位的报告页）。返回值直接作为 sendResponse 载荷。
+ */
+async function resolveReportJump(msg, sender) {
+  // 端口探测失败即报错、不跳转：把一个已经连不上的页面推到用户面前，比直说
+  // 「web 服务没跑」更困惑（ADR-0055 决策 8，纯层负责把 null port 变成 error）。
+  // 注意探测与 API base 走 127.0.0.1，而打开给用户看的页面一律用 localhost——
+  // 两者是不同 origin，勿「顺手统一」（见 report-target-pure.js 的 reportUrl）。
+  const port = await ensureLivePort().catch(() => null);
+  // 候选池与「当前窗口」的采集口径 open-report / open-web 共用（ADR-0078）。
+  const { tabs, currentWindowId } = await collectWebTabContext(sender);
+  const target = REPORT_TARGET.pickReportTarget({
+    livePort: port,
+    tabs,
+    currentWindowId,
+    num: msg.num,
+    kind: msg.kind,
+  });
+  if (target.action === "error") return { ok: false, error: target.error };
+  if (target.action === "create") {
+    // 服务活着但没有任何 web 端标签页：退回今天的行为，别让用户点不动徽章。
+    await chrome.tabs.create({ url: target.url });
+    return { ok: true, reportUrl: target.url, mode: "created" };
+  }
+  // 复用：先把 web 端标签页提到前台，再请它自己前端路由跳过去（不刷新页面，
+  // ADR-0055 修订）；web 端没应声才回退整页导航。体检报告的落点是一个 API
+  // 端点（直接返回那份自包含 HTML），不是 web 端的应用路由：让页面自己
+  // router.push 过去会撞上 404 页，只能整页导航（forceReload）。
+  const mode = await revealWebTab(target, msg.kind === "checkup" && target.navigate);
+  return { ok: true, reportUrl: target.url, mode };
+}
+
 // ---- message routing ------------------------------------------------------
 
 const selectionByTab = new Map(); // tabId → string[] (selected posting URLs)
@@ -777,59 +849,43 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       }
       case "open-report": {
         try {
-          // 端口探测失败即报错、不跳转：把一个已经连不上的页面推到用户面前，比直说
-          // 「web 服务没跑」更困惑（ADR-0055 决策 8）。注意探测与 API base 走
-          // 127.0.0.1，而打开给用户看的页面一律用 localhost——两者是不同 origin，
-          // 勿「顺手统一」（见 report-target-pure.js 的 reportUrl）。
+          const result = await resolveReportJump(msg, sender);
+          sendResponse(result);
+        } catch (err) {
+          sendResponse({ ok: false, error: err.message });
+        }
+        break;
+      }
+      case "open-web": {
+        // 浮窗标题栏 🌐 的面板级 Web 端入口（ADR-0078 修订）：主落点 = 当前职位的
+        // 报告页（msg.num 来自浮窗的已评估行，与徽章/行级链路同一来源）；未评估
+        // （无报告号）时兜底进 /pipeline 收件箱——面板级入口在任何状态下都得有去处。
+        // 两条支路与 open-report 走同一套解析口径（collectWebTabContext + 纯层）。
+        // 端口探测失败报错不跳转：把一个已经连不上的页面推到用户面前，比直说
+        // 「web 服务没跑」更困惑（ADR-0055 决策 8 同款语义）。
+        try {
+          const num = Number(msg.num);
+          if (Number.isFinite(num) && num > 0) {
+            const result = await resolveReportJump({ ...msg, kind: "report" }, sender);
+            sendResponse({ ...result, webUrl: result.reportUrl });
+            break;
+          }
           const port = await ensureLivePort().catch(() => null);
-          // 候选池来自全库标签页；「当前窗口」取最近聚焦窗口，取不到则退化用发起本次
-          // 点击的招聘站 tab 所在窗口（content script 的 sender.tab 就是它）。
-          const tabs = await chrome.tabs.query({}).catch(() => []);
-          let currentWindowId = null;
-          try {
-            const w = await chrome.windows.getLastFocused({});
-            currentWindowId = w && typeof w.id === "number" ? w.id : null;
-          } catch {
-            /* 窗口接口不可用：退到 sender.tab（下面兜） */
-          }
-          if (currentWindowId == null && sender && sender.tab) {
-            currentWindowId = typeof sender.tab.windowId === "number" ? sender.tab.windowId : null;
-          }
-
-          const target = REPORT_TARGET.pickReportTarget({
-            livePort: port,
-            tabs,
-            currentWindowId,
-            num: msg.num,
-            kind: msg.kind,
-          });
+          const { tabs, currentWindowId } = await collectWebTabContext(sender);
+          const target = REPORT_TARGET.pickWebTarget({ livePort: port, tabs, currentWindowId });
           if (target.action === "error") {
             sendResponse({ ok: false, error: target.error });
             break;
           }
           if (target.action === "create") {
-            // 服务活着但没有任何 web 端标签页：退回今天的行为，别让用户点不动徽章。
+            // 服务活着但没有任何 web 端标签页：新开一个，别让用户点不动。
             await chrome.tabs.create({ url: target.url });
-            sendResponse({ ok: true, reportUrl: target.url, mode: "created" });
+            sendResponse({ ok: true, webUrl: target.url, mode: "created" });
             break;
           }
-          // 复用：先把 web 端标签页提到前台，再请它自己前端路由跳过去（不刷新页面，
-          // ADR-0055 修订）；web 端没应声才回退整页导航。不 tabs.move 搬家，也不关
-          // 不动招聘站页面——用户切回去仍在原职位页。
-          await chrome.tabs.update(target.tabId, { active: true });
-          if (target.windowId != null) {
-            await chrome.windows.update(target.windowId, { focused: true }).catch(() => {});
-          }
-          // 体检报告的落点是一个 API 端点（直接返回那份自包含 HTML），不是 web 端的应用
-          // 路由：让页面自己 router.push 过去会撞上 404 页，只能整页导航。评估报告仍走前端路由。
-          if (target.navigate && msg.kind === "checkup") {
-            await chrome.tabs.update(target.tabId, { url: target.url, active: true });
-            sendResponse({ ok: true, reportUrl: target.url, mode: "reloaded" });
-            break;
-          }
-          // 已在同一报告页（navigate=false）就只聚焦，连消息都不发。
-          const mode = target.navigate ? await navigateInWebTab(target.tabId, target.path, target.url) : "focused";
-          sendResponse({ ok: true, reportUrl: target.url, mode });
+          // /pipeline 是应用路由，永远走前端路由优先（无 ack 回退整页导航）。
+          const mode = await revealWebTab(target, false);
+          sendResponse({ ok: true, webUrl: target.url, mode });
         } catch (err) {
           sendResponse({ ok: false, error: err.message });
         }

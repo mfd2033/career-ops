@@ -16,7 +16,7 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 const mod = await import(pathToFileURL(join(ROOT, "extension", "report-target-pure.js")).href);
-const { pickReportTarget, parseWebTab, reportPath, reportUrl, checkupPath, checkupUrl, urlKey, NO_SERVICE_ERROR, WEB_PORT_MIN, WEB_PORT_MAX } = mod.default ?? mod;
+const { pickReportTarget, pickWebTarget, parseWebTab, reportPath, reportUrl, pipelinePath, pipelineUrl, checkupPath, checkupUrl, urlKey, NO_SERVICE_ERROR, WEB_SERVICE_ERROR, WEB_PORT_MIN, WEB_PORT_MAX } = mod.default ?? mod;
 
 /** 造一个 chrome.tabs.query 形状的标签页。 */
 const tab = (url, { id = 1, windowId = 1, active = false } = {}) => ({ id, windowId, active, url });
@@ -223,4 +223,74 @@ test("不带 query 的落点仍旧只看 origin+pathname（评估报告的幂等
     "显式 withQuery 才能区分两份不同的体检报告"
   );
   assert.equal(urlKey("http://localhost:3000/report/12", true), urlKey("http://localhost:3000/report/12"), "显式 withQuery 对无 query 的 URL 无副作用");
+});
+
+// ---- pickWebTarget：浮窗面板级 🌐 的落点解析（ADR-0078） --------------------
+//
+// 规则与 pickReportTarget 同源（pickWebTab），落点固定 /pipeline、无报告号参与。
+// 用例与 ADR-0055 系列一一同构，证明共用 helper 没让候选口径漂移。
+
+test("pickWebTarget：端口探测失败 → error（Web 端专属文案，不走「报告」措辞）", () => {
+  const r = pickWebTarget({ livePort: null, tabs: [tab("http://localhost:3000/report/1")], currentWindowId: 1 });
+  assert.equal(r.action, "error");
+  assert.equal(r.error, WEB_SERVICE_ERROR);
+  assert.notEqual(r.error, NO_SERVICE_ERROR);
+});
+
+test("pickWebTarget：服务活着但没有 web 端标签页 → create，落点 /pipeline 且 origin 是 localhost", () => {
+  const r = pickWebTarget({ livePort: 3003, tabs: [], currentWindowId: 1 });
+  assert.deepEqual(r, { action: "create", url: "http://localhost:3003/pipeline", path: "/pipeline" });
+});
+
+test("pipelinePath / pipelineUrl：固定 path，port 进 origin，url 以 path 收尾", () => {
+  assert.equal(pipelinePath(), "/pipeline");
+  assert.equal(pipelineUrl(3007), "http://localhost:3007/pipeline");
+  const r = pickWebTarget({ livePort: 3007, tabs: [], currentWindowId: 1 });
+  assert.ok(r.url.endsWith(r.path), "整页 URL 必须以同一个 path 收尾（回退导航与前端路由指向同一处）");
+});
+
+test("pickWebTarget：端口优先，同端口下当前窗口的候选压过别处 active 的那个", () => {
+  const tabs = [
+    tab("http://localhost:3001/report/1", { id: 11, windowId: 1, active: true }),
+    tab("http://localhost:3000/report/2", { id: 12, windowId: 2, active: true }),
+    tab("http://localhost:3000/inbox", { id: 13, windowId: 1, active: false }),
+  ];
+  const r = pickWebTarget({ livePort: 3000, tabs, currentWindowId: 1 });
+  assert.equal(r.action, "reuse");
+  assert.equal(r.tabId, 13, "同端口池里先按窗口收敛（13 在当前窗口），13 非 active 也是池内唯一 → 选它");
+});
+
+test("pickWebTarget：窗口收敛先于 active——当前窗口内的候选压过别处 active 的那个", () => {
+  const tabs = [
+    tab("http://localhost:3000/report/1", { id: 21, windowId: 1, active: false }),
+    tab("http://localhost:3000/", { id: 22, windowId: 2, active: true }),
+  ];
+  const r = pickWebTarget({ livePort: 3000, tabs, currentWindowId: 1 });
+  assert.equal(r.tabId, 21, "先按当前窗口收敛（21 是窗口内唯一候选），active 只在收敛后的池子里比");
+});
+
+test("pickWebTarget：已在 /pipeline → 只聚焦不重载（幂等粒度 origin+pathname）", () => {
+  const r = pickWebTarget({ livePort: 3000, tabs: [tab("http://localhost:3000/pipeline", { id: 5, active: true })], currentWindowId: 1 });
+  assert.equal(r.action, "reuse");
+  assert.equal(r.navigate, false);
+});
+
+test("pickWebTarget：尾斜杠与跟踪参数不算换页，停在别的页 → 需要导航", () => {
+  const stay = pickWebTarget({ livePort: 3000, tabs: [tab("http://localhost:3000/pipeline/?utm=ext", { id: 5 })], currentWindowId: 1 });
+  assert.equal(stay.navigate, false, "幂等判定忽略尾斜杠与 query");
+  const move = pickWebTarget({ livePort: 3000, tabs: [tab("http://localhost:3000/report/9", { id: 6 })], currentWindowId: 1 });
+  assert.equal(move.action, "reuse");
+  assert.equal(move.navigate, true);
+  assert.equal(move.url, "http://localhost:3000/pipeline");
+});
+
+test("pickWebTarget：候选池里混着招聘站页与端口越界页，照常被 parseWebTab 滤掉", () => {
+  const tabs = [
+    tab("https://www.zhipin.com/job_detail/abc.html", { id: 31, active: true }),
+    tab(`http://localhost:${WEB_PORT_MAX + 1}/`, { id: 32 }),
+    tab("http://localhost:3000/", { id: 33 }),
+  ];
+  const r = pickWebTarget({ livePort: 3000, tabs, currentWindowId: 1 });
+  assert.equal(r.action, "reuse");
+  assert.equal(r.tabId, 33);
 });
