@@ -11,6 +11,7 @@ import { NextDateDialog } from "@/components/followups/next-date-dialog";
 import { StatusPill } from "@/components/followups/status-pill";
 import { scoreTone } from "@/lib/format";
 import { channelLabel } from "@/lib/followup-channel.mjs";
+import { statusI18nKey } from "@/lib/followups";
 import { describeStatusWriteError, offlineStatusWriteError } from "@/lib/status-write-error.mjs";
 import {
   type CadenceEntry,
@@ -172,12 +173,16 @@ export function FollowupsView() {
   }, [entries, tab, q, sortKey, dir]);
 
   // ADR-0077: inline status edit callbacks handed down to each row's StatusPill.
+  const statusText = (s: string) => {
+    const key = statusI18nKey(s);
+    return key ? t(key) : s;
+  };
   const handleStatusChange = (entry: CadenceEntry, to: string, from: string) => {
     setStatusToast((prev) => ({
       n: entry.num,
       company: entry.company,
-      from,
-      to,
+      from: statusText(from),
+      to: statusText(to),
       seq: (prev?.seq ?? 0) + 1,
     }));
     refetch(); // cadence re-folds: the row may leave the tracker (non-actionable state)

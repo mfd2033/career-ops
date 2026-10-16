@@ -5,6 +5,7 @@
 
 // 渠道枚举的唯一事实来源在 followup-channel.mjs（纯逻辑，node --test 可直接
 // 门住）；本模块只仍对外暴露 Channel 类型，具体值与下拉框都直引 followup-channel.mjs。
+import { CANONICAL_STATES } from "@/lib/format";
 import { CHANNELS } from "./followup-channel.mjs";
 export type Channel = (typeof CHANNELS)[number];
 
@@ -88,6 +89,18 @@ export function urgencyTone(u: string): "bad" | "warn" | "info" | "muted" {
   if (u === "overdue") return "warn";
   if (u === "waiting") return "info";
   return "muted";
+}
+
+/** Canonical state → its i18n key in the shared pipeline.status.* dictionary;
+ *  null for unknown legacy states, which render raw. Case-insensitive on
+ *  purpose: the cadence ships lowercase ("applied") while CANONICAL_STATES are
+ *  capitalized. Single derivation point so the pill, its popover and the undo
+ *  toast never drift apart (ADR-0077). */
+export function statusI18nKey(s: string): string | null {
+  const hit = (CANONICAL_STATES as readonly string[]).find(
+    (c) => c.toLowerCase() === s.toLowerCase(),
+  );
+  return hit ? `pipeline.status.${hit.toLowerCase()}` : null;
 }
 
 /** Status badge tone per spec: interview=green, responded=blue, else neutral. */

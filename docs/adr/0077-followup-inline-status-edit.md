@@ -21,7 +21,7 @@ Accepted (2026-10-16)
 ## 决策
 
 1. **入口宿主 = `/followups` 表格的状态列**：`Badge` 换为胶囊按钮（`StatusPill`，新组件归 `web/src/components/followups/` 一族），样式沿用 `followupStatusTone` 的 tone 语义，加下拉 chevron 与 hover 环。报告页 `StatusSelect` 不动。
-2. **弹层 = listbox 形态**：9 个 `CANONICAL_STATES` + 未知状态兜底项（与 StatusSelect 的 known 分支同口径）；当前项打勾；Enter/Space 开、↑↓ 移动、Enter 选、Esc 关、外点关；`role="listbox"` + `aria-expanded`/`aria-selected`。选项文案用 canonical 原形式（与该列现状「首字母大写英文」一致，不新增第二份状态翻译）。
+2. **弹层 = listbox 形态**：9 个 `CANONICAL_STATES` + 未知状态兜底项（同 StatusSelect 的 known 分支）；当前项打勾；Enter/Space 开、↑↓ 移动、Enter 选、Esc 关、外点关；`role="listbox"` + `aria-expanded`/`aria-selected`。~~选项文案用 canonical 原形式~~ **（2026-10-16 用户修订：胶囊、选项与 toast 的新旧状态全部改走既有 `pipeline.status.*` 字典，与报告页 StatusSelect 同源——推导收敛在 `statusI18nKey()` 单点，canonical 原形式仅作未知状态兜底，仍不新增第二份翻译）**。
 3. **弹层方向自适应**：按钮贴近视口底部时向上弹，否则向下弹——表格容器 `overflow-x-auto` 会裁剪越界弹层，最后一行向下弹必被裁。
 4. **写路径 = 仅 `POST /api/status`**：乐观更新 → 成功 `onChanged` → 视图 `refetch()`（cadence 重算，与页面既有数据流一致）；失败回退 + `describeStatusWriteError` / `offlineStatusWriteError`（语义原样：失败从不静默，504 文案如实说「可能已生效」）。复用路由的锁等待/超时语义，零改动。
 5. **成功 toast 带「撤销」（5s 自动消失，收件箱同款）**：文案「状态已更新：{company} {from} → {to}」。撤销 = 再发一次 `POST /api/status` 回旧值——status-log 如实记两次往返，不造假账；撤销失败落 `actionError`。撤销窗口关闭后行若已离开列表，就地无入口，从报告页改回（可接受：低频误操作 + 5s 窗口 + 报告页兜底）。

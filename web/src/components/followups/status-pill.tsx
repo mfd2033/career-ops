@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Check, ChevronDown } from "lucide-react";
 import { CANONICAL_STATES } from "@/lib/format";
-import { followupStatusTone } from "@/lib/followups";
+import { followupStatusTone, statusI18nKey } from "@/lib/followups";
 import { describeStatusWriteError, offlineStatusWriteError } from "@/lib/status-write-error.mjs";
 import { useI18n } from "@/lib/i18n/context";
 import { cn } from "@/lib/cn";
@@ -19,6 +19,13 @@ import { cn } from "@/lib/cn";
 
 type StatusWriteError = { key: string; detail?: string };
 
+// e.status arrives lowercase ("applied") while CANONICAL_STATES are capitalized;
+// canonicalize once so display, i18n and the popover's current-item check all
+// agree. Unknown legacy states fall through raw.
+function canonicalize(s: string): string {
+  return (CANONICAL_STATES as readonly string[]).find((c) => c.toLowerCase() === s.toLowerCase()) ?? s;
+}
+
 export function StatusPill({
   n,
   status,
@@ -30,7 +37,7 @@ export function StatusPill({
   onStatusChange: (to: string, from: string) => void;
   onError: (err: StatusWriteError) => void;
 }) {
-  const [status_, setStatus] = useState(status);
+  const [status_, setStatus] = useState(() => canonicalize(status));
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [popPos, setPopPos] = useState<{ left: number; top: number; up: boolean } | null>(null);
@@ -43,7 +50,7 @@ export function StatusPill({
   // The view refetches after every (un)do; when the row's status changes out
   // there — undo toast, another tab — this pill must follow the prop, not keep
   // its last optimistic value.
-  useEffect(() => setStatus(status), [status]);
+  useEffect(() => setStatus(canonicalize(status)), [status]);
 
   // Outside pointer press closes; keydown lives on the root so Esc and the
   // arrow keys work wherever focus is inside the pill + popover pair.
@@ -175,7 +182,7 @@ export function StatusPill({
           tone,
         )}
       >
-        {status_}
+        {t(statusI18nKey(status_) ?? "") || status_}
         <ChevronDown className="size-3 opacity-60" aria-hidden="true" />
       </button>
       {open && popPos && (
@@ -205,7 +212,7 @@ export function StatusPill({
                 s === status_ ? "font-semibold" : "",
               )}
             >
-              {s}
+              {t(statusI18nKey(s) ?? "") || s}
               {s === status_ && <Check className="ml-auto size-3 text-brand" aria-hidden="true" />}
             </button>
           ))}
