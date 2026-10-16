@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { CalendarClock, ChevronDown, ChevronRight, Loader2, Pin, Search, Trash2 } from "lucide-react";
+import { ArrowLeft, CalendarClock, ChevronDown, ChevronRight, Loader2, Mail, NotebookPen, Pin, Search, Snowflake, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { CompanyLogo } from "@/components/company-logo";
 import { LogDialog } from "@/components/followups/log-dialog";
@@ -19,7 +19,6 @@ import {
   type Urgency,
   daysHeatClass,
   oxfordJoin,
-  relativeDays,
   urgencyRank,
   urgencyTone,
 } from "@/lib/followups";
@@ -32,7 +31,6 @@ import { useI18n } from "@/lib/i18n/context";
 // only filters, sorts, and records.
 
 const URGENCY_TABS = ["ALL", "OVERDUE", "URGENT", "WAITING", "COLD"] as const;
-type UrgencyTab = (typeof URGENCY_TABS)[number];
 
 const COLUMNS = [
   { key: "company" },
@@ -44,6 +42,7 @@ const COLUMNS = [
   { key: "next" },
   { key: "count" },
   { key: "since" },
+  { key: "silence" },
 ] as const;
 type SortKey = (typeof COLUMNS)[number]["key"];
 const SORT_KEYS = COLUMNS.map((c) => c.key);
@@ -73,6 +72,8 @@ function sortVal(e: CadenceEntry, key: SortKey): string | number | null {
       return e.followupCount;
     case "since":
       return e.daysSinceLastFollowup;
+    case "silence":
+      return e.silenceDays ?? null;
   }
 }
 
@@ -80,7 +81,12 @@ type CadenceResponse = {
   available: boolean;
   metadata: CadenceMetadata | null;
   entries: CadenceEntry[];
+  /** 引擎生效的 cadence 配置（含 freeze_threshold_days）；旧引擎可能缺省。 */
+  cadenceConfig?: { freeze_threshold_days?: number } | null;
 };
+
+/** 撤销窗口兜底：API 返回 cadenceConfig 前的默认值（与引擎 DEFAULT_CADENCE 一致）。 */
+const FREEZE_THRESHOLD_FALLBACK = 14;
 
 export function FollowupsView() {
   const { t } = useI18n();
@@ -121,7 +127,8 @@ export function FollowupsView() {
   // stays local for snappy typing, seeded from the URL. No sort param → the
   // engine's own order (most pressing first) and all headers show ⇅.
   const pTab = (params.get("urgency") ?? "").toUpperCase();
-  const tab: UrgencyTab = (URGENCY_TABS as readonly string[]).includes(pTab) ? (pTab as UrgencyTab) : "ALL";
+  const tab: string =
+    pTab === "FREEZE" || (URGENCY_TABS as readonly string[]).includes(pTab) ? pTab : "ALL";
   const pSort = params.get("sort") ?? "";
   const sortKey: SortKey | null = (SORT_KEYS as readonly string[]).includes(pSort) ? (pSort as SortKey) : null;
   const dir = (params.get("dir") === "-1" ? -1 : 1) as 1 | -1;
@@ -149,13 +156,31 @@ export function FollowupsView() {
     [params, router, pathname],
   );
 
-  const entries = useMemo(() => (data?.available ? data.entries : []), [data]);
+  // 冻结判定字段由引擎单点输出（ADR-0079 决策 1），前端只消费不复算。
+  const entries = data?.available ? data.entries : [];
   const meta = data?.available ? data.metadata : null;
+  const freezeThreshold = data?.cadenceConfig?.freeze_threshold_days ?? FREEZE_THRESHOLD_FALLBACK;
+
+  const [freezeFor, setFreezeFor] = useState<CadenceEntry | null>(null);
+  // 冻结成功 toast：撤销窗口 10s（比 ADR-0077 改状态 5s 加重——冻结是更重的决策）。
+  const [freezeToast, setFreezeToast] = useState<{
+    n: number;
+    company: string;
+    from: string; // 原状态（引擎规范小写值），撤销时真实写回
+    reason: string;
+    seq: number;
+  } | null>(null);
+  useEffect(() => {
+    if (!freezeToast) return;
+    const timer = setTimeout(() => setFreezeToast(null), 10000);
+    return () => clearTimeout(timer);
+  }, [freezeToast]);
 
   const filtering = tab !== "ALL" || q.trim().length > 0;
   const filtered = useMemo(() => {
     let rows = entries;
-    if (tab !== "ALL") rows = rows.filter((e) => e.urgency.toUpperCase() === tab);
+    if (tab === "FREEZE") rows = rows.filter((e) => e.freezeSuggested);
+    else if (tab !== "ALL") rows = rows.filter((e) => e.urgency.toUpperCase() === tab);
     if (q.trim()) {
       const needle = q.toLowerCase();
       rows = rows.filter((e) => `${e.company} ${e.role}`.toLowerCase().includes(needle));
@@ -171,6 +196,36 @@ export function FollowupsView() {
       return ((av as number) - (bv as number)) * dir;
     });
   }, [entries, tab, q, sortKey, dir]);
+
+  // 冻结确认 = 真实写 Discarded（唯一写门：POST /api/status → set-status.mjs，
+  // status-log 留痕）；成功后 refetch 让行自然离开列表，10s 内可撤销。
+  const handleFreezeConfirm = async (entry: CadenceEntry, reason: string) => {
+    setFreezeFor(null);
+    setActionError(null);
+    try {
+      const res = await fetch("/api/status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ n: String(entry.num), status: "Discarded", note: reason }),
+      });
+      if (!res.ok) {
+        const err = describeStatusWriteError(res.status, await res.json().catch(() => null));
+        setActionError(t(err.key, err.detail ? { detail: err.detail } : undefined));
+        return;
+      }
+      setFreezeToast((prev) => ({
+        n: entry.num,
+        company: entry.company,
+        from: entry.status,
+        reason,
+        seq: (prev?.seq ?? 0) + 1,
+      }));
+      refetch();
+    } catch {
+      const err = offlineStatusWriteError();
+      setActionError(t(err.key));
+    }
+  };
 
   // ADR-0077: inline status edit callbacks handed down to each row's StatusPill.
   const statusText = (s: string) => {
@@ -194,14 +249,15 @@ export function FollowupsView() {
 
   // Undo = a second real write back to the previous state (never a memory-only
   // revert — the list refetches and must agree with the data layer).
-  const undoStatus = async (n: number, from: string) => {
+  // clearNote（ADR-0079）：撤销冻结时一并移除当初追加的原因段，恢复冻结前原状。
+  const undoStatus = async (n: number, from: string, clearNote?: string) => {
     setStatusToast(null);
     setActionError(null);
     try {
       const res = await fetch("/api/status", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ n: String(n), status: from }),
+        body: JSON.stringify({ n: String(n), status: from, ...(clearNote ? { clearNote } : {}) }),
       });
       if (!res.ok) {
         const err = describeStatusWriteError(res.status, await res.json().catch(() => null));
@@ -277,10 +333,15 @@ export function FollowupsView() {
 
       {meta && !filtering && <NarrativeCard meta={meta} entries={entries} />}
 
-      {/* urgency filter */}
+      {/* urgency filter（「建议冻结」tab 常驻，计数随引擎判定走） */}
       <div className="mt-6 flex flex-wrap gap-1 border-b border-border">
-        {URGENCY_TABS.map((tabKey) => {
-          const count = tabKey === "ALL" ? entries.length : entries.filter((e) => e.urgency.toUpperCase() === tabKey).length;
+        {[...URGENCY_TABS, "FREEZE"].map((tabKey) => {
+          const count =
+            tabKey === "ALL"
+              ? entries.length
+              : tabKey === "FREEZE"
+                ? entries.filter((e) => e.freezeSuggested).length
+                : entries.filter((e) => e.urgency.toUpperCase() === tabKey).length;
           return (
             <button
               key={tabKey}
@@ -290,7 +351,12 @@ export function FollowupsView() {
                 tab === tabKey ? "border-brand text-foreground" : "border-transparent text-muted hover:text-foreground",
               )}
             >
-              {t(`followups.tab.${tabKey.toLowerCase()}`)} <span className="text-faint tabular-nums">{count}</span>
+              {tabKey === "FREEZE" ? (
+                <>❄ {t("followups.freezeTab")}</>
+              ) : (
+                t(`followups.tab.${tabKey.toLowerCase()}`)
+              )}{" "}
+              <span className="text-faint tabular-nums">{count}</span>
             </button>
           );
         })}
@@ -308,7 +374,7 @@ export function FollowupsView() {
         )
       ) : (
         <div className="mt-4 overflow-x-auto rounded-2xl border border-border">
-          <table className="w-full min-w-[880px] text-sm">
+          <table className="w-full min-w-[960px] text-sm">
             <thead className="bg-surface/60 text-left text-xs uppercase tracking-wide text-faint">
               <tr>
                  <th className="w-8 px-2 py-2.5" aria-label={t("followups.expandColAria")} />
@@ -318,6 +384,7 @@ export function FollowupsView() {
                      <th key={c.key} aria-sort={active ? (dir === 1 ? "ascending" : "descending") : "none"} className="px-2.5 py-2.5 font-medium">
                        <button
                          type="button"
+                         title={t(`followups.colHint.${c.key}`)}
                          className="inline-flex cursor-pointer select-none items-center gap-1 uppercase tracking-wide hover:text-foreground"
                          onClick={() =>
                            // First click on Urgency descends (most pressing first —
@@ -348,6 +415,7 @@ export function FollowupsView() {
                   onRemove={removeLogged}
                   onStatusChange={(to, from) => handleStatusChange(e, to, from)}
                   onStatusError={handleStatusError}
+                  onFreeze={() => setFreezeFor(e)}
                 />
               ))}
             </tbody>
@@ -357,6 +425,14 @@ export function FollowupsView() {
 
       {dialogFor && <LogDialog entry={dialogFor} onClose={() => setDialogFor(null)} onLogged={refetch} />}
       {pinFor && <NextDateDialog entry={pinFor} onClose={() => setPinFor(null)} onChanged={refetch} />}
+      {freezeFor && (
+        <FreezeDialog
+          entry={freezeFor}
+          threshold={freezeThreshold}
+          onClose={() => setFreezeFor(null)}
+          onConfirm={handleFreezeConfirm}
+        />
+      )}
 
       {statusToast && (
         <div className="fixed inset-x-0 bottom-6 z-40 flex justify-center px-4">
@@ -375,6 +451,35 @@ export function FollowupsView() {
               type="button"
               onClick={() => undoStatus(statusToast.n, statusToast.from)}
               className="text-xs font-medium text-brand transition-colors hover:underline"
+            >
+              {t("followups.statusUndo")}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 冻结成功 toast（10s 撤销窗口；与 ADR-0077 状态 toast 错开高度） */}
+      {freezeToast && (
+        <div className="fixed inset-x-0 bottom-20 z-40 flex justify-center px-4">
+          <div
+            role="status"
+            className="inline-flex items-center gap-3 rounded-full border border-sky-400/40 bg-surface px-4 py-2 text-sm shadow-lg"
+          >
+            <span className="text-muted">
+              {t("followups.freezeToast", {
+                company: freezeToast.company,
+                num: freezeToast.n,
+                reason: freezeToast.reason,
+              })}
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                const { n, from, reason } = freezeToast;
+                setFreezeToast(null);
+                undoStatus(n, from, reason);
+              }}
+              className="text-xs font-medium text-sky-600 transition-colors hover:underline dark:text-sky-400"
             >
               {t("followups.statusUndo")}
             </button>
@@ -433,6 +538,7 @@ function FollowupRow({
   onRemove,
   onStatusChange,
   onStatusError,
+  onFreeze,
 }: {
   entry: CadenceEntry;
   expanded: boolean;
@@ -442,6 +548,7 @@ function FollowupRow({
   onRemove: (num: number) => void;
   onStatusChange: (to: string, from: string) => void;
   onStatusError: (err: { key: string; detail?: string }) => void;
+  onFreeze: () => void;
 }) {
   const { t } = useI18n();
   const Chevron = expanded ? ChevronDown : ChevronRight;
@@ -479,21 +586,30 @@ function FollowupRow({
         <td className="px-2.5 py-3">
           <Badge tone={scoreTone(e.score)}>{e.score || "—"}</Badge>
         </td>
-        <td className="px-2.5 py-3">
+        <td className="min-w-24 whitespace-nowrap px-2.5 py-3">
           {/* ADR-0077: the status badge IS the write control — click to change
               state inline (same gate as the report page's StatusSelect). */}
           <StatusPill n={String(e.num)} status={e.status} onStatusChange={onStatusChange} onError={onStatusError} />
         </td>
         <td className="px-2.5 py-3">
-          <Badge tone={urgencyTone(e.urgency)}>{e.urgency}</Badge>
+          <Badge tone={urgencyTone(e.urgency)}>{t(`followups.urgency.${e.urgency}`)}</Badge>
         </td>
         <td className={cn("px-2.5 py-3 tabular-nums", daysHeatClass(e.daysSinceApplication))}>{e.daysSinceApplication}</td>
         <td className="whitespace-nowrap px-2.5 py-3">
           {e.daysUntilNext == null ? (
             <span className="text-faint">—</span>
           ) : (
-            <span className={cn(e.daysUntilNext < 0 && "font-medium text-red-600 dark:text-red-400")} title={e.nextFollowupDate ?? undefined}>
-              {relativeDays(e.daysUntilNext)}
+            /* 纯数字紧凑样式：负数=已过期（红 + 细箭头指向过去），正数=未来天数；
+               绝对日期悬停可见（title）。 */
+            <span
+              className={cn(
+                "inline-flex items-center gap-0.5 tabular-nums",
+                e.daysUntilNext < 0 ? "font-medium text-red-600 dark:text-red-400" : "text-muted",
+              )}
+              title={e.nextFollowupDate ?? undefined}
+            >
+              {e.daysUntilNext < 0 && <ArrowLeft className="size-3" aria-hidden />}
+              {Math.abs(e.daysUntilNext)}
             </span>
           )}
           {e.nextOverride && (
@@ -510,16 +626,38 @@ function FollowupRow({
         <td className={cn("px-2.5 py-3 tabular-nums", daysHeatClass(e.daysSinceLastFollowup))}>
           {e.daysSinceLastFollowup == null ? <span className="text-faint">—</span> : e.daysSinceLastFollowup}
         </td>
+        {/* career-ops-49：沉默天数 + 冻结判定（❄ 仅「已读不回且达阈值」时出现，悬停看全称） */}
+        <td className="px-2.5 py-3">
+          {e.silenceDays == null ? (
+            <span className="text-faint">—</span>
+          ) : e.freezeSuggested ? (
+            <span
+              className="inline-flex items-center gap-1 text-sky-700 dark:text-sky-300"
+              title={t("followups.freezeBadge")}
+            >
+              <Snowflake className="size-3.5" aria-label={t("followups.freezeBadge")} />
+              <span className="tabular-nums">{e.silenceDays}</span>
+            </span>
+          ) : e.readState === "unread" ? (
+            <span className="inline-flex items-center gap-1 text-faint" title={t("followups.unreadHint")}>
+              <Mail className="size-3.5" aria-label={t("followups.unreadHint")} />
+              <span className="tabular-nums">{e.silenceDays}</span>
+            </span>
+          ) : (
+            <span className="tabular-nums">{e.silenceDays}</span>
+          )}
+        </td>
         <td className="whitespace-nowrap px-2.5 py-3">
           <span className="inline-flex items-center gap-0.5">
               <button
-               type="button"
-               onClick={onLog}
-               title={t("followups.logTitle")}
-               className="rounded-md px-2 py-1 text-xs font-medium text-muted transition-colors hover:bg-brand-soft hover:text-brand"
-             >
-               {t("followups.log")}
-             </button>
+              type="button"
+              onClick={onLog}
+              title={t("followups.logTitle")}
+              aria-label={t("followups.logTitle")}
+              className="rounded-md p-1 text-faint transition-colors hover:bg-brand-soft hover:text-brand"
+            >
+              <NotebookPen className="size-3.5" />
+            </button>
              <button
                type="button"
                onClick={onPin}
@@ -531,6 +669,17 @@ function FollowupRow({
             >
               <CalendarClock className="size-3.5" />
             </button>
+            {e.freezeSuggested && (
+              <button
+                type="button"
+                onClick={onFreeze}
+                title={t("followups.freezeAction")}
+                aria-label={t("followups.freezeAction")}
+                className="rounded-md p-1.5 text-sky-700 transition-colors hover:bg-sky-400/10 hover:text-sky-500 dark:text-sky-300"
+              >
+                <Snowflake className="size-3.5" />
+              </button>
+            )}
           </span>
         </td>
       </tr>
@@ -604,6 +753,92 @@ function EmptyPanel({ title, body }: { title: string; body: string }) {
     <div className="mt-4 rounded-2xl border border-dashed border-border bg-surface/30 px-6 py-12 text-center">
       <p className="font-display text-lg">{title}</p>
       <p className="mx-auto mt-1 max-w-md text-sm text-muted">{body}</p>
+    </div>
+  );
+}
+
+/* ── ADR-0079：冻结确认对话框 ─────────────────────────────────────
+   签名元素：冰蓝顶边 + 证据行（最近跟进 · 已读状态 · 沉默天数 vs 阈值）
+   + 原因预填（可编辑，只进确认请求）。确认 = POST /api/status 写
+   Discarded（set-status 写路径，status-log 留痕），10s 内可撤销。 */
+function FreezeDialog({
+  entry: e,
+  threshold,
+  onClose,
+  onConfirm,
+}: {
+  entry: CadenceEntry;
+  threshold: number;
+  onClose: () => void;
+  onConfirm: (entry: CadenceEntry, reason: string) => void;
+}) {
+  const { t } = useI18n();
+  const [reason, setReason] = useState(t("followups.freezeReasonPrefill", { n: e.silenceDays ?? threshold }));
+  useEffect(() => {
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  return (
+    <div
+      className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-5"
+      role="dialog"
+      aria-modal="true"
+      aria-label={t("followups.freezeDialogAria", { company: e.company })}
+      onClick={(ev) => {
+        if (ev.target === ev.currentTarget) onClose();
+      }}
+    >
+      <div className="w-[460px] max-w-full rounded-2xl border border-border border-t-[3px] border-t-sky-400 bg-surface p-5 shadow-xl">
+        <h2 className="text-lg font-medium">{t("followups.freezeDialogTitle")}</h2>
+        <p className="mt-0.5 text-xs text-faint">
+          {t("followups.dialogSubtitle", { company: e.company, role: e.role, num: e.num })}
+        </p>
+        <div className="mt-3 space-y-1 rounded-xl border border-sky-400/30 bg-sky-400/10 px-3 py-2.5 text-xs">
+          <div className="flex justify-between gap-3">
+            <span className="text-faint">{t("followups.freezeEvidenceLast")}</span>
+            <span>{e.followups?.[0]?.date ?? "—"}</span>
+          </div>
+          <div className="flex justify-between gap-3">
+            <span className="text-faint">{t("followups.freezeEvidenceRead")}</span>
+            <span>{t("followups.freezeEvidenceReadRead")}</span>
+          </div>
+          <div className="flex justify-between gap-3">
+            <span className="text-faint">{t("followups.freezeEvidenceSilence")}</span>
+            <span className="tabular-nums">
+              {t("followups.freezeEvidenceSilenceVal", { n: e.silenceDays ?? 0, m: threshold })}
+            </span>
+          </div>
+        </div>
+        <label htmlFor="freeze-reason" className="mt-3.5 block text-xs text-faint">
+          {t("followups.freezeReasonLabel")}
+        </label>
+        <textarea
+          id="freeze-reason"
+          value={reason}
+          onChange={(ev) => setReason(ev.target.value)}
+          className="mt-1.5 min-h-16 w-full resize-y rounded-xl border border-border bg-background px-3 py-2 text-sm outline-none focus:border-sky-400/50"
+        />
+        <p className="mt-2 text-[11px] text-faint">{t("followups.freezeFineprint")}</p>
+        <div className="mt-4 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg border border-border px-4 py-2 text-sm text-muted transition-colors hover:text-foreground"
+          >
+            {t("followups.cancel")}
+          </button>
+          <button
+            type="button"
+            onClick={() => onConfirm(e, reason.trim())}
+            className="rounded-lg bg-sky-400 px-4 py-2 text-sm font-semibold text-sky-950 transition-[filter] hover:brightness-110"
+          >
+            {t("followups.freezeConfirm")}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

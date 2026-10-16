@@ -127,6 +127,7 @@ eq(
     channel: 'email',
     contact: 'jane@acme.com',
     notes: 'first nudge',
+    unread: false, // ADR-0079：[unread] token 解析字段，未标注恒为 false
   },
 );
 
@@ -212,6 +213,7 @@ eq(
     responded_initial: 2,
     responded_subsequent: 9,
     interview_thankyou: 4,
+    freeze_threshold_days: 14, // ADR-0079：profile 未配置时回默认
   },
 );
 eq(

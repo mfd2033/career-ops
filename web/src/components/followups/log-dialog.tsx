@@ -26,6 +26,8 @@ export function LogDialog({
   const [channel, setChannel] = useState<Channel>(DEFAULT_CHANNEL);
   const [contact, setContact] = useState(entry.contacts[0]?.email ?? "");
   const [notes, setNotes] = useState("");
+  // ADR-0079 决策 5：已读/未读唯一可靠来源是人工标注；勾选 → log 行尾 [unread]。
+  const [unread, setUnread] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -59,6 +61,7 @@ export function LogDialog({
           channel,
           contact: tableSafe(contact),
           notes: tableSafe(notes),
+          unread,
         }),
       });
       const j = await res.json().catch(() => ({}));
@@ -151,6 +154,15 @@ export function LogDialog({
             />
           </label>
           {error && <p className="text-xs text-red-500">{error}</p>}
+          <label className="flex cursor-pointer items-center gap-2 text-xs font-medium text-muted">
+            <input
+              type="checkbox"
+              checked={unread}
+              onChange={(e) => setUnread(e.target.checked)}
+              className="size-3.5 accent-[hsl(203_52%_68%)]"
+            />
+            {t("followups.unreadCheckbox")}
+          </label>
           <div className="flex justify-end gap-2 pt-1">
             <button type="button" onClick={onClose} className="rounded-md px-3 py-2 text-sm text-muted transition hover:text-foreground">
               {t("followups.cancel")}

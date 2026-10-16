@@ -17,6 +17,7 @@ export const PROFILE_CADENCE_KEYS = [
   "responded_initial_days",
   "responded_subsequent_days",
   "interview_thankyou_days",
+  "freeze_threshold_days",
 ] as const;
 export type ProfileCadenceKey = (typeof PROFILE_CADENCE_KEYS)[number];
 
@@ -37,6 +38,8 @@ export type FollowupLogEntry = {
   channel: string;
   contact: string;
   notes: string;
+  /** 行尾 [unread] token（ADR-0079 决策 5，人工标注「对方未读」）；旧记录无该字段。 */
+  unread?: boolean;
 };
 
 export type SuggestedContact = { email: string; name: string | null };
@@ -62,6 +65,12 @@ export type CadenceEntry = {
   /** User-pinned next date (overrides the computed cadence); absent on older engines. */
   nextOverride?: string | null;
   daysUntilNext: number | null;
+  /* ── ADR-0079 冻结判定：引擎（followup-cadence.mjs）单点输出，前端只消费不复算。
+     freezeSuggested 仅在「applied/interview 且非未读且沉默 ≥ freeze_threshold_days」时
+     为 true；unread 永不建议。旧引擎无这些字段时为 undefined，UI 按「无建议」处理。 */
+  silenceDays?: number | null;
+  readState?: "read" | "unread" | null;
+  freezeSuggested?: boolean;
 };
 
 export type CadenceMetadata = {
@@ -109,14 +118,6 @@ export function followupStatusTone(status: string): "good" | "info" | "muted" {
   if (s.includes("interview")) return "good";
   if (s.includes("responded")) return "info";
   return "muted";
-}
-
-/** "today" / "tomorrow" / "in N days" / "N days ago" from a daysUntil delta. */
-export function relativeDays(daysUntil: number): string {
-  if (daysUntil === 0) return "today";
-  if (daysUntil === 1) return "tomorrow";
-  if (daysUntil > 1) return `in ${daysUntil} days`;
-  return daysUntil === -1 ? "1 day ago" : `${-daysUntil} days ago`;
 }
 
 /** 7/14-day escalation for "days since" cells: amber bold ≥7, red bold ≥14. */

@@ -105,13 +105,22 @@ function runSetStatus(args: string[]): Promise<CliResult> {
 // the document from the end rather than from the first `{`.
 
 export async function POST(req: Request) {
-  let body: { n?: string; status?: string };
+  let body: { n?: string; status?: string; note?: string; clearNote?: string };
   try {
     body = await req.json();
   } catch {
     return NextResponse.json({ error: "bad json" }, { status: 400 });
   }
   const { n, status } = body;
+  // 可选备注（ADR-0079 决策 3：冻结原因进 status-log 备注）。单行化 + 去表格
+  // 破坏字符，与 status 校验同一思路；留空视为未提供。clearNote 同款净化，
+  // 供撤销冻结时移除当初追加的原因段（恢复冻结前原状）。
+  const sanitizeNote = (v: unknown) =>
+    typeof v === "string"
+      ? v.replace(/[\r\n]+/g, " ").replace(/[|*]/g, "/").trim().slice(0, 300)
+      : "";
+  const note = sanitizeNote(body.note);
+  const clearNote = sanitizeNote(body.clearNote);
   if (!n || typeof status !== "string" || !status.trim()) {
     return NextResponse.json({ error: "n and status required" }, { status: 400 });
   }
@@ -161,6 +170,8 @@ export async function POST(req: Request) {
     "--row",
     row,
     canon,
+    ...(note ? (["--note", note] as const) : []),
+    ...(clearNote ? (["--note-clear", clearNote] as const) : []),
     "--source",
     "web",
     "--json",

@@ -38,6 +38,7 @@ export async function POST(req: Request) {
     contact?: string;
     notes?: string;
     note?: string; // legacy alias for notes
+    unread?: boolean; // ADR-0079 决策 5：人工标注「对方未读」→ 行尾 [unread] token
   };
   try {
     body = (await req.json()) as typeof body;
@@ -97,7 +98,9 @@ export async function POST(req: Request) {
       // whether we're also inserting the header, or the row glues to the last line.
       if (existing && !existing.endsWith("\n")) out += "\n";
       if (!hasHeader) out += TABLE_HEADER;
-      out += `| ${num} | ${appNum} | ${date} | ${company} | ${role} | ${channel} | ${contact} | ${notes} |\n`;
+      // [unread] 挂行尾（followup-cadence.mjs 的 stripUnreadToken 按行尾解析），
+      // 不进 notes 单元格——免得 UI 展示字段里混进机器标记。
+      out += `| ${num} | ${appNum} | ${date} | ${company} | ${role} | ${channel} | ${contact} | ${notes} |${body.unread === true ? " [unread]" : ""}\n`;
       fs.appendFileSync(file, out, "utf8");
       return Response.json({ ok: true, num, appNum, date, channel });
     });

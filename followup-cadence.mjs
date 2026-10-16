@@ -56,6 +56,8 @@ export const DEFAULT_CADENCE = {
   responded_initial: 1,
   responded_subsequent: 3,
   interview_thankyou: 1,
+  // ADR-0079 决策 1：已读不回达该天数即建议冻结（转 Discarded 体面收尾）。
+  freeze_threshold_days: 14,
 };
 
 const PROFILE_CADENCE_KEYS = {
@@ -65,6 +67,7 @@ const PROFILE_CADENCE_KEYS = {
   responded_initial_days: 'responded_initial',
   responded_subsequent_days: 'responded_subsequent',
   interview_thankyou_days: 'interview_thankyou',
+  freeze_threshold_days: 'freeze_threshold_days',
 };
 
 function positiveInteger(value) {
@@ -419,9 +422,21 @@ function parseTrackerContent(content) {
 // aren't either, so both fail the `isNaN` check below and never enter `entries`.
 const BULLET_RE = /^-\s+(\d{4}-\d{2}-\d{2})\s+·\s+#(\d+)\s+(.+?)(?:\s+—\s+(.*))?$/;
 
+// follow-ups.md log 行尾可选 [unread] token（ADR-0079 决策 5）：用户人工标注
+// 「对方未读」。已读/未读没有自动信号源（邮件回执、LinkedIn 回执在本仓库均不可得），
+// 未标注默认 read——「已发出即视为对方可读」。抽成纯函数以便单测与 log 写入端共用格式。
+export function stripUnreadToken(line) {
+  const text = String(line ?? '');
+  const stripped = text.replace(/\s*\[unread\]\s*$/, '');
+  return { text: stripped, unread: stripped !== text };
+}
+
 export function parseFollowups(content) {
   const entries = [];
-  for (const line of String(content ?? '').split('\n')) {
+  for (const rawLine of String(content ?? '').split('\n')) {
+    // 先剥 token 再走行解析：token 无论落在表格末列内还是行尾注释位，
+    // 都不能混进 notes 字段污染 UI 展示。
+    const { text: line, unread } = stripUnreadToken(rawLine);
     if (line.startsWith('|')) {
       const parts = line.split('|').map(s => s.trim());
       if (parts.length < 8) continue;
@@ -438,6 +453,7 @@ export function parseFollowups(content) {
         channel: parts[6],
         contact: parts[7],
         notes: parts[8] || '',
+        unread,
       });
       continue;
     }
@@ -452,6 +468,7 @@ export function parseFollowups(content) {
       channel: 'Other',
       contact: '',
       notes: m[4] || '',
+      unread,
     });
   }
   return entries;
@@ -788,6 +805,18 @@ export function analyzeFromContent(trackerContent, followupsContent = '') {
       if (lastDate) daysSinceLastFollowup = daysBetween(lastDate, now);
     }
 
+    // 冻结判定（ADR-0079 决策 1）。silenceDays = 距上次跟进，无记录则距申请日；
+    // readState 取最近一次跟进的 [unread] 标记，无跟进记录为 null（null = 无标注，
+    // 按默认口径「已发出即视为对方可读」计为已读）。
+    // 仅 applied/interview 参与——responded 是双向互动，不是「已读不回」；
+    // unread 永不建议冻结——未读只是「再看一眼」，不是「放弃」。
+    const readState = sortedFollowups.length > 0 ? (sortedFollowups[0].unread ? 'unread' : 'read') : null;
+    const silenceDays = daysSinceLastFollowup ?? daysSinceApp;
+    const freezeSuggested =
+      (normalized === 'applied' || normalized === 'interview') &&
+      readState !== 'unread' &&
+      silenceDays >= CADENCE.freeze_threshold_days;
+
     let urgency = computeUrgency(normalized, daysSinceApp, daysSinceLastFollowup, followupCount);
     let nextFollowupDate = computeNextFollowupDate(normalized, appliedDate, lastFollowupDate, followupCount);
 
@@ -834,6 +863,9 @@ export function analyzeFromContent(trackerContent, followupsContent = '') {
       contacts,
       daysSinceApplication: daysSinceApp,
       daysSinceLastFollowup,
+      silenceDays,
+      readState,
+      freezeSuggested,
       followupCount,
       followups: sortedFollowups,
       urgency,

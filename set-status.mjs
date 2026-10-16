@@ -116,6 +116,7 @@ const USAGE = `Usage: node set-status.mjs <report#|company> <state> [--note "...
   --row N            Select by tracker # explicitly (unambiguous; skips the mismatch guard)
   --report N         Select the row whose Report cell links report #N
   --note "..."       Append to the Notes cell ("; "-separated, idempotent)
+  --note-clear "..." Remove a previously appended Notes segment (undo freeze, ADR-0079)
   --role "..."       Disambiguate when several rows share the company (fuzzy match)
   --on YYYY-MM-DD    Real event date for the status-log entry (defaults to today —
                      pass it when the transition happened earlier than it's recorded)
@@ -134,8 +135,8 @@ const USAGE = `Usage: node set-status.mjs <report#|company> <state> [--note "...
 
 const rawArgs = process.argv.slice(2);
 const positional = [];
-const flags = { note: null, role: null, on: null, row: null, report: null, source: null, force: false, dryRun: false, json: false };
-const VALUE_FLAGS = { '--note': 'note', '--role': 'role', '--on': 'on', '--row': 'row', '--report': 'report', '--source': 'source' };
+const flags = { note: null, noteClear: null, role: null, on: null, row: null, report: null, source: null, force: false, dryRun: false, json: false };
+const VALUE_FLAGS = { '--note': 'note', '--note-clear': 'noteClear', '--role': 'role', '--on': 'on', '--row': 'row', '--report': 'report', '--source': 'source' };
 
 // Who is driving this write. A caller that delegates here instead of touching
 // the tracker itself — the web status route — needs its ledger rows to stay
@@ -521,7 +522,30 @@ if (note) {
   }
 }
 
-const changed = statusChanged || noteChanged;
+// --note-clear：移除一个此前由 --note 追加的整段备注（ADR-0079 撤销冻结用——
+// 撤销必须恢复到冻结前的原状，残留「跟进 N 天无回复」会误导）。与追加同一套
+// 边界匹配（整段或 "; "-分界），不是裸子串——note 本身含 "; " 也能安全移除。
+// 幂等：段不存在时静默无操作。与 --note 互斥（一次调用只做一个方向的备注变更）。
+let noteCleared = false;
+if (flags.noteClear != null) {
+  if (note) failWith(EXIT_USAGE, 'note-conflict', '--note and --note-clear are mutually exclusive');
+  if (colmap.notes == null) {
+    failWith(EXIT_USAGE, 'no-notes-column', 'Tracker has no Notes column — cannot apply --note-clear');
+  }
+  const removee = cell(flags.noteClear);
+  const existing = parts[colmap.notes] ?? '';
+  let next = existing;
+  if (existing === removee) next = '';
+  else if (existing.endsWith(`; ${removee}`)) next = existing.slice(0, existing.length - removee.length - 2);
+  else if (existing.startsWith(`${removee}; `)) next = existing.slice(removee.length + 2);
+  else if (existing.includes(`; ${removee}; `)) next = existing.replace(`; ${removee}; `, '; ');
+  if (next !== existing) {
+    parts[colmap.notes] = next;
+    noteCleared = true;
+  }
+}
+
+const changed = statusChanged || noteChanged || noteCleared;
 
 if (changed && !flags.dryRun) {
   lines[target.lineIdx] = rebuildRow(parts);
