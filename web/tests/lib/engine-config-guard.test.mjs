@@ -89,13 +89,12 @@ test("mode restores from the main store, never from the quick-eval store", () =>
   assert.ok(!FORM.includes("setMode(q."), "快评存储里的 mode 又回来覆盖主配置了 —— 每次打开都会落在快评上");
 });
 
-test("the quick-eval store no longer carries mode, and key-mode save writes mode to the main store", () => {
+test("key-mode save writes only tier + UI drafts; the vault owns quick-eval fields (ADR-0083)", () => {
   const keyBranch = slice(FORM, 'if (mode === "key") {', "return; //", "save() key 分支");
-  assert.ok(
-    keyBranch.includes("JSON.stringify({ provider: savedProvider, model: quickModel, baseUrl: quickBaseUrl })"),
-    "快评存储的写入形状变了 —— 只要还带 mode，档位就会再次分裂成两个真值源",
-  );
-  assert.ok(!keyBranch.includes("{ mode, provider: savedProvider"), "mode 仍被写进快评存储");
+  // 快评字段的真相源已迁到服务端密钥库（data/quick-eval.json v2）：
+  // 旧的 career-ops:quickeval 镜像与「单密钥整体覆盖」PUT 都不得还魂。
+  assert.ok(!keyBranch.includes("QUICK_STORAGE_KEY"), "快评 localStorage 镜像已退役，别再写回去");
+  assert.ok(!keyBranch.includes("quick-config"), "save() 不再整体覆盖单密钥——写路径归密钥库卡");
   assert.ok(keyBranch.includes("STORAGE_KEY") && keyBranch.includes("\n            mode,"), "key 分支没把档位写进主配置");
 });
 

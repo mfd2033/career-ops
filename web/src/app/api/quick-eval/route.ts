@@ -6,13 +6,15 @@
 // 快评结合简历：服务端读 cv.md + profile 记忆，构造紧凑摘要内联进 prompt，
 // 单轮 completion 完成适配度打分 → 秒级（实测 LLM 单轮 ~677ms，加简历仍远 <1 分钟）。
 //
-// 只读打分：不写 tracker、不入管道、不生成报告/CV。未配置密钥 → 403，插件据此
-// 提示「快评不可用」，不越权改跑完整评估。
+// 只读打分：不写 tracker、不入管道、不生成报告/CV。密钥库无使用中密钥 →
+// 403，插件据此提示「快评不可用」，不越权改跑完整评估（ADR-0083：扩展对
+// 密钥切换透明，它只调本路由，服务端 activeId 变了下一次快评自然用新密钥）。
 import { NextRequest, NextResponse } from "next/server";
 import fs from "node:fs";
 import path from "node:path";
 import { careerOpsRoot, readMemory } from "@/lib/career-ops";
-import { readQuickConfig, quickEvaluate, buildCvSummary } from "@/lib/quick-eval";
+import { quickEvaluate, buildCvSummary } from "@/lib/quick-eval";
+import { readVault, activeKey, toQuickConfig } from "@/lib/quick-vault.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -37,8 +39,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "missing JD text" }, { status: 400 });
   }
 
-  const cfg = readQuickConfig();
-  if (!cfg.apiKey) {
+  // 密钥库：整束（provider/model/baseUrl/key）跟着使用中密钥走，切换即换整套。
+  const cfg = toQuickConfig(activeKey(readVault(careerOpsRoot())));
+  if (!cfg?.apiKey) {
     return NextResponse.json({ error: "quickEvalNotConfigured" }, { status: 403 });
   }
 

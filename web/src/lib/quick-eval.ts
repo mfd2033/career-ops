@@ -7,14 +7,11 @@
 // 分数与完整评不等价——快评浅扫（JD + 简历要点），完整评深评（读 cv/profile/
 // 全套模板）。两者 `/5` 不同属预期，互不覆盖。
 //
-// 配置持有：密钥唯一落盘点是 gitignore 的 data/quick-eval.json（服务端本地
-// 文件），读取后仅内存使用，不打印不写日志。绝不进 localStorage / chrome 存储。
+// 配置持有：密钥唯一落盘点是 gitignore 的 data/quick-eval.json（v2 密钥库形状，
+// 读写与迁移全部在 quick-vault.mjs）；本模块只接受调用方传入的密钥束，
+// 读取后仅内存使用，不打印不写日志。绝不进 localStorage / chrome 存储。
 
-import fs from "node:fs";
-import path from "node:path";
-import { careerOpsRoot } from "@/lib/career-ops";
-
-const CONFIG_REL = path.join("data", "quick-eval.json");
+import { classifyProbeFailure } from "@/lib/quick-vault.mjs";
 
 // Quick-eval 支持的 provider 预设（OpenAI 兼容 chat/completions 端点）。
 // baseUrl 留空时使用对应 provider 的默认端点。仅快评用，不触及 CLI 引擎。
@@ -30,30 +27,6 @@ export type QuickConfig = {
   baseUrl?: string;
   apiKey?: string;
 };
-
-/** 读快评配置。文件不存在/损坏 → 返回空对象（configured=false）。 */
-export function readQuickConfig(): QuickConfig {
-  try {
-    const raw = fs.readFileSync(path.join(careerOpsRoot(), CONFIG_REL), "utf8");
-    const v = JSON.parse(raw);
-    return {
-      provider: typeof v.provider === "string" ? v.provider : "",
-      model: typeof v.model === "string" ? v.model : "",
-      baseUrl: typeof v.baseUrl === "string" ? v.baseUrl : "",
-      apiKey: typeof v.apiKey === "string" ? v.apiKey : "",
-    };
-  } catch {
-    return {};
-  }
-}
-
-/** 写快评配置到 gitignore 的 data/quick-eval.json（原子写）。返回写入值（不含回显污染）。 */
-export function writeQuickConfig(cfg: QuickConfig): void {
-  const root = careerOpsRoot();
-  const file = path.join(root, CONFIG_REL);
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, JSON.stringify(cfg, null, 2), "utf8");
-}
 
 /** 解决实际请求端点：显式 baseUrl 优先，否则按 provider 默认。 */
 function resolveBaseUrl(cfg: QuickConfig): string {
@@ -108,6 +81,53 @@ export type QuickResult = { grade: string; score: number; reason: string; raw: s
  * DOMException「This operation was aborted」直显给用户。
  */
 export const QUICK_EVAL_TIMEOUT_MS = 15000;
+
+/**
+ * 连接测试（ADR-0083 工单 04）的内层超时：探测请求只发一条 ping 消息、
+ * max_tokens=1，正常端点亚秒级返回；8s 仍无响应即可判定不可达。必须显著
+ * 小于前端 fetch 的外层预算（key-vault-card 的 12s），否则外层先 abort、
+ * 用户只能看到笼统的「服务异常」而拿不到分类文案（quick-eval-timeout 同族教训）。
+ */
+export const QUICK_TEST_TIMEOUT_MS = 8000;
+
+export type ProbeResult = { ok: boolean; reason?: string; latencyMs?: number };
+
+/**
+ * 向密钥束指向的端点发一次最小 chat/completions 探测。失败原因经
+ * classifyProbeFailure 分类；结果里绝不回显密钥，也不打印任何请求头。
+ */
+export async function probeQuickKey(cfg: QuickConfig): Promise<ProbeResult> {
+  const baseUrl = resolveBaseUrl(cfg);
+  const endpoint = `${baseUrl}/chat/completions`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), QUICK_TEST_TIMEOUT_MS);
+  const startedAt = Date.now();
+  try {
+    const res = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${cfg.apiKey || ""}`,
+      },
+      body: JSON.stringify({
+        model: cfg.model || "agnes-2.5-flash",
+        messages: [{ role: "user", content: "ping" }],
+        max_tokens: 1,
+        stream: false,
+      }),
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      return { ok: false, reason: classifyProbeFailure({ status: res.status }) };
+    }
+    return { ok: true, latencyMs: Date.now() - startedAt };
+  } catch {
+    // fetch 抛错只有两类：超时 abort / 真网络异常（DNS/拒绝连接），分类器区分。
+    return { ok: false, reason: classifyProbeFailure({ aborted: controller.signal.aborted }) };
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 /**
  * 单轮直连 LLM 快评。OpenAI 兼容 /chat/completions，非流式，max_tokens 下限保证

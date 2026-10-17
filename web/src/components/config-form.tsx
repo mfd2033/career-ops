@@ -15,6 +15,7 @@ import {
 import { cn } from "@/lib/cn";
 import { CadenceSettings } from "@/components/followups/cadence-settings";
 import { JdRulesSettings } from "@/components/jd-rules-settings";
+import { KeyVaultCard } from "@/components/key-vault-card";
 import { SkillsPanel } from "@/components/skills-panel";
 import { AboutPanel } from "@/components/about-panel";
 import { JobTargetSettings } from "@/components/job-target-settings";
@@ -62,22 +63,15 @@ type Cli = {
 
 type Mode = "cli" | "key" | "manual";
 
-const PROVIDERS = [
-  { id: "anthropic", label: "Anthropic (Claude)" },
-  { id: "openai", label: "OpenAI" },
-  { id: "google", label: "Google (Gemini)" },
-  { id: "openrouter", label: "OpenRouter" },
-  // agnes 仅用于快评（OpenAI 兼容端点），默认 baseUrl 见 quick-eval.ts。
-  { id: "agnes", label: "Agnes AI" },
-] as const;
+// 密钥束的 provider 预设已随密钥库卡迁入 key-vault-card.tsx（ADR-0083）：
+// provider 不再是页面级全局单选，而是一把密钥自己的属性。
 
 // 全局并发上限的可选项（原型：纯数值选择 → <select> 下拉，1–8）。
 const CONCURRENCY_OPTIONS = [1, 2, 3, 4, 5, 6, 7, 8];
 
 const STORAGE_KEY = "career-ops:config";
-// 快评配置独立存储对象：与 career-ops:config 完全隔离，改快评不影响 CLI 评估引擎。
-// 只存 provider/model/baseUrl，密钥绝不进 localStorage（仅服务端 gitignore 文件持有）。
-const QUICK_STORAGE_KEY = "career-ops:quickeval";
+// ADR-0083：快评字段（密钥束）的真相源在服务端密钥库 data/quick-eval.json，
+// 旧的快评 localStorage 镜像已退役——密钥库卡直接读写 /api/quick-config。
 
 // 页内目录导航的六个区段：id 用于 IntersectionObserver 锚点与高亮。分组顺序即保存档位
 // 顺序（统一保存 → 卡片内保存 → 只读），档位仅靠顺序表达——与已验收原型一致，侧栏不加标记。
@@ -111,11 +105,6 @@ export function ConfigForm() {
   // when the freshly-fetched options just don't list it. "" (legacy configs)
   // means "unknown → belongs to the current CLI".
   const [modelCliId, setModelCliId] = useState<string>("");
-  const [provider, setProvider] = useState("anthropic");
-  const [apiKey, setApiKey] = useState("");
-  // 快评专用字段（model/baseUrl），与 CLI 模型的 model 状态隔离。
-  const [quickModel, setQuickModel] = useState("agnes-2.5-flash");
-  const [quickBaseUrl, setQuickBaseUrl] = useState("https://api.agnes-ai.cn/v1");
   const [logos, setLogos] = useState(true);
   const [applyBehavior, setApplyBehavior] = useState<ApplyBehavior>(APPLY_BEHAVIOR_DEFAULT);
   const [scanSource, setScanSource] = useState<ScanSource[]>([...SCAN_SOURCE_DEFAULT]);
@@ -171,20 +160,12 @@ export function ConfigForm() {
         // belongs to the CLI saved alongside it, so it is never dropped.
         if (v.modelCliId) setModelCliId(v.modelCliId);
         else if (v.model && v.cliId) setModelCliId(v.cliId);
-        if (v.provider) setProvider(v.provider);
         if (typeof v.logos === "boolean") setLogos(v.logos);
       }
-      // 快评配置回显：只读非密钥字段；provider 以快评存储为准（若存在）。
-      // 绝不从这里恢复 `mode`（ADR-0073 决议 1）：历史上快评存储里那一份 `mode`
-      // 在后、主配置那份在前，于是每次打开都落在快评上，而切回 CLI 保存又不碰它 ——
-      // 用户无法自救，就是那个界面缺陷的根因。
-      const qraw = localStorage.getItem(QUICK_STORAGE_KEY);
-      if (qraw) {
-        const q = JSON.parse(qraw);
-        if (q.provider) setProvider(q.provider);
-        if (q.model) setQuickModel(q.model);
-        if (q.baseUrl) setQuickBaseUrl(q.baseUrl);
-      }
+      // ADR-0083：旧的快评 localStorage 镜像（provider/model/baseUrl）不再读回——
+      // 快评字段的唯一真相源是服务端密钥库，密钥库卡自己 fetch。
+      // 档位恢复仍只走主配置（ADR-0073 决议 1），那个「每次打开都落在快评」
+      // 的界面缺陷不能借重构还魂。
     } catch {
       /* ignore */
     }
@@ -269,15 +250,9 @@ export function ConfigForm() {
     void persistConcurrencyPool(concurrencyPool);
     // 用户点了保存 → 草稿成为已保存态，清空待计数。
     setDirty(new Set());
-    // 快评（key 模式）：密钥 PUT 到服务端 gitignore 文件，前端只存非密钥字段。
+    // 快评（key 模式，ADR-0083）：密钥束由密钥库卡即时读写服务端，save() 在这里
+    // 只落界面/扫描草稿与档位本身——「单密钥整体覆盖」那条 PUT 路径已随旧面板退役。
     if (mode === "key") {
-      const savedProvider = provider;
-      // ADR-0073 决议 1：`mode` 不再写进快评存储（那一份以前会在打开时覆盖主配置）。
-      // 整对象重写顺带清掉旧浏览器里残留的 `mode` 键。
-      localStorage.setItem(
-        QUICK_STORAGE_KEY,
-        JSON.stringify({ provider: savedProvider, model: quickModel, baseUrl: quickBaseUrl }),
-      );
       // 快评模式下界面/扫描草稿（Logo/申请行为/扫描方式）与引擎无关，也要落库——
       // 合并写入保留已存的 CLI 引擎字段（cliId/model），避免保存条谎报「已保存 N 项」却丢写。
       try {
@@ -301,23 +276,9 @@ export function ConfigForm() {
       }
       persistApplyBehavior(applyBehavior);
       persistScanSources(scanSource);
-      fetch("/api/quick-config", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          provider: savedProvider,
-          model: quickModel,
-          baseUrl: quickBaseUrl,
-          apiKey,
-        }),
-      })
-        .then((r) => {
-          if (!r.ok) throw new Error(`quick-config ${r.status}`);
-        })
-        .then(() => setSaved(true))
-        .catch(() => setSaved(false));
+      setSaved(true);
       setTimeout(() => setSaved(false), 2000);
-      return; // 快评密钥走服务端，不写入 career-ops:config。
+      return; // 快评密钥走服务端密钥库，不写入 career-ops:config。
     }
     // The API key is deliberately NOT persisted: nothing reads it yet (the
     // key/manual panel is unwired) and a secret must never sit in clear-text
@@ -342,7 +303,6 @@ export function ConfigForm() {
         cliId,
         model: nextModel,
         modelCliId: nextModel ? picked.modelCliId : "",
-        provider,
         logos,
         applyBehavior,
         scanSource: cleanScanSources(scanSource),
@@ -741,79 +701,12 @@ export function ConfigForm() {
           {mode === "key" && (
             <div className="space-y-4">
               <div className="rounded-xl border border-border bg-surface/50 p-4">
-                <p className="mb-3 text-xs leading-relaxed text-faint">{t("config.quickEvalDesc")}</p>
-                <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-muted">
-                  {t("config.provider")}
-                </span>
-                <div className="grid gap-2 sm:grid-cols-2">
-                  {PROVIDERS.map((p) => (
-                    <RadioChoice
-                      key={p.id}
-                      selected={provider === p.id}
-                      onSelect={() => {
-                        setProvider(p.id);
-                        // 切换 provider 时同步默认端点到 baseUrl 输入框（用户仍可改）。
-                        if (p.id === "agnes") setQuickBaseUrl("https://api.agnes-ai.cn/v1");
-                        if (p.id === "openai") setQuickBaseUrl("https://api.openai.com/v1");
-                        if (p.id === "openrouter") setQuickBaseUrl("https://openrouter.ai/api/v1");
-                        touch("provider");
-                      }}
-                      title={p.label}
-                    />
-                  ))}
-                </div>
+                <p className="text-xs leading-relaxed text-faint">{t("config.quickEvalDesc")}</p>
+                {/* ADR-0083 决议 1：密钥束心智一句话说明——选一把 = 整套属性一起切。 */}
+                <p className="mt-1.5 text-xs leading-relaxed text-faint">{t("config.vaultBundleHint")}</p>
               </div>
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="rounded-xl border border-border bg-surface/50 p-4">
-                  <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-muted">
-                    {t("config.pasteKey")}
-                  </label>
-                  <p className="mb-2 text-xs text-faint">{t("config.bringKey")}</p>
-                  <input
-                    type="password"
-                    value={apiKey}
-                    onChange={(e) => {
-                      setApiKey(e.target.value);
-                      touch("apiKey");
-                    }}
-                    placeholder="sk-…"
-                    autoComplete="off"
-                    className="w-full rounded-lg border border-border bg-surface/60 px-3 py-2 font-mono text-sm outline-none transition-colors placeholder:text-faint focus:border-brand/50"
-                  />
-                  <p className="mt-2 text-xs text-faint">{t("config.keyStored")}</p>
-                </div>
-                <div className="rounded-xl border border-border bg-surface/50 p-4">
-                  <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-muted">
-                    {t("config.quickModel")}
-                  </label>
-                  <input
-                    type="text"
-                    value={quickModel}
-                    onChange={(e) => {
-                      setQuickModel(e.target.value);
-                      touch("quickModel");
-                    }}
-                    placeholder="agnes-2.5-flash"
-                    autoComplete="off"
-                    className="w-full rounded-lg border border-border bg-surface/60 px-3 py-2 font-mono text-sm outline-none transition-colors placeholder:text-faint focus:border-brand/50"
-                  />
-                  <label className="mt-3 mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-muted">
-                    {t("config.quickBaseUrl")}
-                  </label>
-                  <input
-                    type="text"
-                    value={quickBaseUrl}
-                    onChange={(e) => {
-                      setQuickBaseUrl(e.target.value);
-                      touch("quickBaseUrl");
-                    }}
-                    placeholder="https://api.agnes-ai.cn/v1"
-                    autoComplete="off"
-                    className="w-full rounded-lg border border-border bg-surface/60 px-3 py-2 font-mono text-sm outline-none transition-colors placeholder:text-faint focus:border-brand/50"
-                  />
-                  <p className="mt-2 text-xs text-faint">{t("config.quickBaseUrlHint")}</p>
-                </div>
-              </div>
+              {/* provider 顶部大卡行已删：provider 是一把密钥自己的属性，在添加/编辑表单里选。 */}
+              <KeyVaultCard />
             </div>
           )}
 
