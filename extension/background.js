@@ -1029,7 +1029,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
               title: typeof msg.title === "string" ? msg.title : "",
               text,
             }),
-            signal: AbortSignal.timeout(8000),
+            // 外层预算必须大于服务端内层 QUICK_EVAL_TIMEOUT_MS（15s），好让内层先超时、
+            // 回一个可读的「快评超时…」文案；若外层先 abort，只会落到下方 catch 的笼统提示。
+            // 18s < route maxDuration 60s。
+            signal: AbortSignal.timeout(18000),
           });
           const j = await res.json().catch(() => ({}));
           if (!res.ok) {

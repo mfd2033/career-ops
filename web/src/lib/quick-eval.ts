@@ -100,8 +100,18 @@ export function buildQuickPrompt(title: string, jdText: string, cvSummary: strin
 export type QuickResult = { grade: string; score: number; reason: string; raw: string };
 
 /**
+ * 快评单次 LLM 调用的超时上限（毫秒）。必须显著大于真实远程端点的往返延迟
+ * （网络抖动 / 冷启动 / 把 ~4k 字简历摘要 + 整段 JD 内联进 prompt 的生成时间），
+ * 又必须小于插件侧 /api/quick-eval 的外层 fetch 超时（见 extension/background.js
+ * 的 AbortSignal.timeout），否则外层先 abort、错误会被降级成笼统的「本地 web
+ * 服务/接口异常」。原写死 3000ms 过紧，正常偏慢的端点几乎必被 abort，抛出裸
+ * DOMException「This operation was aborted」直显给用户。
+ */
+export const QUICK_EVAL_TIMEOUT_MS = 15000;
+
+/**
  * 单轮直连 LLM 快评。OpenAI 兼容 /chat/completions，非流式，max_tokens 下限保证
- * 解析；~3s 超时，失败抛错（供 route 降级为「快评不可用」）。
+ * 解析；受 QUICK_EVAL_TIMEOUT_MS 超时保护，失败抛错（供 route 降级为「快评不可用」）。
  */
 export async function quickEvaluate(
   cfg: QuickConfig,
@@ -112,7 +122,7 @@ export async function quickEvaluate(
   const prompt = buildQuickPrompt(opts.title, opts.jdText, opts.cvSummary);
 
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 3000);
+  const timer = setTimeout(() => controller.abort(), QUICK_EVAL_TIMEOUT_MS);
   let res: Response;
   try {
     res = await fetch(endpoint, {
@@ -130,6 +140,16 @@ export async function quickEvaluate(
       }),
       signal: controller.signal,
     });
+  } catch (e) {
+    // 超时经 AbortController 触发 → fetch 抛 name=AbortError 的 DOMException
+    // （message="This operation was aborted"）。翻译成可读中文，绝不让裸英文
+    // 漏到中文 UI；非超时的网络错误（DNS/连接失败等）原样上抛。
+    if ((e as Error)?.name === "AbortError") {
+      throw new Error(
+        `快评超时：AI 端点 ${QUICK_EVAL_TIMEOUT_MS / 1000}s 内未响应，请稍后重试或换更快的模型`,
+      );
+    }
+    throw e;
   } finally {
     clearTimeout(timer);
   }
