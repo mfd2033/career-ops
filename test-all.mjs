@@ -4415,6 +4415,54 @@ try {
   fail(`scan.mjs blacklist tests crashed: ${err.message}`);
 }
 
+// ADR-0084: parseBlacklist locates columns by HEADER NAME, so appending
+// `Exempt until` before Reason never shifts Reason into the exemption date (or
+// vice-versa). It also tolerates the historical 4-column file (no exemption
+// column) and a reordered table.
+try {
+  const { parseBlacklist } = await import(pathToFileURL(join(ROOT, 'scan.mjs')).href);
+  const five = parseBlacklist([
+    '| Company | Since | Scope | Exempt until | Reason |',
+    '|---|---|---|---|---|',
+    '| Initech | 2026-09-23 | company | 2026-11-01 | low comp |',
+    '| Umbrella | 2026-10-01 | company |  | hard gate |',
+  ].join('\n'));
+  const ini = five.get('initech');
+  const umb = five.get('umbrella');
+  if (ini && ini.exemptUntil === '2026-11-01' && ini.reason === 'low comp' &&
+      umb && umb.exemptUntil === '' && umb.reason === 'hard gate') {
+    pass('scan.mjs parseBlacklist reads Exempt until by header name, reason not shifted (ADR-0084)');
+  } else {
+    fail(`scan.mjs 5-col parse wrong: ${JSON.stringify([...five.values()])}`);
+  }
+
+  const four = parseBlacklist([
+    '| Company | Since | Scope | Reason |',
+    '|---|---|---|---|',
+    '| Acme | 2026-01-15 | company | old format |',
+  ].join('\n'));
+  const acme = four.get('acme');
+  if (acme && acme.reason === 'old format' && acme.exemptUntil === '') {
+    pass('scan.mjs parseBlacklist still parses the historical 4-column file (exemptUntil empty)');
+  } else {
+    fail(`scan.mjs 4-col regression: ${JSON.stringify(acme)}`);
+  }
+
+  const reordered = parseBlacklist([
+    '| Reason | Company | Exempt until | Since | Scope |',
+    '|---|---|---|---|---|',
+    '| biz reason | Hooli | 2026-12-31 | 2026-05-05 | company |',
+  ].join('\n'));
+  const hooli = reordered.get('hooli');
+  if (hooli && hooli.reason === 'biz reason' && hooli.exemptUntil === '2026-12-31' && hooli.since === '2026-05-05') {
+    pass('scan.mjs parseBlacklist maps columns by name even when the table is reordered');
+  } else {
+    fail(`scan.mjs reordered-table wrong: ${JSON.stringify(hooli)}`);
+  }
+} catch (err) {
+  fail(`scan.mjs ADR-0084 header-name blacklist tests crashed: ${err.message}`);
+}
+
 // Blacklist wiring: skips are counted and reported (never silent), persisted to
 // scan-runs.tsv by header name, and --include-blacklisted bypasses the filter.
 if (
@@ -4490,7 +4538,7 @@ if (readFile('DATA_CONTRACT.md').includes('data/blacklist.md')) {
   fail('DATA_CONTRACT.md does not register data/blacklist.md');
 }
 
-if (fileExists('templates/blacklist.example.md') && readFile('templates/blacklist.example.md').includes('| Company | Since | Scope | Reason |')) {
+if (fileExists('templates/blacklist.example.md') && readFile('templates/blacklist.example.md').includes('| Company | Since | Scope | Exempt until | Reason |')) {
   pass('templates/blacklist.example.md ships the blacklist table seed (#1742)');
 } else {
   fail('templates/blacklist.example.md missing or lacks the table header');

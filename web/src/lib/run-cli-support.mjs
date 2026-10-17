@@ -655,6 +655,23 @@ export function makeCheckupHtmlProbe(root) {
 }
 
 /**
+ * Did the run stop because of the company blacklist gate? The gate modes
+ * (oferta / auto-pipeline / apply) emit a stable machine marker
+ * `[[BLACKLIST-GATE]] company=<name>` when they stop a headless run on a hit
+ * (ADR-0084). Detection is deterministic on that marker — NOT a fuzzy match on
+ * the agent's prose, which drifts with wording. Returns the matched company
+ * name (possibly ''), or null when the marker is absent.
+ *
+ * @param {string} text - the run's stdout tail (agent-visible text).
+ * @returns {{ company: string } | null}
+ */
+export function detectBlacklistGate(text) {
+  const m = /\[\[BLACKLIST-GATE\]\]\s+company=([^\n\]|]+)/.exec(String(text ?? ""));
+  if (!m) return null;
+  return { company: m[1].trim() };
+}
+
+/**
  * The evaluate/checkup honesty gate, extracted from route.ts's close handler.
  *
  * It was inline there, which is why it had no test seam and why checkup could
@@ -666,16 +683,19 @@ export function makeCheckupHtmlProbe(root) {
  * mirrors the original if/else chain exactly; the evaluate message is kept
  * byte-identical.
  *
- * @param {{kind: string, cleanExit: boolean, sawError: boolean, emittedText: boolean, persisted: boolean, timedOut?: boolean, checkupAlreadyCurrentStar?: number | null}} args
+ * @param {{kind: string, cleanExit: boolean, sawError: boolean, emittedText: boolean, persisted: boolean, timedOut?: boolean, checkupAlreadyCurrentStar?: number | null, blacklistGate?: boolean}} args
  *   `timedOut` = the harness's own kill timer stopped it (route.ts's `killer`), which is
  *   NOT the CLI's fault and must be reported as such — see the branch below.
  *   `checkupAlreadyCurrentStar` = 本 tracker# 当天已有一条可核验体检行时的星级
  *   （route.ts 传入 `checkupArtifactTodayForTracker(...)`）。一次干净结束、没写新东西
  *   但发现当天报告已在的体检，不是失败（用户数据已是最新）——所以报 ok + `alreadyCurrent`
  *   提示，而非误导性的「零产物」error（2026-09-23，approach B）。
- * @returns {{ok: true, alreadyCurrent?: boolean, message?: string} | {ok: false, message: string}}
+ *   `blacklistGate` = 该 run 命中了公司黑名单门禁并主动停止（route.ts 用
+ *   `detectBlacklistGate(stdoutTail)` 判定）。这不是失败而是按设计拦截，记 done + 说明，
+ *   不再提示无谓重跑（ADR-0084，2026-10-17 12:28 误判的修复）。
+ * @returns {{ok: true, alreadyCurrent?: boolean, blockedByBlacklist?: boolean, message?: string} | {ok: false, message: string}}
  */
-export function persistRunOutcome({ kind, cleanExit, sawError, emittedText, persisted, timedOut = false, checkupAlreadyCurrentStar = null }) {
+export function persistRunOutcome({ kind, cleanExit, sawError, emittedText, persisted, timedOut = false, checkupAlreadyCurrentStar = null, blacklistGate = false }) {
   // 本地定时器杀的，先于一切判——否则「无 stdout + 非 0 退出」会落进下面的
   // noOutputError 分支，把 30 分钟体检上限读成安装/登录问题（2026-09-17 #682 实测：
   // 卡片写着 "is it installed and authenticated?"，真因是撞了 checkup 的 1_800_000ms
@@ -707,6 +727,19 @@ export function persistRunOutcome({ kind, cleanExit, sawError, emittedText, pers
   }
   if (!emittedText && !sawError) {
     return { ok: false, message: "The CLI produced no output — is it installed and authenticated? (career-ops is best on Claude Code.)" };
+  }
+  // Blacklist gate stop (ADR-0084): a clean, text-emitting run that wrote no
+  // report because the gate deliberately stopped before Block A. This is the
+  // designed outcome, not a failure — record it as a done with an explanatory
+  // note (mirrors the checkup alreadyCurrent path) so the card never prompts a
+  // re-run that would stop on the same gate. Only a clean exit qualifies: a
+  // crashed run must not be laundered into a policy stop by a stray marker.
+  if (blacklistGate && cleanExit && !sawError && !persisted) {
+    return {
+      ok: true,
+      blockedByBlacklist: true,
+      message: "命中黑名单，已按规则停止——门禁的正常结果，非失败。要临时放行，去「黑名单」页给该公司设一个 Exempt until 日期。",
+    };
   }
   if (PERSISTENCE_GATED_KINDS.has(kind) && !persisted) {
     // approach B（2026-09-23）：一次跑到结束（干净退出、有真实输出、无 error）的体检，

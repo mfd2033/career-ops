@@ -151,6 +151,7 @@ const SYSTEM_PATHS = [
   'extract-latex-content.mjs',
   'patch-latex-content.mjs',
   'lib/ascii-fold.mjs',
+  'lib/blacklist.mjs',
   'lib/cli-flags.mjs',
   'lib/gemini-node-floor.mjs',
   'lib/local-today.mjs',

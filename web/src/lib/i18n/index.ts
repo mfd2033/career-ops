@@ -12,6 +12,7 @@ import { en as configEn, zh as configZh } from "./clusters/config";
 import { en as portalsEn, zh as portalsZh } from "./clusters/portals";
 import { en as jobsEn, zh as jobsZh } from "./clusters/jobs";
 import { en as inboxEn, zh as inboxZh } from "./clusters/inbox";
+import { en as blacklistEn, zh as blacklistZh } from "./clusters/blacklist";
 
 // Full dictionaries per language: flat key -> localized string.
 export const dictionaries: Record<Lang, Dict> = {
@@ -29,6 +30,7 @@ export const dictionaries: Record<Lang, Dict> = {
     ...portalsEn,
     ...jobsEn,
     ...inboxEn,
+    ...blacklistEn,
   },
   zh: {
     ...navZh,
@@ -44,6 +46,7 @@ export const dictionaries: Record<Lang, Dict> = {
     ...portalsZh,
     ...jobsZh,
     ...inboxZh,
+    ...blacklistZh,
   },
 };
 

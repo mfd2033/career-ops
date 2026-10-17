@@ -33,11 +33,13 @@ Before running any evaluation, confirm the posting is still live. The Step 0 Pla
 
 Do not continue to Step 1 until this gate is resolved.
 
-## Step 0.6 — Blacklist gate (#1742)
+## Step 0.6 — Blacklist gate (#1742, exemption ADR-0084)
 
 If `data/blacklist.md` exists, check the posting's company against it before running any evaluation — the file is the candidate's own do-not-apply list (user layer, opt-in; absent file = skip this gate). Match case- and punctuation-insensitively.
 
-On a hit, **stop before Step 1** and surface the candidate's own recorded decision: tell them which entry matched and quote their recorded reason ("{Company} is on your blacklist (since {Since}): *{Reason}*. Do you still want me to evaluate it?"). Wait for an explicit answer — never silently refuse, never silently proceed. The candidate's call always wins (same HITL spirit as the score < 4.0 rule): an explicit yes continues to Step 1 as normal; anything else stops the pipeline here, and if the entry came from `data/pipeline.md`, mark it `- [x] ~~Company | Role~~ — blacklisted`. A blacklist entry never changes any score.
+**Exemption window:** if the matched row's `Exempt until` date is today or in the future, the gate is deliberately lifted — skip this step and continue to Step 1, noting `blacklist-exempt until {date}`. A past or empty date means the gate is armed.
+
+On a hit (gate armed), **stop before Step 1** and surface the candidate's own recorded decision: tell them which entry matched and quote their recorded reason ("{Company} is on your blacklist (since {Since}): *{Reason}*. Do you still want me to evaluate it?"). Wait for an explicit answer — never silently refuse, never silently proceed. The candidate's call always wins (same HITL spirit as the score < 4.0 rule): an explicit yes continues to Step 1 as normal; anything else stops the pipeline here, and if the entry came from `data/pipeline.md`, mark it `- [x] ~~Company | Role~~ — blacklisted`. **When you stop here** — the candidate declined, OR this is a headless run with no user to override — emit exactly one plain output line `[[BLACKLIST-GATE]] company={Company}` before stopping, so the run ledger records a deliberate policy stop rather than a failure (machine-read marker, not user copy). A blacklist entry never changes any score.
 
 ## Step 1 — A-G Evaluation
 

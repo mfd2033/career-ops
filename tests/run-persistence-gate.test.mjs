@@ -18,6 +18,7 @@ import {
   checkupArtifactRowCount,
   checkupArtifactTodayForTracker,
   makeCheckupHtmlProbe,
+  detectBlacklistGate,
   PERSISTENCE_GATED_KINDS,
 } from '../web/src/lib/run-cli-support.mjs';
 
@@ -312,6 +313,32 @@ console.log('persistRunOutcome already-current');
   if (!unclean.ok) pass('  \u975e\u6b63\u5e38\u9000\u51fa\u4e0d\u5f97\u88ab already-current \u6d88\u9ed8');
   else fail(`  \u975e\u6b63\u5e38\u9000\u51fa\u88ab\u653e\u884c: ${JSON.stringify(unclean)}`);
   const ev = persistRunOutcome({ kind: 'evaluate', cleanExit: true, sawError: false, emittedText: true, persisted: false, checkupAlreadyCurrentStar: 2.0 });
-  if (!ev.ok && /didn't save a report/.test(ev.message)) pass('  evaluate \u4e0d\u53d7 already-current \u5f71\u54cd');
-  else fail(`  evaluate \u88ab\u65b0\u53c2\u6570\u6c61\u67d3: ${JSON.stringify(ev)}`);
+  if (!ev.ok && /didn't save a report/.test(ev.message)) pass('  evaluate 不受 already-current 影响');
+  else fail(`  evaluate 被新参数污染: ${JSON.stringify(ev)}`);
+}
+
+// ── 7. 黑名单门禁命中记 done（ADR-0084，2026-10-17 12:28 误判修复）────────────
+console.log('detectBlacklistGate + blacklist done');
+{
+  const hit = detectBlacklistGate('blah\n[[BLACKLIST-GATE]] company=中犇科技\nmore');
+  if (hit && hit.company === '中犇科技') pass('  detectBlacklistGate 从稳定标记提取公司名');
+  else fail(`  marker 未识别: ${JSON.stringify(hit)}`);
+  if (detectBlacklistGate('no marker here, just prose about blacklist') === null) pass('  无标记时返回 null（不拿正文措辞误判）');
+  else fail('  无标记却命中');
+
+  const blocked = persistRunOutcome({ kind: 'evaluate', cleanExit: true, sawError: false, emittedText: true, persisted: false, blacklistGate: true });
+  if (blocked.ok && blocked.blockedByBlacklist === true && /黑名单/.test(blocked.message)) pass('  门禁命中干净结束 → ok + blockedByBlacklist + 中文说明（不再是零产物 error）');
+  else fail(`  门禁命中未记 done: ${JSON.stringify(blocked)}`);
+
+  const crashedGate = persistRunOutcome({ kind: 'evaluate', cleanExit: false, sawError: false, emittedText: true, persisted: false, blacklistGate: true });
+  if (!crashedGate.ok) pass('  非正常退出不得被黑名单标记洗成 done');
+  else fail(`  崩退被门禁标记放行: ${JSON.stringify(crashedGate)}`);
+
+  const sawErrGate = persistRunOutcome({ kind: 'evaluate', cleanExit: true, sawError: true, emittedText: true, persisted: false, blacklistGate: true });
+  if (!sawErrGate.ok) pass('  sawError 优先：真出错的 run 不记 done');
+  else fail(`  出错被门禁标记消默: ${JSON.stringify(sawErrGate)}`);
+
+  const persistedGate = persistRunOutcome({ kind: 'evaluate', cleanExit: true, sawError: false, emittedText: true, persisted: true, blacklistGate: true });
+  if (persistedGate.ok && !persistedGate.blockedByBlacklist) pass('  已落盘报告的 run 不走门禁 done 分支（门禁本就不该在有报告时触发）');
+  else fail(`  persisted 时误入门禁分支: ${JSON.stringify(persistedGate)}`);
 }

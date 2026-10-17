@@ -17,14 +17,18 @@ When the candidate pastes a **URL** (not JD text), confirm the posting is still 
 
 Do not continue to Block A until this gate is resolved. The snapshot captured here is reused by Block G's freshness signals.
 
-## Blacklist gate (#1742)
+## Blacklist gate (#1742, exemption ADR-0084)
 
 If `data/blacklist.md` exists, check the posting's company against it before Block A. The file is the candidate's own do-not-apply list (user layer, opt-in): absent file = no gate, and nothing ever adds a company to it automatically. Match case- and punctuation-insensitively — "Acme Corp." on the list catches a JD that says "acme corp".
 
-1. On a hit, **stop before Block A** and surface the candidate's own recorded decision:
+0. **Exemption window.** Each row may carry an `Exempt until` date. If it is today or in the future, the candidate has deliberately lifted the gate for this company: **proceed with the normal evaluation** and note `blacklist-exempt until {date}` in the report. A past or empty date means the gate is armed — continue below. (The exemption never changes any score; it only opens the gate.)
+1. On a hit (gate armed), **stop before Block A** and surface the candidate's own recorded decision:
    > "{Company} is on your blacklist (since {Since}): *{Reason}*. Do you still want me to evaluate this posting?"
 2. Wait for an explicit answer — never silently refuse, never silently proceed. The candidate's call always wins (same HITL spirit as the score < 4.0 rule): an explicit yes runs the full A-G evaluation as normal (note the override in the report notes); anything else stops here with no evaluation, report, or CV.
-3. No match, or no `data/blacklist.md` → proceed. A blacklist entry never changes any score anywhere — it is a gate, not a signal.
+3. **When you stop here** — the candidate declined, OR this is a headless run (`/api/run`, batch worker) with no user to give an override — emit **exactly one line** so the run ledger records this as a deliberate policy stop, not a failure:
+   > `[[BLACKLIST-GATE]] company={Company}`
+   Emit it as a plain output line (do not wrap it in prose), then stop. This marker is machine-read by the run engine; it is not user-facing copy.
+4. No match, no `data/blacklist.md`, or an active exemption → proceed. A blacklist entry never changes any score anywhere — it is a gate, not a signal.
 
 ## Bounded Research Budget
 

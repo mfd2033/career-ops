@@ -10,7 +10,7 @@ import { after } from "next/server";
 import { resolveCli, dropCrossEngineModel } from "@/lib/clis";
 import { cliDisplayName } from "@/lib/cli-labels.mjs";
 import { resolveWorkerInvocation } from "@/lib/worker-invocation.mjs";
-import { accumulateTokens, authExpiredHint, checkupArtifactRowCount, checkupArtifactTodayForTracker, makeCheckupHtmlProbe, failureEvidence, failureLedgerMsg, hasNewCompletedReport, isFatalGenericStderr, persistRunOutcome, PERSISTENCE_GATED_KINDS, withModelFlag } from "@/lib/run-cli-support.mjs";
+import { accumulateTokens, authExpiredHint, checkupArtifactRowCount, checkupArtifactTodayForTracker, makeCheckupHtmlProbe, detectBlacklistGate, failureEvidence, failureLedgerMsg, hasNewCompletedReport, isFatalGenericStderr, persistRunOutcome, PERSISTENCE_GATED_KINDS, withModelFlag } from "@/lib/run-cli-support.mjs";
 import { spawnHeadlessCli, terminateCli } from "@/lib/spawn-cli.mjs";
 import { careerOpsRoot, readMemory, findReportFile, readInbox, readScanDates, findCheckupTarget, readApplications, rootScript } from "@/lib/career-ops";
 import { checkupDispatchText } from "@/lib/checkup-request.mjs";
@@ -912,8 +912,8 @@ async function runPipeline({
         // decision lives in persistRunOutcome so it is assertable: an inline copy
         // here is exactly how checkup drifted out from under this gate and two
         // zero-artifact runs got banked as done (2026-09-16, #73/#131).
-        const outcome = persistRunOutcome({ kind, cleanExit, sawError, emittedText, persisted, timedOut, checkupAlreadyCurrentStar });
-        if (outcome.ok && kind === "evaluate") {
+        const outcome = persistRunOutcome({ kind, cleanExit, sawError, emittedText, persisted, timedOut, checkupAlreadyCurrentStar, blacklistGate: !!detectBlacklistGate(stdoutTail) });
+        if (outcome.ok && kind === "evaluate" && !outcome.blockedByBlacklist) {
           // Archiving the inbox row is route work after the CLI is gone, and it
           // outlives this handler — the `finally` below must not close the run out
           // from under it (same shape as the pdf render path above).
@@ -921,9 +921,9 @@ async function runPipeline({
           return;
         }
         if (outcome.ok) {
-          if (outcome.alreadyCurrent) {
-            // 说明这个 done 为何没产出新产物，让任务卡片和轨迹显示「当天已体检」，
-            // 而不是看起来像静默空跑（这正是用来替换掉那条误导性的零产物 error 的）。
+          if (outcome.alreadyCurrent || outcome.blockedByBlacklist) {
+            // 说明这个 done 为何没产出新产物：体检是「当天已体检」，评估是「命中黑名单
+            // 门禁按规则停止」。让卡片显示可读原因，而不是看起来像静默空跑或失败。
             send({ type: "text", text: `\n\u2139\uFE0F ${outcome.message}\n` });
           }
           send(doneEvent());

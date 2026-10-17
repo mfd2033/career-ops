@@ -206,9 +206,11 @@ export function parseTrackerInterviewRows(content) {
 
 // --- Blacklist suggestion (suggestion-only, #1742/#1856) ---
 // Mirrors data/blacklist.md's table format (templates/blacklist.example.md):
-// | Company | Since | Scope | Reason |
+// | Company | Since | Scope | Exempt until | Reason |  (ADR-0084).
+// The suggested row ships an empty `Exempt until` cell — a fresh blacklist
+// entry is a hard gate by default; the user sets a date only to lift it.
 export function buildBlacklistSuggestion(company, todayStr, reason) {
-  return `| ${company} | ${todayStr} | company | ${reason} |`;
+  return `| ${company} | ${todayStr} | company |  | ${reason} |`;
 }
 
 /**
@@ -379,8 +381,8 @@ function printSummary(result, meta) {
     }
 
     console.log('\n  Suggested data/blacklist.md rows (copy manually — nothing is written for you):\n');
-    console.log('  | Company | Since | Scope | Reason |');
-    console.log('  |---------|-------|-------|--------|');
+    console.log('  | Company | Since | Scope | Exempt until | Reason |');
+    console.log('  |---------|-------|-------|--------------|--------|');
     for (const f of result.flags) {
       console.log('  ' + f.blacklistSuggestion);
     }
@@ -454,8 +456,8 @@ function runSelfTest() {
     check(acme.daysSinceLastInterview === 77, 'elapsed days computed from last interview to --today');
     check(acme.reason.includes('30-day courtesy threshold'), 'reason names the courtesy threshold');
     check(acme.reasonCode === 'courtesy-threshold-exceeded', 'flag carries the language-neutral reasonCode');
-    check(acme.blacklistSuggestion === '| Acme Corp | 2026-07-17 | company | ' + acme.reason + ' |',
-      'blacklist suggestion row matches data/blacklist.md column format');
+    check(acme.blacklistSuggestion === '| Acme Corp | 2026-07-17 | company |  | ' + acme.reason + ' |',
+      'blacklist suggestion row matches data/blacklist.md 5-column format (ADR-0084)');
     check(acme.trackerNums.includes(1), 'flag carries the tracker row number(s)');
   }
 

@@ -56,6 +56,7 @@ import { compileKeyword, compilePositiveKeyword, buildTitleFilter } from './titl
 import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 import { withPortalHealthLock } from './portal-health-lock.mjs';
 import { localToday } from './lib/local-today.mjs';
+import { parseBlacklist } from './lib/blacklist.mjs';
 
 try {
   const { config } = await import('dotenv');
@@ -1968,44 +1969,20 @@ export async function appendToScanHistory(offers, date, status = 'added') {
 const BLACKLIST_PATH = 'data/blacklist.md';
 
 /**
- * Parse the user's do-not-apply list (data/blacklist.md, user layer, opt-in).
- *
- * The file is a small markdown table the user owns:
- * `| Company | Since | Scope | Reason |`. Nothing here ever creates or writes
- * it — an absent file means no filtering. Companies are keyed with the same
- * normalization every tracker writer shares (normalizeCompany, #1460), so a
- * blacklist row "Acme Corp." still catches an ATS feed that says "acme corp".
- *
- * @param {string} text - Raw data/blacklist.md content.
- * @returns {Map<string, {company: string, since: string, scope: string, reason: string}>}
- *          Normalized company key → entry. First row wins on duplicate keys.
+ * parseBlacklist is the shared header-driven parser (ADR-0084), owned by
+ * lib/blacklist.mjs so scan.mjs and the web /api/blacklist route share ONE
+ * implementation. Re-exported here for back-compat with existing importers
+ * (tests and callers import it from scan.mjs). scan.mjs itself never honors
+ * the exemption date — the scan stays a hard gate.
  */
-export function parseBlacklist(text) {
-  const entries = new Map();
-  for (const line of String(text ?? '').replace(/\r/g, '').split('\n')) {
-    if (!line.trim().startsWith('|')) continue;
-    const cells = line.split('|').map(s => s.trim());
-    const company = cells[1] || '';
-    if (!company || /^[-: ]+$/.test(company)) continue; // separator row
-    if (company.toLowerCase() === 'company') continue;  // header row
-    const key = normalizeCompany(company);
-    if (!key || entries.has(key)) continue;
-    entries.set(key, {
-      company,
-      since: cells[2] || '',
-      scope: cells[3] || '',
-      reason: cells[4] || '',
-    });
-  }
-  return entries;
-}
+export { parseBlacklist };
 
 /**
  * Load data/blacklist.md if the user opted in. Absent file = empty Map = no
  * filtering anywhere — the scan stays byte-identical to a pre-#1742 run.
  *
  * @param {string} [filePath] - Override for tests.
- * @returns {Map<string, {company: string, since: string, scope: string, reason: string}>}
+ * @returns {Map<string, {company: string, since: string, scope: string, exemptUntil: string, reason: string}>}
  */
 export function loadBlacklist(filePath = BLACKLIST_PATH) {
   if (!existsSync(filePath)) return new Map();
