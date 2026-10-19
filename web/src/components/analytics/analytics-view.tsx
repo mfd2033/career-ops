@@ -13,6 +13,14 @@ import { UNKNOWN_EMPLOYER_SENTINEL } from "@/lib/unknown-employer.mjs";
 type StageCount = { key: string; n: number; href?: string };
 type Bucket = { label: string; n: number; href?: string };
 type Company = { name: string; n: number; href?: string };
+type PaceWeek = { week: string; count: number };
+type Pace = {
+  target: number;
+  thisWeek: string | null;
+  thisWeekCount: number;
+  belowTarget: boolean;
+  weeks: PaceWeek[];
+};
 
 export function AnalyticsView({
   total,
@@ -22,6 +30,7 @@ export function AnalyticsView({
   topCompanies,
   interviews,
   offers,
+  pace,
 }: {
   total: number;
   stageCounts: StageCount[];
@@ -30,6 +39,7 @@ export function AnalyticsView({
   topCompanies: Company[];
   interviews: number;
   offers: number;
+  pace: Pace;
 }) {
   const { t } = useI18n();
 
@@ -64,6 +74,11 @@ export function AnalyticsView({
           hint={offers === 0 ? t("analytics.stat.offersHint") : undefined}
         />
       </div>
+
+      {/* 周投递节奏卡 (CO-52)：本周投递 X/目标 进度条 + 近几周趋势，低于目标提示
+          补扫。节奏信号，不是一组可跳转的行，故整卡不接 href（不违反 ADR-0067
+          对统计卡的决议）。 */}
+      <PaceCard pace={pace} />
 
       <Section title={t("analytics.section.pipelineByStage")}>
         {stageCounts.map((s) => (
@@ -120,6 +135,62 @@ function Stat({ value, label, hint }: { value: number | string; label: string; h
           {hint}
         </Link>
       )}
+    </div>
+  );
+}
+
+// 周投递节奏卡 (CO-52)。节奏信号面板，非可下钻的一组行——整卡不接链接，
+// 遵守 analytics-drilldown 对统计区的守卫（不引入 href）。
+function PaceCard({ pace }: { pace: Pace }) {
+  const { t } = useI18n();
+  const pct = pace.target > 0 ? Math.min(100, (pace.thisWeekCount / pace.target) * 100) : 0;
+  const maxCount = Math.max(1, pace.target, ...pace.weeks.map((w) => w.count));
+  return (
+    <div className="mt-6 rounded-2xl border border-border bg-surface p-5">
+      <div className="flex items-baseline justify-between gap-3">
+        <h2 className="text-xs font-semibold uppercase tracking-[0.2em] text-muted">{t("analytics.pace.title")}</h2>
+        {pace.belowTarget && <span className="text-xs text-amber-500">{t("analytics.pace.rescanHint")}</span>}
+      </div>
+
+      <div className="mt-3 flex items-end justify-between gap-4">
+        <div>
+          <div className="text-3xl font-semibold tabular-nums">
+            {pace.thisWeekCount}
+            <span className="text-lg text-faint">/{pace.target}</span>
+          </div>
+          <div className="mt-1 text-xs text-faint">{t("analytics.pace.thisWeek")}</div>
+        </div>
+
+        {/* 近几周趋势小柱，当前周在最右。加一行标签说明这组柱子的含义，
+            否则裸露的 0/4/4/0 读不出是什么。 */}
+        <div className="flex flex-col items-end gap-1">
+          <span className="text-[10px] text-faint">{t("analytics.pace.trend")}</span>
+          <div className="flex items-end gap-1.5">
+            {pace.weeks.map((w) => (
+              <div key={w.week} className="flex flex-col items-center gap-1">
+                <div className="flex h-12 w-4 items-end overflow-hidden rounded-sm bg-foreground/10">
+                  <div
+                    className="w-full rounded-sm bg-foreground/25"
+                    style={{ height: `${(w.count / maxCount) * 100}%` }}
+                  />
+                </div>
+                <span className="text-[10px] tabular-nums text-faint">{w.count}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-4 h-2 overflow-hidden rounded-full bg-foreground/10">
+        <div
+          className={`h-full rounded-full ${
+            pace.belowTarget
+              ? "bg-gradient-to-r from-amber-500/60 to-amber-500/30"
+              : "bg-gradient-to-r from-emerald-500/60 to-emerald-500/30"
+          }`}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
     </div>
   );
 }

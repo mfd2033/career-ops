@@ -264,6 +264,23 @@ export function readApplications(): Application[] {
 }
 
 /**
+ * 周投递节奏目标 (CO-52) —— 读 config/profile.yml 的 `pace.weekly_applications_target`。
+ * 文件/键缺失或值非正 → 回退 8，与核心 stats.mjs 的 readPaceTarget() 同口径，
+ * 保证 CLI 报表与 Analytics 卡片对同一个 profile 给出同一个目标线。
+ */
+export function readWeeklyPaceTarget(): number {
+  try {
+    const doc = yaml.load(read("config/profile.yml") ?? "") as
+      | { pace?: { weekly_applications_target?: unknown } }
+      | null;
+    const v = Number(doc?.pace?.weekly_applications_target);
+    return Number.isFinite(v) && v > 0 ? Math.round(v) : 8;
+  } catch {
+    return 8;
+  }
+}
+
+/**
  * 评估用时 map (report number → latest eval session summary), from the user's
  * data/eval-timings.tsv — see CONTEXT.md「评估用时」and ADR-0016 for the
  * report-delivery-only scope. Missing file / empty data → {} (the UI shows "—").

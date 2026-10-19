@@ -1,6 +1,7 @@
-import { pipelineSummary } from "@/lib/career-ops";
+import { pipelineSummary, readWeeklyPaceTarget } from "@/lib/career-ops";
 import { canonStatus, scoreNum } from "@/lib/format";
 import { cumulativeTiles } from "@/lib/funnel-tiles.mjs";
+import { computeWeeklyPace } from "@/lib/weekly-pace.mjs";
 import { buildContextQuery } from "@/lib/pipeline-order.mjs";
 import { AnalyticsView } from "@/components/analytics/analytics-view";
 
@@ -53,6 +54,10 @@ export default function Analytics() {
   // everInterview/everOffer in stats.mjs's computeFunnel().
   const { interviews, offers } = cumulativeTiles(applications.map((a) => canonStatus(a.status)));
 
+  // 周投递节奏 (CO-52)：本周实际投递数 vs profile.yml 目标。口径镜像 stats.mjs，
+  // 卡片无下钻（进度/趋势是节奏信号，不是一组可跳转的行），故不接 href。
+  const pace = computeWeeklyPace(applications, { target: readWeeklyPaceTarget() });
+
   return (
     <AnalyticsView
       total={total}
@@ -62,6 +67,7 @@ export default function Analytics() {
       topCompanies={topCompanies}
       interviews={interviews}
       offers={offers}
+      pace={pace}
     />
   );
 }

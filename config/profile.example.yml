@@ -112,6 +112,14 @@ language:
 # See the tier -> model mapping table in modes/_shared.md.
 spend_tier: standard
 
+# Weekly application-pace target, read by `node stats.mjs` (pace section) and
+# shown as the "this week X / target" progress bar on the web Analytics page.
+# A week below the target is flagged so you know when to run a rescan. Set it to
+# the discipline you hold yourself to — 8-10 submissions/week is a common cadence.
+# Omit the block (or the key) to fall back to 8.
+# pace:
+#   weekly_applications_target: 8
+
 # (Optional) Visual theming for the generated CV and cover-letter PDFs (#1837).
 # Each token is injected as a CSS custom property that overrides the template
 # default — omit the block (or any key) to keep the built-in look unchanged.

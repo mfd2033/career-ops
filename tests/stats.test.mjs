@@ -93,6 +93,47 @@ try {
     fail(`isoWeek boundary math wrong: ${JSON.stringify(wk)}`);
   }
 
+  // Weekly pace (CO-52) — submissions per ISO week from the tracker's own dates,
+  // 0-filled trailing weeks so the current week always reads a progress number.
+  // Evaluated/SKIP/Discarded must NOT count (never sent); Applied/Rejected must.
+  const paceMd = [
+    '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |',
+    '|---|------|---------|------|-------|--------|-----|--------|-------|',
+    '| 1 | 2026-06-01 | Acme | Eng | 4.5/5 | Applied | ✅ | ❌ | sent |',
+    '| 2 | 2026-06-03 | Beta | Eng | 3.8/5 | Evaluated | ❌ | ❌ | not sent |',
+    '| 3 | 2026-06-04 | Gama | Eng | 4.2/5 | Rejected | ✅ | ❌ | was sent |',
+    '| 4 | 2026-06-10 | Delta | Eng | 4.0/5 | Applied | ✅ | ❌ | this week |',
+  ].join('\n');
+  // now = 2026-06-10 (a Wednesday) so the current bucket is the week of 06-08;
+  // rows 06-01/03/04 fall in the prior week, row 06-10 in the current week.
+  const pace = stats.computePaceStats(paceMd, { target: 3, weeks: 2, now: new Date('2026-06-10T12:00:00Z') });
+  const priorBucket = pace.weeks[0];
+  if (pace.target === 3 && pace.thisWeek === stats.isoWeek('2026-06-10')
+      && pace.thisWeekCount === 1 && pace.belowTarget === true
+      && priorBucket.count === 2 && pace.weeks.length === 2
+      && pace.weeks[1].count === 1) {
+    pass('computePaceStats counts only submissions per week and 0-fills the trailing window');
+  } else {
+    fail(`computePaceStats wrong output: ${JSON.stringify(pace)}`);
+  }
+  // Current week >= target flips belowTarget off.
+  const paceMet = stats.computePaceStats(paceMd, { target: 1, weeks: 1, now: new Date('2026-06-10T12:00:00Z') });
+  if (paceMet.thisWeekCount === 1 && paceMet.belowTarget === false) {
+    pass('computePaceStats clears belowTarget once the week meets the target');
+  } else {
+    fail(`computePaceStats belowTarget wrong: ${JSON.stringify(paceMet)}`);
+  }
+
+  // pace target reader — explicit value wins; missing/absent falls back to 8.
+  if (stats.readPaceTarget('pace:\n  weekly_applications_target: 10\n') === 10
+      && stats.readPaceTarget('') === 8 && stats.readPaceTarget(null) === 8
+      && stats.readPaceTarget('candidate:\n  full_name: x\n') === 8
+      && stats.readPaceTarget('pace:\n  weekly_applications_target: 0\n') === 8) {
+    pass('readPaceTarget reads pace.weekly_applications_target with an 8 fallback');
+  } else {
+    fail('readPaceTarget fallback/explicit math wrong');
+  }
+
   // Portal coverage — real portals.yml keys (tracked_companies / job_boards).
   const portalsYml = [
     'tracked_companies:',

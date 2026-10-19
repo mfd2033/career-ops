@@ -33,6 +33,7 @@ const FOLLOWUPS_FILE = join(ROOT, 'data', 'follow-ups.md');
 const SCAN_RUNS_FILE = join(ROOT, 'data', 'scan-runs.tsv');
 const PORTALS_FILE = join(ROOT, 'portals.yml');
 const PORTAL_HEALTH_FILE = join(ROOT, 'data', 'portal-health.tsv');
+const PROFILE_FILE = join(ROOT, 'config', 'profile.yml');
 
 const CANONICAL_STATUSES = ['Evaluated', 'Applied', 'Responded', 'Interview', 'Offer', 'Hired', 'Rejected', 'Discarded', 'SKIP'];
 
@@ -46,6 +47,12 @@ const ACTIVE_STATUSES = new Set(['Applied', 'Responded', 'Interview', 'Offer']);
 // Plain avgScore mixes in SKIP/Discarded and understates real fit. Hired is
 // the fullest pursuit of all, so it belongs here.
 const PURSUED_STATUSES = new Set(['Applied', 'Responded', 'Interview', 'Offer', 'Hired', 'Rejected']);
+
+// Weekly application-pace submissions (CO-52). Deliberately the SAME set the
+// funnel calls everApplied — a rejection or a landed job both prove a real
+// submission, while Evaluated/SKIP/Discarded never left the drafts folder, so
+// counting them would inflate "本周投递" with work that was never sent.
+const SUBMITTED_STATUSES = PURSUED_STATUSES;
 
 const round1 = (n) => Math.round(n * 10) / 10;
 const pct = (part, total) => (total > 0 ? round1((part / total) * 100) : 0);
@@ -242,6 +249,77 @@ export function scanCompanyNames(content) {
     if (company) names.add(company.toLowerCase());
   }
   return [...names];
+}
+
+// ── Weekly application pace ──────────────────────────────
+
+/**
+ * Read the weekly application-pace target from config/profile.yml
+ * (`pace.weekly_applications_target`). Missing file / key / non-positive value
+ * falls back to 8 — the 8-10/week discipline the card is built around. Never
+ * throws: a malformed profile must not crash a stats run.
+ *
+ * @param {string|null} profileContent - Raw config/profile.yml text.
+ * @param {number} [fallback=8]
+ */
+export function readPaceTarget(profileContent, fallback = 8) {
+  if (!profileContent) return fallback;
+  try {
+    const doc = yaml.load(String(profileContent)) || {};
+    const v = Number(doc?.pace?.weekly_applications_target);
+    return Number.isFinite(v) && v > 0 ? Math.round(v) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+/**
+ * Weekly application pace (CO-52) — mirrors computeScanStats's weekCounts
+ * pattern but sourced from the tracker's own dates instead of scan-history.
+ * Counts rows whose canonical status proves a submission (SUBMITTED_STATUSES),
+ * bucketed by the ISO week of the row's Date. The `weeks` trailing calendar
+ * weeks are always emitted oldest→newest, 0-filled even when a week logged
+ * nothing, so "本周投递" reads a real progress bar at zero rather than vanishing.
+ *
+ * Known limitation (same as the funnel): a status is a snapshot and Date is the
+ * row's initial log date, so a row evaluated one week and applied the next
+ * counts in the evaluation week. Acceptable for a pace signal; the precise
+ * transition date lives in data/status-log.tsv if this ever needs to tighten.
+ *
+ * @param {string} content - Raw applications.md text.
+ * @param {{target?: number, weeks?: number, now?: Date}} [opts]
+ */
+export function computePaceStats(content, { target = 8, weeks = 4, now = new Date() } = {}) {
+  const lines = String(content ?? '').replace(/\r/g, '').split('\n');
+  const colmap = resolveColumns(lines);
+  const weekCounts = new Map();
+  for (const line of lines) {
+    const row = parseTrackerRow(line, colmap);
+    if (!row) continue;
+    if (!SUBMITTED_STATUSES.has(canonicalStatus(row.status))) continue;
+    const date = String(row.date || '').trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
+    const wk = isoWeek(date);
+    if (wk) weekCounts.set(wk, (weekCounts.get(wk) || 0) + 1);
+  }
+  // Walk back `weeks - 1` days*7 from "now" so the current calendar week is
+  // always the last bucket, whether or not it has logged anything yet.
+  const bucketWeeks = [];
+  for (let i = weeks - 1; i >= 0; i--) {
+    const d = new Date(now.getTime());
+    d.setUTCDate(d.getUTCDate() - i * 7);
+    const wk = isoWeek(d.toISOString().slice(0, 10));
+    if (wk) bucketWeeks.push({ week: wk, count: weekCounts.get(wk) || 0 });
+  }
+  const thisWeek = bucketWeeks.length ? bucketWeeks[bucketWeeks.length - 1].week : null;
+  const thisWeekCount = bucketWeeks.length ? bucketWeeks[bucketWeeks.length - 1].count : 0;
+  return {
+    target,
+    thisWeek,
+    thisWeekCount,
+    belowTarget: thisWeekCount < target,
+    weeks: bucketWeeks,
+  };
 }
 
 // ── Portal coverage ─────────────────────────────────────────────────
@@ -476,6 +554,7 @@ export function computeAllStats({
   scanRunsFile = SCAN_RUNS_FILE,
   portalsFile = PORTALS_FILE,
   portalHealthFile = PORTAL_HEALTH_FILE,
+  profileFile = PROFILE_FILE,
 } = {}) {
   const read = (f) => (existsSync(f) ? readFileSync(f, 'utf-8') : null);
   const apps = read(appsFile);
@@ -484,6 +563,7 @@ export function computeAllStats({
   const portals = read(portalsFile);
   const runs = read(scanRunsFile);
   const portalHealth = read(portalHealthFile);
+  const profile = read(profileFile);
   const trackerBase = apps ? computeTrackerStats(apps) : null;
   const scan = scanHist ? computeScanStats(scanHist) : null;
 
@@ -521,11 +601,13 @@ export function computeAllStats({
         portals: !!portals,
         scanRuns: !!runs,
         portalHealth: !!portalHealth,
+        profile: !!profile,
       },
     },
     tracker,
     funnel: tracker ? computeFunnel(tracker.byStatus) : null,
     scan,
+    pace: apps ? computePaceStats(apps, { target: readPaceTarget(profile) }) : null,
     portals: portals ? computePortalStats(portals, scan, scanHist ? scanCompanyNames(scanHist) : [], portalHealth) : null,
     followups: fups && apps ? computeFollowupStats(fups, trackerStatusByNum(apps)) : null,
     runs: runs ? computeRunStats(runs) : null,
@@ -564,6 +646,12 @@ function printSummary(stats) {
     console.log(`Scanner:    ${s.totalRecorded} jobs recorded${s.firstSeen ? ` since ${s.firstSeen}` : ''} | ${s.added} added | ${s.distinctCompanies} companies${portalsLine ? ` | ${portalsLine}` : ''}`);
   } else {
     console.log('Scanner:    — no data (data/scan-history.tsv missing)');
+  }
+  const pace = stats.pace;
+  if (pace) {
+    const trend = pace.weeks.map((w) => w.count).join('→');
+    const flag = pace.belowTarget ? ' · ⚠️ 低于目标，建议补扫' : '';
+    console.log(`Pace:       本周 ${pace.thisWeekCount}/${pace.target}${pace.thisWeek ? ` (${pace.thisWeek})` : ''} | 近${pace.weeks.length}周 ${trend}${flag}`);
   }
   const p = stats.portals;
   if (p) {
