@@ -22,7 +22,7 @@ import { normalizeReportLink as normalizeLink } from './tracker-links.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
 import { parsePdfIndex } from './find.mjs';
 import { LEGACY_COLMAP, detectColumns, isHeaderRow, resolveScoreStatus, normalizeVia, SEPARATOR_ROW_RE } from './tracker-parse.mjs';
-import { resolveTrackerPath, resolveWorkspaceRoot, resolvePdfIndexPath, trackerLockDirFor, acquireTrackerLock, writeFileAtomic, normalizeCompany, cell } from './tracker-utils.mjs';
+import { resolveTrackerPath, resolveWorkspaceRoot, resolvePdfIndexPath, trackerLockDirFor, acquireTrackerLock, writeFileAtomic, normalizeCompany, cell, buildTrackerRow } from './tracker-utils.mjs';
 // Canonical posting-URL key. Kept in its own module so scan.mjs / scan-history
 // can adopt the same key later without the definitions drifting.
 import { normalizeUrl } from './url-key.mjs';
@@ -486,69 +486,15 @@ let COLMAP = LEGACY_COLMAP;
 // width implied by COLMAP.
 let HEADER_WIDTH = null;
 
-// Build a tracker row string matching the detected layout. Every field
-// career-ops knows about is placed at ITS OWN detected index, and any column
-// the header declares but career-ops has no value for becomes '—'.
+// Build a tracker row string matching the detected layout.
 //
-// The previous implementation appended a fixed tail (score, status, pdf,
-// report, notes, [url]) after the optional Via/Location columns. That silently
-// produced a row NARROWER than the header on any tracker with extra columns —
-// e.g. a 10-column `… | Materials | Apply Link | Follow-up | Notes` layout got
-// 9-cell rows. Such rows are unparseable by set-status.mjs (its column map is
-// header-derived), so those applications became unaddressable: the status could
-// no longer be changed through the supported path.
+// The implementation now lives in tracker-utils.mjs (buildTrackerRow) so the
+// three row writers — this merge, tracker-add.mjs and tracker-edit.mjs — cannot
+// disagree about the shape of a row on a customized header. This wrapper only
+// binds the module-level layout state those functions don't own: COLMAP and
+// HEADER_WIDTH are reassigned once the table has been read.
 function buildRow(o) {
-  const width = HEADER_WIDTH ?? (Math.max(...Object.values(COLMAP)) + 2);
-  // index 0 is the empty string left of the leading pipe; index `width - 1` is
-  // the one right of the trailing pipe. Data cells live in between.
-  const cells = new Array(Math.max(0, width - 2)).fill('—');
-  // Rebuilding an EXISTING row (PDF sync, re-evaluation update, URL backfill):
-  // start from the row's current cells so values in columns career-ops has no
-  // field for — a hand-entered Apply Link, a Follow-up date — survive the
-  // rebuild. parseAppLine only carries the mapped fields, so without this the
-  // '—' fill above would overwrite those user-owned cells on every update.
-  // Copied verbatim (empty cells included); the put() calls below then
-  // overwrite only the fields career-ops owns. New rows pass no `raw` and keep
-  // the plain '—' fill.
-  if (o.raw) {
-    const prev = String(o.raw).split('|').map(s => s.trim());
-    for (let i = 0; i < cells.length; i++) {
-      if (prev[i + 1] !== undefined) cells[i] = prev[i + 1];
-    }
-  }
-  const put = (key, value) => {
-    const idx = COLMAP[key];
-    if (idx == null) return false;
-    const at = idx - 1; // shift past the pre-pipe empty cell
-    if (at < 0 || at >= cells.length) return false;
-    cells[at] = value;
-    return true;
-  };
-
-  put('num', o.num);
-  put('date', o.date);
-  put('company', cell(o.company));
-  put('via', cell(o.via) || '—');
-  put('role', cell(o.role));
-  put('location', cell(o.location) || '—');
-  put('score', o.score);
-  put('status', o.status);
-  put('pdf', o.pdf);
-  // Optional trailing URL column — the stable natural key.
-  put('url', cell(o.url) || '');
-
-  // A layout with no dedicated Report column keeps the link in Notes, mirroring
-  // how extractReportNum already READS it back. Without this the link would be
-  // dropped outright on such trackers.
-  let notes = cell(o.notes);
-  if (!put('report', o.report) && o.report && String(o.report).trim() !== '—') {
-    const link = String(o.report).trim();
-    if (notes && !notes.includes(link)) notes = `${notes.replace(/\s*$/, '')} Report: ${link}.`;
-    else if (!notes) notes = `Report: ${link}.`;
-  }
-  put('notes', notes);
-
-  return `| ${cells.join(' | ')} |`;
+  return buildTrackerRow(o, { colmap: COLMAP, width: HEADER_WIDTH });
 }
 
 // Header + separator for the DETECTED layout, mirroring buildRow's column

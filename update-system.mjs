@@ -173,6 +173,8 @@ const SYSTEM_PATHS = [
   'sync-pdf-flags.mjs',
   'tracker-links.mjs',
   'tracker.mjs',
+  'tracker-add.mjs',
+  'tracker-edit.mjs',
   'find.mjs',
   'verify-pipeline.mjs',
   'reconcile-pipeline.mjs',

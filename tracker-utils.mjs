@@ -56,6 +56,78 @@ export function rebuildRow(parts) {
 }
 
 /**
+ * Build a markdown table row for the tracker's ACTUAL layout.
+ *
+ * Every field career-ops knows about is placed at ITS OWN detected index, and
+ * any column the header declares but career-ops has no value for becomes `—`.
+ * Driving the width from the header (not from a fixed column list) is what lets
+ * a customized table — an extra Location, Apply Link or Follow-up column — keep
+ * its shape: a row narrower than the header is unparseable by the
+ * header-derived readers (parseTrackerRow), so those applications would become
+ * unaddressable by every supported write path.
+ *
+ * Rebuilding an EXISTING row (pass `raw`) starts from the row's current cells so
+ * values in columns career-ops has no field for survive the rebuild — the put()
+ * calls below only overwrite the cells career-ops owns. A NEW row passes no
+ * `raw` and keeps the plain `—` fill.
+ *
+ * Shared by merge-tracker.mjs (batch insert + in-place updates), tracker-add.mjs
+ * and tracker-edit.mjs so the row shape can't drift between writers (the
+ * historical failure: merge-tracker emitted 9-cell rows into a 10-cell table).
+ *
+ * @param {object} fields - Field values keyed by canonical name (see tracker-aliases.json).
+ * @param {object} layout
+ * @param {Object<string,number>} layout.colmap - Field → column index (resolveColumns()).
+ * @param {number|null} [layout.width] - Header cell count; falls back to colmap's implied width.
+ * @returns {string} The rebuilt `| a | b | … |` row.
+ */
+export function buildTrackerRow(fields, { colmap, width = null }) {
+  const totalWidth = width ?? (Math.max(...Object.values(colmap)) + 2);
+  // index 0 is the empty string left of the leading pipe; index `totalWidth - 1`
+  // is the one right of the trailing pipe. Data cells live in between.
+  const cells = new Array(Math.max(0, totalWidth - 2)).fill('—');
+  if (fields.raw) {
+    const prev = String(fields.raw).split('|').map(s => s.trim());
+    for (let i = 0; i < cells.length; i++) {
+      if (prev[i + 1] !== undefined) cells[i] = prev[i + 1];
+    }
+  }
+  const put = (key, value) => {
+    const idx = colmap[key];
+    if (idx == null) return false;
+    const at = idx - 1; // shift past the pre-pipe empty cell
+    if (at < 0 || at >= cells.length) return false;
+    cells[at] = value;
+    return true;
+  };
+
+  put('num', fields.num);
+  put('date', fields.date);
+  put('company', cell(fields.company));
+  put('via', cell(fields.via) || '—');
+  put('role', cell(fields.role));
+  put('location', cell(fields.location) || '—');
+  put('score', fields.score);
+  put('status', fields.status);
+  put('pdf', fields.pdf);
+  // Optional trailing URL column — the stable natural key.
+  put('url', cell(fields.url) || '');
+
+  // A layout with no dedicated Report column keeps the link in Notes, mirroring
+  // how extractTrackerReportNumbers already READS it back. Without this the link
+  // would be dropped outright on such trackers.
+  let notes = cell(fields.notes);
+  if (!put('report', fields.report) && fields.report && String(fields.report).trim() !== '—') {
+    const link = String(fields.report).trim();
+    if (notes && !notes.includes(link)) notes = `${notes.replace(/\s*$/, '')} Report: ${link}.`;
+    else if (!notes) notes = `Report: ${link}.`;
+  }
+  put('notes', notes);
+
+  return `| ${cells.join(' | ')} |`;
+}
+
+/**
  * Normalize company names for same-company lookups across tracker scripts.
  *
  * Company names can contain spaces, punctuation, or branding variants in the
@@ -216,6 +288,37 @@ export function trackerLockDirFor(appsFile) {
   if (!pathIsInside(canonicalParent, tmpRoot)) return fallback;
   if (!basename(candidate).startsWith('career-ops-merge-tracker-')) return fallback;
   return candidate;
+}
+
+/**
+ * Observe (never acquire) the shared tracker lock.
+ *
+ * A pre-flight probe needs to answer "is another writer busy right now?" without
+ * taking the lock itself — acquiring it would either block behind the writer we
+ * are reporting or, worse, make the probe the holder and turn every concurrent
+ * reader into a false "busy".
+ *
+ * It lives here, next to `trackerLockDirFor`, because the lock directory is named
+ * from a hash of the canonical tracker path: a second copy of that rule anywhere
+ * else would drift and then silently probe a directory nobody locks.
+ *
+ * The owner metadata is best-effort. A directory with no readable `owner.json` is
+ * still a lock in flight (its winner sits between `mkdirSync` and the metadata
+ * write), so `held` is decided by the directory alone and `owner` may be null.
+ *
+ * @param {string} appsFile - Tracker path (canonicalized here).
+ * @returns {{held: boolean, owner: {pid?: number, token?: string, started_at?: string}|null, lockDir: string}}
+ */
+export function probeTrackerLock(appsFile) {
+  const lockDir = trackerLockDirFor(canonicalizeTrackerPath(appsFile));
+  if (!existsSync(lockDir)) return { held: false, owner: null, lockDir };
+  let owner = null;
+  try {
+    owner = JSON.parse(readFileSync(join(lockDir, 'owner.json'), 'utf-8'));
+  } catch {
+    owner = null;
+  }
+  return { held: true, owner, lockDir };
 }
 
 /**

@@ -121,6 +121,8 @@ AI-powered, CLI-agnostic job search automation: pipeline tracking, offer evaluat
 | `scan-interamt.mjs` | Playwright browser scanner for Interamt.de (German public sector portal — Apache Wicket, no REST API) |
 | `check-liveness.mjs` / `liveness-core.mjs` | Job posting liveness checker + shared logic (expired signals win over generic Apply text) |
 | `set-status.mjs` | Canonical tracker-row update: `node set-status.mjs <report#\|company> <State> [--note] [--force]` — strict states.yml validation, report-link mismatch guard, shared lock, atomic write |
+| `tracker-add.mjs` | Canonical single-row INSERT (`--company`/`--role` + optional date/via/url/score/status/note): locked read-modify-write, URL→company+role dedup (a duplicate returns the existing row's number, not a new row), states.yml validation. Backs `POST /api/tracker` and `PUT /api/tracker/upsert` |
+| `tracker-edit.mjs` | Canonical single-row field EDIT (`--row N` + whitelisted fields); a status change reuses the states.yml check and writes the same status-log line as set-status; refuses the write if the markdown changed inside its lock window. Backs `PATCH /api/tracker/[id]` |
 | `invite-match.mjs` | Fuzzy-match a pasted interview invite (company, date, req ID) against the tracker, ranking candidates when a company has multiple entries (JSON or `--summary`) |
 | `paste-reply.mjs` | Manual/no-Gmail input into reply-watch classification — normalizes a pasted/file email (subject/from/body) and appends to `data/reply-candidates.json`; never overwrites entries, never classifies, never touches the tracker |
 | `analyze-patterns.mjs` | Pattern analysis incl. per-ATS-vendor advance rate (JSON) |

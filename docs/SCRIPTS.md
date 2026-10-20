@@ -712,17 +712,51 @@ node tracker.mjs sync --check             # diagnose corruption only, no write (
 node tracker.mjs query --status Applied --since 2026-05-01
 node tracker.mjs query --company acme --json
 node tracker.mjs history --id 42          # status transitions observed across syncs (Applied → Interview → ...)
+node tracker.mjs history --id 42 --json   # {num, company, role, status, events[]}
+node tracker.mjs health                   # pre-flight: diagnostics + tracker lock state
 node tracker.mjs export                   # inverse: index → canonical markdown table on stdout
 node tracker.mjs export --out repaired.md # write to a file (existing file backed up to .bak first)
 ```
 
-`query` and `history` auto-resync when the markdown changed since the last sync, so the index can never serve stale reads.
+`query` and `history` auto-resync when the markdown changed since the last sync, so the index can never serve stale reads. `history`, `sync` and `health` accept `--json`, which puts one JSON document on stdout LAST (human diagnostics stay on stderr) — `sync --check --json` reports its findings as `issues[]` instead of prose, and `health --json` adds `lockHeld`/`lockOwner` from the shared tracker lock directory.
 
 `sync` detects and reports the corruption classes markdown accumulates — mojibake placeholder cells, scores stranded in the status column, non-canonical statuses (resolved via `templates/states.yml` aliases), missing/duplicate ids, stray pipes — and normalizes them **in the index only**; the markdown is never modified. Fix at the source with `normalize-statuses.mjs` / `dedup-tracker.mjs`, then re-sync. Status changes between syncs accumulate in a `status_events` table, which gives `analyze-patterns.mjs` a real funnel instead of only the current snapshot.
 
 `export` is the inverse of `sync` (round-trip `md → db → md` is lossless for clean input — enforced by `test-all.mjs`). It writes to stdout by default and never touches `applications.md` unless you explicitly pass it as `--out`. Phase 2 of #918 (DB becomes source of truth, markdown becomes a rendered view) is a separate, explicit per-user opt-in — not part of this script yet.
 
 **Exit codes:** `0` success, `1` validation error, missing prerequisites (Node < 22.5, no `applications.md` to index), or corruption found by `sync --check`.
+
+---
+
+## tracker-add
+
+Canonical CLI to append **one** row to `data/applications.md` — the writer behind `POST /api/tracker` and `PUT /api/tracker/upsert`. Every other tracker writer already existed (status, PDF cell, batch TSV merge); a machine caller wanting to create a row had to edit the markdown, which bypasses the lock and the canonical-state check.
+
+```bash
+node tracker-add.mjs --company "Acme" --role "Engineer" --url https://acme.test/jobs/1 --json
+node tracker-add.mjs --company "Acme" --role "Engineer" --update-on-match --note "recruiter call"
+```
+
+De-duplicates on the normalized posting URL (`url-key.mjs`); without a usable URL it falls back to the company key + fuzzy role match (`role-matcher.mjs`), with any **conflicting** URL treated as proof the rows differ. A duplicate is a **success**, not an error: it reports the existing row's number as `verdict: "duplicate"` and writes nothing, so a retried create cannot produce a second row. `--update-on-match` turns that into an in-place update of the supplied fields (`verdict: "updated"`).
+
+The read-modify-write runs under the shared tracker lock with an atomic replace, and the row is built to the header's real width — extra columns the user added (Apply Link, Follow-up) keep their shape instead of being dropped.
+
+**Exit codes:** `0` success (including the duplicate verdict), `1` usage / non-canonical state / unreadable `states.yml` / write failure, `2` no tracker file, `4` tracker lock timeout (retry later).
+
+---
+
+## tracker-edit
+
+Canonical CLI to edit the fields of **one existing** row — the writer behind `PATCH /api/tracker/[id]`. `set-status.mjs` owns the Status cell; this owns the rest (date, company, role, via, url, score, notes), so field edits no longer mean hand-editing markdown outside the lock.
+
+```bash
+node tracker-edit.mjs --row 42 --score 4.6/5 --note "moved to final round" --json
+node tracker-edit.mjs --row 42 --status Interview --source web
+```
+
+Only the named cells change; every other byte round-trips. A field the tracker has no column for is refused (`no-column`) rather than dropped silently. `--note` **replaces** the Notes cell — use `set-status.mjs --note` to append. A status change goes through `templates/states.yml` and appends the same transition-ledger line `set-status.mjs` writes (closed-set source column), so `funnel-velocity.mjs` counts it. The content hash is re-checked immediately before the write: the lock serializes cooperating writers, so a change there means something wrote the tracker **without** the lock, and the edit is refused (`concurrent-modification`) instead of overwriting it.
+
+**Exit codes:** `0` success (including a no-op re-run), `1` usage / non-canonical state / missing column / write failure, `2` row or tracker not found, `3` duplicate row number or concurrent modification, `4` tracker lock timeout (retry later).
 
 ---
 

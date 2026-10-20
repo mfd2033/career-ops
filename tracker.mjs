@@ -22,16 +22,21 @@
  * Zero new dependencies — uses node:sqlite (built into Node >= 22.5).
  *
  * Usage:
- *   node tracker.mjs sync [--check]             # (re)build applications.db from applications.md
+ *   node tracker.mjs sync [--check] [--json]  # (re)build applications.db from applications.md
  *                                               # --check: diagnose only, no write; exit 1 if issues found
  *   node tracker.mjs query [--status Applied] [--company acme] [--role designer]
  *                          [--since 2026-01-01] [--id N] [--limit 20] [--json]
- *   node tracker.mjs history --id N             # status transition log observed across syncs
+ *   node tracker.mjs history --id N [--json]    # status transition log observed across syncs
+ *   node tracker.mjs health [--json]            # pre-flight: diagnostics + tracker lock state
  *   node tracker.mjs export [--out FILE]        # inverse: applications.db → canonical markdown (stdout by default)
  *   node tracker.mjs delete --num N [--dry-run] # remove one application row from applications.md + reindex
  *
  * query/history auto-resync when applications.md changed since the last sync,
  * so the index can never serve stale reads.
+ *
+ * sync/history/health each put ONE JSON document on stdout LAST when --json is
+ * passed (the human-readable diagnostics stay on stderr), so a machine caller
+ * can read the result from the end of the stream.
  */
 
 import { realpathSync,  readFileSync, copyFileSync, existsSync, mkdirSync, statSync } from 'fs';
@@ -41,7 +46,7 @@ import { pathToFileURL } from 'url';
 import * as yaml from 'js-yaml';
 import { resolveColumns } from './tracker-parse.mjs';
 import {
-  canonicalizeTrackerPath, openTrackerTransaction, writeFileAtomic,
+  canonicalizeTrackerPath, openTrackerTransaction, probeTrackerLock, writeFileAtomic,
 } from './tracker-utils.mjs';
 
 const MD_PATH = process.env.CAREER_OPS_TRACKER || 'data/applications.md';
@@ -283,6 +288,28 @@ function mdHash() {
 
 // ── Sync (markdown → derived index) ─────────────────────────────────
 
+/**
+ * The diagnostics as structured issues, for the JSON output.
+ *
+ * `reportDiagnostics` prints prose for a human; the HTTP layer needs the same
+ * findings as data so it can answer `data.issues` instead of re-parsing English
+ * off stderr. Both are built from ONE diag object, so the list and the message
+ * can never disagree about what was found.
+ *
+ * @param {{[key:string]: number}} diag - Counters from parseTracker().
+ * @returns {{code:string, count:number, message:string}[]} One entry per non-zero counter.
+ */
+function diagnosticsToIssues(diag) {
+  const issues = [];
+  if (diag.mojibake) issues.push({ code: 'mojibake', count: diag.mojibake, message: 'mojibake placeholder cell(s)' });
+  if (diag.scoreInStatus) issues.push({ code: 'score-in-status', count: diag.scoreInStatus, message: 'score(s) sitting in the status column' });
+  if (diag.unknownStatus) issues.push({ code: 'unknown-status', count: diag.unknownStatus, message: 'non-canonical status(es), indexed as Evaluated (original kept in notes)' });
+  if (diag.badId) issues.push({ code: 'bad-id', count: diag.badId, message: 'missing/duplicate id(s), reassigned in the index' });
+  if (diag.badDate) issues.push({ code: 'bad-date', count: diag.badDate, message: 'malformed date(s), kept as-is' });
+  if (diag.strayPipes) issues.push({ code: 'stray-pipes', count: diag.strayPipes, message: 'row(s) with stray pipes, folded into notes' });
+  return issues;
+}
+
 function reportDiagnostics(diag) {
   const total = Object.values(diag).reduce((a, b) => a + b, 0);
   if (total === 0) {
@@ -334,7 +361,9 @@ function syncIndex(db, states) {
 }
 
 async function sync(args) {
+  const json = args.includes('--json');
   if (!existsSync(MD_PATH)) {
+    if (json) console.log(JSON.stringify({ ok: false, error: `${MD_PATH} not found — nothing to index.`, code: 'no-tracker' }));
     console.error(`Error: ${MD_PATH} not found — nothing to index.`);
     process.exit(1);
   }
@@ -342,10 +371,22 @@ async function sync(args) {
 
   if (args.includes('--check')) {
     const { apps, diag } = parseTracker(states);
+    const issues = diagnosticsToIssues(diag);
     console.error(`Parsed ${apps.length} data rows from ${MD_PATH}`);
-    const issues = reportDiagnostics(diag);
+    const problems = reportDiagnostics(diag);
     console.error('(--check — no index written)');
-    process.exit(issues > 0 ? 1 : 0);
+    if (json) {
+      console.log(JSON.stringify({
+        ok: issues.length === 0,
+        checkOnly: true,
+        wrote: false,
+        mdPath: MD_PATH,
+        dbPath: DB_PATH,
+        rowCount: apps.length,
+        issues,
+      }, null, 2));
+    }
+    process.exit(problems > 0 ? 1 : 0);
   }
 
   const DatabaseSync = await loadSqlite();
@@ -353,6 +394,17 @@ async function sync(args) {
   const { apps, diag } = syncIndex(db, states);
   console.error(`Indexed ${apps.length} applications from ${MD_PATH} into ${DB_PATH}`);
   reportDiagnostics(diag);
+  if (json) {
+    console.log(JSON.stringify({
+      ok: true,
+      checkOnly: false,
+      wrote: true,
+      mdPath: MD_PATH,
+      dbPath: DB_PATH,
+      rowCount: apps.length,
+      issues: diagnosticsToIssues(diag),
+    }, null, 2));
+  }
 }
 
 // query/history must never serve stale reads: if the markdown changed since
@@ -425,17 +477,91 @@ async function query(args) {
 }
 
 async function history(args) {
+  const json = args.includes('--json');
   const DatabaseSync = await loadSqlite();
   const db = openDb(DatabaseSync);
   ensureFresh(db, loadStates());
   const id = parseInt(flagValue(args, '--id') || '', 10);
-  if (!Number.isInteger(id)) { console.error('Error: history requires --id N'); process.exit(1); }
+  if (!Number.isInteger(id)) {
+    if (json) console.log(JSON.stringify({ error: 'history requires --id N', code: 'usage' }));
+    console.error('Error: history requires --id N');
+    process.exit(1);
+  }
   const app = db.prepare('SELECT * FROM applications WHERE id = ?').get(id);
-  if (!app) { console.error(`Error: no application with id ${id}`); process.exit(1); }
+  if (!app) {
+    // `code: not-found` (not the exit code) is what tells the HTTP layer this is
+    // a 404 rather than a broken run: the human path keeps its historical exit 1.
+    if (json) console.log(JSON.stringify({ error: `no application with id ${id}`, code: 'not-found' }));
+    console.error(`Error: no application with id ${id}`);
+    process.exit(1);
+  }
+  const events = db.prepare('SELECT status, date FROM status_events WHERE app_id = ? ORDER BY id').all(id);
+  if (json) {
+    console.log(JSON.stringify({
+      num: app.id,
+      company: app.company,
+      role: app.role,
+      status: app.status,
+      events: events.map(e => ({ status: e.status, date: e.date })),
+    }, null, 2));
+    return;
+  }
   console.log(`#${app.id} ${app.company} — ${app.role}`);
-  for (const e of db.prepare('SELECT status, date FROM status_events WHERE app_id = ? ORDER BY id').all(id)) {
+  for (const e of events) {
     console.log(`  ${e.date}  ${e.status}`);
   }
+}
+
+// ── Health (pre-flight probe) ───────────────────────────────────────
+
+/**
+ * Answer "is it safe to write the tracker right now, and is it intact?" in one
+ * call: the same diagnostics `sync --check` reports, plus whether another
+ * process currently holds the shared tracker lock.
+ *
+ * Read-only by construction — it parses the markdown and stats the lock
+ * directory, never builds or writes the index, never acquires the lock.
+ *
+ * The lock probe lives in the core (tracker-utils.mjs) rather than in the HTTP
+ * layer because the lock directory name is a hash of the canonical tracker path;
+ * a second copy of that rule in the web app would drift and then quietly probe a
+ * directory nobody locks. It only OBSERVES the lock — this subcommand must never
+ * take it, or the probe would become the holder it is trying to report.
+ *
+ * @param {string[]} args - CLI args after the subcommand; `--json` switches output.
+ * @returns {Promise<void>}
+ */
+async function health(args) {
+  const json = args.includes('--json');
+  if (!existsSync(MD_PATH)) {
+    if (json) console.log(JSON.stringify({ ok: false, error: `${MD_PATH} not found`, code: 'no-tracker' }));
+    console.error(`Error: ${MD_PATH} not found`);
+    process.exit(1);
+  }
+  const states = loadStates();
+  const { apps, diag } = parseTracker(states);
+  const issues = diagnosticsToIssues(diag);
+
+  const { held: lockHeld, owner: lockOwner } = probeTrackerLock(MD_PATH);
+  const ok = issues.length === 0 && !lockHeld;
+  const report = {
+    ok,
+    mdPath: MD_PATH,
+    dbPath: DB_PATH,
+    rowCount: apps.length,
+    issues,
+    lockHeld,
+    ...(lockHeld ? { lockOwner } : {}),
+    ...(lockHeld ? { retryable: true } : {}),
+  };
+
+  if (json) {
+    console.log(JSON.stringify(report, null, 2));
+    return;
+  }
+  console.log(`${ok ? '✅' : '⚠️ '} ${MD_PATH}: ${apps.length} row(s), ${issues.length} issue(s), lock ${lockHeld ? 'HELD' : 'free'}`);
+  for (const issue of issues) console.log(`  ${issue.count} ${issue.message}`);
+  if (lockHeld) console.log(`  another writer holds the tracker lock (pid ${lockOwner?.pid ?? 'unknown'}) — retry shortly`);
 }
 
 // ── Export (index → canonical markdown) ─────────────────────────────
@@ -548,13 +674,13 @@ async function deleteApp(args) {
   if (report) console.error(`Note: report file may now be orphaned — ${report}`);
 }
 
-const COMMANDS = { sync, query, history, export: exportMd, delete: deleteApp };
+const COMMANDS = { sync, query, history, health, export: exportMd, delete: deleteApp };
 
 async function main() {
   const [command, ...args] = process.argv.slice(2);
   const fn = COMMANDS[command];
   if (!fn) {
-    console.log('Usage: node tracker.mjs <sync|query|history|export|delete> [flags]');
+    console.log('Usage: node tracker.mjs <sync|query|history|health|export|delete> [flags]');
     console.log('See the header comment of this file for examples, or docs/SCRIPTS.md.');
     process.exit(command ? 1 : 0);
   }

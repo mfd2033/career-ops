@@ -5,47 +5,66 @@
 const GENERIC_FAILURE = "status update failed";
 
 /**
- * The CLI's JSON document, or null when stdout carries none.
+ * The LAST JSON document on stdout, whatever its shape, or null when there is
+ * none.
  *
- * `--json` prints one JSON object, but diagnostics can precede it — a ledger
- * append warning, say. Scanning forward to the first `{` finds a brace inside
- * that diagnostic just as readily as the document, and the resulting slice does
- * not parse. The route then reports 500 for a write the CLI already committed,
- * losing `changed` and `statusLogged` with it.
+ * `--json` prints one document, but diagnostics can precede it — a ledger
+ * append warning, say — and those can contain braces of their own. Scanning
+ * forward to the first `{` finds a brace inside that diagnostic just as readily
+ * as the document, and the resulting slice does not parse. So the scan runs from
+ * the END: the CLI prints its result last.
  *
- * So the document is read from the end: the last line that parses as a plain
- * object is the result. A diagnostic that happens to be valid JSON cannot shadow
- * it, because the result is printed last.
+ * Objects and arrays are both accepted here; the exported readers below narrow
+ * to one shape so a caller never has to re-check what it got.
  *
  * @param {string} stdout
- * @returns {Record<string, unknown> | null}
+ * @returns {unknown} The parsed document, or null.
  */
-export function parseCliJson(stdout) {
+function lastJsonDocument(stdout) {
   const text = String(stdout ?? "");
   const lines = text.split("\n");
-  // The CLI prints the result LAST, so scan from the end for the line where
-  // the document starts. `--json` documents may be pretty-printed
-  // (set-status.mjs prints JSON.stringify(result, null, 2)) — multi-line, with
-  // the opening brace alone on its own line — so the document is every line
-  // from the found start to the END of stdout, not just that one line.
-  // Parsing the whole tail at once handles both the single-line document and
-  // the pretty-printed one; a diagnostic object printed before the result is
-  // still skipped because the scan runs from the end.
+  // The document may be pretty-printed (JSON.stringify(x, null, 2)), so it is
+  // every line from the found start to the END of stdout, not just the one line
+  // that starts with a bracket.
   for (let i = lines.length - 1; i >= 0; i--) {
     const line = lines[i].trim();
-    if (!line.startsWith("{")) continue;
+    if (!line.startsWith("{") && !line.startsWith("[")) continue;
     const candidate = lines.slice(i).join("\n");
     try {
-      const parsed = JSON.parse(candidate);
-      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-        return /** @type {Record<string, unknown>} */ (parsed);
-      }
+      return JSON.parse(candidate);
     } catch {
       // Not the document start (e.g. a `{...}` inside a diagnostic on its own
       // line). Keep scanning earlier lines.
     }
   }
   return null;
+}
+
+/**
+ * The CLI's JSON OBJECT document, or null when stdout carries none.
+ *
+ * @param {string} stdout
+ * @returns {Record<string, unknown> | null}
+ */
+export function parseCliJson(stdout) {
+  const parsed = lastJsonDocument(stdout);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+  return /** @type {Record<string, unknown>} */ (parsed);
+}
+
+/**
+ * The CLI's JSON ARRAY document, or null when stdout carries none.
+ *
+ * tracker.mjs prints its query result as a bare array (`JSON.stringify(rows)`),
+ * so a reader that only accepts objects would report "no result" for a perfectly
+ * successful read. Same end-anchored scan, array-only narrowing.
+ *
+ * @param {string} stdout
+ * @returns {unknown[] | null}
+ */
+export function parseCliJsonArray(stdout) {
+  const parsed = lastJsonDocument(stdout);
+  return Array.isArray(parsed) ? parsed : null;
 }
 
 /**

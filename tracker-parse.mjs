@@ -184,7 +184,7 @@ export function resolveColumns(lines) {
  *
  * @param {string} line - One line from applications.md.
  * @param {Object<string,number>} [colmap] - From resolveColumns(); defaults to legacy.
- * @returns {object|null} `{num,date,company,role,score,status,pdf,report,notes,location?,raw}`.
+ * @returns {object|null} `{num,date,company,role,score,status,pdf,report,notes,location?,via?,url?,raw}`.
  */
 export function parseTrackerRow(line, colmap = LEGACY_COLMAP) {
   if (typeof line !== 'string' || !line.startsWith('|')) return null;
@@ -215,6 +215,12 @@ export function parseTrackerRow(line, colmap = LEGACY_COLMAP) {
   };
   if (colmap.location != null) row.location = at('location');
   if (colmap.via != null) row.via = at('via');
+  // The optional URL column is the tracker's stable natural key (url-key.mjs).
+  // Exposed here so every header-aware reader — dedup writers included — can
+  // key on it without growing a private parse of the same row (merge-tracker's
+  // Pass 0 had the only copy, which is why tracker-add.mjs could not dedup by
+  // URL at all).
+  if (colmap.url != null) row.url = at('url');
   return row;
 }
 
