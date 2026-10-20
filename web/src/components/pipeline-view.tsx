@@ -8,6 +8,8 @@ import type { Application, InboxJob } from "@/lib/career-ops";
 import { Badge } from "@/components/ui/badge";
 import { CompanyLogo } from "@/components/company-logo";
 import { RowSlot } from "@/components/row-slot";
+// 投递时机常驻条（Kaneo CO-44 / ADR-0085）：把三平台黄金时间矩阵变成页头一句建议。
+import { DeliveryTimeHint } from "@/components/delivery-time-hint";
 import { canonStatus, fmtDuration, scoreTone, statusDot, checkupTone } from "@/lib/format";
 import type { CheckupEntry } from "@/lib/format";
 import { CHECKUP_RISK_LABELS } from "@/lib/company-checkups.mjs";
@@ -434,6 +436,9 @@ export function PipelineView({
           </div>
         )}
       </div>
+
+      {/* 投递时机（ADR-0085）：常驻槽位，首帧渲染同高占位，不会把下面的表格顶开。 */}
+      <DeliveryTimeHint />
 
       {/* tabs */}
       <div className="mt-6 flex flex-wrap gap-1 border-b border-border md:shrink-0">

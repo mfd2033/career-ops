@@ -27,6 +27,10 @@ import { ApplyButton } from "@/components/apply-button";
 import { DeleteFromTracker } from "@/components/delete-from-tracker";
 import { SkipFromTracker } from "@/components/skip-from-tracker";
 import { LogFollowupButton } from "@/components/followups/log-followup-button";
+// 投递时机条（Kaneo CO-44 / ADR-0085）：与管道页同一枚组件——详情页就是点
+// 「申请」的那一屏，按当前时刻告诉用户现在投不投、投哪个平台。
+import { DeliveryTimeHint } from "@/components/delivery-time-hint";
+import { sourcePlatform } from "@/lib/source-label.mjs";
 import { useI18n } from "@/lib/i18n/context";
 
 // Progressive disclosure of the report. The core writes prose blocks
@@ -430,6 +434,9 @@ export function ReportView({
   const showReval = Boolean(revalDate && app?.date && revalDate !== app.date);
   const archetype = field("Archetype");
   const url = field("URL");
+  // 投递时机平台（ADR-0085）：从报告 header 的 **URL:** 还原来源平台（与列表页
+  // 「来源」列同一套域名映射）；不在 Boss/猎聘/智联（如 ATS、公司官网）→ null。
+  const deliveryPlatform = sourcePlatform(url);
   const pdfReady = (app?.pdf ?? "").includes("✅");
   // The tailored CV is recorded in data/pdf-index.tsv keyed by its REPORT number
   // (a re-evaluated row keeps its tracker `#` but links a new report file, so the
@@ -554,6 +561,12 @@ export function ReportView({
           {/* 「记录跟进」（ADR-0075）：entry 存在即渲染；弹窗与 /followups 完全同一枚 */}
           {followupEntry && <LogFollowupButton entry={followupEntry} />}
         </div>
+
+        {/* 投递时机（ADR-0085）：紧贴操作区下方——看过分数/建议就决定要不要投，
+            时机信息就在决策点旁边。只看「这一份从哪个平台来的」：猎聘的职位
+            不会拿 Boss 的晚间时段来建议；来源不在三平台（ATS/官网…）时
+            如实说没有规律。 */}
+        <DeliveryTimeHint platforms={deliveryPlatform ? [deliveryPlatform] : []} />
 
         {app && canDelete && (
           <div className="mt-3">
