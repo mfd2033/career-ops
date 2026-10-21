@@ -169,6 +169,8 @@ career-dashboard
 career-dashboard.exe
 career-dashboard-ui.exe
 career-dashboard-launcher.exe
+# Electron 壳产物目录（CareerDashboardTray.exe + resources/app + locales，ADR-0086）
+career-tray/
 # career-dashboard-*-launcher runtime artifacts (written next to the exe on launch)
 /LOCK
 /icon.ico
@@ -178,6 +180,8 @@ package-lock.json
 
 # Playwright MCP server run artifacts (ephemeral, machine-local)
 .playwright-mcp/
+# Computer-use 截图落盘目录（桌面自动化验收留证，机器本地）
+.cu-shots/
 test-results/
 playwright-report/
 

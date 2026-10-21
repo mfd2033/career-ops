@@ -1,0 +1,67 @@
+/* 日志窗口 —— 与面板 dark 同色板，等宽字体，来源分三档着色（不做语法高亮）。 */
+:root{
+  --wall:#17191C;
+  --bar:#1F2227;
+  --line:rgba(255,255,255,.08);
+  --ink:#EFEDE9;
+  --ink-muted:#9A958D;
+  --ink-faint:#6E6A64;
+  --brand:#E68B45;
+  --error:#F2585D;
+  --font-mono: "Cascadia Mono", Consolas, "Microsoft YaHei UI", ui-monospace, monospace;
+  --font: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{
+  background:var(--wall);color:var(--ink);
+  font-family:var(--font);font-size:12.5px;line-height:1.5;
+  display:flex;flex-direction:column;overflow:hidden;
+  -webkit-font-smoothing:antialiased;
+}
+
+.bar{
+  display:flex;align-items:center;gap:10px;
+  padding:0 8px 0 12px;height:38px;flex:0 0 auto;
+  background:var(--bar);border-bottom:1px solid var(--line);
+  -webkit-app-region:drag;
+}
+.title{font-family:var(--font-mono);font-size:11.5px;color:var(--ink);flex:0 0 auto}
+.path{
+  font-family:var(--font-mono);font-size:10.5px;color:var(--ink-faint);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:rtl;text-align:left;min-width:0;
+}
+.spacer{flex:1 1 auto}
+.tool{
+  -webkit-app-region:no-drag;
+  font-family:inherit;font-size:11.5px;color:var(--ink-muted);
+  background:transparent;border:1px solid transparent;border-radius:6px;
+  padding:4px 8px;cursor:pointer;white-space:nowrap;
+  transition:background-color .12s ease,color .12s ease,border-color .12s ease;
+}
+.tool:hover{background:rgba(255,255,255,.06);color:var(--ink)}
+.tool[aria-pressed="true"]{color:var(--brand);border-color:rgba(230,139,69,.4)}
+.tool.close{font-size:12px;padding:4px 9px}
+.tool.close:hover{background:rgba(242,88,93,.16);color:var(--error)}
+.tool:focus-visible{outline:2px solid var(--brand);outline-offset:1px}
+
+.hint{
+  flex:0 0 auto;padding:6px 12px;font-size:11.5px;
+  color:var(--error);background:rgba(242,88,93,.10);border-bottom:1px solid var(--line);
+}
+.hint[hidden]{display:none}
+
+.view{
+  flex:1 1 auto;overflow:auto;padding:8px 0 14px;
+  font-family:var(--font-mono);font-size:11.5px;line-height:1.62;
+  user-select:text;scrollbar-width:thin;
+}
+.line{display:flex;gap:10px;padding:0 14px;white-space:pre-wrap;word-break:break-word}
+.line:hover{background:rgba(255,255,255,.03)}
+.t{color:var(--ink-faint);flex:0 0 auto}
+.src{flex:0 0 auto;width:62px}
+.line[data-source="launcher"] .src{color:var(--brand)}
+.line[data-source="server"] .src{color:var(--ink-muted)}
+.msg{flex:1 1 auto;color:var(--ink)}
+.line[data-level="error"] .msg{color:var(--error)}
+.line[data-level="error"] .src{color:var(--error)}

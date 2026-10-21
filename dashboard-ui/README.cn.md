@@ -1,6 +1,13 @@
 # dashboard-ui/
 
-career-ops **网页版 dashboard** 的 Windows 启动器——把 web UI（`web/`）打包成可双击运行的启动器。打包产出的日常双击入口是 **`career-dashboard-launcher.exe`**：
+> **冻结（2026-10-21，ADR-0086）**：本目录的 Go 实现（`launcher.go` / `tray*.go` / `logwindow_windows.go`）
+> 已停止演进，托盘壳迁到 [`../tray-shell/`](../tray-shell/)（Electron）。
+> 日常构建 `node dashboard-ui/build-dashboard-ui.mjs` 默认产出 `career-tray/`，**不再调用 go build**；
+> `--shell=go` 仍可回滚产出旧的仓库根 exe（Go 源码与单测都保留）。
+> 本目录留下的资产仍被现壳使用：`icon.ico`（打包嵌图标）、`app/` + `node.exe`（服务运行时源）、
+> `build-dashboard-ui.mjs`（唯一构建入口）。
+
+career-ops **网页版 dashboard** 的 Windows 启动器——把 web UI（`web/`）打包成可双击运行的启动器。打包产出的日常双击入口是 **`career-dashboard-launcher.exe`**（现为 `career-tray/CareerDashboardTray.exe`）：  
 
 - **GUI 子系统**（`-H windowsgui`）：双击启动全程**不创建控制台窗口**。这是治本手段——Windows Terminal 充当默认终端时，控制台窗口归 WT 宿主进程所有，process 内 `GetConsoleWindow()` 只拿到一个不可见的 `PseudoConsoleWindow`，`ShowWindow(SW_HIDE)` 对它无效（实测，见 ADR-0066 修订 2）。
 - **静默启动**：启动后只有托盘图标 + 后台服务，日志窗口默认不弹出；托盘「显示日志窗口」随时唤回（隐藏或最小化都能拉回前台）。

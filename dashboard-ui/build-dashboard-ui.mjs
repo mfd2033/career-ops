@@ -1,21 +1,22 @@
 #!/usr/bin/env node
-// build-dashboard-ui.mjs — package the career-ops web UI into the lightweight
-// career-dashboard-launcher.exe (no embedded runtime; reads from .dashboard-runtime/).
+// build-dashboard-ui.mjs — 构建 career-ops web 并打包成托盘壳（默认 Electron，ADR-0086）。
 //
 // Pipeline:
 //   1. next build (standalone output)   → web/.next/standalone
 //   2. copy .next/static into the standalone tree (Next does not do this)
 //   3. strip traced dev files (src/, tests/, logs, configs) out of standalone
-//   4. copy the clean standalone tree  → dashboard-ui/app   (Go embed source)
-//   5. copy the running node binary     → dashboard-ui/node.exe (Go embed source)
-//   6. go-winres make                   → rsrc_windows_amd64.syso (icon + manifest)
-//   7. go build -ldflags "-H windowsgui -X main.cacheVersion" → career-dashboard-launcher.exe
-//      （GUI 子系统：双击不创建控制台窗口，见 ADR-0066 修订 2）
+//   4. copy the clean standalone tree  → dashboard-ui/app   (runtime source)
+//   5. copy the running node binary     → dashboard-ui/node.exe (runtime source)
+//   5b/5c. stamp build-info.json +预置 .dashboard-runtime/v{cacheVersion}
+//   6. 壳：
+//      --shell=electron（默认）→ tray-shell/scripts/pack.mjs 产出 career-tray/ 目录
+//      --shell=go（回滚）      → go-winres + go build 产出仓库根的 9 MB exe
 //
-// Requires: Node (builds the web app), Go 1.24+, and go-winres (auto-installed
-// on first run into dashboard-ui/.gobin). Run from anywhere:
-//   node dashboard-ui/build-dashboard-ui.mjs
-import { execSync } from "node:child_process";
+// Requires: Node (builds the web app)；--shell=go 额外需要 Go 1.24+ 与 go-winres
+// （首次自动装进 dashboard-ui/.gobin）。Run from anywhere:
+//   node dashboard-ui/build-dashboard-ui.mjs                 # Electron 壳（默认）
+//   node dashboard-ui/build-dashboard-ui.mjs --shell=go      # 回滚旧 exe
+import { execSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -25,6 +26,35 @@ const webDir = path.join(root, "web");
 const uiDir = path.join(root, "dashboard-ui");
 const gobinDir = path.join(uiDir, ".gobin");
 const goWinres = path.join(gobinDir, "go-winres.exe");
+
+// ── 壳的选择（ADR-0086 决策 1）─────────────────────────────────────────────
+// 默认 electron：产物是 career-tray/ 目录。--shell=go 保留旧 exe 的产出路径，作回滚开关。
+const argv = process.argv.slice(2);
+const flagValue = (flag) => {
+  const withEq = argv.find((a) => a.startsWith(`${flag}=`));
+  if (withEq) return withEq.slice(flag.length + 1);
+  const i = argv.indexOf(flag);
+  return i === -1 ? "" : argv[i + 1] || "";
+};
+
+if (argv.includes("--help") || argv.includes("-h")) {
+  console.log(`build-dashboard-ui.mjs — 构建 web 并打包托盘壳
+
+用法：
+  node dashboard-ui/build-dashboard-ui.mjs                 Electron 壳（默认）→ career-tray/
+  node dashboard-ui/build-dashboard-ui.mjs --shell=go      回滚：产出 career-dashboard-launcher.exe
+  node dashboard-ui/build-dashboard-ui.mjs --help
+
+两种壳共用第 1–5c 步（Next 构建、运行时目录预置）；只有第 6 步不同。
+Go 源码已冻结（dashboard-ui/*.go），仍保留单测与回滚能力。`);
+  process.exit(0);
+}
+
+const SHELL = flagValue("--shell") || "electron";
+if (!["electron", "go"].includes(SHELL)) {
+  console.error(`✗ 不认识的 --shell=${SHELL}（只支持 electron / go）`);
+  process.exit(1);
+}
 
 function run(cmd, cwd, env = {}) {
   console.log(`\n$ ${cmd}`);
@@ -93,8 +123,8 @@ function peSubsystem(file) {
   return buf.readUInt16LE(optionalHeader + 0x44);
 }
 
-// 0. ensure go-winres is available
-if (!fs.existsSync(goWinres)) {
+// 0. ensure go-winres is available（只有 --shell=go 需要）
+if (SHELL === "go" && !fs.existsSync(goWinres)) {
   console.log("installing go-winres into .gobin …");
   run(`go install github.com/tc-hib/go-winres@latest`, root, { GOBIN: gobinDir });
 }
@@ -194,16 +224,34 @@ cpSyncRetry(path.join(uiDir, "app"), path.join(runtimeCacheDir, "app"), { recurs
 fs.copyFileSync(process.execPath, path.join(runtimeCacheDir, "node.exe"));
 console.log(`✓ prepared runtime cache ${runtimeCacheDir} (v${cacheVersion})`);
 
-// 6. regenerate the Windows resources (icon + manifest + version) as .syso.
-run(`${goWinres} make --arch amd64`, uiDir);
+// 6. 壳：默认 Electron（tray-shell/scripts/pack.mjs），--shell=go 回滚旧 exe。
+if (SHELL === "electron") {
+  // 免安装打包：copy Electron 运行时 + 改名 + resedit 嵌图标（不用 electron-builder，见 ADR-0086 决策 8）。
+  const args = ["tray-shell/scripts/pack.mjs", `--cache-version=${cacheVersion}`, `--built-at=${builtAt}`];
+  if (buildSha) args.push(`--sha=${buildSha}`);
+  console.log(`\n$ node ${args.join(" ")}`);
+  const packed = spawnSync(process.execPath, args, { cwd: root, encoding: "utf8" });
+  const stdout = String(packed.stdout || "");
+  const stderr = String(packed.stderr || "");
+  if (packed.status !== 0) {
+    // 失败时只印子进程最后 20 行，把真正的错因（前置缺件 / 文件被占）留在屏幕上。
+    const tail = `${stdout}${stderr}`.trimEnd().split(/\r?\n/).slice(-20).join("\n");
+    throw new Error(`tray-shell/scripts/pack.mjs 退出码 ${packed.status}：\n${tail}`);
+  }
+  process.stdout.write(stdout);
+  if (stderr.trim()) process.stderr.write(stderr);
+  console.log(`\n✓ career-tray/ 已就绪（cacheVersion=v${cacheVersion}）`);
+} else {
+  // 回滚路径：旧 Go 壳（ADR-0066 修订 2 的 GUI 子系统与 PE 子系统守卫原样保留）。
+  // 6. regenerate the Windows resources (icon + manifest + version) as .syso.
+  run(`${goWinres} make --arch amd64`, uiDir);
 
-// 7. Lightweight launcher (~9 MB): no embedded runtime, reads from cache dir.
-// cacheVersion injection prevents the launcher falling back to newest-by-mtime
-// and silently serving a stale .dashboard-runtime extraction after a rebuild.
-// -ldflags "-H windowsgui"（ADR-0066 修订 2）：GUI 子系统，双击启动全程无控制台窗口；
-// 从终端/脚本拉起时由 launcher 自己 AttachConsole(父进程) 接回 stdout，重定向/管道则原样保留。
-// 注意 -H 是链接器选项，必须包在 -ldflags 里（`go build -H ...` 会被当成非法 build flag）。
-{
+  // 7. Lightweight launcher (~9 MB): no embedded runtime, reads from cache dir.
+  // cacheVersion injection prevents the launcher falling back to newest-by-mtime
+  // and silently serving a stale .dashboard-runtime extraction after a rebuild.
+  // -ldflags "-H windowsgui"（ADR-0066 修订 2）：GUI 子系统，双击启动全程无控制台窗口；
+  // 从终端/脚本拉起时由 launcher 自己 AttachConsole(父进程) 接回 stdout，重定向/管道则原样保留。
+  // 注意 -H 是链接器选项，必须包在 -ldflags 里（`go build -H ...` 会被当成非法 build flag）。
   const out = path.join(root, "career-dashboard-launcher.exe");
   run(`go build -ldflags "-H windowsgui -X main.cacheVersion=${cacheVersion}" -o ..\\career-dashboard-launcher.exe .`, uiDir);
   const subsystem = peSubsystem(out);

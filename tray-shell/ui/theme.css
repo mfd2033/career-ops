@@ -1,0 +1,226 @@
+/* ============================================================
+   career-ops 托盘 flyout —— 生产样式（照搬 .scratch/tray-flyout/prototype.html）
+   签名元素：管道四柱（品牌橙明度阶梯，柱高 = 真实在册行数，对数缩放）。
+   色相分工：品牌橙 = 数据；绿/琥珀/红 = 服务健康，仅此一处；其余全中性。
+   ============================================================ */
+:root{
+  --font: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif;
+  --font-display: "Segoe UI Variable Display", "Segoe UI Semibold", "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif;
+  --font-mono: "Cascadia Mono", Consolas, "Microsoft YaHei UI", ui-monospace, monospace;
+
+  --brand: #D5742E;
+  --brand-deep: #B4530F;
+  --brand-ink: hsl(24 30% 12%);
+
+  --ink: #16191d;
+  --ink-muted: #67625C;
+  --ink-faint: #948E86;
+
+  --panel: #FFFDFB;
+  --panel-2: #F5F2ED;
+  --panel-3: #EBE6DF;
+  --border: rgba(24,20,16,.10);
+  --border-2: rgba(24,20,16,.18);
+  --shadow: 0 8px 24px -10px rgba(30,20,10,.45), 0 1px 4px -2px rgba(30,20,10,.22);
+
+  --run: #0E9F6E;   --run-soft: rgba(14,159,110,.12);
+  --start: #B87700; --start-soft: rgba(184,119,0,.14);
+  --down: #D63B3F;  --down-soft: rgba(214,59,63,.12);
+  --idle: #8A857E;  --idle-soft: rgba(138,133,126,.14);
+
+  --bar-1: color-mix(in oklab, var(--brand) 48%, var(--panel-3));
+  --bar-2: color-mix(in oklab, var(--brand) 65%, var(--panel-3));
+  --bar-3: color-mix(in oklab, var(--brand) 82%, var(--panel-3));
+}
+html[data-theme="dark"]{
+  --ink:#EFEDE9; --ink-muted:#9A958D; --ink-faint:#6E6A64;
+
+  --panel:#1C1B19; --panel-2:#262421; --panel-3:#2F2C28;
+  --border: rgba(255,255,255,.10); --border-2: rgba(255,255,255,.20);
+  --shadow: 0 10px 28px -10px rgba(0,0,0,.70), 0 1px 6px -3px rgba(0,0,0,.55);
+
+  --run:#3AD29B;   --run-soft: rgba(58,210,155,.16);
+  --start:#F0B23F; --start-soft: rgba(240,178,63,.18);
+  --down:#F2585D;  --down-soft: rgba(242,88,93,.18);
+  --idle:#8A857E;  --idle-soft: rgba(138,133,126,.18);
+  --brand: #E68B45; --brand-deep:#F2A263;
+
+  --bar-1: color-mix(in oklab, var(--brand) 72%, var(--panel-3));
+  --bar-2: color-mix(in oklab, var(--brand) 84%, var(--panel-3));
+  --bar-3: color-mix(in oklab, var(--brand) 93%, var(--panel-3));
+}
+@media (prefers-color-scheme: dark){
+  /* data-theme="auto" 只在开发期直接开 panel.html 时出现；生产由主进程按系统下发 light/dark。 */
+  html[data-theme="auto"]{
+    --ink:#EFEDE9; --ink-muted:#9A958D; --ink-faint:#6E6A64;
+    --panel:#1C1B19; --panel-2:#262421; --panel-3:#2F2C28;
+    --border: rgba(255,255,255,.10); --border-2: rgba(255,255,255,.20);
+    --shadow: 0 10px 28px -10px rgba(0,0,0,.70), 0 1px 6px -3px rgba(0,0,0,.55);
+    --run:#3AD29B;   --run-soft: rgba(58,210,155,.16);
+    --start:#F0B23F; --start-soft: rgba(240,178,63,.18);
+    --down:#F2585D;  --down-soft: rgba(242,88,93,.18);
+    --idle:#8A857E;  --idle-soft: rgba(138,133,126,.18);
+    --brand:#E68B45; --brand-deep:#F2A263;
+    --bar-1: color-mix(in oklab, var(--brand) 72%, var(--panel-3));
+    --bar-2: color-mix(in oklab, var(--brand) 84%, var(--panel-3));
+    --bar-3: color-mix(in oklab, var(--brand) 93%, var(--panel-3));
+  }
+}
+
+*{box-sizing:border-box}
+html,body{margin:0;background:transparent}
+body{
+  /* 透明留白给窗口阴影：卡片本身恒为 384px，窗口宽度 = 384 + 2×PAD */
+  padding:10px;
+  color:var(--ink);
+  font-family:var(--font); font-size:13px; line-height:1.45;
+  -webkit-font-smoothing:antialiased;
+  overflow:hidden;
+  user-select:none;
+}
+button{font-family:inherit;color:inherit;border:0;background:none;cursor:pointer;padding:0}
+:focus-visible{outline:2px solid var(--brand);outline-offset:2px;border-radius:6px}
+.mono{font-family:var(--font-mono);font-variant-numeric:tabular-nums}
+
+/* ---------- 浮出面板 ---------- */
+.flyout{
+  width:384px;
+  background:var(--panel);border:1px solid var(--border);border-radius:16px;
+  box-shadow:var(--shadow);overflow:hidden;
+  display:flex;flex-direction:column;
+  animation:fly-in .16s cubic-bezier(.23,1,.32,1) both;
+}
+@keyframes fly-in{from{opacity:0;transform:translateY(6px) scale(.985)}to{opacity:1;transform:none}}
+
+.fhead{display:flex;align-items:center;gap:11px;padding:14px 16px 12px}
+.mark{display:block;flex:0 0 auto}
+.fid{display:flex;flex-direction:column;gap:4px;min-width:0}
+.fname{font-family:var(--font-display);font-size:15px;font-weight:600;letter-spacing:-.01em;line-height:1}
+.fsub{font-family:var(--font-mono);font-size:10.5px;line-height:1;color:var(--ink-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+.pill{
+  margin-left:auto;display:inline-flex;align-items:center;gap:6px;
+  font-size:11.5px;font-weight:500;line-height:1;padding:6px 10px;border-radius:999px;white-space:nowrap;
+}
+.pill.run{background:var(--run-soft);color:var(--run)}
+.pill.start{background:var(--start-soft);color:var(--start)}
+.pill.down{background:var(--down-soft);color:var(--down)}
+.pill.idle{background:var(--idle-soft);color:var(--idle)}
+
+/* ---------- 区块头 ---------- */
+.block{padding:4px 10px 10px}
+.block-head{display:flex;align-items:baseline;gap:8px;padding:4px 6px 8px}
+.block-label{
+  font-family:var(--font-mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--ink-faint);
+}
+.block-count{margin-left:auto;font-family:var(--font-mono);font-size:10.5px;color:var(--ink-muted)}
+
+/* ---------- 签名图表：四根品牌明度阶梯柱 ---------- */
+.chart{margin:0 0 2px;padding:0 6px}
+.chart svg{display:block;width:100%;height:auto;overflow:visible}
+.chart .bar{cursor:pointer}
+.chart .bar:focus-visible{outline:none}
+/* 柱是 SVG <g>，浏览器在它上面画的 outline 不可靠；用描边当焦点环（键盘 Tab 必须看得见）。 */
+.chart .bar:focus-visible .bar-rect{stroke:var(--ink);stroke-width:1.6;filter:brightness(1.06)}
+.chart .bar-rect{fill:var(--bar-1);transition:filter .12s ease}
+.chart .bar[data-k="responded"] .bar-rect{fill:var(--bar-2)}
+.chart .bar[data-k="interview"] .bar-rect{fill:var(--bar-3)}
+.chart .bar[data-k="offer"] .bar-rect{fill:var(--brand)}
+.chart .bar:hover .bar-rect{filter:brightness(1.08) saturate(1.06)}
+.chart .chart-num{font-family:var(--font-mono);font-size:11px;font-weight:600;font-variant-numeric:tabular-nums;fill:var(--ink)}
+.chart .chart-label{font-family:var(--font);font-size:10.5px;fill:var(--ink-muted)}
+.chart .baseline{stroke:var(--border);stroke-width:1}
+.chart[data-empty="true"] .bar-rect{opacity:.42}
+.chart[data-empty="true"] .chart-num{fill:var(--ink-faint)}
+
+/* ---------- 待跟进 ---------- */
+.todo{padding:0 10px 8px}
+/* 槽位高度固定成 3 行（3×34 + 2×4 间隙 = 110px）：跟进数 0→3 变化时面板不许上下跳
+   （工单 04 的硬要求）。行数上限也是 3（snapshot.cjs 的 FOLLOWUP_ITEMS）。
+   居中是为了空态：让「没有到期跟进」这块小虚框落在预留区中间，而不是顶上一个空大框。 */
+.todo-list{display:flex;flex-direction:column;justify-content:center;gap:4px;min-height:calc(34px * 3 + 4px * 2)}
+.todo-row{
+  width:100%;display:flex;align-items:center;gap:8px;min-height:34px;
+  padding:7px 10px;border-radius:10px;background:var(--panel-2);
+  font-size:12.5px;text-align:left;transition:background-color .12s ease;
+}
+.todo-row:hover{background:var(--panel-3)}
+.todo-dot{width:5px;height:5px;border-radius:50%;background:var(--brand);flex:0 0 auto}
+.todo-text{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.todo-text b{font-weight:600}
+.todo-urg{font-family:var(--font-mono);font-size:10.5px;color:var(--ink-muted);flex:0 0 auto}
+.todo-urg.hot{color:var(--down)}
+.todo-arrow{margin-left:auto;color:var(--ink-faint);display:grid;place-items:center;flex:0 0 auto}
+.todo-row:hover .todo-arrow{color:var(--ink)}
+.todo-empty{
+  display:flex;align-items:center;flex:0 0 auto;min-height:34px;padding:7px 10px;border-radius:10px;
+  font-size:12.5px;color:var(--ink-faint);background:transparent;border:1px dashed var(--border);
+}
+
+/* ---------- 评估在跑 ---------- */
+.runs{display:flex;align-items:baseline;gap:8px;padding:0 16px 8px}
+.runs-value{font-family:var(--font-mono);font-size:11.5px;color:var(--ink-muted)}
+.runs-value b{color:var(--ink);font-weight:600}
+
+/* ---------- 服务行 ---------- */
+.svc{padding:2px 10px 6px}
+.svc-row{
+  display:grid;grid-template-columns:8px minmax(0,1fr) auto auto;align-items:center;gap:9px;
+  padding:9px 8px 9px 10px;border-radius:10px;transition:background-color .12s ease;
+}
+.svc-row:hover{background:var(--panel-2)}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--idle);position:relative}
+.dot.run{background:var(--run)} .dot.start{background:var(--start)} .dot.down{background:var(--down)}
+.dot.start::after{content:"";position:absolute;inset:-3px;border-radius:50%;border:1px solid var(--start);animation:ping 1.3s cubic-bezier(.23,1,.32,1) infinite}
+@keyframes ping{0%{opacity:.7;transform:scale(.72)}100%{opacity:0;transform:scale(1.6)}}
+.svc-main{display:flex;flex-direction:column;gap:3px;min-width:0}
+.svc-name{font-size:13px;font-weight:500;line-height:1.2;display:flex;align-items:center;gap:6px;min-width:0}
+.svc-meta{font-family:var(--font-mono);font-size:10.5px;line-height:1.25;color:var(--ink-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.svc-meta.bad{color:var(--down)}
+.svc-state{font-size:11.5px;font-weight:500;white-space:nowrap}
+.svc-state.run{color:var(--run)} .svc-state.start{color:var(--start)} .svc-state.down{color:var(--down)}
+.svc-acts{display:flex;gap:2px;opacity:.6;transition:opacity .12s ease}
+.svc-row:hover .svc-acts,.svc-row:focus-within .svc-acts{opacity:1}
+.iconbtn{
+  width:26px;height:26px;border-radius:7px;display:grid;place-items:center;color:var(--ink-muted);
+  transition:background-color .12s ease,color .12s ease;
+}
+.iconbtn:hover{background:var(--panel-3);color:var(--ink)}
+.iconbtn[disabled]{opacity:.32;cursor:default}
+.iconbtn[disabled]:hover{background:none;color:var(--ink-muted)}
+
+.chip{
+  font-family:var(--font-mono);font-size:9.5px;letter-spacing:.02em;line-height:1;
+  padding:3px 6px;border-radius:5px;color:var(--ink-muted);
+  background:var(--panel-3);border:1px solid var(--border);
+  white-space:nowrap;flex:0 0 auto;
+}
+.chip[hidden]{display:none}
+
+/* ---------- 页脚 ---------- */
+.ffoot{border-top:1px solid var(--border);padding:12px 12px 10px;display:flex;flex-direction:column;gap:8px}
+.foot-actions{display:flex;gap:8px}
+.btn{
+  font-size:13px;font-weight:500;line-height:1;padding:11px 13px;border-radius:10px;
+  display:inline-flex;align-items:center;justify-content:center;gap:7px;
+  transition:background-color .14s ease,color .14s ease,border-color .14s ease,opacity .14s ease;
+}
+.btn-primary{flex:1;background:var(--brand);color:var(--brand-ink)}
+.btn-primary:hover{background:var(--brand-deep)}
+.btn-primary[disabled]{opacity:.5;cursor:default}
+.btn-primary[disabled]:hover{background:var(--brand)}
+.btn-ghost{border:1px solid var(--border-2);background:var(--panel-2);color:var(--ink)}
+.btn-ghost:hover{background:var(--panel-3)}
+.btn-ghost[disabled]{opacity:.45;cursor:default}
+.btn-ghost[disabled]:hover{background:var(--panel-2)}
+.btn[hidden]{display:none}
+.foot-links{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.foot-ver{font-family:var(--font-mono);font-size:10.5px;color:var(--ink-faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:flex;align-items:center;gap:6px}
+.devtag{font-size:9px;letter-spacing:.06em;padding:2px 5px;border-radius:4px;background:var(--panel-3);color:var(--ink-muted)}
+.linkbtn{font-size:12px;color:var(--ink-muted);padding:5px 7px;border-radius:7px;transition:background-color .12s ease,color .12s ease;white-space:nowrap}
+.linkbtn:hover{background:var(--panel-2);color:var(--ink)}
+
+@media (prefers-reduced-motion: reduce){
+  *,::before,::after{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important}
+}

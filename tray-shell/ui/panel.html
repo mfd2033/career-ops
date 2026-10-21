@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; script-src 'self'; img-src 'self' data:">
+<title>career-ops</title>
+<link rel="stylesheet" href="theme.css">
+</head>
+<body>
+
+<div class="flyout" id="flyout" role="dialog" aria-label="career-ops 托盘面板">
+
+  <header class="fhead">
+    <span class="mark" id="mark" aria-hidden="true"></span>
+    <div class="fid">
+      <div class="fname">career-ops</div>
+      <div class="fsub" id="fsub">localhost:3000</div>
+    </div>
+    <div class="pill idle" id="pill">已停止</div>
+  </header>
+
+  <section class="block" aria-labelledby="pipeLabel">
+    <div class="block-head">
+      <span class="block-label" id="pipeLabel">管道</span>
+      <span class="block-count" id="total">—</span>
+    </div>
+    <div class="chart" id="chart" data-empty="true"></div>
+  </section>
+
+  <section class="todo" aria-labelledby="todoLabel">
+    <div class="block-head">
+      <span class="block-label" id="todoLabel">待跟进</span>
+      <span class="block-count" id="todoCount">—</span>
+    </div>
+    <div class="todo-list" id="todoList"></div>
+  </section>
+
+  <section class="runs" aria-label="评估在跑">
+    <span class="block-label">评估</span>
+    <span class="runs-value" id="runs">—</span>
+  </section>
+
+  <section class="svc" aria-labelledby="svcLabel">
+    <div class="block-head"><span class="block-label" id="svcLabel">服务</span></div>
+    <div class="svc-row" id="svcRow">
+      <span class="dot" id="svcDot" aria-hidden="true"></span>
+      <span class="svc-main">
+        <span class="svc-name">Dashboard 服务 <span class="chip" id="svcChip" hidden>外部实例</span></span>
+        <span class="svc-meta" id="svcMeta">—</span>
+      </span>
+      <span class="svc-state" id="svcState">—</span>
+      <span class="svc-acts">
+        <button class="iconbtn" id="rowRestart" aria-label="重启服务" title="重启服务">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v5h-5"/></svg>
+        </button>
+        <button class="iconbtn" id="rowLogs" aria-label="显示日志窗口" title="显示日志窗口">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16"/><path d="M4 12h16"/><path d="M4 19h10"/></svg>
+        </button>
+      </span>
+    </div>
+  </section>
+
+  <footer class="ffoot">
+    <div class="foot-actions">
+      <button class="btn btn-primary" id="openBtn">打开仪表盘</button>
+      <button class="btn btn-ghost" id="restartBtn" hidden>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v5h-5"/></svg>
+        重启
+      </button>
+    </div>
+    <div class="foot-links">
+      <span class="foot-ver" id="version">—</span>
+      <button class="linkbtn" id="logBtn">查看日志</button>
+    </div>
+  </footer>
+
+</div>
+
+<script src="panel.js"></script>
+</body>
+</html>

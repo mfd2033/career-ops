@@ -1,8 +1,15 @@
 # dashboard-ui/
 
+> **冻结（2026-10-21，ADR-0086）**：本目录的 Go 实现（`launcher.go` / `tray*.go` / `logwindow_windows.go`）
+> 已停止演进，托盘壳迁到 [`../tray-shell/`](../tray-shell/)（Electron）。
+> 日常构建 `node dashboard-ui/build-dashboard-ui.mjs` 默认产出 `career-tray/`，**不再调用 go build**；
+> `--shell=go` 仍可回滚产出旧的仓库根 exe（Go 源码与单测都保留）。
+> 本目录留下的资产仍被现壳使用：`icon.ico`（打包嵌图标）、`app/` + `node.exe`（服务运行时源）、
+> `build-dashboard-ui.mjs`（唯一构建入口）。
+
 Windows launcher for the career-ops **web dashboard** — packages the web UI
 (`web/`) into a double-clickable launcher. The packager's daily double-click
-entry is **`career-dashboard-launcher.exe`**:
+entry was **`career-dashboard-launcher.exe`** (now `career-tray/CareerDashboardTray.exe`):
 
 - **GUI subsystem** (`-H windowsgui`): a double-click never creates a console
   window. This is the root fix — when Windows Terminal is the default terminal

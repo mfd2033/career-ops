@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; script-src 'self'; img-src 'self' data:">
+<title>career-ops · 日志</title>
+<link rel="stylesheet" href="logs.css">
+</head>
+<body>
+
+<header class="bar">
+  <span class="title">launcher.log</span>
+  <span class="path" id="path">—</span>
+  <span class="spacer"></span>
+  <button class="tool" id="follow" aria-pressed="true">跟随</button>
+  <button class="tool" id="clear">清屏</button>
+  <button class="tool" id="folder">打开所在文件夹</button>
+  <button class="tool close" id="close" aria-label="关闭日志窗口" title="关闭">✕</button>
+</header>
+
+<div class="hint" id="hint" hidden>日志文件不可写：这里只显示本次运行的内存缓冲（文件仍在尝试写入）。</div>
+
+<main class="view" id="view" role="log" aria-live="polite" aria-label="launcher.log 内容"></main>
+
+<script src="logs.js"></script>
+</body>
+</html>

@@ -64,6 +64,9 @@
     "application:init": "node application-artifacts.mjs --init",
     "build:dashboard": "node build-dashboard.mjs",
     "serve:dashboard": "cd dashboard && go run . --path ..",
+    "tray": "electron tray-shell",
+    "tray:test": "node --test \"tray-shell/tests/*.test.cjs\"",
+    "tray:pack": "node tray-shell/scripts/pack.mjs",
     "postinstall": "npx playwright install chromium --with-deps || npx playwright install chromium --with-deps",
     "manifesto": "node manifesto.mjs"
   },
@@ -98,6 +101,7 @@
     "playwright": "1.62.1"
   },
   "devDependencies": {
-    "electron": "^44.1.1"
+    "electron": "^44.1.1",
+    "resedit": "^3.1.0"
   }
 }
