@@ -117,6 +117,55 @@ function discoverTests(dir) {
   return out;
 }
 
+// Blank out comments and string/template-literal contents so the source-text
+// guards below (process.exit, finish) match only real CODE, not text that merely
+// appears inside a quoted argument. A suite that runs `node -e '...process.exit(3)'
+//` asserts on a SUBPROCESS's exit and must not trip the #1916 guard — it is the
+// bsk-extract.test.mjs false positive (2026-10): the exit lives in a string literal
+// passed to a child, never called in-process.
+//
+// Known limit (deliberate): template interpolation (${...}) is blanked together
+// with the literal, so a real exit() hidden inside a template is not caught. The
+// guard is an accident-check; blanking the whole literal beats failing the entire
+// suite to load over a text match.
+function blankNonCode(src) {
+  let out = '';
+  let i = 0;
+  const n = src.length;
+  while (i < n) {
+    const c = src[i];
+    const d = src[i + 1];
+    // line comment — drop to end of line (keep the newline itself)
+    if (c === '/' && d === '/') {
+      while (i < n && src[i] !== '\n') i++;
+      continue;
+    }
+    // block comment — drop the whole span, leave one space so tokens don't merge
+    if (c === '/' && d === '*') {
+      i += 2;
+      while (i < n && !(src[i] === '*' && src[i + 1] === '/')) i++;
+      i += 2;
+      out += ' ';
+      continue;
+    }
+    // string / template literal — drop the whole literal (escape-aware)
+    if (c === '"' || c === "'" || c === '`') {
+      const quote = c;
+      i++;
+      while (i < n) {
+        if (src[i] === '\\') { i += 2; continue; }
+        if (src[i] === quote) { i++; break; }
+        i++;
+      }
+      out += ' ';
+      continue;
+    }
+    out += c;
+    i++;
+  }
+  return out;
+}
+
 async function runDiscovered(filter = null) {
   let files = discoverTests(TESTS_DIR);
   if (filter) {
@@ -131,11 +180,16 @@ async function runDiscovered(filter = null) {
   for (const f of files) {
     const rel = f.slice(ROOT.length + 1);
     const src = readFileSync(f, 'utf-8');
+    // Guards below match a symbol in CODE. Run them against a copy with
+    // comments and string/template literals blanked, so a `process.exit()` or
+    // `finish()` that only exists inside a quoted argument is not mistaken for
+    // an in-process call (the bsk-extract false positive, 2026-10).
+    const srcCode = blankNonCode(src);
     // Discovered suites run IN-PROCESS and share this suite's counters. A
     // process.exit() inside one would terminate test-all mid-run with a forged
     // exit code — every later section (and finish()) would silently never run.
     // Refuse to import such a suite and fail loudly instead (#1916 regression).
-    if (/\bprocess\.exit\s*\(/.test(src)) {
+    if (/\bprocess\.exit\s*\(/.test(srcCode)) {
       fail(`${rel} calls process.exit() — discovered suites must use pass/fail from tests/helpers.mjs and never exit`);
       continue;
     }
@@ -170,7 +224,7 @@ async function runDiscovered(filter = null) {
     // finish() prints the global summary and exits — inside a discovered suite
     // it forges the verdict line and decapitates every suite sorting after it,
     // sailing past the process.exit() check above (the exit lives in helpers).
-    if (/\bfinish\s*\(\s*\)/.test(src)) {
+    if (/\bfinish\s*\(\s*\)/.test(srcCode)) {
       fail(`${f.slice(ROOT.length + 1)} calls finish() — only test-all.mjs may print the global summary; discovered suites use pass/fail and return`);
       continue;
     }
@@ -17223,6 +17277,36 @@ try {
   }
 } catch (e) {
   fail(`formatRunFailure clipping check: ${e.message}`);
+}
+
+// blankNonCode: the discovered-suite guards (process.exit, finish) must fire on
+// a real in-code call and stay silent when the symbol only appears inside a
+// comment or a quoted argument. This is the bsk-extract false positive, where
+// `node -e '...process.exit(3)'` lives in a string literal (2026-10).
+{
+  const exits = /\bprocess\.exit\s*\(/;
+  const cases = [
+    ['single-quoted arg', "execFileSync(NODE, ['-e', 'process.exit(3)'])", false],
+    ['double-quoted arg', 'run(`x`, "process.exit(0)")', false],
+    ['template literal', 'const s = `process.exit(1)`;', false],
+    ['line comment', '// process.exit(1)\nfoo()', false],
+    ['block comment', '/* finish() */ foo()', false],
+    ['real call', 'if (bad) process.exit(1);', true],
+    ['real finish call is not an exit', 'function go(){ finish(); }', false],
+    ['call after a string', "log('done'); process.exit(2)", true],
+  ];
+  for (const [desc, code, expectExit] of cases) {
+    const got = exits.test(blankNonCode(code));
+    if (got === expectExit) pass(`blankNonCode ${desc}`);
+    else fail(`blankNonCode ${desc}: process.exit match=${got}, expected ${expectExit} for ${JSON.stringify(code)}`);
+  }
+  // finish() must survive as a real call but vanish from a comment/string.
+  const fin = /\bfinish\s*\(\s*\)/;
+  if (fin.test(blankNonCode('/* finish() */ x')) === false && fin.test(blankNonCode('finish();')) === true) {
+    pass('blankNonCode strips finish() from comments but keeps real calls');
+  } else {
+    fail('blankNonCode mishandles finish()');
+  }
 }
 
 await runDiscovered();
