@@ -124,6 +124,33 @@ try {
     fail(`computePaceStats belowTarget wrong: ${JSON.stringify(paceMet)}`);
   }
 
+  // Send-date semantics (CO-52 revision): a row evaluated last week but really
+  // sent this week must bucket by the status-log transition date, not the row
+  // Date (the entry/evaluation day). Rows absent from the ledger fall back.
+  const paceSendMd = [
+    '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |',
+    '|---|------|---------|------|-------|--------|-----|--------|-------|',
+    '| 5001 | 2026-06-01 | Acme | Eng | 4.5/5 | Applied | ✅ | ❌ | sent later |',
+    '| 5002 | 2026-06-10 | Beta | Eng | 4.0/5 | Applied | ✅ | ❌ | no ledger row |',
+  ].join('\n');
+  const statusLogText = [
+    'num\tdate\tfrom\tto\tsource\tnote',
+    '5001\t2026-06-10\tEvaluated\tApplied\tset-status\t',
+    '', // tolerate trailing blank line
+  ].join('\n');
+  const paceSend = stats.computePaceStats(paceSendMd, { target: 8, weeks: 1, now: new Date('2026-06-10T12:00:00Z'), statusLog: statusLogText });
+  if (paceSend.thisWeekCount === 2) {
+    pass('computePaceStats buckets by status-log send date with row-Date fallback');
+  } else {
+    fail(`computePaceStats send-date semantics wrong: ${JSON.stringify(paceSend)}`);
+  }
+  const paceNoLog = stats.computePaceStats(paceSendMd, { target: 8, weeks: 1, now: new Date('2026-06-10T12:00:00Z') });
+  if (paceNoLog.thisWeekCount === 1) {
+    pass('computePaceStats without a status ledger falls back to row Dates');
+  } else {
+    fail(`computePaceStats row-Date fallback wrong: ${JSON.stringify(paceNoLog)}`);
+  }
+
   // pace target reader — explicit value wins; missing/absent falls back to 8.
   if (stats.readPaceTarget('pace:\n  weekly_applications_target: 10\n') === 10
       && stats.readPaceTarget('') === 8 && stats.readPaceTarget(null) === 8

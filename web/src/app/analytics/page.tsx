@@ -1,4 +1,4 @@
-import { pipelineSummary, readWeeklyPaceTarget } from "@/lib/career-ops";
+import { pipelineSummary, readWeeklyPaceTarget, readStatusLog } from "@/lib/career-ops";
 import { canonStatus, scoreNum } from "@/lib/format";
 import { cumulativeTiles } from "@/lib/funnel-tiles.mjs";
 import { computeWeeklyPace } from "@/lib/weekly-pace.mjs";
@@ -55,8 +55,10 @@ export default function Analytics() {
   const { interviews, offers } = cumulativeTiles(applications.map((a) => canonStatus(a.status)));
 
   // 周投递节奏 (CO-52)：本周实际投递数 vs profile.yml 目标。口径镜像 stats.mjs，
-  // 卡片无下钻（进度/趋势是节奏信号，不是一组可跳转的行），故不接 href。
-  const pace = computeWeeklyPace(applications, { target: readWeeklyPaceTarget() });
+  // 投递日取 status-log 首次转入投递态的事件日期（评估一周后真正投出的行按
+  // 实际投递周计数），无台账记录回退行 Date。卡片无下钻（进度/趋势是节奏信号，
+  // 不是一组可跳转的行），故不接 href。
+  const pace = computeWeeklyPace(applications, { target: readWeeklyPaceTarget(), statusLog: readStatusLog() });
 
   return (
     <AnalyticsView

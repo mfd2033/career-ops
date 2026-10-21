@@ -264,6 +264,16 @@ export function readApplications(): Application[] {
 }
 
 /**
+ * Raw data/status-log.tsv text for the weekly pace send-date resolution
+ * (CO-52): set-status.mjs appends one line per real status transition with its
+ * event date, which is the authoritative "actually sent on" day. Missing file
+ * → null (computeWeeklyPace falls back to the row Date for every row).
+ */
+export function readStatusLog(): string | null {
+  return read("data/status-log.tsv");
+}
+
+/**
  * 周投递节奏目标 (CO-52) —— 读 config/profile.yml 的 `pace.weekly_applications_target`。
  * 文件/键缺失或值非正 → 回退 8，与核心 stats.mjs 的 readPaceTarget() 同口径，
  * 保证 CLI 报表与 Analytics 卡片对同一个 profile 给出同一个目标线。

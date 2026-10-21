@@ -25,9 +25,11 @@ import { fileURLToPath, pathToFileURL } from 'url';
 import * as yaml from 'js-yaml';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import { normalizeStatus, analyzeFromContent } from './followup-cadence.mjs';
+import { submittedDatesFromStatusLog } from './status-log.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const APPS_FILE = join(ROOT, 'data', 'applications.md');
+const STATUS_LOG_FILE = join(ROOT, 'data', 'status-log.tsv');
 const SCAN_HISTORY_FILE = join(ROOT, 'data', 'scan-history.tsv');
 const FOLLOWUPS_FILE = join(ROOT, 'data', 'follow-ups.md');
 const SCAN_RUNS_FILE = join(ROOT, 'data', 'scan-runs.tsv');
@@ -277,27 +279,32 @@ export function readPaceTarget(profileContent, fallback = 8) {
  * Weekly application pace (CO-52) — mirrors computeScanStats's weekCounts
  * pattern but sourced from the tracker's own dates instead of scan-history.
  * Counts rows whose canonical status proves a submission (SUBMITTED_STATUSES),
- * bucketed by the ISO week of the row's Date. The `weeks` trailing calendar
- * weeks are always emitted oldest→newest, 0-filled even when a week logged
- * nothing, so "本周投递" reads a real progress bar at zero rather than vanishing.
+ * bucketed by the ISO week of the row's REAL send date: the earliest transition
+ * into a submitted state in data/status-log.tsv (passed via `statusLog` text)
+ * when the ledger has one, else the row's own Date. The `weeks` trailing
+ * calendar weeks are always emitted oldest→newest, 0-filled even when a week
+ * logged nothing, so "本周投递" reads a real progress bar at zero rather than
+ * vanishing.
  *
- * Known limitation (same as the funnel): a status is a snapshot and Date is the
- * row's initial log date, so a row evaluated one week and applied the next
- * counts in the evaluation week. Acceptable for a pace signal; the precise
- * transition date lives in data/status-log.tsv if this ever needs to tighten.
+ * Date semantics: a row evaluated one week and applied the next must count in
+ * the APPLICATION week — the row Date is only the entry/evaluation day. The
+ * status ledger (status-log.tsv) carries the precise transition date (set-status
+ * --on aware); rows absent from it (bulk-seeded before the ledger existed) fall
+ * back to the row Date, matching the pre-ledger behavior.
  *
  * @param {string} content - Raw applications.md text.
- * @param {{target?: number, weeks?: number, now?: Date}} [opts]
+ * @param {{target?: number, weeks?: number, now?: Date, statusLog?: string|null}} [opts]
  */
-export function computePaceStats(content, { target = 8, weeks = 4, now = new Date() } = {}) {
+export function computePaceStats(content, { target = 8, weeks = 4, now = new Date(), statusLog = null } = {}) {
   const lines = String(content ?? '').replace(/\r/g, '').split('\n');
   const colmap = resolveColumns(lines);
+  const sendDates = submittedDatesFromStatusLog(statusLog, SUBMITTED_STATUSES);
   const weekCounts = new Map();
   for (const line of lines) {
     const row = parseTrackerRow(line, colmap);
     if (!row) continue;
     if (!SUBMITTED_STATUSES.has(canonicalStatus(row.status))) continue;
-    const date = String(row.date || '').trim();
+    const date = (sendDates.get(row.num)) || String(row.date || '').trim();
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
     const wk = isoWeek(date);
     if (wk) weekCounts.set(wk, (weekCounts.get(wk) || 0) + 1);
@@ -558,6 +565,7 @@ export function computeAllStats({
 } = {}) {
   const read = (f) => (existsSync(f) ? readFileSync(f, 'utf-8') : null);
   const apps = read(appsFile);
+  const statusLog = read(STATUS_LOG_FILE);
   const scanHist = read(scanHistoryFile);
   const fups = read(followupsFile);
   const portals = read(portalsFile);
@@ -607,7 +615,7 @@ export function computeAllStats({
     tracker,
     funnel: tracker ? computeFunnel(tracker.byStatus) : null,
     scan,
-    pace: apps ? computePaceStats(apps, { target: readPaceTarget(profile) }) : null,
+    pace: apps ? computePaceStats(apps, { target: readPaceTarget(profile), statusLog }) : null,
     portals: portals ? computePortalStats(portals, scan, scanHist ? scanCompanyNames(scanHist) : [], portalHealth) : null,
     followups: fups && apps ? computeFollowupStats(fups, trackerStatusByNum(apps)) : null,
     runs: runs ? computeRunStats(runs) : null,

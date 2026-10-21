@@ -16,6 +16,9 @@
 // folder, so counting them would inflate "本周投递" with work that was not sent.
 
 import { canonStatus } from "./status-alias.mjs";
+// web 侧副本（非根版）：next.config.mjs 的 turbopack.root 钉在 web/，Turbopack
+// 拒绝解析仓库根模块。两份实现由 weekly-pace.test.mjs 的漂移守卫锁定一致。
+import { submittedDatesFromStatusLog } from "./status-log.mjs";
 
 // Same set as everApplied in stats.mjs computeFunnel(). includes-match tolerates
 // any localized canonical token canonStatus may return.
@@ -48,19 +51,29 @@ function isSubmitted(status) {
 /**
  * Compute the trailing-weeks submission pace for the Analytics card.
  *
- * @param {Array<{date: string, status: string}>} applications - Tracker rows
+ * Send-date semantics mirror stats.mjs computePaceStats: a row is bucketed by
+ * its REAL send date — the earliest transition into a submitted state in
+ * data/status-log.tsv (`statusLog` raw text, parsed by the shared root parser)
+ * when the ledger has one, else the row's own Date. Without this, a row
+ * evaluated one week and applied the next counts in the evaluation week and
+ * the card reads "本周已投 0" on the day the user actually applied.
+ *
+ * @param {Array<{n?: number|string, num?: number|string, date: string, status: string}>} applications - Tracker rows
  *   (needs the initial log `date` and raw `status`; canonStatus is applied here).
- * @param {{target?: number, weeks?: number, now?: Date}} [opts] - target from
+ * @param {{target?: number, weeks?: number, now?: Date, statusLog?: string|null}} [opts] - target from
  *   config/profile.yml (pace.weekly_applications_target, default 8); how many
  *   trailing calendar weeks to emit (default 4); the "now" reference (default
- *   today) — injectable so tests are deterministic.
+ *   today) — injectable so tests are deterministic; statusLog = raw
+ *   data/status-log.tsv text (null/undefined → row-Date fallback for all rows).
  * @returns {{target:number, thisWeek:string|null, thisWeekCount:number, belowTarget:boolean, weeks:{week:string,count:number}[]}}
  */
-export function computeWeeklyPace(applications, { target = 8, weeks = 4, now = new Date() } = {}) {
+export function computeWeeklyPace(applications, { target = 8, weeks = 4, now = new Date(), statusLog = null } = {}) {
+  const sendDates = submittedDatesFromStatusLog(statusLog, SUBMITTED_TOKENS);
   const weekCounts = new Map();
   for (const a of Array.isArray(applications) ? applications : []) {
     if (!isSubmitted(a.status)) continue;
-    const date = String(a.date || "").trim();
+    const num = Number.parseInt(String(a.n ?? a.num ?? ""), 10);
+    const date = (Number.isFinite(num) && sendDates.get(num)) || String(a.date || "").trim();
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
     const wk = isoWeek(date);
     if (wk) weekCounts.set(wk, (weekCounts.get(wk) || 0) + 1);
