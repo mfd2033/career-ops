@@ -86,6 +86,12 @@ If yes → `node update-system.mjs apply --confirm`. If no → `node update-syst
 
 规则：任何批量改写数据层的操作（`merge-tracker.mjs --migrate-via`、直编 `data/applications.md`、`set-status.mjs --force`、批量重命名/归档 `reports/` 等）**执行前必须先跑 `local\backup-data.cmd`**；恢复用 `local\restore-data.cmd`，永远先落到新文件比对。完整规程、白名单与维护命令见 [docs/data-backup.md](docs/data-backup.md)。
 
+## 「打包」默认含义（fork-local，MANDATORY）
+
+除非用户在当前请求中特殊说明，**「打包」一律指重新打包 Electron 托盘壳 `career-tray\CareerDashboardTray.exe`**（ADR-0086），一键命令 `node local/pack-launcher.mjs`；前置、产物结构、成功判据见 [docs/launcher-packaging.md](docs/launcher-packaging.md)。
+
+以前「打包」指 Go 启动器 `career-dashboard-launcher.exe`，现已默认废弃，仅当用户明确点名 Go 壳或说「`--shell=go`」时才回滚：`node dashboard-ui/build-dashboard-ui.mjs --shell=go`。
+
 ## What is career-ops
 
 AI-powered, CLI-agnostic job search automation: pipeline tracking, offer evaluation, CV generation, portal scanning, batch processing. Runs on any AI coding CLI following the [open agent skill standard](https://agentskills.io) (Claude Code, Cursor, Codex, OpenCode, Qwen, Copilot, Kimi, Antigravity CLI, Grok Build CLI). Legacy Gemini API evaluation remains via `gemini-eval.mjs`.
