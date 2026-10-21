@@ -10,6 +10,11 @@ const nextConfig = {
   // repo root as the workspace root. On Windows that misinference can send
   // Turbopack's postcss workers into an unbounded respawn loop that exhausts
   // all RAM (vercel/next.js#92978) — pin the root to this app.
+  //
+  // 注意与 D:\→F:\ 目录联接的关系：这里必须是绝对路径（import.meta.dirname 已是
+  // realpath）。曾经试过换成 process.cwd() 想顺手修掉 `next dev` 全站 500，实测无效——
+  // 那个问题出在 Next 内部把 distDir 与 cwd 拼接，改这个字段绕不过去；用
+  // `node local/dev-web.mjs` 从真实路径拉起 dev 服务器即可（见该文件头部说明）。
   turbopack: { root: import.meta.dirname },
   // Allow a throwaway build dir (e.g. BUILD_DIST=.next-prod) so a production
   // `next build` can run without clobbering a live `next dev` .next.
