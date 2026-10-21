@@ -92,6 +92,16 @@ If yes → `node update-system.mjs apply --confirm`. If no → `node update-syst
 
 以前「打包」指 Go 启动器 `career-dashboard-launcher.exe`，现已默认废弃，仅当用户明确点名 Go 壳或说「`--shell=go`」时才回滚：`node dashboard-ui/build-dashboard-ui.mjs --shell=go`。
 
+## 本地开发服务器（fork-local，MANDATORY）
+
+**不要直接跑 `npm run dev` / `npx next dev`**——本机会全站 500。改用 `node local/dev-web.mjs`，并显式指定端口（3000 上通常跑着托盘壳，而不带 `-p` 时 Next 会去拿 3000）：`node local/dev-web.mjs -p 3101`。
+
+原因：本仓库 `D:\workspace\career-ops` 是 `F:\workspace\career-ops` 的目录联接（同一份文件，不是副本）。`process.cwd()` 保留联接路径，而模块解析走 realpath，Next 16 内部把 `distDir` 与 cwd 拼接成 `D:\...\web\F:\...\web\F:\...\web\.next`，dev 服务器读不到 `routes-manifest.json`（errno -4058）。`local/dev-web.mjs` 先 realpath 再拿它当子进程 cwd，拼接才成立。
+
+- 改 `web/next.config.mjs` 的 `turbopack.root` 修不了这个问题（换成 `import.meta.dirname` 或 `process.cwd()`，错误路径一字未变）；文件内已留注释。
+- `next build` / `node local/pack-launcher.mjs` 不受影响（入口本来就从真实路径调起），所以这个故障只在直接跑 dev 时出现。
+- 脚本与 `pack-launcher.mjs` 同类，落在 `local/`（整个目录已 gitignore），不进版本控制。背景见工单 CO-68。
+
 ## What is career-ops
 
 AI-powered, CLI-agnostic job search automation: pipeline tracking, offer evaluation, CV generation, portal scanning, batch processing. Runs on any AI coding CLI following the [open agent skill standard](https://agentskills.io) (Claude Code, Cursor, Codex, OpenCode, Qwen, Copilot, Kimi, Antigravity CLI, Grok Build CLI). Legacy Gemini API evaluation remains via `gemini-eval.mjs`.
