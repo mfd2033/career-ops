@@ -158,11 +158,18 @@ export function TodayDashboard({
                   <p className="truncate text-sm font-medium">{a.company} · {a.role}</p>
                   <p className="text-xs text-muted">计划 {a.planned}</p>
                 </div>
-                {a.url && (
-                  <a href={a.url} target="_blank" rel="noopener noreferrer" className="shrink-0 text-xs text-brand hover:underline">
-                    职位 ↗
-                  </a>
-                )}
+                <div className="flex shrink-0 items-center gap-3">
+                  {a.report && a.report !== "—" && a.report.includes("](") && (
+                    <Link href={`/report/${a.n}`} className="text-xs text-brand hover:underline">
+                      评估 ↗
+                    </Link>
+                  )}
+                  {a.url && (
+                    <a href={a.url} target="_blank" rel="noopener noreferrer" className="text-xs text-brand hover:underline">
+                      职位 ↗
+                    </a>
+                  )}
+                </div>
               </li>
             ))}
           </ol>
