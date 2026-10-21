@@ -111,6 +111,21 @@ Accepted (2026-10-21)
 - 未覆盖：副屏 / 多 DPI 与「任务栏换到顶部」需要外接显示器或 Win10 任务栏，本机不具备；
   几何逻辑由 `tray-shell/tests/flyout-position.test.cjs` 的负坐标副屏与顶部锚点用例守着。
 
+#### 面板弹出「先闪一下」的定调与解法（2026-10-21 追加）
+
+验收后用户报「点托盘后面板先闪一下」。像素时间线（16ms 粒度）量到：窗口已可见但面板要 **183–222ms** 才画上去，
+亮度按 21.7 → 68.8 → 84.2 → 118.8 → 152.4 → 188.8 → 224.8 等步长爬升 —— **整窗 alpha 淡入**。
+逐项排除：DWM 过渡开关（`DWMWA_TRANSITIONS_FORCEDISABLED`）、`--disable-direct-composition`、
+`--disable-backgrounding-occluded-windows`、`backgroundThrottling:false`、`transparent:false`、`showInactive()`、
+CSS `fly-in`（全程 `finished`）均无效；屏外停靠代替 `hide()` 更差（677ms，屏外不参与合成）。
+
+**只需要不调 `ShowWindow` 就没有淡入**：窗口在创建时以 alpha 0 + 鼠标穿透 `showInactive()` 一次，
+之后收起 = `setOpacity(0)` + `setIgnoreMouseEvents(true)` + `setAlwaysOnTop(false)`，
+打开 = 反序恢复再 `setOpacity(1)` + `focus()`。点击→画上 **343ms → 196ms**（剩余部分是本机派生进程的下限，真实点击不付这笔），
+首帧即实心。鼠标穿透用 `WindowFromPoint` 断言（收起后命中底下别的进程窗口）。
+代价：面板窗口常驻（不可见、穿透、不置顶），因此**禁止再改回 `hide()`**——
+守卫在 `tray-shell/tests/flyout-park.test.cjs`，注入 `hide()` 会红。
+
 ## References
 
 - 视觉定稿：`.scratch/tray-flyout/prototype.html`（四态 × 深浅主题，图标 16/32px 对照，数据来源标注）

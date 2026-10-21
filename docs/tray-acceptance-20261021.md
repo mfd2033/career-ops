@@ -121,12 +121,32 @@
 | 8 | 跟进 0 项与 3 项时面板高度跳 76px | 待跟进槽位没有预留高度 | 槽位固定 110px（3 行），空态框居中（`ui/theme.css`） |
 | 9 | 一次「上一个实例还在拆句柄」的重启，整场没有 `launcher.log` | `createWriteStream` 异步 open 失败只变成 error 事件 | 失败退避重试 4 次再降级为仅内存（`src/logger.cjs`） |
 | 10 | 面板在无版本信息时读成「—dev」 | dev 标记无条件追加 | 标签为「—」时不追加 dev（`ui/panel.js`） |
+| 11 | 点托盘后面板先半透明/露出底下窗口，约 200ms 后才实心（「先闪一下」） | 收起时调 `hide()` → 渲染器挂起；下次 `show()` 会触发窗口层的 alpha 淡入（等步长，实测 183–222ms）。与 DWM 过渡开关、Chromium 遮挡/合成开关、CSS `fly-in`、transparent 均无关（逐项排除，见 [.scratch 探针](#4-复现命令) 与下方「闪一下」小节） | 窗口只在创建时 `showInactive()` 一次（alpha 0 + 鼠标穿透），之后收起 = `setOpacity(0)`+`setIgnoreMouseEvents(true)`+取消置顶，打开 = 反序恢复；点击→画上 **343ms → 196ms**，首帧即实心（`src/main.cjs`，守卫 `tests/flyout-park.test.cjs`） |
 
 另外顺手补的两处可观测性：`httpJson` 现在带回 `error` 码；业务块降级时日志写一行 `业务数据降级：<path> status=… ms error=…`（同一签名只报一次），否则线上分不清「服务慢」还是「接口 500」。
 
-单测：`node --test "tray-shell/tests/*.test.cjs"` → **47/47 通过**（新增 `service.test.cjs` 4 条、业务降级 1 条）。
+单测：`node --test "tray-shell/tests/*.test.cjs"` → **52/52 通过**（验收后补了 `service.test.cjs` 4 条、业务降级 1 条、`flyout-park.test.cjs` 5 条）。
 
-## 3. 对工单的偏离（已知、有意）
+## 3. 「先闪一下」（面板弹出时的 alpha 淡入）实测
+
+录制方式：C# 内部循环，16ms 粒度同时记录窗口矩形 / 可见性 / 面板区域平均亮度，触发用「第二次启动 exe」（即点托盘）。
+
+| 条件 | 可见→画上（中位） | 结论 |
+| --- | --- | --- |
+| 现状（`hide()`/`show()`） | **197ms**（8 次里 6 次 186–205ms） | 复现基线 |
+| `DWMWA_TRANSITIONS_FORCEDISABLED=1` | 183ms | 不是 DWM 窗口过渡 |
+| `--disable-direct-composition` | 200ms（复测） | 不是合成路径（首轮 0ms 是噪声） |
+| `--disable-backgrounding-occluded-windows` 等 | 184ms | 不是遮挡后台化 |
+| `backgroundThrottling:false` | 201ms | 不是渲染器节流 |
+| `transparent:false` | 同类淡入 | 不是透明窗口特有 |
+| `showInactive()`（不激活） | 200ms | 不是激活动画 |
+| CSS `fly-in` 动画 | 全程 `finished t=160` | 不是入场动画（从未重播） |
+| 屏外停靠代替 hide | **677ms** | 更差：屏外窗口不参与合成 |
+| **只 show 一次 + alpha 切显隐** | **0ms 淡入**（点击→画上中位 196ms ≈ 进程派生下限 150ms） | 采用 |
+
+像素时间线把机制钉死：亮度按 21.7 → 68.8 → 84.2 → 118.8 → 152.4 → 188.8 → 224.8 等步长爬升，是**整窗 alpha 淡入**，不是「内容分块出现」。鼠标穿透另用 `WindowFromPoint` 断言：收起后该点命中的是底下别的进程窗口（`hitIsTray=False`），打开时才是托盘自己。
+
+## 4. 对工单的偏离（已知、有意）
 
 | 偏离 | 工单写法 | 实现 | 理由 |
 | --- | --- | --- | --- |
@@ -135,15 +155,15 @@
 | 跟进槽位 | 「0 项时同一位置写『没有到期跟进』，槽位高度固定」 | 固定 110px（3 行）+ 空态居中 | 实现工单要求本身 |
 | 新增调试开关 | 只有 `--state=` | 另加 `--theme=dark\|light` | 验收要截深色/浅色两套，且不能改用户系统设置 |
 
-## 4. 回滚路径（`--shell=go`）仍可用
+## 5. 回滚路径（`--shell=go`）仍可用
 `node dashboard-ui/build-dashboard-ui.mjs --shell=go` → `career-dashboard-launcher.exe`（**9.0 MB, subsystem=GUI**，PE 子系统校验通过）。冷启动实跑：12:09:20 → 12:09:22 就绪，`/api/version` `packaged=true`，旧托盘菜单在位（`打开面板 / 重启服务 / 分隔线 / 退出`）。回滚开关没有随 Electron 化一起烂掉。
 
-## 5. 遗留观察（不在本工单收口范围）
+## 6. 遗留观察（不在本工单收口范围）
 
-- **托盘与它的服务在同一次消失中都没留下日志**：12:14 起的实例跑到 13:23 之后不见了，`launcher.log` 停在最后一条 `业务数据降级`，既没有 `退出：…` 也没有 `启动失败：…`；Windows 应用事件日志在 ±5 分钟窗口内也没有 `CareerDashboardTray` 的崩溃记录。按日志语义，这只能是**外部强杀**（任务管理器 / 进程树清理）而不是壳自己的任何退出路径——壳的每条退出/崩溃分支都会落日志。记录在此，后续如再现再查（不影响本轮交付）。
+- **托盘消失两次，其中一次的锅在调试脚本**：13:44 那次与 `probe-anim.mjs` 结束时的 `browser.close()` 同刻 —— 在 `chromium.connectOverCDP()` 连接上调 `browser.close()` 会把 Electron 应用一起关掉（不是只断开），已改成 `process.exit(0)`。12:23 更早那次至今无法归因：`launcher.log` 既无 `退出：…` 也无 `启动失败：…`，Windows 应用事件日志 ±5 分钟窗口内没有 `CareerDashboardTray` 崩溃记录 —— 壳自己的每条退出/崩溃分支都会落日志，所以那次只能是外部强杀。若再现，先排除调试脚本。
 - 同日 13:10–13:23 期间出现过几次 `/api/tracker`、`/api/followups` 超过 5s（包括一次四路全超时）：当时正在并发探测 CLI 列表，Next 单线程服务被堵。降级路径按预期工作（只会让对应块短暂显示「—」，下一次轮询自行恢复），且没有误判成「服务已停止」。
 
-## 6. 复现命令
+## 7. 复现命令
 
 ```powershell
 # 打包（含结构自检 + 拉起验证 + 清旧 runtime）
@@ -164,6 +184,13 @@ Start-Process node -ArgumentList ".scratch\tray-electron-flyout\squatter.cjs"
 
 # 场景一：真跑一次评估看「1 在跑」→ 取消 → 「空闲」（零副作用）
 node .scratch\tray-electron-flyout\probe-run-count.mjs
+
+# 面板弹出闪一下：像素时间线（10 轮）+ 分析
+powershell -ExecutionPolicy Bypass -File .scratch\tray-electron-flyout\probe-flash.ps1 -Iterations 10 -OutRoot ".scratch\flash-probe\check"
+node .scratch\tray-electron-flyout\analyze-flash.mjs .scratch\flash-probe\check
+
+# 收起的窗口不得挡鼠标（WindowFromPoint 断言）
+powershell -ExecutionPolicy Bypass -File .scratch\tray-electron-flyout\probe-passthrough.ps1
 
 # 回滚旧 Go 壳
 node dashboard-ui/build-dashboard-ui.mjs --shell=go

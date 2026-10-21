@@ -54,6 +54,11 @@ let flyoutAnchor = null;
 let businessBusy = false;
 let businessStartedAt = 0;
 let healthBusy = false;
+// 面板「隐藏」不调 hide()：hide 会把渲染器挂起，下次 show 后要等窗口层 alpha 淡入
+// （实测等步长、183–222ms），用户先看到半透明/底下的窗口——就是「先闪一下」。
+// 改为：窗口启动时以 alpha 0 出现一次，之后只切 alpha（换样式、不换可见性），
+// 代价是它常驻，得自己把鼠标穿透回来（parkFlyout 里 setIgnoreMouseEvents）。
+let flyoutParked = true;
 
 // `CAREER_TRAY_STATE=run|starting|down|failed`（或 `--state=…`）：开发期肉眼校验四态图标，
 // 不接管服务、不碰端口（工单 01 验收里的调试开关）。
@@ -227,15 +232,20 @@ function createFlyout() {
     backgroundColor: "#00000000",
   });
   flyout.loadFile(path.join(appRoot, "ui", "panel.html"));
+  // 唯一一次 show：alpha 0 + 鼠标穿透，用户看不到也点不到；
+  // 之后的「打开/关闭」只切 alpha，不再走窗口显示过渡。
+  flyout.setOpacity(0);
+  flyout.setIgnoreMouseEvents(true);
+  flyout.showInactive();
   flyout.on("blur", () => {
     if (quitting) return;
     if (flyout.webContents.isDevToolsOpened()) return;
-    flyout.hide();
+    parkFlyout();
   });
   flyout.on("close", (event) => {
     if (quitting) return;
     event.preventDefault();
-    flyout.hide();
+    parkFlyout();
   });
 }
 
@@ -278,27 +288,42 @@ function positionFlyout() {
   flyout.setPosition(x, y, false);
 }
 
+/** 隐去面板：只收 alpha + 鼠标穿透 + 取消置顶，不动可见性（不触发窗口显示过渡）。 */
+function parkFlyout() {
+  if (!flyout || flyout.isDestroyed()) return;
+  flyoutParked = true;
+  flyout.setOpacity(0);
+  // alpha 0 的分层窗口仍会吃掉点击，必须显式穿透，否则它会默默挡住下面那块区域。
+  flyout.setIgnoreMouseEvents(true);
+  // 收起时不再置顶：一个隐形又置顶的窗口会干扰别的应用的遮挡判定。
+  flyout.setAlwaysOnTop(false);
+}
+
 /**
  * 开/关面板。`forceOpen` 为 true 时强制打开（单实例第二次双击 = 切换）。
  * 打开时立刻刷一次业务数据 —— 用户点开就想看「现在」的数字。
  */
 function toggleFlyout(forceOpen, anchor) {
   if (!flyout || flyout.isDestroyed()) return;
-  if (forceOpen === true || !flyout.isVisible()) {
+  if (forceOpen === true || flyoutParked) {
     if (anchor) flyoutAnchor = { x: Math.round(anchor.x), y: Math.round(anchor.y) };
     positionFlyout();
-    flyout.show();
+    flyoutParked = false;
+    flyout.setIgnoreMouseEvents(false);
+    flyout.setAlwaysOnTop(true);
+    flyout.setOpacity(1);
+    if (!flyout.isVisible()) flyout.show();
     flyout.focus();
     refreshBusiness();
     return;
   }
-  flyout.hide();
+  parkFlyout();
 }
 
 /** 任务栏换边、分辨率/缩放变化、显示器增减：面板开着就立刻重新贴合。 */
 function watchDisplays() {
   const reposition = () => {
-    if (flyout && flyout.isVisible()) positionFlyout();
+    if (flyout && !flyoutParked) positionFlyout();
   };
   screen.on("display-metrics-changed", reposition);
   screen.on("display-added", reposition);
@@ -422,7 +447,7 @@ function registerIpc() {
   ipcMain.handle("logs:show", () => showLogs());
 
   ipcMain.handle("app:hideFlyout", () => {
-    if (flyout && !flyout.isDestroyed()) flyout.hide();
+    parkFlyout();
   });
 
   ipcMain.handle("window:fit", (event, desiredHeight) => {
