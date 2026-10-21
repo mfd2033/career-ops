@@ -77,7 +77,7 @@ export function TodayDashboard({
     const planned = useMemo(
       () => applications
         .filter((a) => /^evaluat/i.test(a.status) && a.planned && /^\d{4}-\d{2}-\d{2}$/.test(a.planned))
-        .sort((a, b) => (a.planned < b.planned ? -1 : a.planned > b.planned ? 1 : 0)),
+        .sort((a, b) => ((a.planned ?? "") < (b.planned ?? "") ? -1 : (a.planned ?? "") > (b.planned ?? "") ? 1 : 0)),
       [applications],
     );
 
