@@ -232,6 +232,10 @@ export type Application = {
   notes: string;
   /** Posting URL from the tracker's URL column, "" when the tracker has none. */
   url: string;
+  /** 计划投递日（ISO 日期，如 2026-10-22），来自 tracker 的 Planned 列；缺省/空 = 未计划。
+   *  看板「明日投递计划」卡片与 CLI `tracker.mjs plan` 据此筛选 Evaluated 待投；解析器（tracker-table.mjs）
+   *  从共享别名表映射，写门不走 set-status.mjs。 */
+  planned?: string;
   /** 评估用时 (ADR-0016): seconds of the latest eval session up to report
    *  delivery, joined from data/eval-timings.tsv by the pipeline page; null
    *  when no timing was recorded. Attached at page level, not by the parser. */

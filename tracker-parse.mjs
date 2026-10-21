@@ -184,7 +184,7 @@ export function resolveColumns(lines) {
  *
  * @param {string} line - One line from applications.md.
  * @param {Object<string,number>} [colmap] - From resolveColumns(); defaults to legacy.
- * @returns {object|null} `{num,date,company,role,score,status,pdf,report,notes,location?,via?,url?,raw}`.
+ * @returns {object|null} `{num,date,company,role,score,status,pdf,report,notes,location?,via?,url?,planned?,raw}`.
  */
 export function parseTrackerRow(line, colmap = LEGACY_COLMAP) {
   if (typeof line !== 'string' || !line.startsWith('|')) return null;
@@ -221,6 +221,7 @@ export function parseTrackerRow(line, colmap = LEGACY_COLMAP) {
   // Pass 0 had the only copy, which is why tracker-add.mjs could not dedup by
   // URL at all).
   if (colmap.url != null) row.url = at('url');
+  if (colmap.planned != null) row.planned = at('planned');
   return row;
 }
 

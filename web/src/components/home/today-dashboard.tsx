@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Bell, CircleHelp, Sparkles, ArrowRight } from "lucide-react";
+import { Bell, CalendarDays, CircleHelp, Sparkles, ArrowRight } from "lucide-react";
 import { instrumentSerif } from "@/lib/fonts";
 import { HeroGlow } from "@/components/hero-glow";
 import type { Application, InboxJob } from "@/lib/career-ops";
@@ -68,11 +68,18 @@ export function TodayDashboard({
     return () => window.removeEventListener("co-job-done", onDone);
   }, [refetch, router]);
 
-  // Awaiting decision: scored (Evaluated) but no terminal status yet.
-  const awaiting = useMemo(
-    () => applications.filter((a) => /^evaluat/i.test(a.status)).slice(0, 6),
-    [applications],
-  );
+    // Awaiting decision: scored (Evaluated) but no terminal status yet.
+    const awaiting = useMemo(
+      () => applications.filter((a) => /^evaluat/i.test(a.status)).slice(0, 6),
+      [applications],
+    );
+    // 明日投递计划：Evaluated 且填了 Planned 日期（按文件行序；同日按 # 升序）。
+    const planned = useMemo(
+      () => applications
+        .filter((a) => /^evaluat/i.test(a.status) && a.planned && /^\d{4}-\d{2}-\d{2}$/.test(a.planned))
+        .sort((a, b) => (a.planned < b.planned ? -1 : a.planned > b.planned ? 1 : 0)),
+      [applications],
+    );
 
   const newThisWeek = freshCount;
   const allClear = newThisWeek === 0 && overdue === 0 && awaiting.length === 0;
@@ -137,6 +144,28 @@ export function TodayDashboard({
               <DecisionCard key={a.n} app={a} />
             ))}
           </div>
+        </Section>
+      )}
+
+      {/* B2. 明日投递计划 */}
+      {planned.length > 0 && (
+        <Section icon={CalendarDays} title="明日投递计划" hint={`${planned.length} 个待投`}>
+          <ol className="grid gap-2.5">
+            {planned.map((a, i) => (
+              <li key={a.n} className="flex items-center gap-3 rounded-xl border border-border bg-surface/40 px-4 py-3">
+                <span className="font-mono text-xs text-muted tabular-nums">{i + 1}</span>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium">{a.company} · {a.role}</p>
+                  <p className="text-xs text-muted">计划 {a.planned}</p>
+                </div>
+                {a.url && (
+                  <a href={a.url} target="_blank" rel="noopener noreferrer" className="shrink-0 text-xs text-brand hover:underline">
+                    职位 ↗
+                  </a>
+                )}
+              </li>
+            ))}
+          </ol>
         </Section>
       )}
 

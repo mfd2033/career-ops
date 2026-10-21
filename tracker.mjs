@@ -26,6 +26,7 @@
  *                                               # --check: diagnose only, no write; exit 1 if issues found
  *   node tracker.mjs query [--status Applied] [--company acme] [--role designer]
  *                          [--since 2026-01-01] [--id N] [--limit 20] [--json]
+ *   node tracker.mjs plan [--date YYYY-MM-DD]   # 明日投递清单：Evaluated 且 Planned≤日期（默认明天）
  *   node tracker.mjs history --id N [--json]    # status transition log observed across syncs
  *   node tracker.mjs health [--json]            # pre-flight: diagnostics + tracker lock state
  *   node tracker.mjs export [--out FILE]        # inverse: applications.db → canonical markdown (stdout by default)
@@ -44,7 +45,7 @@ import { createHash } from 'crypto';
 import { dirname, resolve, join } from 'path';
 import { pathToFileURL } from 'url';
 import * as yaml from 'js-yaml';
-import { resolveColumns } from './tracker-parse.mjs';
+import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import {
   canonicalizeTrackerPath, openTrackerTransaction, probeTrackerLock, writeFileAtomic,
 } from './tracker-utils.mjs';
@@ -476,6 +477,57 @@ async function query(args) {
   }
 }
 
+/**
+ * 明日投递清单（ADR-0088）：列出 `Status=Evaluated` 且 `Planned` 列日期 ≤ 目标日
+ * （默认明天，本地时区）的待投岗位。直接读 applications.md（不碰 SQLite 索引，避免
+ * 为新列迁库），用共享的 resolveColumns + parseTrackerRow 解析。替代本地
+ * `明日投递清单-*.md`。
+ *
+ * @param {string[]} args - CLI args; `--date YYYY-MM-DD` 覆盖目标日，`--json` 机器可读。
+ */
+async function plan(args) {
+  const states = loadStates();
+  const argDate = flagValue(args, '--date');
+  let target;
+  if (argDate) {
+    if (!DATE_RE.test(argDate)) { console.error('Error: --date must be YYYY-MM-DD'); process.exit(1); }
+    target = argDate;
+  } else {
+    const t = new Date();
+    t.setDate(t.getDate() + 1);
+    target = t.toISOString().slice(0, 10);
+  }
+  const md = readFileSync(MD_PATH, 'utf8').replace(/\r/g, '').split('\n');
+  const colmap = resolveColumns(md);
+  if (colmap.planned == null) {
+    console.error('Error: no Planned column in tracker header — add one (e.g. `| … | Status | Planned | … |`).');
+    process.exit(1);
+  }
+  const rows = [];
+  for (const line of md) {
+    const r = parseTrackerRow(line, colmap);
+    if (!r) continue;
+    if (normalizeStatus(r.status, states).toLowerCase() !== 'evaluated') continue;
+    const planned = (r.planned || '').trim();
+    if (!planned || !DATE_RE.test(planned)) continue;
+    if (planned > target) continue; // 计划日晚于目标日 → 还没到
+    rows.push({ n: r.num, company: r.company, role: r.role, planned, url: r.url, notes: r.notes });
+  }
+  rows.sort((a, b) => (a.planned < b.planned ? -1 : a.planned > b.planned ? 1 : 0));
+  if (args.includes('--json')) {
+    console.log(JSON.stringify({ target, count: rows.length, rows }, null, 2));
+  } else {
+    console.log(`明日投递计划（截至 ${target}，共 ${rows.length} 个 Evaluated 待投）`);
+    console.log('─'.repeat(48));
+    rows.forEach((r, i) => {
+      console.log(`${i + 1}. #${r.n}  ${r.company} · ${r.role}   [计划 ${r.planned}]`);
+      if (r.url) console.log(`   ${r.url}`);
+    });
+    if (rows.length === 0) console.log('（暂无：给 Evaluated 行填上 Planned 日期即出现在此）');
+    console.error(`\n${rows.length} row(s) — Status=Evaluated 且 Planned≤${target}`);
+  }
+}
+
 async function history(args) {
   const json = args.includes('--json');
   const DatabaseSync = await loadSqlite();
@@ -674,7 +726,7 @@ async function deleteApp(args) {
   if (report) console.error(`Note: report file may now be orphaned — ${report}`);
 }
 
-const COMMANDS = { sync, query, history, health, export: exportMd, delete: deleteApp };
+const COMMANDS = { sync, query, history, health, export: exportMd, delete: deleteApp, plan };
 
 async function main() {
   const [command, ...args] = process.argv.slice(2);

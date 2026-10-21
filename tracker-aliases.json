@@ -19,5 +19,8 @@
   "follow up": "followup",
   "followup": "followup",
   "notes": "notes",
-  "url": "url"
+  "url": "url",
+  "planned": "planned",
+  "计划投递": "planned",
+  "计划投递日": "planned"
 }

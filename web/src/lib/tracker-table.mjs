@@ -26,7 +26,7 @@ import path from "node:path";
  */
 const WEB_FIELD = {
   num: "n", date: "date", company: "company", via: "via", role: "role", location: "location",
-  score: "score", status: "status", pdf: "pdf", report: "report", notes: "notes", url: "url",
+  score: "score", status: "status", pdf: "pdf", report: "report", notes: "notes", url: "url", planned: "planned",
 };
 
 /** @type {Map<string, {mtimeMs: number, size: number, aliases: Record<string, string>}>} */
@@ -116,7 +116,7 @@ export function detectColumnMap(lines, aliases) {
  * mirroring parseTrackerRow in tracker-parse.mjs.
  * @param {string} md - content of data/applications.md.
  * @param {string} rootDir - career-ops root holding tracker-aliases.json.
- * @returns {{n: string, date: string, revalDate: string, company: string, via: string, role: string, score: string, status: string, pdf: string, report: string, notes: string, url: string}[]}
+ * @returns {{n: string, date: string, revalDate: string, company: string, via: string, role: string, score: string, status: string, pdf: string, report: string, notes: string, url: string, planned: string}[]}
  */
 export function parseApplications(md, rootDir) {
   const lines = md.split("\n");
@@ -144,6 +144,7 @@ export function parseApplications(md, rootDir) {
         score: at("score"), status: at("status"), pdf: at("pdf"), report: at("report"),
         notes,
         url: at("url"),
+        planned: at("planned"),
       });
     } else {
       // Legacy fixed order; tolerate the 8-cell variant where Notes is absent.
