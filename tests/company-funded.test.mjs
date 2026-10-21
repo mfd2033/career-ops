@@ -327,6 +327,12 @@ try {
 
   const originalFetch = globalThis.fetch;
   const seenFetchOptions = [];
+  // This call to discoverFundedCompanies passes no fixed `now`, so the `months: 3`
+  // window is measured against the real clock. A hardcoded pubDate ages out of
+  // that window (the old `15 Jul 2026` fixture went red once "today" passed
+  // ~2026-10-15), so pin the mock item a few days back from Date.now() instead —
+  // always inside the window, never in the future.
+  const recentRssDate = new Date(Date.now() - 5 * 864e5).toUTCString().replace(' GMT', ' +0000');
   globalThis.fetch = async (url, options) => {
     seenFetchOptions.push({ url, options });
     if (seenFetchOptions.length === 1) {
@@ -341,7 +347,7 @@ try {
         <item>
           <title>Acme raises $25M Series A</title>
           <link>https://techcrunch.com/acme</link>
-          <pubDate>Wed, 15 Jul 2026 12:00:00 +0000</pubDate>
+          <pubDate>${recentRssDate}</pubDate>
           <description>Acme raises funding.</description>
         </item>
       </channel></rss>`, {
