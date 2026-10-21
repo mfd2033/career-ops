@@ -18,7 +18,7 @@
 3. 新增 CLI `node tracker.mjs plan [--date YYYY-MM-DD]`：直接读 md，列出 `Status=Evaluated`
    且 `Planned ≤ 目标日`（默认本地时区明天）的待投，替代本地 md。
 4. 看板首页 `TodayDashboard` 新增「明日投递计划」卡片，复用 `Application.planned`，按文件行序展示；
-   列表项在有评估报告时附「评估 ↗」入口（跳 `/report/{n}`，经 `app.report` 链接列判断存在性，
+   列表项在有评估报告时附「报告 ↗」入口（跳 `/report/{n}`，经 `app.report` 链接列判断存在性，
    `Report=—` 或空则不显示），与既有「职位 ↗」（外链投递页）并列。
 
 ## 范围（不动）
