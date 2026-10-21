@@ -36,7 +36,7 @@
 import { chromium } from 'playwright';
 import { resolve, dirname, relative, sep, isAbsolute, basename, join } from 'path';
 import { readFile } from 'fs/promises';
-import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync } from 'fs';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { randomUUID } from 'node:crypto';
 import { readStyleTokens, injectThemeStyle, readCvSectionOrder } from './theme-style.mjs';
@@ -950,8 +950,49 @@ function countRenderedPdfPages(pdfBuffer) {
 }
 
 /**
+ * 把候选路径规范成相对工作区的路径；越界或无法规范化时返回 null。
+ *
+ * 比较必须在 realpath 之后做：词法 relative() 在“同一目录的两种拼写”上会撒谎——
+ * Windows 盘符别名（D:\workspace 是指向 F:\workspace 的 junction）下跨盘符直接返回
+ * 绝对路径，被当成逃逸。候选文件可能还没生成，所以先找到最近的已存在祖先做 realpath，
+ * 再把未创建的那段尾部接回去（与 assertInsideWorkspace 同一套语义）。
+ *
+ * @param {string} candidatePath - 已 resolve 或待 resolve 的候选路径。
+ * @param {string} rootDir - 工作区根。
+ * @returns {string | null} 相对 rootDir 的路径（平台分隔符），越界/null。
+ */
+function canonicalWorkspaceRelativePath(candidatePath, rootDir) {
+  let probe = resolve(candidatePath);
+  const tail = [];
+  while (!existsSync(probe)) {
+    tail.unshift(basename(probe));
+    const parent = dirname(probe);
+    if (parent === probe) break; // 已到文件系统根
+    probe = parent;
+  }
+  try {
+    const canonicalRoot = realpathSync(resolve(rootDir));
+    const canonicalAnchor = existsSync(probe) ? realpathSync(probe) : probe;
+    const canonical = tail.length > 0 ? resolve(canonicalAnchor, ...tail) : canonicalAnchor;
+    const rel = relative(canonicalRoot, canonical);
+    return isInsideRelative(rel) ? rel : null;
+  } catch {
+    return null;
+  }
+}
+
+/** 相对路径是否指向根之内（'' 即根本身）。 */
+function isInsideRelative(rel) {
+  return rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
+}
+
+/**
  * Convert a path to a workspace-relative manifest entry, or blank if it is
  * unknown or outside the tracker-owned workspace.
+ *
+ * 词法命中先返回（保持既有输出逐字节不变），词法判越界且不等于真越界时回落到
+ * realpath 判定：盘符别名下的 D: 候选会被写成相对路径，而不是被遗成绝对路径或空串
+ * （#1135：绝对路径入清单后，按报告号反查 PDF 的阅读器拼不出正确文件）。
  *
  * @param {string} pathValue - Absolute or cwd-relative filesystem path.
  * @param {string} [rootDir] - Workspace root used as the manifest base.
@@ -959,9 +1000,10 @@ function countRenderedPdfPages(pdfBuffer) {
  */
 export function workspaceRelativeManifestPath(pathValue, rootDir = currentWorkspaceRoot()) {
   if (!pathValue) return '';
-  const rel = relative(rootDir, resolve(pathValue));
-  if (rel === '' || rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) return '';
-  return rel.split(sep).join('/');
+  const root = resolve(rootDir);
+  const lexical = relative(root, resolve(pathValue));
+  const rel = isInsideRelative(lexical) ? lexical : canonicalWorkspaceRelativePath(pathValue, root);
+  return rel ? rel.split(sep).join('/') : '';
 }
 
 /** @deprecated Use workspaceRelativeManifestPath. */
@@ -969,42 +1011,25 @@ export function repoRelativeManifestPath(pathValue, rootDir = currentWorkspaceRo
   return workspaceRelativeManifestPath(pathValue, rootDir);
 }
 
-function nearestExistingPath(pathValue) {
-  let candidate = pathValue;
-  while (true) {
-    try {
-      lstatSync(candidate);
-      return candidate;
-    } catch (error) {
-      if (error?.code !== 'ENOENT') throw error;
-      const parent = dirname(candidate);
-      if (parent === candidate) throw error;
-      candidate = parent;
-    }
-  }
-}
-
 /**
- * Confirm a PDF destination is lexically and canonically inside its workspace.
+ * Confirm a PDF destination is inside its workspace.
  * Resolving the nearest existing ancestor catches output directories that are
  * symlinks to another location before Chromium writes through them.
+ *
+ * 判据只有 realpath 一条（见 canonicalWorkspaceRelativePath）：先做词法 relative()
+ * 比较、词法判越界就 return false 的写法会把「同一目录的两种拼写」误判成逃逸——
+ * Windows 上 D:\workspace 是指向 F:\workspace 的 junction，调用方按 D: 拼写传输出
+ * 路径、而守卫的根是 realpath 后的 F: 拼写，path.relative() 跨盘符直接返回绝对路径，
+ * 于是每一个 web 派发的定制简历渲染都在这里被拒（#1135）。realpath 已经覆盖了词法
+ * 版本想拦的东西（链接祖先会被展开到真实位置），realpath 失败时包含性无法证明，
+ * 一律 fail closed。
+ *
+ * @param {string} pathValue - 输出 PDF 路径（绝对或相对 cwd）。
+ * @param {string} [rootDir] - 工作区根，默认由 tracker 推导。
+ * @returns {boolean}
  */
 export function isWorkspaceOutputPath(pathValue, rootDir = currentWorkspaceRoot()) {
-  const root = resolve(rootDir);
-  const candidate = resolve(pathValue);
-  const lexical = relative(root, candidate);
-  if (lexical === '' || lexical === '..' || lexical.startsWith(`..${sep}`) || isAbsolute(lexical)) {
-    return false;
-  }
-
-  try {
-    const canonicalRoot = realpathSync(root);
-    const canonicalAnchor = realpathSync(nearestExistingPath(candidate));
-    const canonical = relative(canonicalRoot, canonicalAnchor);
-    return canonical === '' || (canonical !== '..' && !canonical.startsWith(`..${sep}`) && !isAbsolute(canonical));
-  } catch {
-    return false;
-  }
+  return canonicalWorkspaceRelativePath(pathValue, rootDir) !== null;
 }
 
 export function injectPrintPageCss(html, format = 'a4') {
@@ -1046,8 +1071,9 @@ export function injectPrintPageCss(html, format = 'a4') {
  */
 function updatePDFManifest(reportNum, pdfPath, htmlPath, format) {
   const manifestPath = resolvePdfIndexPath(trackerPath);
-  const toRel = (p) => relative(workspaceRoot, p).split(sep).join('/');
-  const relPDF = toRel(pdfPath);
+  // 清单里永远写相对路径：词法 relative() 在盘符别名下会返回绝对路径（#1135），
+  // 阅读器再拼一次根目录就找不到文件了。
+  const relPDF = workspaceRelativeManifestPath(pdfPath, workspaceRoot);
   const relHTML = workspaceRelativeManifestPath(htmlPath, workspaceRoot);
   const date = new Date().toISOString().slice(0, 10);
   // "008" and "8" are the same report — zero-padded report-link form vs
