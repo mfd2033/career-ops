@@ -15,6 +15,7 @@ import {
 import { cn } from "@/lib/cn";
 import { CadenceSettings } from "@/components/followups/cadence-settings";
 import { JdRulesSettings } from "@/components/jd-rules-settings";
+import { MarketModeSettings } from "@/components/market-mode-settings";
 import { KeyVaultCard } from "@/components/key-vault-card";
 import { SkillsPanel } from "@/components/skills-panel";
 import { AboutPanel } from "@/components/about-panel";
@@ -940,11 +941,12 @@ export function ConfigForm() {
           </div>
         </Section>
 
-        {/* ④ 定向规则（▣ 卡片内保存）：求职意向 + JD 评估规则两张并排卡 */}
+        {/* ④ 定向规则（▣ 卡片内保存）：求职意向 + JD 评估规则 + 评估模式三张并列 */}
         <Section id="target" title={t("config.navTarget")} desc={t("config.secTargetDesc")}>
           <div className="grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(min(320px,100%),1fr))]">
             <JobTargetSettings />
             <JdRulesSettings />
+            <MarketModeSettings />
           </div>
         </Section>
 

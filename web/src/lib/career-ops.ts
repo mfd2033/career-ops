@@ -291,6 +291,42 @@ export function readWeeklyPaceTarget(): number {
 }
 
 /**
+ * 评估模式目录（CO-51 / CO-65）—— 读 `config/profile.yml` 的 `language.modes_dir` 原值。
+ * 由 `market-modes.mjs` 的 resolveMarketMode 决定实际读哪个评估模式文件；
+ * 缺失 / 解析失败 / 非字符串 → null（调用方回落根版 `modes/oferta.md`）。
+ */
+export function readMarketModesDir(): string | null {
+  try {
+    const doc = yaml.load(read("config/profile.yml") ?? "") as
+      | { language?: { modes_dir?: unknown } }
+      | null;
+    const v = doc?.language?.modes_dir;
+    return typeof v === "string" && v.trim() ? v.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 实际存在的模式目录 slug 列表（`modes/*` 下带 `_shared.md` 的子目录）。
+ * 两个用途：① 让 resolveMarketMode 判断配置的目录真的存在；
+ * ② 配置页列出可选模式（扫描磁盘，不维护第二份清单）。
+ */
+export function listMarketModes(): string[] {
+  const dir = path.join(careerOpsRoot(), "modes");
+  try {
+    return fs
+      .readdirSync(dir, { withFileTypes: true })
+      .filter((e) => e.isDirectory())
+      .map((e) => e.name)
+      .filter((name) => fs.existsSync(path.join(dir, name, "_shared.md")))
+      .sort();
+  } catch {
+    return [];
+  }
+}
+
+/**
  * 评估用时 map (report number → latest eval session summary), from the user's
  * data/eval-timings.tsv — see CONTEXT.md「评估用时」and ADR-0016 for the
  * report-delivery-only scope. Missing file / empty data → {} (the UI shows "—").

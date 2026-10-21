@@ -152,7 +152,7 @@ function employerDirective(policy) {
  * inline instead of writing it), and a guard that greps route.ts for the marker
  * text matched the route's own comments instead. See test-all.mjs §55.6.
  *
- * @param {{kind: string, input: string, memory: string, today: string, postedAt?: string, unknownEmployer?: string, checkupCompany?: string, checkupSkill?: {path: string, version: string | null}, jdText?: string, company?: string, reportNum?: string, reportFile?: string}} args
+ * @param {{kind: string, input: string, memory: string, today: string, postedAt?: string, unknownEmployer?: string, checkupCompany?: string, checkupSkill?: {path: string, version: string | null}, jdText?: string, company?: string, reportNum?: string, reportFile?: string, marketMode?: {dir: string|null, evalFile: string, sharedFile: string, warning: string|null}}} args
  *   reportNum — the report number the row's Report cell actually links (a
  *   re-evaluated row keeps its tracker `#` but links a new report file, so the two
  *   differ). The pdf prompt reads the report at an exact server-resolved path
@@ -169,9 +169,12 @@ function employerDirective(policy) {
  *   jdText / company — ADR-0051: the posting text and employer the browser
  *   extension extracted from the logged-in page's DOM. Absent → the evaluate
  *   prompt is byte-identical to what it always was.
+ *   marketMode — CO-65: `profile.yml` 的 `language.modes_dir` 经 market-modes.mjs 解析后的结果。
+ *   present 且 dir 有值 → 读该模式集的评估文件并提示同目录 `_shared.md`；null/缺省 → 根版
+ *   `modes/oferta.md`（旧行为逐字节一致）。warning 存在时在 prompt 末尾附一行回落说明。
  * @returns {string}
  */
-export function buildPrompt({ kind, input, memory, today, postedAt, unknownEmployer, checkupCompany, checkupSkill, jdText, company, reportNum, reportFile }) {
+export function buildPrompt({ kind, input, memory, today, postedAt, unknownEmployer, checkupCompany, checkupSkill, jdText, company, reportNum, reportFile, marketMode }) {
   const mem = memory.trim() ? `\n\nDurable notes about the user (from their profile):\n${memory.trim()}\n` : "";
   if (kind === "research") {
     return `You are investigating the user's OWN work / portfolio to surface job-search-relevant strengths, headless. Investigate the target (use WebFetch for URLs; read local files if referenced) and report: what it is, why it is impressive, and how to leverage it in their job search — which roles/claims it supports and how to frame it on a CV. Be specific, honest, and encouraging. Report only: never submit, send, or click Apply anywhere, and contact no one — you are investigating the user's own work, not acting on it.${mem}
@@ -322,9 +325,19 @@ End with EXACTLY one final line: VERDICT: ★{star}/5 — {one-line recommendati
   // precisely so they can't be misread as the row's LOCATION.
   const jd = clampInlineJd(jdText);
   const employer = clampInlineEmployer(company);
+  // 评估模式（CO-65）：marketMode 由调用方用 market-modes.mjs 从 profile.yml 解析好传入，
+  // null = 根版 modes/oferta.md（旧行为）。这里只拼路径，不做目录判定。
+  const evalRef = marketMode?.evalFile ?? "modes/oferta.md";
+  const evalSharedHint = marketMode?.dir
+    ? ` This run uses the MARKET MODE SET ${marketMode.dir}: the market vocabulary and scoring rules for it live in ${marketMode.sharedFile} — read that file once before scoring. The output language of the report is still governed by language.output, not by the mode directory.`
+    : "";
+  // 回落不静默：运行可见一行说明（写进报告会污染报告，这里只让 worker/日志看得见）。
+  const evalFallbackNote = !marketMode?.dir && marketMode?.warning
+    ? `\n\nNOTE (configuration): language.modes_dir was configured but ignored — ${marketMode.warning}. This run uses the root mode set ${evalRef}.`
+    : "";
   return useInlineJdText(`You are running the OFFICIAL career-ops job evaluation, HEADLESS, on the user's own machine. Today is ${today}. Run the REAL career-ops evaluation — do NOT improvise your own scoring.
 
-1. Read modes/oferta.md and follow it EXACTLY (blocks A–F, G posting-legitimacy, and the Machine Summary). Ground the fit in THIS person: read cv.md, config/profile.yml and modes/_profile.md. ${WEBFETCH_STEP}
+1. Read ${evalRef} and follow it EXACTLY (blocks A–F, G posting-legitimacy, and the Machine Summary).${evalSharedHint} Ground the fit in THIS person: read cv.md, config/profile.yml and modes/_profile.md. ${WEBFETCH_STEP}
 
    BLOCKED BOARDS: postings on zhipin.com / kanzhun.com (BOSS直聘), zhaopin.com (智联) and liepin.com (猎聘) block plain WebFetch and headless/logged-out browsers with a captcha/login wall. The user's LOGGED-IN browser IS reachable via bsk, so for these domains run the extractor FIRST instead of plain WebFetch:
    node browser-extract.mjs "<url>" --mode jd --extractor auto
@@ -344,7 +357,7 @@ ${EVAL_TIMING_SINGLE}
 After everything above is written and merged, output EXACTLY one final line, nothing after it:
 VERDICT: {score}/5 — {reason in 12 words or fewer}
 
-Posting URL: ${input}`, jd) + inlineJdTail(jd, employer);
+Posting URL: ${input}`, jd) + inlineJdTail(jd, employer) + evalFallbackNote;
 }
 
 /**
@@ -368,16 +381,16 @@ Posting URL: ${input}`, jd) + inlineJdTail(jd, employer);
  * and pins every `{num}` in the report/tracker templates to the assigned number.
  *
  * @param {string} reportNum  zero-padded 3-digit number the orchestrator reserved
- * @param {{input:string, memory:string, today:string, postedAt?:string, unknownEmployer?:string, jdText?:string, company?:string}} args
+ * @param {{input:string, memory:string, today:string, postedAt?:string, unknownEmployer?:string, jdText?:string, company?:string, marketMode?:object}} args
  * @returns {string}
  */
-export function buildBatchPrompt(reportNum, { input, memory, today, postedAt, unknownEmployer, jdText, company }) {
+export function buildBatchPrompt(reportNum, { input, memory, today, postedAt, unknownEmployer, jdText, company, marketMode }) {
   const jd = clampInlineJd(jdText);
   const employer = clampInlineEmployer(company);
   // The inline-JD wording is NOT delegated to buildPrompt here: the sections must
   // be appended AFTER the `{num}` pinning below (ADR-0051 决议 4), so the batch
   // owns its own order — same two helpers, one spelling each.
-  let p = useInlineJdText(buildPrompt({ kind: "evaluate", input, memory, today, postedAt, unknownEmployer }), jd);
+  let p = useInlineJdText(buildPrompt({ kind: "evaluate", input, memory, today, postedAt, unknownEmployer, marketMode }), jd);
   // Step 2a — stop asking the worker to reserve its own (racing) number.
   p = p.replace(
     /[^\n]*a\. Reserve a report number:.*\n/,

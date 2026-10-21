@@ -34,9 +34,11 @@ import { withModelFlag, isFatalGenericStderr, parseReservationOutput } from "@/l
 import { resolveWorkerInvocation } from "@/lib/worker-invocation.mjs";
 import { isReservedReportFile } from "@/lib/report-files.mjs";
 import { spawnHeadlessCli, terminateCli } from "@/lib/spawn-cli.mjs";
-import { careerOpsRoot, readMemory, readInbox, readScanDates } from "@/lib/career-ops";
+import { careerOpsRoot, readMemory, readInbox, readScanDates, readMarketModesDir, listMarketModes } from "@/lib/career-ops";
 import { readAppConfig } from "@/lib/app-config";
 import { buildBatchPrompt } from "@/lib/run-prompts.mjs";
+// 评估模式（CO-65）：profile.yml 的 language.modes_dir → 实际评估模式文件。
+import { resolveMarketMode } from "@/lib/market-modes.mjs";
 import { acquireTrackerWrite, releaseTrackerWrite } from "@/lib/core/run-registry";
 import { acquire, release, __setSizeSource, DEFAULT_POOL_SIZE, type PoolHandle } from "@/lib/core/concurrency-pool";
 
@@ -259,6 +261,8 @@ export async function POST(req: Request) {
               unknownEmployer: readAppConfig().unknownEmployer,
               jdText: jdText.trim() || undefined,
               company: company.trim() || undefined,
+              // 评估模式（CO-65）：同一份解析逻辑，批量与单条不能给出不同口径。
+              marketMode: resolveMarketMode({ raw: readMarketModesDir(), available: listMarketModes() }),
             });
             // ADR-0054: worker argv comes from the shared spec-driven selector —
             // streamArgsFor (claude/qoder-cn/codebuddy audited per-kind flags) >

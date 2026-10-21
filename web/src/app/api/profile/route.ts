@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import * as yaml from "js-yaml";
-import { careerOpsRoot } from "@/lib/career-ops";
+import { careerOpsRoot, listMarketModes } from "@/lib/career-ops";
 import { atomicWriteWithBackup } from "@/lib/core/safe-write";
 import { patchToProfile } from "@/lib/profile-patch.mjs";
 import { extractDealBreakers, replaceDealBreakersSection } from "@/lib/profile-md-sync.mjs";
@@ -28,6 +28,8 @@ type ProfilePatch = {
   dealBreakers?: string[];
   /** JD evaluation/exclusion rules (config page). string → compensation.location_flexibility. */
   locationFlexibility?: string;
+  /** 评估模式（CO-51）：`modes/<lang>`；"root" / 空串 = 清空回通用模式。 */
+  marketMode?: string;
 };
 
 function isObj(v: unknown): v is Record<string, unknown> {
@@ -53,6 +55,7 @@ export async function GET() {
   let dealBreakers: string[] = [];
   let locationFlexibility = "";
   let roles: string[] = [];
+  let marketMode: string | null = null;
   if (fs.existsSync(file)) {
     let parsed: unknown;
     try {
@@ -71,6 +74,10 @@ export async function GET() {
     if (Array.isArray(targets.primary)) {
       roles = (targets.primary as unknown[]).filter((r): r is string => typeof r === "string");
     }
+    const language = isObj(profile.language) ? (profile.language as Record<string, unknown>) : {};
+    if (typeof language.modes_dir === "string" && language.modes_dir.trim()) {
+      marketMode = language.modes_dir.trim();
+    }
   }
   // `modes/_profile.md` is ALSO read by the evaluation pipeline (SKILL.md loads
   // it for every mode; context-budget injects both files). A rule hand-written
@@ -87,7 +94,7 @@ export async function GET() {
       dealBreakers = merged;
     }
   }
-  return Response.json({ dealBreakers, locationFlexibility, roles });
+  return Response.json({ dealBreakers, locationFlexibility, roles, marketMode, marketModes: listMarketModes() });
 }
 
 export async function POST(req: Request) {
@@ -125,6 +132,10 @@ export async function POST(req: Request) {
   }
 
   const merged = deepMerge(base, proposed);
+  // 「回到通用模式」以 null 传入（见 profile-patch.mjs）：在 merge 后删键，
+  // 而不是把 null 写进 profile.yml——那会让 resolver 分不清未配置与显式清空。
+  const mergedLanguage = merged.language;
+  if (isObj(mergedLanguage) && mergedLanguage.modes_dir === null) delete mergedLanguage.modes_dir;
   try {
     // Back up the prior profile before the first normalized write (yaml.dump
     // reformats — comments are not preserved; the .bak is the safety net).

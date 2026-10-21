@@ -74,16 +74,41 @@ Kaneo CO-51 要求补全中国市场模式。核查后任务前提已经部分�
   需按 ADR-0022 的 fork 规则重新叠加。
 - 代价二：`_custom.md` 里的指针是「路径 + 段名」约定，`modes/zh/_shared.md` 若被重命名或该段标题被改，
   指针会静默失效（与 `oferta.md` 依赖 `Scoring Rules` 段名同理，属既有风险，不是本期新增）。
-- 已知缺口：web / 批量评估仍不读 `modes_dir`（CO-65）。在 CO-65 完成前，从 web 端点发起的评估
-  只通过 `_custom.md` 的指针间接吃到中国口径，读到的 `_shared.md` 仍是根目录英文版；两者的实际差异体现在
-  Block A/D/G 的判定口径上，属于「部分生效」而非「完全生效」。
+- ~~已知缺口：web / 批量评估仍不读 `modes_dir`（CO-65）。~~ **已于 2026-10-21 关闭**（见下面「后续」）。
+  在 CO-65 完成前，从 web 端点发起的评估只通过 `_custom.md` 的指针间接吃到中国口径，
+  读到的 `_shared.md` 仍是根目录英文版；两者的实际差异体现在 Block A/D/G 的判定口径上。
 - 回滚：本期只改两个 markdown 文件 + 新增本 ADR，删掉 `Scoring Rules` 段即回到原状，无数据迁移。
+
+## 后续（2026-10-21）：CO-65 与 CO-51 剩余两项已落地
+
+CO-51 当初写的另两项（写 `language.modes_dir`、配置页增「评估模式」控件）推迟到 `modes/zh`
+与根版对齐之后才做——否则一切过去就丢 Liveness gate、Blacklist gate、Research Budget、
+Block G 全套与 Cover Letter Draft（见 CO-66 / CO-67，zh 四份模式文件已全部对齐）。落地方式：
+
+1. **解析器**：新增 `web/src/lib/market-modes.mjs`（纯函数）。每个语言目录的评估文件名是本地化的
+   （de=angebot、fr=offre、ja=kyujin、zh=oferta），所以用一张显式映射表而不是「排除法猜」；
+   表里没有或目录不存在的目录一律回落根版 `modes/oferta.md`，**每次回落带可读 warning**。
+   只接受 `modes/<两字母>(-<两字母>)`，挡住 `..` 与绝对路径。
+2. **启用**：`run-prompts.mjs` 的 evaluate 分支改读解析结果（`modes/zh/oferta.md`），并提示
+   同目录 `_shared.md`；`/api/run` 与 `/api/batch-evaluate` 两处调用传入同一份解析，
+   单条与批量不会给出不同口径。回落时的 warning 以一行 NOTE 附在 prompt 末尾（不写进报告，
+   避免污染产物）。
+3. **配置面**：`/api/profile` 的 GET 返回 `marketMode` + 扫盘得到的 `marketModes` 选项；
+   POST 接受 `marketMode`（`"root"`/空串 = 清空），`patchToProfile` 映射到 `language.modes_dir`，
+   「清空」在 merge 后**删键**而不是写 `null`（否则 resolver 分不清「未配置」与「显式清空」）。
+   前端新增 `market-mode-settings.tsx`，挂在配置页「定向规则」区（与求职意向、JD 规则并列，
+   卡片内保存）。
+4. **本机配置**：`config/profile.yml` 已写 `language.modes_dir: modes/zh`（用户层，不入库）。
+
+验证：`web/tests/lib/market-modes.test.mjs` 锁住映射、回落 warning、路径穿越拒绝，
+并有一条集成守卫逐一断言映射表声称的文件在磁盘上真实存在；`profile-patch.test.mjs` 锁住
+marketMode 三态。端到端实跑确认 prompt 第 1 步指向 `modes/zh/oferta.md`、回落路径回根版并带 NOTE。
 
 ## References
 
 - 需求来源：Kaneo CO-51（工作区 Nono工作室 / 项目 CareerOps），「中国市场模式 modes/zh」
-- 跟踪票：Kaneo CO-65「评估引擎按 language.modes_dir 选模式文件（web 路径吃不到 modes/zh 口径）」
-- 工单目录：`.scratch/zh-market-rules/`（README + 6 张票）
+- 跟踪票：Kaneo CO-65（已关）、CO-66（zh oferta 对齐）、CO-67（zh apply/pipeline 对齐）
+- 工单目录：`.scratch/zh-market-rules/`（README + 8 张票）
 - 生效出口：`modes/oferta.md` 综合分段落（读取 `modes/_custom.md` → Scoring Rules）
 - 系统层与用户层边界：`DATA_CONTRACT.md`；fork 合并规则：ADR-0022、`docs/fork-ops-history.md` §4
 - 用户层 deal-breaker：`modes/_profile.md`「Your Deal-Breakers」

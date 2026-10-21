@@ -86,3 +86,27 @@ test("mapper never fabricates keys the form did not send", () => {
   assert.ok(!("target_roles" in out));
   assert.deepEqual(out.compensation, { location_flexibility: "仅远程" });
 });
+
+// ── 评估模式（CO-51 / CO-65）→ language.modes_dir 的三态 ──────────────────
+
+test("marketMode: a directory value maps to language.modes_dir", () => {
+  assert.deepEqual(patchToProfile({ marketMode: "modes/zh" }), { language: { modes_dir: "modes/zh" } });
+  assert.deepEqual(patchToProfile({ marketMode: "  modes/de  " }), { language: { modes_dir: "modes/de" } });
+});
+
+test("marketMode: \"root\" and empty string both mean clear (null, deleted by the route)", () => {
+  assert.deepEqual(patchToProfile({ marketMode: "root" }), { language: { modes_dir: null } });
+  assert.deepEqual(patchToProfile({ marketMode: "" }), { language: { modes_dir: null } });
+});
+
+test("marketMode: absent means leave it alone (no language key at all)", () => {
+  const out = patchToProfile({ dealBreakers: ["不做纯外包"] });
+  assert.ok(!("language" in out));
+  assert.deepEqual(patchToProfile({ marketMode: undefined }), {});
+});
+
+test("marketMode coexists with the JD rules in one patch", () => {
+  const out = patchToProfile({ dealBreakers: ["不做纯外包"], marketMode: "modes/zh" });
+  assert.deepEqual(out.narrative, { deal_breakers: ["不做纯外包"] });
+  assert.deepEqual(out.language, { modes_dir: "modes/zh" });
+});
