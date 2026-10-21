@@ -3,6 +3,7 @@ import path from "node:path";
 import * as yaml from "js-yaml";
 import { careerOpsRoot, listMarketModes } from "@/lib/career-ops";
 import { atomicWriteWithBackup } from "@/lib/core/safe-write";
+import { mergeYamlPatch } from "@/lib/core/profile-merge.mjs";
 import { patchToProfile } from "@/lib/profile-patch.mjs";
 import { extractDealBreakers, replaceDealBreakersSection } from "@/lib/profile-md-sync.mjs";
 
@@ -109,39 +110,52 @@ export async function POST(req: Request) {
 
   const root = careerOpsRoot();
   const file = path.join(root, "config", "profile.yml");
-  let base: Record<string, unknown> = {};
+  let next: string;
   let seeded = false;
+  let changed = true;
   // DATA-LOSS GUARD (maintainer, bug-class #649/#704/#920/#958): distinguish
   // "no profile yet" (safe to seed from the example) from "profile EXISTS but is
   // malformed" (NEVER overwrite — that would silently destroy the user's data).
   if (!fs.existsSync(file)) {
+    let base: Record<string, unknown> = {};
     try {
       base = (yaml.load(fs.readFileSync(path.join(root, "config", "profile.example.yml"), "utf8")) as Record<string, unknown>) || {};
       seeded = Object.keys(base).length > 0;
     } catch {
       base = {};
     }
+    // First create: there is no file, so there are no comments to lose — a
+    // normalized dump is the right shape for a freshly seeded profile.
+    next = yaml.dump(deepMerge(base, proposed), { lineWidth: 100, noRefs: true });
   } else {
-    let parsed: unknown;
+    let text: string;
     try {
-      parsed = yaml.load(fs.readFileSync(file, "utf8"));
+      text = fs.readFileSync(file, "utf8");
+      yaml.load(text);
     } catch {
       return Response.json({ error: "config/profile.yml exists but is not valid YAML — refusing to overwrite it." }, { status: 409 });
     }
-    base = isObj(parsed) ? (parsed as Record<string, unknown>) : {};
+    // Text-level splice, NOT load→dump: profile.yml is the user layer and its
+    // comments are the rationale for the settings. A round-trip deletes every
+    // one of them and nothing on screen says it happened (see profile-merge.mjs).
+    const merged = mergeYamlPatch(text, proposed);
+    if (merged.skipped.length) {
+      // The patch asked to replace real content with a shape we cannot guarantee
+      // (e.g. a whole mapping became a string). Refuse rather than guess.
+      return Response.json(
+        { error: `refusing to overwrite ${merged.skipped.join(", ")}: the existing value has a different shape` },
+        { status: 409 },
+      );
+    }
+    next = merged.text;
+    changed = merged.changed;
   }
-
-  const merged = deepMerge(base, proposed);
-  // 「回到通用模式」以 null 传入（见 profile-patch.mjs）：在 merge 后删键，
-  // 而不是把 null 写进 profile.yml——那会让 resolver 分不清未配置与显式清空。
-  const mergedLanguage = merged.language;
-  if (isObj(mergedLanguage) && mergedLanguage.modes_dir === null) delete mergedLanguage.modes_dir;
-  try {
-    // Back up the prior profile before the first normalized write (yaml.dump
-    // reformats — comments are not preserved; the .bak is the safety net).
-    atomicWriteWithBackup(file, yaml.dump(merged, { lineWidth: 100, noRefs: true }));
-  } catch (e) {
-    return Response.json({ error: e instanceof Error ? e.message : "write failed" }, { status: 500 });
+  if (changed) {
+    try {
+      atomicWriteWithBackup(file, next);
+    } catch (e) {
+      return Response.json({ error: e instanceof Error ? e.message : "write failed" }, { status: 500 });
+    }
   }
 
   // Mirror the deal-breakers into modes/_profile.md — the evaluation pipeline

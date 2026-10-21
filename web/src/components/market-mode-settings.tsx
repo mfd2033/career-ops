@@ -85,7 +85,8 @@ export function MarketModeSettings() {
   const orphaned = current !== null && !options.includes(orphanedSlug);
 
   return (
-    <div className="flex flex-col rounded-xl border border-border bg-surface p-4">
+    // h-full：跨整行（md 下 col-span-2）时与左侧两张卡等高，卡片底部对齐。
+    <div className="flex h-full flex-col rounded-xl border border-border bg-surface p-4">
       <h3 className="font-display text-[17px] font-medium leading-tight text-landing">{t("config.marketModeTitle")}</h3>
       <p className="mt-1 text-xs leading-relaxed text-faint">{t("config.marketModeDesc")}</p>
       {loadError ? (
@@ -105,7 +106,9 @@ export function MarketModeSettings() {
         </div>
       ) : (
         <>
-          <label className="mt-3 block">
+          {/* 跨整行时不要把 <select> 拉成 760px 宽的横条输入框（与 config-form 的
+              容器查询断点对齐）。 */}
+          <label className="mt-3 block @2xl:max-w-[420px] @5xl:max-w-none">
             <span className="block text-sm font-medium text-foreground">{t("config.marketModeLabel")}</span>
             <select
               value={value}

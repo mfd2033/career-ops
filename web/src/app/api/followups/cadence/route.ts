@@ -4,6 +4,7 @@ import path from "node:path";
 import * as yaml from "js-yaml";
 import { careerOpsRoot, rootScript } from "@/lib/career-ops";
 import { atomicWriteWithBackup } from "@/lib/core/safe-write";
+import { mergeYamlPatch } from "@/lib/core/profile-merge.mjs";
 import { PROFILE_CADENCE_KEYS, type ProfileCadenceKey } from "@/lib/followups";
 
 export const runtime = "nodejs";
@@ -111,35 +112,48 @@ export async function POST(req: Request) {
 
   const root = careerOpsRoot();
   const file = path.join(root, "config", "profile.yml");
-  let base: Record<string, unknown> = {};
+  let next: string;
+  let existing: Record<string, unknown> = {};
   if (!fs.existsSync(file)) {
     // First create: seed from the example so we never leave a cadence-only profile.
+    let base: Record<string, unknown> = {};
     try {
       const seeded = yaml.load(fs.readFileSync(path.join(root, "config", "profile.example.yml"), "utf8"));
       base = isObj(seeded) ? seeded : {};
     } catch {
       base = {};
     }
+    existing = isObj(base.followup_cadence) ? base.followup_cadence : {};
+    next = yaml.dump(
+      { ...base, followup_cadence: { ...existing, ...cadence } },
+      { lineWidth: 100, noRefs: true },
+    );
   } else {
     // DATA-LOSS GUARD (mirrors /api/profile): a profile that EXISTS but cannot be
     // read/parsed must never be overwritten with a cadence-only file.
-    let parsed: unknown;
+    let text: string;
     try {
-      parsed = yaml.load(fs.readFileSync(file, "utf8"));
+      text = fs.readFileSync(file, "utf8");
+      const parsed = yaml.load(text);
+      existing = isObj(parsed) && isObj(parsed.followup_cadence) ? parsed.followup_cadence : {};
     } catch {
       return Response.json({ error: "config/profile.yml exists but could not be read as YAML — refusing to overwrite it." }, { status: 409 });
     }
-    base = isObj(parsed) ? parsed : {};
+    // Text-level splice, NOT load→dump: a round-trip would delete every comment
+    // in the user layer (same reason /api/profile uses it — profile-merge.mjs).
+    const merged = mergeYamlPatch(text, { followup_cadence: cadence });
+    if (merged.skipped.length) {
+      return Response.json(
+        { error: `refusing to overwrite ${merged.skipped.join(", ")}: the existing value has a different shape` },
+        { status: 409 },
+      );
+    }
+    next = merged.text;
   }
-
-  const merged = {
-    ...base,
-    followup_cadence: { ...(isObj(base.followup_cadence) ? base.followup_cadence : {}), ...cadence },
-  };
   try {
-    atomicWriteWithBackup(file, yaml.dump(merged, { lineWidth: 100, noRefs: true }));
+    atomicWriteWithBackup(file, next);
   } catch (e) {
     return Response.json({ error: e instanceof Error ? e.message : "write failed" }, { status: 500 });
   }
-  return Response.json({ ok: true, followup_cadence: merged.followup_cadence });
+  return Response.json({ ok: true, followup_cadence: { ...existing, ...cadence } });
 }

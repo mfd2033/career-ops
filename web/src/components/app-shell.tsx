@@ -74,8 +74,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </aside>
         {/* overflow-x-clip（非 hidden）：hidden 会把 overflow-y 计算值强制成 auto，使 main
             变成滚动容器，从而破坏页内 sticky 侧栏（配置页 TOC）——clip 同样裁剪横向溢出
-            但不建立滚动容器，sticky 仍相对视口生效。 */}
-        <main className="flex-1 overflow-x-clip">{children}</main>
+            但不建立滚动容器，sticky 仍相对视口生效。
+            min-w-0：flex item 默认 min-width:auto，clip 不建立滚动容器所以不会把这条隐式最小宽
+            归零——内容比可用宽度宽时 main 会被 min-content 顶大，整页跟着横向溢出（798px 窗口
+            实测 scrollWidth 958 vs clientWidth 783，多出的 175px 全从这里来）。min-w-0 允许
+            它收缩到可用宽度，clip 再把真的放不下的部分裁掉。 */}
+        <main className="min-w-0 flex-1 overflow-x-clip">{children}</main>
         <AssistantConsole />
         <FirstScoreView />
       </div>
