@@ -5,6 +5,7 @@ import { spawnSync } from "node:child_process";
 import { codexStreamArgs, isFatalClaudeStderr, isFatalCodexStderr, isFatalOpenCodeStderr, parseClaudeEvent, parseCodexEvent } from "./run-cli-support.mjs";
 import { loadOpencodeModels, resetOpencodeModelCache } from "./opencode-models.mjs";
 import { loadQoderModels, resetQoderModelCache } from "./qoder-models.mjs";
+import { loadClaudeModels } from "./claude-models.mjs";
 import { cliDisplayName } from "./cli-labels.mjs";
 import { cliSearchDirs, npmPrefixDirs, workbuddyBundledCliDirs } from "./cli-bin-dirs.mjs";
 import { isNodeScript, spawnTargetFor } from "./spawn-cli.mjs";
@@ -579,6 +580,17 @@ export function detectClis(): DetectedCli[] {
       const dynamic = loadQoderModels(found);
       if (dynamic.length > 0) {
         model = { ...c.model, options: dynamic, default: dynamic[0].id };
+      }
+    }
+    // Claude 的模型目录读自本机实时生效的 `~/.claude/settings.json`（档位映射）：
+    // CLI 没有 `--list-models`、代理 `/v1/models` 又是空的，这个 env 映射是唯一
+    // 能反映「当前 provider 真会把 --model 落到哪」的来源。解析不到（官方直连、
+    // 无代理、文件缺失）时保持静态表不变——与 opencode/qoder 同一「问不到不编造」纪律。
+    // default 仍留 "sonnet"：那是 CLI 自身无 --model 时的默认，不随档位映射漂移。
+    if (c.id === "claude") {
+      const dynamic = loadClaudeModels();
+      if (dynamic.length > 0) {
+        model = { ...c.model, options: dynamic };
       }
     }
     return { id: c.id, name: c.name, run: c.run, url: c.url, installed: !!found, path: found, usable, version: probe?.version, model };
