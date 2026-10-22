@@ -14,6 +14,12 @@ import { DecisionCard } from "@/components/home/decision-card";
 import { QuickEvaluate } from "@/components/quick-evaluate";
 import { useI18n } from "@/lib/i18n/context";
 
+/** 是否已排进投递计划：填了合法的 Planned 日期（YYYY-MM-DD）。首页「Awaiting
+ *  your decision」与「投递计划」两个分区据此互斥，避免同一行重复出现。 */
+function hasPlannedDate(a: Application) {
+  return !!a.planned && /^\d{4}-\d{2}-\d{2}$/.test(a.planned);
+}
+
 // The retention "Today": a dual-loop action queue (the maintainer's
 // "N new matches this week · M follow-ups due"). SUPPLY loop = fresh free-scan
 // matches (zero tokens, /api/whats-new); DEMAND loop = follow-ups due
@@ -68,9 +74,11 @@ export function TodayDashboard({
     return () => window.removeEventListener("co-job-done", onDone);
   }, [refetch, router]);
 
-    // Awaiting decision: scored (Evaluated) but no terminal status yet.
+    // Awaiting decision: scored (Evaluated) but no terminal status yet, and not
+    // already scheduled into 投递计划 (section B2) — a planned row shows there,
+    // so don't duplicate it here.
     const awaiting = useMemo(
-      () => applications.filter((a) => /^evaluat/i.test(a.status)).slice(0, 6),
+      () => applications.filter((a) => /^evaluat/i.test(a.status) && !hasPlannedDate(a)).slice(0, 6),
       [applications],
     );
     // 投递计划：Evaluated 且填了 Planned 日期，按本地今/明/未来分组（同日按文件行序）。
@@ -81,7 +89,7 @@ export function TodayDashboard({
       const tmr = new Date(dt.getFullYear(), dt.getMonth(), dt.getDate() + 1);
       const tomorrowStr = fmt(tmr);
       const apps = applications
-        .filter((a) => /^evaluat/i.test(a.status) && a.planned && /^\d{4}-\d{2}-\d{2}$/.test(a.planned))
+        .filter((a) => /^evaluat/i.test(a.status) && hasPlannedDate(a))
         .sort((a, b) => ((a.planned ?? "") < (b.planned ?? "") ? -1 : (a.planned ?? "") > (b.planned ?? "") ? 1 : 0));
       return {
         today: apps.filter((a) => a.planned === todayStr),
@@ -91,7 +99,10 @@ export function TodayDashboard({
     }, [applications]);
 
   const newThisWeek = freshCount;
-  const allClear = newThisWeek === 0 && overdue === 0 && awaiting.length === 0;
+  // 投递计划里的待投项也算「有需要你处理的事」：已排计划的岗位不再进 awaiting，
+  // 若只看 awaiting 会误判为空并弹出「全部处理完」卡片。
+  const plannedCount = plannedGroups.today.length + plannedGroups.tomorrow.length + plannedGroups.later.length;
+  const allClear = newThisWeek === 0 && overdue === 0 && awaiting.length === 0 && plannedCount === 0;
   const inboxUrls = useMemo(() => new Set(inbox.map((j) => j.url)), [inbox]);
 
   return (
@@ -115,6 +126,10 @@ export function TodayDashboard({
                 {newThisWeek > 0 && overdue > 0 && <span className="text-faint"> · </span>}
                 {overdue > 0 && (
                   <>{t(overdue === 1 ? "home.followUpDueOne" : "home.followUpsDue", { n: overdue })}</>
+                )}
+                {(newThisWeek > 0 || overdue > 0) && plannedCount > 0 && <span className="text-faint"> · </span>}
+                {plannedCount > 0 && (
+                  <>{t(plannedCount === 1 ? "home.plannedOne" : "home.plannedMany", { n: plannedCount })}</>
                 )}
               </>
             )}
@@ -160,9 +175,9 @@ export function TodayDashboard({
       <Section
         icon={CalendarDays}
         title="投递计划"
-        hint={`${plannedGroups.today.length + plannedGroups.tomorrow.length + plannedGroups.later.length} 个待投`}
+        hint={`${plannedCount} 个待投`}
       >
-        {plannedGroups.today.length === 0 && plannedGroups.tomorrow.length === 0 && plannedGroups.later.length === 0 ? (
+        {plannedCount === 0 ? (
           <p className="text-sm text-muted">无</p>
         ) : (
           <div className="grid gap-4">
