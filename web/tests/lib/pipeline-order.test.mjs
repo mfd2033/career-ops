@@ -102,6 +102,17 @@ test("q searches company + role case-insensitively", () => {
   assert.deepEqual(acme.map((a) => a.n), ["1", "3"]);
 });
 
+test("q supports report-number search, additively to company/role", () => {
+  // A bare number jumps straight to that row (padding and '#' tolerated).
+  assert.deepEqual(orderApplications(apps, { q: "3" }).map((a) => a.n), ["3"]);
+  assert.deepEqual(orderApplications(apps, { q: "#3" }).map((a) => a.n), ["3"]);
+  // Additive: a number that also appears in a company/role still substring-matches,
+  // so "1" hits row 1 by number AND any company/role literally containing "1".
+  assert.deepEqual(orderApplications(apps, { q: "1" }).map((a) => a.n), ["1"]);
+  // Non-numeric text is unaffected — never hijacked into a numeric lookup.
+  assert.deepEqual(orderApplications(apps, { q: "engineer" }).map((a) => a.n), ["5", "1", "4", "3"]);
+});
+
 test("company/role/date sort alphabetically / chronologically (dir=1)", () => {
   assert.deepEqual(orderApplications(apps, { sortKey: "company", dir: 1 }).map((a) => a.n), ["1", "3", "2", "4", "5"]);
   assert.deepEqual(orderApplications(apps, { sortKey: "role", dir: 1 }).map((a) => a.n), ["2", "3", "4", "5", "1"]);

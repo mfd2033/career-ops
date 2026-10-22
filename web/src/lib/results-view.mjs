@@ -13,6 +13,8 @@
 // The tab vocabulary is owned by results-list.tsx (`ResultTab`/`TABS`); these
 // helpers only read it.
 
+import { matchesReportNo } from "./report-no-search.mjs";
+
 /**
  * Which result tab an enriched offer belongs to.
  *
@@ -51,9 +53,10 @@ export function isSelectable(o, added) {
 
 /**
  * The rows on screen: the tab's rows, narrowed by the keyword box (title or
- * company, case-insensitive). Order is NOT applied here — sorting is
- * presentation, and the header/tab counts deliberately look at the whole result
- * set rather than the filtered list.
+ * company, case-insensitive, and — when the query is a bare number — by the
+ * report number of an already-evaluated offer). Order is NOT applied here —
+ * sorting is presentation, and the header/tab counts deliberately look at the
+ * whole result set rather than the filtered list.
  *
  * @param {Array<{url: string, title: string, company: string, inPipeline?: boolean, evaluatedN?: string}>} offers
  * @param {string} tab
@@ -64,5 +67,10 @@ export function visibleOffers(offers, tab, query) {
   const list = offers.filter((o) => inResultTab(tab, o));
   const needle = (query ?? "").trim().toLowerCase();
   if (!needle) return list;
-  return list.filter((o) => o.title.toLowerCase().includes(needle) || o.company.toLowerCase().includes(needle));
+  return list.filter(
+    (o) =>
+      o.title.toLowerCase().includes(needle) ||
+      o.company.toLowerCase().includes(needle) ||
+      matchesReportNo(query, o.evaluatedN),
+  );
 }

@@ -17,6 +17,7 @@
 import { canonStatus } from "./status-alias.mjs";
 import { scoreNum } from "./score-num.mjs";
 import { salaryMedian } from "./report-salary.mjs";
+import { matchesReportNo } from "./report-no-search.mjs";
 
 /** The tracker table's own default context — ALL rows, score descending. Used
  *  as the fallback when a report is opened without (or outside) a list
@@ -146,7 +147,7 @@ function normalizeContext(ctx = {}) {
  *   - min: numeric score floor; null/undefined disables.
  *   - max: numeric score ceiling, EXCLUSIVE — [min, max) (ADR-0067). Null disables.
  *   - company: exact company-name equality needle (ADR-0067). "" disables.
- *   - q: company+role search needle.
+ *   - q: company+role search needle; a bare number ("64" / "#064") also matches by report number.
  *   - sortKey: company | role | score | salary | checkup | status | date | duration. Default score.
  *     salary = 报告薪资（ADR-0037）：区间中位值，未披露恒沉底。
  *     checkup = 体检分数（ADR-0064）：最近一次 star，未体检恒沉底。
@@ -178,7 +179,10 @@ export function orderApplications(applications, ctx = {}) {
   if (company) rows = rows.filter((r) => r.company === company);
   if (q.trim()) {
     const needle = q.toLowerCase();
-    rows = rows.filter((r) => `${r.company} ${r.role}`.toLowerCase().includes(needle));
+    // Company/role substring match, PLUS a report-number lookup when the query
+    // is a bare number ("64" / "#064") — additive, so "64" still hits a company
+    // literally named "Studio 64". Shared rule in report-no-search.mjs.
+    rows = rows.filter((r) => `${r.company} ${r.role}`.toLowerCase().includes(needle) || matchesReportNo(q, r.n));
   }
   return [...rows].sort((a, b) => compareByKey(a, b, sortKey, dir));
 }

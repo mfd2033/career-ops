@@ -65,6 +65,19 @@ test("the keyword matches company as well as title, case-insensitively", () => {
   assert.equal(visibleOffers(offers, "new", "  ").length, 5, "whitespace-only is not a keyword");
 });
 
+test("a bare number also matches an evaluated offer by report number", () => {
+  const mixed = [
+    mk("https://x/1", "A", "甲"),
+    mk("https://x/2", "B", "乙", { evaluatedN: "#900" }),
+    mk("https://x/3", "C", "丙", { evaluatedN: "064" }),
+  ];
+  // '#' and zero-padding tolerated; only the evaluated rows (which have a number) can hit.
+  assert.deepEqual(visibleOffers(mixed, "all", "900").map((o) => o.url), ["https://x/2"]);
+  assert.deepEqual(visibleOffers(mixed, "all", "#64").map((o) => o.url), ["https://x/3"]);
+  // A number matching nothing stays empty; a non-evaluated row has no number to hit.
+  assert.equal(visibleOffers(mixed, "all", "777").length, 0);
+});
+
 test("the tab narrows it too, and 「全部」 is the fallback over every group", () => {
   const mixed = [
     mk("https://x/1", "A", "甲"),

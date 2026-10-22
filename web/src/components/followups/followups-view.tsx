@@ -11,6 +11,7 @@ import { NextDateDialog } from "@/components/followups/next-date-dialog";
 import { StatusPill } from "@/components/followups/status-pill";
 import { scoreTone } from "@/lib/format";
 import { channelLabel } from "@/lib/followup-channel.mjs";
+import { matchesReportNo } from "@/lib/report-no-search.mjs";
 import { statusI18nKey } from "@/lib/followups";
 import { describeStatusWriteError, offlineStatusWriteError } from "@/lib/status-write-error.mjs";
 import {
@@ -183,7 +184,9 @@ export function FollowupsView() {
     else if (tab !== "ALL") rows = rows.filter((e) => e.urgency.toUpperCase() === tab);
     if (q.trim()) {
       const needle = q.toLowerCase();
-      rows = rows.filter((e) => `${e.company} ${e.role}`.toLowerCase().includes(needle));
+      // Company/role substring match, PLUS a report-number lookup when the query
+      // is a bare number ("64" / "#064") — same shared rule as the tracker table.
+      rows = rows.filter((e) => `${e.company} ${e.role}`.toLowerCase().includes(needle) || matchesReportNo(q, e.num));
     }
     if (!sortKey) return rows; // engine order: most pressing first
     return [...rows].sort((a, b) => {

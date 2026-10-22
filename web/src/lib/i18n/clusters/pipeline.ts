@@ -7,7 +7,7 @@ export const en: Dict = {
   // ── Pipeline view (pipeline-view.tsx) ──
   "pipeline.title": "Pipeline",
   "pipeline.inboxSummary": "{count} in inbox · {total} tracked",
-  "pipeline.searchPlaceholder": "Search company or role…",
+  "pipeline.searchPlaceholder": "Search company, role, or #report no…",
   "pipeline.clearSearch": "Clear search",
   "pipeline.filtered": "Filtered:",
   "pipeline.clearScoreFilter": "Clear score filter",
@@ -286,7 +286,7 @@ export const zh: Dict = {
   // ── Pipeline view (pipeline-view.tsx) ──
   "pipeline.title": "求职管道",
   "pipeline.inboxSummary": "{count} 在收件箱 · {total} 已追踪",
-  "pipeline.searchPlaceholder": "搜索公司或职位…",
+  "pipeline.searchPlaceholder": "搜索公司、职位或报告号…",
   "pipeline.clearSearch": "清除搜索",
   "pipeline.filtered": "已筛选：",
   "pipeline.clearScoreFilter": "清除分数筛选",
