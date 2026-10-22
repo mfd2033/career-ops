@@ -18,7 +18,7 @@ import { readFileSync, readdirSync, mkdirSync, renameSync, existsSync } from 'fs
 import { join, basename, dirname, resolve, sep } from 'path';
 import { fileURLToPath } from 'url';
 import { execFileSync } from 'child_process';
-import { normalizeReportLink as normalizeLink } from './tracker-links.mjs';
+import { normalizeReportLink as normalizeLink, extractReportLinkTargets } from './tracker-links.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
 import { parsePdfIndex } from './find.mjs';
 import { LEGACY_COLMAP, detectColumns, isHeaderRow, resolveScoreStatus, normalizeVia, SEPARATOR_ROW_RE } from './tracker-parse.mjs';
@@ -242,12 +242,15 @@ function extractReportNum(reportStr, notesStr = '') {
  *   it is empty, so the backfill can report the two cases separately.
  */
 function resolveReportUrl(reportField) {
-  const linkMatch = (reportField || '').match(/\]\(([^)]+)\)/);
-  if (!linkMatch) return { url: '', reason: 'no-report' };
+  // Balanced-paren scanner (see tracker-links.mjs): a `[^)]+` regex truncates
+  // the target of any report whose filename carries parentheses, so existsSync
+  // below failed and the URL backfill silently skipped those rows.
+  const [linkTarget] = extractReportLinkTargets(reportField);
+  if (!linkTarget) return { url: '', reason: 'no-report' };
   // Containment, not cosmetics: resolve and assert the path stays under
   // REPORTS_ROOT. Stripping leading `../` alone still let an embedded
   // `reports/../../..` walk out of the tree, and the tracker is user-editable.
-  const reportPath = resolve(REPORTS_ROOT, linkMatch[1].trim().replace(/^(\.\.\/)+/, ''));
+  const reportPath = resolve(REPORTS_ROOT, linkTarget.trim().replace(/^(\.\.\/)+/, ''));
   if (!reportPath.startsWith(REPORTS_ROOT + sep)) return { url: '', reason: 'no-report' };
   if (!existsSync(reportPath)) return { url: '', reason: 'no-report' };
   // [ \t]* NOT \s*: \s matches newlines, so an empty `**URL:**` header swallowed

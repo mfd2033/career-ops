@@ -18,6 +18,7 @@ import { join, dirname, relative, sep } from 'path';
 import { fileURLToPath } from 'url';
 import { load as yamlLoad } from 'js-yaml';
 import { resolveColumns, parseTrackerRow, normalizeVia } from './tracker-parse.mjs';
+import { extractReportLinkTargets } from './tracker-links.mjs';
 // 公司体检台账 (ADR-0025) tolerant reader — same module owns writing+validation;
 // this is a read-only consumer, so the parser comes from the single source.
 import { parseLedger } from './lib/log-checkup.mjs';
@@ -1058,17 +1059,19 @@ function analyze() {
 
   // Enrich entries with report data and classification
   const enriched = entries.map(e => {
-    const reportMatch = e.report.match(/\]\(([^)]+)\)/);
+    // Balanced-paren scanner (see tracker-links.mjs) — a `[^)]+` regex cut the
+    // target of any report whose filename carries parentheses.
+    const [reportLink] = extractReportLinkTargets(e.report);
     // Tracker links are relative to the tracker file's own directory (see
     // merge-tracker.mjs link normalization); fall back to repo root for
     // legacy root-relative links. Each candidate is guarded to reports/
     // before the read is attempted; parseReport returns null for a missing
     // file, so no pre-flight existsSync is needed (#2385).
     let reportData = null;
-    if (reportMatch) {
+    if (reportLink) {
       const candidates = new Set([
-        join(dirname(APPS_FILE), reportMatch[1]),
-        join(CAREER_OPS, reportMatch[1]),
+        join(dirname(APPS_FILE), reportLink),
+        join(CAREER_OPS, reportLink),
       ]);
       for (const candidate of candidates) {
         if (!withinReports(candidate)) continue;

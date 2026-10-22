@@ -8503,6 +8503,9 @@ try {
       // ...and followup-cadence now delegates flag validation to the shared
       // lib/cli-flags.mjs helper, so the fixture carries that too.
       copyFileSync(join(ROOT, 'lib', 'cli-flags.mjs'), join(e2eTmp, 'lib', 'cli-flags.mjs'));
+      // ...and followup-cadence resolves report links through the shared
+      // tracker-links.mjs scanner, so the fixture carries that import too.
+      copyFileSync(join(ROOT, 'tracker-links.mjs'), join(e2eTmp, 'tracker-links.mjs'));
       mkdirSync(join(e2eTmp, 'templates'), { recursive: true });
       copyFileSync(join(ROOT, 'templates', 'states.yml'), join(e2eTmp, 'templates', 'states.yml'));
       // 'junction' on Windows, not 'dir': a directory symlink needs
@@ -9152,6 +9155,44 @@ try {
     rmSync(tmpDir, { recursive: true, force: true });
   }
 
+  // A report filename legitimately contains parentheses — a Chinese company slug
+  // like "1119-中原量子(郑州)科技有限公司-…md" is a normal capture (#1119). The
+  // regex this module used to carry (`\]\(([^)]+)\)`) stopped at the FIRST ")", so the
+  // tracker referenced a file that does not exist while the report sat right
+  // there. CommonMark allows balanced parentheses in a destination; mirror that.
+  const { extractReportLinkTargets, findReportLinks } = await import(pathToFileURL(join(ROOT, 'tracker-links.mjs')).href);
+  const parenName = '1119-中原量子(郑州)科技有限公司-2026-10-12.md';
+  const parenCell = `[1119](../reports/${parenName})`;
+  const [parenTarget] = extractReportLinkTargets(parenCell);
+  if (parenTarget === `../reports/${parenName}`) {
+    pass('balanced-paren scanner keeps a parenthesised report filename intact (#1119)');
+  } else {
+    fail(`parenthesised report target truncated (#1119): ${parenTarget}`);
+  }
+
+  const parenRootRelative = normalizeReportLink(`[1119](reports/${parenName})`, dataDir, repo);
+  if (parenRootRelative === `[1119](../reports/${parenName})`) {
+    pass('normalization prefixes a parenthesised root-relative link without breaking it (#1119)');
+  } else {
+    fail(`parenthesised link normalization wrong (#1119): ${parenRootRelative}`);
+  }
+
+  const multiLinkCell = '[901](../reports/901-a.md) / [1119](../reports/' + parenName + ')';
+  const multiTargets = extractReportLinkTargets(multiLinkCell);
+  if (multiTargets.length === 2 && multiTargets[1] === `../reports/${parenName}`) {
+    pass('multi-link cells keep every target, parenthesised or not (#1119)');
+  } else {
+    fail(`multi-link extraction wrong (#1119): ${JSON.stringify(multiTargets)}`);
+  }
+
+  // A <...>-wrapped destination is read verbatim, parentheses and all.
+  const angleTarget = findReportLinks('[12](<reports/012-a(1).md>)')[0]?.target;
+  if (angleTarget === 'reports/012-a(1).md') {
+    pass('angle-bracket destinations are read verbatim (#1119)');
+  } else {
+    fail(`angle-bracket destination misread (#1119): ${angleTarget}`);
+  }
+
   const { resolveReportPath } = await import(pathToFileURL(join(ROOT, 'followup-cadence.mjs')).href);
   const followupTmp = mkdtempSync(join(tmpdir(), 'career-ops-followup-link-'));
   try {
@@ -9171,6 +9212,16 @@ try {
       pass('follow-up reportPath rejects links outside reports/ (#1126)');
     } else {
       fail(`follow-up reportPath allowed escaped link (#1126): ${escaped}`);
+    }
+    // Same cell through a real consumer: follow-up cadence resolved this link to
+    // null before the scanner fix, silently dropping the report from the row.
+    const parenReport = join(followupTmp, 'reports', '1119-中原量子(郑州)科技有限公司-2026-10-12.md');
+    writeFileSync(parenReport, '# fixture\n');
+    const parenResolved = resolveReportPath('[1119](../reports/1119-中原量子(郑州)科技有限公司-2026-10-12.md)', appsFile, followupTmp);
+    if (parenResolved === 'reports/1119-中原量子(郑州)科技有限公司-2026-10-12.md') {
+      pass('follow-up reportPath resolves a parenthesised filename (#1119)');
+    } else {
+      fail(`follow-up reportPath failed on parenthesised filename (#1119): ${parenResolved}`);
     }
   } finally {
     rmSync(followupTmp, { recursive: true, force: true });

@@ -30,6 +30,7 @@ import { fileURLToPath, pathToFileURL } from 'url';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import { resolvePdfIndexPath } from './tracker-utils.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
+import { extractReportLinkTargets } from './tracker-links.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 
@@ -60,7 +61,11 @@ export function parseTrackerRows(text) {
   for (const line of lines) {
     const row = parseTrackerRow(line, colmap);
     if (!row) continue;
-    const link = row.report.match(/\[(\d+)\]\(([^)]+)\)/);
+    // Balanced-paren scanner (see tracker-links.mjs): the old regex cut the
+    // target of any report whose filename carries parentheses, and took the
+    // report number from the label — which disagrees with the file for
+    // re-evaluated rows ([1149](.../1152-...)), so use the filename prefix.
+    const [linkTarget] = extractReportLinkTargets(row.report);
     rows.push({
       trackerNum: row.num,
       date: row.date,
@@ -68,8 +73,8 @@ export function parseTrackerRows(text) {
       role: row.role,
       score: row.score,
       status: cleanStatus(row.status),
-      reportNum: link ? normNum(link[1]) : null,
-      reportPath: link ? link[2].replace(/^(\.\.\/)+/, '') : null,
+      reportNum: linkTarget ? normNum(linkTarget.split('/').pop().match(/^(\d+)-/)?.[1] ?? '') : null,
+      reportPath: linkTarget ? linkTarget.replace(/^(\.\.\/)+/, '') : null,
     });
   }
   return rows;

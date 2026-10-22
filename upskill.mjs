@@ -27,6 +27,7 @@ import { join, dirname, relative, sep } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { load as yamlLoad } from 'js-yaml';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
+import { extractReportLinkTargets } from './tracker-links.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
@@ -401,14 +402,16 @@ function analyze(minReports) {
   const parsedReports = [];
 
   for (const row of rows) {
-    const linkMatch = (row.report || '').match(/\]\(([^)]+)\)/);
+    // Balanced-paren scanner (see tracker-links.mjs): the old `[^)]+` regex cut
+    // the target of reports whose filename carries parentheses.
+    const [linkMatch] = extractReportLinkTargets(row.report);
     if (!linkMatch) continue;
     reportsLinked += 1;
     // Tracker links are normalized relative to the tracker file's directory
     // (see merge-tracker.mjs); resolve against it, with a root-relative fallback.
     // The read is attempted directly instead of probing with existsSync first,
     // which costs a full stat per report and races with the read (#2385).
-    const candidates = new Set([join(dirname(APPS_FILE), linkMatch[1]), join(CAREER_OPS, linkMatch[1])]);
+    const candidates = new Set([join(dirname(APPS_FILE), linkMatch), join(CAREER_OPS, linkMatch)]);
     let content = null;
     for (const p of candidates) {
       if (!withinReports(p)) continue;

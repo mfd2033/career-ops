@@ -27,6 +27,7 @@ import {
   looksLikeScoreCell, isSeparatorRow, isHeaderRow, resolveColumns,
   normalizeTextKey, normalizeVia,
 } from './tracker-parse.mjs';
+import { extractReportLinkTargets } from './tracker-links.mjs';
 import { checkTrackerSync } from './tracker-sync-check.mjs';
 import { checkFollowupsSchema } from './stats.mjs';
 
@@ -173,9 +174,8 @@ if (dupes === 0) ok('No exact duplicates found');
 const TRACKER_DIR = dirname(APPS_FILE);
 let brokenReports = 0;
 for (const e of entries) {
-  const match = e.report.match(/\]\(([^)]+)\)/);
-  if (!match) continue;
-  const link = match[1];
+  const [link] = extractReportLinkTargets(e.report);
+  if (!link) continue;
   if (!existsSync(join(TRACKER_DIR, link)) && !existsSync(join(CAREER_OPS, link))) {
     error(`#${e.num}: Report not found: ${link}`);
     brokenReports++;
@@ -337,14 +337,14 @@ if (dupReports === 0) ok('No duplicate reports for the same company+role');
 const referencedNums = new Set();
 for (const e of entries) {
   const linkTexts = [...e.report.matchAll(/\[(\d+)\]/g)];
-  const linkTargets = [...e.report.matchAll(/\]\(([^)]+)\)/g)];
+  const linkTargets = extractReportLinkTargets(e.report);
   if (linkTexts.length === 0 && linkTargets.length === 0) {
     referencedNums.add(e.num);
     continue;
   }
   for (const lt of linkTexts) referencedNums.add(parseInt(lt[1], 10));
-  for (const lt of linkTargets) {
-    const m = lt[1].split('/').pop().match(/^(\d+)-/);
+  for (const target of linkTargets) {
+    const m = target.split('/').pop().match(/^(\d+)-/);
     if (m) referencedNums.add(parseInt(m[1], 10));
   }
 }
