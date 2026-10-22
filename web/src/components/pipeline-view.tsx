@@ -1,6 +1,7 @@
 "use client";
 
 import { memo, useCallback, useEffect, useDeferredValue, useMemo, useRef, useState } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Search, ChevronsUpDown, X, Compass, ArrowRight, RotateCcw, Loader2, SkipForward, HeartPulse } from "lucide-react";
@@ -223,6 +224,20 @@ export function PipelineView({
     () => buildContextQuery({ tab, min: minFilter, max: maxFilter, company: companyFilter ?? "", sortKey: sort.key, dir: sort.dir, q: deferredQ }),
     [tab, minFilter, maxFilter, companyFilter, sort.key, sort.dir, deferredQ],
   );
+
+  // 虚拟滚动（B）：只渲染视口内的行 + overscan。A 阶段抽了 memo 行，但勾选/切 tab/排序
+  // 会改 contextQuery（tab/sort/q 都在其中）→ 每行 href 变 → 整表 700 行仍同步 reconcile；
+  // memo 拦不住这个。虚拟化把任意交互都钉在视口规模，才是 #2 卡顿的根治。
+  // 行高用 measureElement 动态测（重评行有第二行，比估算高）。overscan 12 行 ≫ 粘性表头
+  // 高度，把「表头占位导致的顶部偏移」自然吃进 overscan 余量，不另算 paddingStart。
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const rowVirtualizer = useVirtualizer({
+    count: filtered.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => 52,
+    overscan: 12,
+    getItemKey: (index) => filtered[index]?.n ?? index,
+  });
 
   // ── Batch re-evaluate ──
   // Selection is keyed by application number (r.n). Posting URLs are resolved
@@ -591,7 +606,7 @@ export function PipelineView({
            than letting w-full crush them on a phone.
            44rem 是薪资/用时/体检三列加入前的旧值（ADR-0064 决议 11）：10 列下
            被挤压的总是公司/职位两列——窄窗口靠横向滚动，不靠换行撑高行。 */
-        <div className="mt-4 overflow-x-auto rounded-2xl border border-border md:min-h-0 md:flex-1 md:overflow-y-auto">
+        <div ref={scrollRef} className="mt-4 overflow-x-auto rounded-2xl border border-border md:min-h-0 md:flex-1 md:overflow-y-auto">
           <table className="w-full min-w-[64rem] text-sm">
             <thead className="sticky top-0 z-10 border-b border-border bg-surface text-left text-xs uppercase tracking-wide text-faint">
               <tr>
@@ -628,23 +643,44 @@ export function PipelineView({
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {filtered.map((r) => (
-                <TrackerRow
-                  key={r.n}
-                  row={r}
-                  isSelected={selected.has(r.n)}
-                  href={`/pipeline/${r.n}${contextQuery}`}
-                  companyText={companyLabel(r)}
-                  statusText={statusLabel(r.status)}
-                  checkupStar={checkups?.[r.n]?.star ?? null}
-                  checkupTitleText={checkupTitle(r.n)}
-                  showSuggest={tab === "EVALUATED" && !!suggests?.has(r.n)}
-                  suggestLabel={t("pipeline.suggestCheckup")}
-                  suggestTitle={t("pipeline.suggestCheckupTitle")}
-                  revalText={r.revalDate && r.revalDate !== r.date ? t("pipeline.revalOn", { date: r.revalDate }) : null}
-                  onToggle={toggleRow}
-                />
-              ))}
+              {(() => {
+                const items = rowVirtualizer.getVirtualItems();
+                if (items.length === 0) return null;
+                const topPad = items[0].start;
+                const bottomPad = rowVirtualizer.getTotalSize() - items[items.length - 1].end;
+                return (
+                  <>
+                    {topPad > 0 && (
+                      <tr aria-hidden="true"><td colSpan={11} style={{ height: topPad, padding: 0, border: 0 }} /></tr>
+                    )}
+                    {items.map((vi) => {
+                      const r = filtered[vi.index];
+                      return (
+                        <TrackerRow
+                          key={vi.key}
+                          row={r}
+                          dataIndex={vi.index}
+                          innerRef={rowVirtualizer.measureElement}
+                          isSelected={selected.has(r.n)}
+                          href={`/pipeline/${r.n}${contextQuery}`}
+                          companyText={companyLabel(r)}
+                          statusText={statusLabel(r.status)}
+                          checkupStar={checkups?.[r.n]?.star ?? null}
+                          checkupTitleText={checkupTitle(r.n)}
+                          showSuggest={tab === "EVALUATED" && !!suggests?.has(r.n)}
+                          suggestLabel={t("pipeline.suggestCheckup")}
+                          suggestTitle={t("pipeline.suggestCheckupTitle")}
+                          revalText={r.revalDate && r.revalDate !== r.date ? t("pipeline.revalOn", { date: r.revalDate }) : null}
+                          onToggle={toggleRow}
+                        />
+                      );
+                    })}
+                    {bottomPad > 0 && (
+                      <tr aria-hidden="true"><td colSpan={11} style={{ height: bottomPad, padding: 0, border: 0 }} /></tr>
+                    )}
+                  </>
+                );
+              })()}
             </tbody>
           </table>
         </div>
@@ -664,6 +700,8 @@ export function PipelineView({
 // 逻辑用纯函数在组件内从 row 现算），保证 props 尽量为原始值以便浅比较命中。
 const TrackerRow = memo(function TrackerRow({
   row,
+  dataIndex,
+  innerRef,
   isSelected,
   href,
   companyText,
@@ -677,6 +715,10 @@ const TrackerRow = memo(function TrackerRow({
   onToggle,
 }: {
   row: Application;
+  /** 虚拟器用于将 DOM 行关联回数据项（measureElement 读 data-index）。 */
+  dataIndex: number;
+  /** 行元素 ref，交给 react-virtual 动态测行高。 */
+  innerRef?: (el: HTMLTableRowElement | null) => void;
   isSelected: boolean;
   href: string;
   companyText: string;
@@ -690,7 +732,7 @@ const TrackerRow = memo(function TrackerRow({
   onToggle: (n: string) => void;
 }) {
   return (
-    <tr onClick={() => onToggle(row.n)} className="group transition-colors hover:bg-surface/40">
+    <tr ref={innerRef} data-index={dataIndex} onClick={() => onToggle(row.n)} className="group transition-colors hover:bg-surface/40">
       <td className="w-10 px-2 py-3" onClick={(e) => e.stopPropagation()}>
         <input
           type="checkbox"
