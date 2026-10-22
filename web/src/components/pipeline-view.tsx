@@ -28,7 +28,7 @@ import { useI18n } from "@/lib/i18n/context";
 import { useUnknownEmployerPolicy } from "@/lib/use-unknown-employer";
 import { resolveCompanyLabel } from "@/lib/unknown-employer.mjs";
 
-// INBOX (the triage queue) is the default tab; the rest filter the tracker.
+// ALL (the full tracker) is the default tab; INBOX is the triage queue you land on via its own tab.
 const TABS = [
   "INBOX",
   "ALL",
@@ -123,7 +123,7 @@ export function PipelineView({
   // filterPipeline/navigate actions drive
   // the table identically (no useState mirror → no desync).
   const pTab = (params.get("tab") ?? "").toUpperCase();
-  const tab: Tab = (TABS as readonly string[]).includes(pTab) ? (pTab as Tab) : "INBOX";
+  const tab: Tab = (TABS as readonly string[]).includes(pTab) ? (pTab as Tab) : "ALL";
   const pMin = parseFloat(params.get("min") ?? "");
   const minFilter: number | null = Number.isFinite(pMin) ? pMin : null;
   // max（ADR-0067）：分数上限，与 min 组成半开区间 [min, max)——分析页分数桶下钻的落地端。
