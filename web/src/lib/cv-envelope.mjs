@@ -130,7 +130,72 @@ export function parseCvEnvelope(text) {
     else warnings.push(`Unrecognized page format "${declared}"; defaulting to ${DEFAULT_PAGE_FORMAT}.`);
   }
 
+  warnings.push(...experienceOrderWarning(html));
+
   return { ok: true, html, format, warnings };
+}
+
+/**
+ * Warn when the tailored CV's work-experience entries are not reverse-
+ * chronological. modes/pdf.md pins the section's entry ORDER — only the bullets
+ * inside an entry are reorderable — but a pdf worker following its report's
+ * "group these roles into one block" advice moved cv-1145's two older roles
+ * above newer ones and the CV shipped with no signal anywhere: the envelope
+ * gate only ever checked the document was whole.
+ *
+ * A warning, not a veto: ordering is a judgement call the user gets to make on
+ * a rendered CV, and a hard failure here would let one exotic date format break
+ * every pdf run. Anchored to the `.job-period` spans of the base template the
+ * web run is told to fill (build-cv-html.mjs's own structural contract), so a
+ * CV without that markup skips the check entirely.
+ *
+ * @param {string} html - The extracted envelope body.
+ * @returns {string[]} 0 or 1 warning.
+ */
+function experienceOrderWarning(html) {
+  // `[^<]*` keeps one match per span even when a date is unparseable — a lazy
+  // `[\s\S]*?` would skip ahead across tags looking for a parseable pair and
+  // compare the wrong neighbours.
+  const spans = [...html.matchAll(/<span\b[^>]*class="[^"]*job-period[^"]*"[^>]*>([^<]*)<\/span>/gi)];
+  if (spans.length < 2) return [];
+  const FUTURE = Number.MAX_SAFE_INTEGER;
+  const ranges = [];
+  let unparseable = 0;
+  for (const [, raw] of spans) {
+    const text = raw
+      .replace(/&nbsp;/gi, " ")
+      .replace(/&(?:ndash|mdash|#8211|#8212);/gi, "\u2013")
+      .replace(/&#\d+;|&[a-z]+;/gi, " ");
+    // `2021.04 – 2026.03` / `2012-2015` / `2015.09 – present`; month optional,
+    // because some locales carry bare years. End month 0 sorts a same-year
+    // `2026` before `2026.03`, which keeps ties (a merged company span and its
+    // top sub-role sharing an end date) from reading as inversions.
+    const m = text.match(/(^|[^\d])20\d{2}(?:\s*[.\-/]\s*(\d{1,2}))?\s*[\u2013\u2014\u2212-]\s*(20\d{2}|present|now|\u81f3\u4eca|\u73fe\u5728)(?:\s*[.\-/]\s*(\d{1,2}))?/i);
+    if (!m) {
+      unparseable += 1;
+      continue;
+    }
+    const endYear = /^20\d{2}$/.test(m[3]) ? Number(m[3]) : null;
+    const end = endYear === null ? FUTURE : endYear * 100 + Number(m[4] ?? 0);
+    ranges.push({ end, text: text.trim() });
+  }
+  // Dates the grammar does not cover must not pass silently: an unchecked check
+  // reporting "all clear" is worse than no check. Warn, but only if at least two
+  // entries parsed enough to have something to say about — a lone unparseable
+  // date among the rest is still worth flagging as unverifiable.
+  if (unparseable) {
+    return [
+      `Could not verify the work-experience date order: ${unparseable} entr${unparseable === 1 ? "y" : "ies"} used a date format the checker does not recognise. Glance at the section to confirm it is reverse-chronological.`,
+    ];
+  }
+  for (let i = 1; i < ranges.length; i++) {
+    if (ranges[i].end > ranges[i - 1].end) {
+      return [
+        `Work experience entries are not in reverse-chronological order ("${ranges[i].text}" follows an earlier-ending role). modes/pdf.md pins the section to reverse-chronological — check the generated CV before sending.`,
+      ];
+    }
+  }
+  return [];
 }
 
 /**

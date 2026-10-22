@@ -62,6 +62,20 @@ test("buildPrompt: the pdf prompt offers both page formats", () => {
   assert.match(prompt, /letter for a US\/Canada company, otherwise a4/i);
 });
 
+test("buildPrompt: the pdf prompt pins experience ENTRY order, not just bullets", () => {
+  // Given cv-1145: the worker read a bare "reorder experience by relevance" as
+  // license to move whole older entries above newer ones, violating modes/pdf.md's
+  // reverse-chronological Work Experience. The prompt must name bullets as the
+  // reorderable unit and pin the entry order explicitly.
+  const prompt = buildPrompt({ kind: "pdf", ...ARGS });
+
+  // Then "reorder experience" never appears without "bullets" as its object, and
+  // the reverse-chronological constraint is stated in the prompt itself
+  assert.match(prompt, /reorder experience bullets/i);
+  assert.match(prompt, /reverse-chronological/i);
+  assert.ok(!/reorder experience by/.test(prompt), "must not keep the entry-level-phrasing bug");
+});
+
 test("buildPrompt: the pdf prompt still pins tailoring to the real mode", () => {
   // Given a pdf run — the web orchestrates the engine, it does not reimplement it
   const prompt = buildPrompt({ kind: "pdf", ...ARGS });

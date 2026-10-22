@@ -432,3 +432,84 @@ test("createCvEnvelopeFilter: a mid-line closer does not end the body", () => {
   assert.equal(result.html, body);
   assert.ok(!display.includes("trailing"), `body leaked: ${JSON.stringify(display)}`);
 });
+
+// ── work-experience ordering warning (cv-1145) ─────────────────────
+//
+// A pdf worker executing its report's "restructure the ERP-adjacent experience
+// into one block" advice moved two older roles ABOVE newer ones in the rendered
+// CV, and nothing in the pipeline noticed — the envelope gate only checks the
+// document is whole. modes/pdf.md pins Work Experience to reverse-chronological,
+// so the platform now surfaces an entry-level inversion as a warning (the CV
+// still renders; a human decides).
+
+/** Build a whole document whose experience entries carry the given dates. */
+function cvWithJobs(dates) {
+  const jobs = dates
+    .map((d) => `<div class="job"><span class="job-period">${d}</span></div>`)
+    .join("\n");
+  return `<!DOCTYPE html>\n<html><body>${jobs}</body></html>`;
+}
+
+test("parseCvEnvelope: misordered work-experience entries produce an ordering warning", () => {
+  // Given the exact cv-1145 shape: PM → 大方 → 浪潮 → 技术经理 → Java (not descending)
+  const result = parseCvEnvelope(envelope(cvWithJobs([
+    "2021.04 - 2026.03", "2012.04 - 2015.01", "2010.02 - 2012.04", "2019.01 - 2021.03", "2015.09 - 2018.12",
+  ]), "a4"));
+
+  // Then the CV still renders (warning, not veto) but the inversion is named
+  assert.equal(result.ok, true);
+  assert.equal(result.warnings.length, 1);
+  assert.match(result.warnings[0], /reverse-chronological/i);
+});
+
+test("parseCvEnvelope: reverse-chronological experience adds no warning", () => {
+  // Given the same entries in correct order, with en-dashes and an open-ended
+  // (present) role at the top, where an ongoing job actually belongs
+  const result = parseCvEnvelope(envelope(cvWithJobs([
+    "2021.04 – present", "2019.01 – 2021.03", "2015.09 – 2018.12", "2012.04 – 2015.01", "2010.02 – 2012.04",
+  ]), "a4"));
+
+  // Then the check stays silent — no false positive on a well-ordered CV
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.warnings, []);
+});
+
+test("parseCvEnvelope: equal end dates (company header + sub-role) are not an inversion", () => {
+  // Given cv-1139's shape: the merged company span and its first sub-role share
+  // an end date — a tie is not a violation
+  const result = parseCvEnvelope(envelope(cvWithJobs([
+    "2015.09 - 2026.03", "2021.04 - 2026.03", "2019.01 - 2021.03", "2015.09 - 2018.12", "2012.04 - 2015.01",
+  ]), "a4"));
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.warnings, []);
+});
+
+test("parseCvEnvelope: unparseable job dates warn instead of silently passing", () => {
+  // Given dates the grammar does not cover — an unchecked check that reports
+  // "all clear" would be worse than no check at all
+  const result = parseCvEnvelope(envelope(cvWithJobs(["Jan. 2021 through Mar. 2026", "2012 - 2015"]), "a4"));
+
+  assert.equal(result.ok, true);
+  assert.equal(result.warnings.length, 1);
+  assert.match(result.warnings[0], /could not verify/i);
+});
+
+test("parseCvEnvelope: a CV without job-period markup skips the ordering check", () => {
+  // Given the base fixture document (no experience markup at all)
+  const result = parseCvEnvelope(envelope(DOC, "a4"));
+
+  // Then no warning and no "could not verify" noise for a section that isn't there
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.warnings, []);
+});
+
+test("parseCvEnvelope: HTML entities inside job dates do not trigger a false alarm", () => {
+  // Given dates whose separators arrive as HTML entities (&ndash; / &nbsp;)
+  const result = parseCvEnvelope(envelope(cvWithJobs([
+    "2021.04&nbsp;&ndash;&nbsp;2026.03", "2019.01 &ndash; 2021.03", "2012 - 2015",
+  ]), "a4"));
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.warnings, []);
+});
