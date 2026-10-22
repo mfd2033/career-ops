@@ -20,8 +20,13 @@ import { fileURLToPath } from "node:url";
 const WEB = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const SRC = readFileSync(join(WEB, "src", "components", "pipeline-view.tsx"), "utf8");
 
-// 只取追踪器表的 tbody 段——表头 th 的排序 onClick、收件箱分支都不在本不变量内。
+// 只取两处：追踪器表的 tbody 段（现在是 <TrackerRow .../> 的 map，负责把行数据
+// 与「哪一行显示体检/建议」的判定、链接 href、本地化字符串算出来）与 TrackerRow
+// 组件体（真正的行 markup：一个 <tr>、一个公司 <Link>、各列的截断与 stopPropagation）。
+// 行抽成 memo 组件后，结构不变量分散在这两处，守卫必须两处都量到——先例同口径：
+// 表头 th 的排序 onClick、收件箱分支都不在本不变量内。
 const TBODY = SRC.slice(SRC.indexOf("<tbody"), SRC.indexOf("</tbody>"));
+const ROW = SRC.slice(SRC.indexOf("const TrackerRow = memo"), SRC.indexOf("// Empty inbox"));
 
 /**
  * 剥掉注释，只留代码。源码守卫量的是结构，不是散文：否则一句提到 `<Link>` 或
@@ -32,6 +37,7 @@ function stripComments(src) {
 }
 
 const TBODY_CODE = stripComments(TBODY);
+const ROW_CODE = stripComments(ROW);
 const SRC_CODE = stripComments(SRC);
 
 /** 字符串在 src 里出现的次数（用 split 计，避开正则转义 `${` 的坑）。 */
@@ -40,9 +46,10 @@ function count(src, needle) {
 }
 
 test("the tracker table has exactly ONE in-app navigation link, and it is the company", () => {
-  assert.ok(TBODY.length > 0, "pipeline-view.tsx shape changed — the tracker <tbody> was not found");
-  assert.equal(count(TBODY_CODE, "<Link"), 1, "只有公司名该是 <Link>；职位/分数改回链接即违反 ADR-0062");
-  assert.equal(count(TBODY_CODE, '`/pipeline/${r.n}${contextQuery}`'), 1, "唯一的链接必须是带列表上下文的 /pipeline/{n}");
+  assert.ok(ROW.length > 0, "pipeline-view.tsx shape changed — the TrackerRow component was not found");
+  assert.equal(count(ROW_CODE, "<Link"), 1, "只有公司名该是 <Link>；职位/分数改回链接即违反 ADR-0062");
+  assert.equal(count(TBODY_CODE, "<Link"), 0, "行 map（tbody）内不该再有第二个站内链接");
+  assert.equal(count(TBODY_CODE, '`/pipeline/${r.n}${contextQuery}`'), 1, "唯一的链接 href 必须是带列表上下文的 /pipeline/{n}");
 });
 
 test("the list has no link to the minimal report page anymore", () => {
@@ -54,37 +61,38 @@ test("the list has no link to the minimal report page anymore", () => {
 });
 
 test("role and score render as plain content", () => {
-  assert.match(TBODY, /\{r\.role\}/, "职位单元格必须仍在（去链不是删列）");
-  assert.match(TBODY, /<Badge tone=\{scoreTone\(r\.score\)\}>\{r\.score \|\| "—"\}<\/Badge>/,
+  assert.match(ROW, /\{row\.role\}/, "职位单元格必须仍在（去链不是删列）");
+  assert.match(ROW, /<Badge tone=\{scoreTone\(row\.score\)\}>\{row\.score \|\| "—"}<\/Badge>/,
     "分数徽章必须仍以裸 Badge 渲染，取色口径不变");
 });
 
 test("company and role are single-line truncated (ADR-0064 修订决议 11)", () => {
   // 行高一致靠截断不靠换行：两列各有一处 truncate，完整文本进 title 悬停。
-  assert.equal(count(TBODY_CODE, "truncate"), 2, "公司/职位各一处 truncate，多一列就查谁把行高带回来了");
-  assert.match(TBODY, /title=\{companyLabel\(r\)\}/, "公司全名必须可悬停读到");
-  assert.match(TBODY, /title=\{r\.role\}/, "职位全文必须可悬停读到");
+  assert.equal(count(ROW_CODE, "truncate"), 2, "公司/职位各一处 truncate，多一列就查谁把行高带回来了");
+  assert.match(ROW, /title=\{companyText\}/, "公司全名必须可悬停读到");
+  assert.match(ROW, /title=\{row\.role\}/, "职位全文必须可悬停读到");
 });
 
 test("only the checkbox cell and the company link stop propagation", () => {
-  // 行点击（ADR-0038）靠 stopPropagation 才不被劫持。去链后 tbody 里该只剩两处：
+  // 行点击（ADR-0038）靠 stopPropagation 才不被劫持。去链后行内该只剩两处：
   // 复选框 <td> 与公司 <Link>。任何新增的拦截格都意味着那一格又不再参与勾选。
-  assert.equal(count(TBODY_CODE, "e.stopPropagation()"), 2,
+  assert.equal(count(ROW_CODE, "e.stopPropagation()"), 2,
     "职位/分数/角标该冒泡到行 = 切换勾选，不再自行拦截");
 });
 
 test("checkup state lives in exactly one place: the checkup column (ADR-0064 修订决议 1/5)", () => {
   // 曾是「角标是公司 <Link> 的兄弟节点」（ADR-0062/0026）；同日修订后公司格
   // 不再持任何体检信息，★ 与建议 chip 的唯一落点是体检列——同一行出现两颗
-  // 体检状态就是本次要修的重复与换行根源。
-  assert.equal(count(TBODY_CODE, "checkupTone(c.star)"), 1, "★ chip 全 tbody 仅体检列一处");
-  assert.equal(count(TBODY_CODE, 't("pipeline.suggestCheckup")'), 1, "建议 chip 全 tbody 仅体检列一处");
-  assert.match(TBODY, /tab === "EVALUATED" && suggests\?\.has\(r\.n\)/,
+  // 体检状态就是本次要修的重复与换行根源。行抽成 TrackerRow 后，★ 的渲染在
+  // 组件体里，「建议」chip 的字符串与已评估 tab 门控在 map 里算好再传进来。
+  assert.equal(count(ROW_CODE, "checkupTone(checkupStar)"), 1, "★ chip 全行仅体检列一处");
+  assert.equal(count(TBODY_CODE, 't("pipeline.suggestCheckup")'), 1, "建议 chip 全 map 仅一处");
+  assert.match(TBODY, /tab === "EVALUATED" && !!suggests\?\.has\(r\.n\)/,
     "chip 渲染必须带已评估 tab 门控——suggests 集合离开该 tab 后残留，不得泄漏到其他 tab");
   // 公司格内段（</Link> 之后到本 td 闭合）必须干净
-  const close = TBODY.indexOf("</Link>");
+  const close = ROW.indexOf("</Link>");
   assert.ok(close > 0, "公司 <Link> 未闭合 — 结构变了，本断言需随宿主改写");
-  const cell = TBODY.slice(close, TBODY.indexOf("</td>", close));
+  const cell = ROW.slice(close, ROW.indexOf("</td>", close));
   assert.ok(!/checkup|suggest/i.test(cell), "公司格不得再出现任何体检 chip");
 });
 
@@ -92,7 +100,7 @@ test("the clickable row uses the default arrow, not the hand cursor", () => {
   // 点行 = 切换勾选（ADR-0038），不是跳转。手型按团队规范只代表链接/导航
   // （ADR-0062 增补），所以行本身不能挂 cursor-pointer——否则“点哪都跳”的错觉又回来。
   // 行内 checkbox（原生控件）与公司 <Link>（真链接）仍各自保留手型，不在本断言范围。
-  const tr = TBODY_CODE.match(/<tr[\s\S]*?>/)[0];
+  const tr = ROW_CODE.match(/<tr[\s\S]*?>/)[0];
   assert.ok(tr, "未找到追踪器行 <tr> — 结构变了，本断言需随宿主改写");
   assert.ok(!/cursor-pointer/.test(tr),
     "数据行不该用 cursor-pointer；手型只留给真链接，点行只是勾选");

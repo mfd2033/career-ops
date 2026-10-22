@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useDeferredValue, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Search, ChevronsUpDown, X, Compass, ArrowRight, RotateCcw, Loader2, SkipForward, HeartPulse } from "lucide-react";
@@ -204,9 +204,13 @@ export function PipelineView({
   // Filtering/sorting live in pipeline-order.mjs — the single source of truth
   // shared with the report detail page so its prev/next navigation reproduces
   // this exact context (the list view and the detail nav must never drift).
+  // 搜索框输入即时回显（q），但喂给过滤/排序与行链接的是 useDeferredValue 的延迟值：
+  // 快速连打时 React 先用旧 deferredQ 低优先级渲染，避免每个字符都重排整表。
+  const deferredQ = useDeferredValue(q);
+
   const filtered = useMemo(
-    () => orderApplications(applications, { tab, min: minFilter, max: maxFilter, company: companyFilter ?? "", q, sortKey: sort.key, dir: sort.dir }),
-    [applications, tab, minFilter, maxFilter, companyFilter, q, sort],
+    () => orderApplications(applications, { tab, min: minFilter, max: maxFilter, company: companyFilter ?? "", q: deferredQ, sortKey: sort.key, dir: sort.dir }),
+    [applications, tab, minFilter, maxFilter, companyFilter, deferredQ, sort],
   );
 
   // The context a row link carries into the report page (and back out again):
@@ -216,8 +220,8 @@ export function PipelineView({
   // prev/next/back links serialize the context IDENTICALLY. tab==="INBOX"
   // never reaches here (no tracker rows to link).
   const contextQuery = useMemo(
-    () => buildContextQuery({ tab, min: minFilter, max: maxFilter, company: companyFilter ?? "", sortKey: sort.key, dir: sort.dir, q }),
-    [tab, minFilter, maxFilter, companyFilter, sort.key, sort.dir, q],
+    () => buildContextQuery({ tab, min: minFilter, max: maxFilter, company: companyFilter ?? "", sortKey: sort.key, dir: sort.dir, q: deferredQ }),
+    [tab, minFilter, maxFilter, companyFilter, sort.key, sort.dir, deferredQ],
   );
 
   // ── Batch re-evaluate ──
@@ -624,110 +628,22 @@ export function PipelineView({
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {filtered.map((r, i) => (
-                <tr
-                  key={`${r.n}-${i}`}
-                  onClick={() => toggleRow(r.n)}
-                  className="group transition-colors hover:bg-surface/40"
-                >
-                  <td className="w-10 px-2 py-3" onClick={(e) => e.stopPropagation()}>
-                    <input
-                      type="checkbox"
-                      checked={selected.has(r.n)}
-                      onChange={(e) => {
-                        const next = new Set(selected);
-                        if (e.target.checked) next.add(r.n);
-                        else next.delete(r.n);
-                        setSelected(next);
-                      }}
-                      className="size-4 cursor-pointer rounded border-border text-brand accent-brand align-middle"
-                      aria-label={companyLabel(r)}
-                    />
-                  </td>
-                  {/* 报告号：tracker# = 报告文件名前缀，与 /pipeline/{n} 详情页同号。 */}
-                  <td className="whitespace-nowrap px-4 py-3 text-faint tabular-nums">#{r.n}</td>
-                  <td className="px-4 py-3 font-medium">
-                    {/* ADR-0062：公司名是全行唯一的站内导航入口。职位与分数曾经也
-                        是链接，用户想勾选行做批量却误点跳页、丢列表筛选与滚动位置。
-                        ADR-0064 修订：格内只剩 logo + 名称——体检★/建议 chip 全部搬进
-                        体检列（双星重复且占宽是公司名换行的主因）；超长单行截断，
-                        全名进悬停 title，行高恒定。ADR-0065：内容区放开后上限
-                        16rem → 24rem——列宽了截断点必须跟走，否则列内死白。 */}
-                    <div className="flex max-w-[24rem] items-center">
-                      <Link
-                        href={`/pipeline/${r.n}${contextQuery}`}
-                        onClick={(e) => e.stopPropagation()}
-                        title={companyLabel(r)}
-                        className="inline-flex min-w-0 max-w-full items-center gap-2.5 transition-colors group-hover:text-brand"
-                      >
-                        <CompanyLogo name={companyLabel(r)} size={20} />
-                        <span className="truncate">{companyLabel(r)}</span>
-                      </Link>
-                    </div>
-                  </td>
-                  <td className="px-4 py-3 text-muted">
-                    {/* 职位常带括号后缀（方向/城市），同样单行截断 + 全文悬停（ADR-0064 决议 11）；
-                        ADR-0065：内容区放开后上限 22rem → 32rem。 */}
-                    <div className="max-w-[32rem] truncate" title={r.role}>{r.role}</div>
-                  </td>
-                  <td className="px-4 py-3">
-                    {/* 分数只做展示（ADR-0062）：曾经的 /report/{n} 直跳通道让位于
-                        「误点不跳页」；该路由仍服务扩展深链与工作器 #N（ADR-0018）。 */}
-                    <Badge tone={scoreTone(r.score)}>{r.score || "—"}</Badge>
-                  </td>
-                  {/* 报告薪资（ADR-0037）：归一化月薪区间，报告的字段原文进悬停提示；
-                      未披露/无报告 → 「—」（与分数列、来源列的空值写法一致，全列只有
-                      「区间」与「—」两种形态）。 */}
-                  <td
-                    className={cn(
-                      "whitespace-nowrap px-4 py-3 tabular-nums",
-                      r.reportSalary?.range ? "text-muted" : "text-faint",
-                    )}
-                    title={r.reportSalary?.text || undefined}
-                  >
-                    {r.reportSalary?.range ? formatSalaryRange(r.reportSalary.range) : "—"}
-                  </td>
-                  {/* 体检列三态（ADR-0064 修订决议 5）：有记录 → ★；无记录但命中
-                      建议 → chip（只随已评估 tab 的懒加载边界渲染——suggests 集合离开
-                      该 tab 后仍残留，渲染处必须判 tab）；皆无 → 空格，空格不是「★0」，
-                      与恒沉底的排序口径同一个诚实姿态。公司格不再持任何体检信息。 */}
-                  {(() => {
-                    const c = checkups?.[r.n];
-                    if (c) {
-                      return (
-                        <td className="whitespace-nowrap px-4 py-3 tabular-nums" title={checkupTitle(r.n) || undefined}>
-                          <Badge tone={checkupTone(c.star)}>★{c.star.toFixed(1)}</Badge>
-                        </td>
-                      );
-                    }
-                    if (tab === "EVALUATED" && suggests?.has(r.n)) {
-                      return (
-                        <td className="whitespace-nowrap px-4 py-3" title={t("pipeline.suggestCheckupTitle")}>
-                          <Badge tone="warn">{t("pipeline.suggestCheckup")}</Badge>
-                        </td>
-                      );
-                    }
-                    return <td className="whitespace-nowrap px-4 py-3" />;
-                  })()}
-                  <td className="whitespace-nowrap px-4 py-3 text-muted tabular-nums">
-                    {fmtDuration(r.evalDuration ?? null)}
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3 text-muted">
-                    <span className="inline-flex items-center gap-1.5">
-                      <span className={cn("size-1.5 shrink-0 rounded-full", statusDot(r.status))} />
-                      {statusLabel(r.status)}
-                    </span>
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3 text-faint tabular-nums">
-                    {r.date}
-                    {r.revalDate && r.revalDate !== r.date && (
-                      <span className="block text-[11px] leading-4 text-faint/70">
-                        {t("pipeline.revalOn", { date: r.revalDate })}
-                      </span>
-                    )}
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3 text-faint">{sourceLabel(r.url) ?? "—"}</td>
-                </tr>
+              {filtered.map((r) => (
+                <TrackerRow
+                  key={r.n}
+                  row={r}
+                  isSelected={selected.has(r.n)}
+                  href={`/pipeline/${r.n}${contextQuery}`}
+                  companyText={companyLabel(r)}
+                  statusText={statusLabel(r.status)}
+                  checkupStar={checkups?.[r.n]?.star ?? null}
+                  checkupTitleText={checkupTitle(r.n)}
+                  showSuggest={tab === "EVALUATED" && !!suggests?.has(r.n)}
+                  suggestLabel={t("pipeline.suggestCheckup")}
+                  suggestTitle={t("pipeline.suggestCheckupTitle")}
+                  revalText={r.revalDate && r.revalDate !== r.date ? t("pipeline.revalOn", { date: r.revalDate }) : null}
+                  onToggle={toggleRow}
+                />
               ))}
             </tbody>
           </table>
@@ -741,6 +657,114 @@ export function PipelineView({
     </div>
   );
 }
+
+// 单行抽成 memo 组件：勾选/切 tab 时只重渲染真正变化的行。原表格 key 带索引 i，
+// 搜索改序会连带 key 变化，逼所有 CompanyLogo remount 重发 /api/logo——现在 key 稳定
+// 为 r.n，配合 memo，即便重排也不再重挂。父层只传需要本地化的字符串（其余纯展示
+// 逻辑用纯函数在组件内从 row 现算），保证 props 尽量为原始值以便浅比较命中。
+const TrackerRow = memo(function TrackerRow({
+  row,
+  isSelected,
+  href,
+  companyText,
+  statusText,
+  checkupStar,
+  checkupTitleText,
+  showSuggest,
+  suggestLabel,
+  suggestTitle,
+  revalText,
+  onToggle,
+}: {
+  row: Application;
+  isSelected: boolean;
+  href: string;
+  companyText: string;
+  statusText: string;
+  checkupStar: number | null;
+  checkupTitleText: string | null;
+  showSuggest: boolean;
+  suggestLabel: string;
+  suggestTitle: string;
+  revalText: string | null;
+  onToggle: (n: string) => void;
+}) {
+  return (
+    <tr onClick={() => onToggle(row.n)} className="group transition-colors hover:bg-surface/40">
+      <td className="w-10 px-2 py-3" onClick={(e) => e.stopPropagation()}>
+        <input
+          type="checkbox"
+          checked={isSelected}
+          onChange={() => onToggle(row.n)}
+          className="size-4 cursor-pointer rounded border-border text-brand accent-brand align-middle"
+          aria-label={companyText}
+        />
+      </td>
+      {/* 报告号：tracker# = 报告文件名前缀，与 /pipeline/{n} 详情页同号。 */}
+      <td className="whitespace-nowrap px-4 py-3 text-faint tabular-nums">#{row.n}</td>
+      <td className="px-4 py-3 font-medium">
+        {/* ADR-0062：公司名是全行唯一的站内导航入口。ADR-0064/0065：格内只剩
+            logo + 名称，超长单行截断、全名进悬停 title，上限 24rem。 */}
+        <div className="flex max-w-[24rem] items-center">
+          <Link
+            href={href}
+            onClick={(e) => e.stopPropagation()}
+            title={companyText}
+            className="inline-flex min-w-0 max-w-full items-center gap-2.5 transition-colors group-hover:text-brand"
+          >
+            <CompanyLogo name={companyText} size={20} />
+            <span className="truncate">{companyText}</span>
+          </Link>
+        </div>
+      </td>
+      <td className="px-4 py-3 text-muted">
+        {/* 职位常带括号后缀（方向/城市），单行截断 + 全文悬停，上限 32rem。 */}
+        <div className="max-w-[32rem] truncate" title={row.role}>{row.role}</div>
+      </td>
+      <td className="px-4 py-3">
+        {/* 分数只做展示（ADR-0062）。 */}
+        <Badge tone={scoreTone(row.score)}>{row.score || "—"}</Badge>
+      </td>
+      {/* 报告薪资（ADR-0037）：归一化月薪区间，报告字段原文进悬停提示；未披露 →「—」。 */}
+      <td
+        className={cn(
+          "whitespace-nowrap px-4 py-3 tabular-nums",
+          row.reportSalary?.range ? "text-muted" : "text-faint",
+        )}
+        title={row.reportSalary?.text || undefined}
+      >
+        {row.reportSalary?.range ? formatSalaryRange(row.reportSalary.range) : "—"}
+      </td>
+      {/* 体检列三态（ADR-0064 修订决议 5）：有记录 → ★；无记录但命中建议 → chip；
+          皆无 → 空格（不是「★0」）。 */}
+      {checkupStar != null ? (
+        <td className="whitespace-nowrap px-4 py-3 tabular-nums" title={checkupTitleText || undefined}>
+          <Badge tone={checkupTone(checkupStar)}>★{checkupStar.toFixed(1)}</Badge>
+        </td>
+      ) : showSuggest ? (
+        <td className="whitespace-nowrap px-4 py-3" title={suggestTitle}>
+          <Badge tone="warn">{suggestLabel}</Badge>
+        </td>
+      ) : (
+        <td className="whitespace-nowrap px-4 py-3" />
+      )}
+      <td className="whitespace-nowrap px-4 py-3 text-muted tabular-nums">
+        {fmtDuration(row.evalDuration ?? null)}
+      </td>
+      <td className="whitespace-nowrap px-4 py-3 text-muted">
+        <span className="inline-flex items-center gap-1.5">
+          <span className={cn("size-1.5 shrink-0 rounded-full", statusDot(row.status))} />
+          {statusText}
+        </span>
+      </td>
+      <td className="whitespace-nowrap px-4 py-3 text-faint tabular-nums">
+        {row.date}
+        {revalText && <span className="block text-[11px] leading-4 text-faint/70">{revalText}</span>}
+      </td>
+      <td className="whitespace-nowrap px-4 py-3 text-faint">{sourceLabel(row.url) ?? "—"}</td>
+    </tr>
+  );
+});
 
 // Empty inbox. Self-sufficient for the mainstream user (a primary in-web action),
 // honest for devs (the CLI/file path stays, demoted to progressive transparency).
