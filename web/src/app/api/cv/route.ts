@@ -4,12 +4,11 @@ import path from "node:path";
 import { careerOpsRoot } from "@/lib/career-ops";
 import { atomicWriteWithBackup } from "@/lib/core/safe-write";
 import { pruneCvSnapshots } from "@/lib/cv-history.mjs";
+import { MAX_CV_BYTES } from "@/lib/cv/import";
 
 function cvPath() {
   return path.join(careerOpsRoot(), "cv.md");
 }
-
-const MAX_CV_BYTES = 200_000;
 
 // 历史快照保留上限（ADR-0048 决议 5）：仅 cv.md 的保存路径清理，
 // 通用 backup() 与其他消费路由不受影响。

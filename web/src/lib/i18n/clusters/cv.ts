@@ -57,6 +57,18 @@ export const en: Dict = {
   "cv.history.cancel": "Cancel",
   "cv.history.restored": "Restored.",
   "cv.history.restoreError": "Couldn't restore — try again.",
+
+  "cv.import.button": "Import .md",
+  "cv.import.hint": "Import a markdown CV (.md / .markdown / .txt), or drop the file onto the editor.",
+  "cv.import.confirmTitle": "Import this CV?",
+  "cv.import.confirmBody": "The editor will be replaced with this file. Nothing is written until you press Save — the current cv.md is backed up first.",
+  "cv.import.confirm": "Import",
+  "cv.import.cancel": "Cancel",
+  "cv.import.done": "Imported — review, then Save.",
+  "cv.import.errExt": "Only .md / .markdown / .txt files can be imported.",
+  "cv.import.errEmpty": "That file is empty.",
+  "cv.import.errTooLarge": "That file is too large (over 200 KB).",
+  "cv.import.errRead": "Couldn't read that file — try again.",
 };
 
 // Simplified Chinese strings. Every key in en must have a matching key here.
@@ -114,4 +126,16 @@ export const zh: Dict = {
   "cv.history.cancel": "取消",
   "cv.history.restored": "已还原。",
   "cv.history.restoreError": "还原失败 —— 请重试。",
+
+  "cv.import.button": "导入 .md",
+  "cv.import.hint": "导入 Markdown 简历（.md / .markdown / .txt），也可把文件直接拖到编辑区。",
+  "cv.import.confirmTitle": "导入这份简历？",
+  "cv.import.confirmBody": "编辑器内容将被该文件替换。在你点击「保存」之前不会写入任何文件 —— 当前 cv.md 会先自动备份。",
+  "cv.import.confirm": "导入",
+  "cv.import.cancel": "取消",
+  "cv.import.done": "已导入 —— 请检查后保存。",
+  "cv.import.errExt": "仅支持导入 .md / .markdown / .txt 文件。",
+  "cv.import.errEmpty": "该文件是空的。",
+  "cv.import.errTooLarge": "该文件太大（超过 200 KB）。",
+  "cv.import.errRead": "无法读取该文件 —— 请重试。",
 };
