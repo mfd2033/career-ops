@@ -1,5 +1,5 @@
 // detail-panel-pure 纯逻辑单测（ADR-0074 / 工单 02）：详情页浮窗的视图态计算——
-// 四行读数（已评估 / 快评 / 状态 / 体检）的取值与占位符、分数分档色、药丸总分回退、
+// 五行读数（报告号 / 已评估 / 快评 / 状态 / 体检）的取值与占位符、分数分档色、药丸总分回退、
 // 评估按钮文案切换、可点入口在缺值时隐藏。无 chrome / DOM 依赖，直接 import
 // extension/detail-panel-pure.js。
 //
@@ -34,10 +34,12 @@ test("分数分档：≥4 绿、≥3 橙、<3 红、非数值灰", () => {
   assert.equal(scoreBand("未评分").color, "#8a8f98");
 });
 
-// ---- 完全未评估：四行都在、全走占位符（结构不跳动） ------------------------
+// ---- 完全未评估：五行都在、全走占位符（结构不跳动） ------------------------
 
-test("完全未评估 → 已评估/状态行「未评估」、快评/体检「—」，两个可点入口都隐藏", () => {
+test("完全未评估 → 报告号「—」、已评估/状态行「未评估」、快评/体检「—」，两个可点入口都隐藏", () => {
   const v = panelView({ entry: null, quick: null });
+  assert.equal(v.reportRow.text, "—");
+  assert.equal(v.reportRow.color, SCORE_NEUTRAL, "无报告号时不得涂品牌蓝");
   assert.equal(v.evalRow.text, "未评估");
   assert.equal(v.evalRow.openable, false);
   assert.equal(v.evalRow.reportNum, null);
@@ -78,6 +80,8 @@ test("已完整评估 → 分数按档着色、带报告号、行尾可点、按
   assert.equal(v.evalRow.text, "4.3/5");
   assert.equal(v.evalRow.color, "#00c68d");
   assert.equal(v.evalRow.reportNum, "1121");
+  assert.equal(v.reportRow.text, "#1121", "报告号行独立显示带 # 前缀的 tracker#");
+  assert.equal(v.reportRow.color, "#4aa3ff");
   assert.equal(v.evalRow.openable, true);
   assert.equal(v.evalBtnLabel, "重新评估");
 });
@@ -233,14 +237,14 @@ test("体检星不报进药丸总分、不报进状态位（ADR-0064：只供展
   assert.equal(v.pill.dotColor, SCORE_NEUTRAL, "体检星不伪装成生命周期状态色");
 });
 
-// ---- 四行恒定存在（结构不跳动的契约） --------------------------------------
+// ---- 五行恒定存在（结构不跳动的契约） --------------------------------------
 
-test("任何输入组合下四行读数都在，行名固定", () => {
+test("任何输入组合下五行读数都在，行名固定", () => {
   for (const [e, q] of [[null, null], [entry(), null], [null, { score: 1 }], [entry(), { score: 1 }]]) {
     const v = panelView({ entry: e, quick: q });
     assert.deepEqual(
-      [v.evalRow.label, v.quickRow.label, v.statusRow.label, v.checkupRow.label],
-      ["已评估", "快评", "状态", "体检"]
+      [v.reportRow.label, v.evalRow.label, v.quickRow.label, v.statusRow.label, v.checkupRow.label],
+      ["报告号", "已评估", "快评", "状态", "体检"]
     );
   }
 });

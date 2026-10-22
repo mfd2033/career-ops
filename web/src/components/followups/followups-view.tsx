@@ -374,10 +374,12 @@ export function FollowupsView() {
         )
       ) : (
         <div className="mt-4 overflow-x-auto rounded-2xl border border-border">
-          <table className="w-full min-w-[960px] text-sm">
+          <table className="w-full min-w-[1020px] text-sm">
             <thead className="bg-surface/60 text-left text-xs uppercase tracking-wide text-faint">
               <tr>
                  <th className="w-8 px-2 py-2.5" aria-label={t("followups.expandColAria")} />
+                 {/* 报告号列：纯展示，不参与排序（tracker# 即报告文件名前缀），置于公司列前。 */}
+                 <th className="whitespace-nowrap px-2.5 py-2.5 font-medium">{t("followups.col.reportNo")}</th>
                  {COLUMNS.map((c) => {
                    const active = sortKey === c.key;
                    return (
@@ -569,6 +571,8 @@ function FollowupRow({
             <Chevron className="size-4" />
           </button>
         </td>
+        {/* 报告号：tracker# = 报告文件名前缀，与 /pipeline/{num} 详情页同号。 */}
+        <td className="whitespace-nowrap px-2.5 py-3 text-faint tabular-nums">#{e.num}</td>
         <td className="px-2.5 py-3 font-medium">
           {e.reportPath ? (
             <Link href={`/pipeline/${e.num}`} className="flex items-center gap-2.5 transition-colors group-hover:text-brand">
@@ -685,7 +689,7 @@ function FollowupRow({
       </tr>
       {expanded && (
         <tr className="bg-surface/30">
-          <td colSpan={COLUMNS.length + 2} className="px-4 py-3">
+          <td colSpan={COLUMNS.length + 3} className="px-4 py-3">
             <HistoryPanel entry={e} onRemove={onRemove} />
           </td>
         </tr>

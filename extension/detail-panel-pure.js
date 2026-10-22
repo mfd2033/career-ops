@@ -93,13 +93,13 @@
   }
 
   /**
-   * 浮窗视图态（四行读数：已评估 / 快评 / 状态 / 体检）。行结构恒定，缺值走
+   * 浮窗视图态（五行读数：报告号 / 已评估 / 快评 / 状态 / 体检）。行结构恒定，缺值走
    * 占位符 —— 页面懒加载、换职位、评估完成都只改内容，不改布局。
    *
    * @param {object}  [p]
    * @param {object}  [p.entry]        evaluated[normalizeUrl] —— {score, reportNum, status, checkupStar}
    * @param {object}  [p.quick]        quickMap[normalizeUrl] —— {score, grade, reason}
-   * @returns {{evalRow:object, quickRow:object, statusRow:object, checkupRow:object,
+   * @returns {{reportRow:object, evalRow:object, quickRow:object, statusRow:object, checkupRow:object,
    *            evalBtnLabel:string, pill:object}}
    */
   function panelView(p = {}) {
@@ -155,6 +155,15 @@
     };
 
     return {
+      // 报告号行：tracker# = 评估报告文件名前缀，是标识不是评价——有报告时给品牌蓝
+      // （与行内 ↗ / 🌐 同源），未评估时走占位符「—」。放在四行读数最前作身份位。
+      reportRow: {
+        label: "报告号",
+        text: reportNum ? `#${reportNum}` : PLACEHOLDER_DASH,
+        color: reportNum ? "#4aa3ff" : SCORE_NEUTRAL,
+        title: reportNum ? `评估报告 #${reportNum}` : "",
+        openable: false,
+      },
       evalRow: {
         label: "已评估",
         text: evalScore || PLACEHOLDER_STATUS,

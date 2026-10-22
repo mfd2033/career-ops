@@ -588,7 +588,7 @@ export function PipelineView({
            44rem 是薪资/用时/体检三列加入前的旧值（ADR-0064 决议 11）：10 列下
            被挤压的总是公司/职位两列——窄窗口靠横向滚动，不靠换行撑高行。 */
         <div className="mt-4 overflow-x-auto rounded-2xl border border-border md:min-h-0 md:flex-1 md:overflow-y-auto">
-          <table className="w-full min-w-[60rem] text-sm">
+          <table className="w-full min-w-[64rem] text-sm">
             <thead className="sticky top-0 z-10 border-b border-border bg-surface text-left text-xs uppercase tracking-wide text-faint">
               <tr>
                 <th className="w-10 px-2 py-2.5">
@@ -605,6 +605,8 @@ export function PipelineView({
                     className="size-4 cursor-pointer rounded border-border text-brand accent-brand align-middle"
                   />
                 </th>
+                {/* 报告号列：纯展示，不参与排序（tracker# 即报告文件名前缀），置于公司列前。 */}
+                <th className="whitespace-nowrap px-4 py-2.5 font-medium">{t("pipeline.col.reportNo")}</th>
                 {SORT_KEYS.map((k) => (
                   <th
                     key={k}
@@ -642,6 +644,8 @@ export function PipelineView({
                       aria-label={companyLabel(r)}
                     />
                   </td>
+                  {/* 报告号：tracker# = 报告文件名前缀，与 /pipeline/{n} 详情页同号。 */}
+                  <td className="whitespace-nowrap px-4 py-3 text-faint tabular-nums">#{r.n}</td>
                   <td className="px-4 py-3 font-medium">
                     {/* ADR-0062：公司名是全行唯一的站内导航入口。职位与分数曾经也
                         是链接，用户想勾选行做批量却误点跳页、丢列表筛选与滚动位置。

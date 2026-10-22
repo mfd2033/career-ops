@@ -44,7 +44,11 @@ export function DecisionCard({ app }: { app: Application }) {
       <div className="flex items-start gap-2.5">
         <CompanyLogo name={companyLabel} size={24} />
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-medium text-foreground">{companyLabel}</p>
+          <p className="truncate text-sm font-medium text-foreground">
+            {/* 报告号（tracker# = 报告文件名前缀，与 /pipeline/{n} 同号）。 */}
+            <span className="mr-1.5 font-mono text-xs tabular-nums text-faint">#{app.n}</span>
+            {companyLabel}
+          </p>
           <p className="truncate text-[13px] text-muted">{app.role}</p>
         </div>
         {Number.isFinite(score) && score > 0 && (

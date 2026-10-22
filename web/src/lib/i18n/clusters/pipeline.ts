@@ -42,6 +42,8 @@ export const en: Dict = {
   "pipeline.tab.skip": "SKIP",
 
   // Table column headers (display labels; sort param stays canonical English)
+  // 报告号（tracker# = 报告文件名前缀，非排序列）
+  "pipeline.col.reportNo": "report #",
   "pipeline.col.company": "company",
   "pipeline.col.role": "role",
   "pipeline.col.score": "score",
@@ -319,6 +321,7 @@ export const zh: Dict = {
   "pipeline.tab.skip": "跳过",
 
   // Table column headers
+  "pipeline.col.reportNo": "报告号",
   "pipeline.col.company": "公司",
   "pipeline.col.role": "职位",
   "pipeline.col.score": "分数",

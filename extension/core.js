@@ -344,7 +344,7 @@
   ].join("");
 
   // 骨架一次建好，之后只改 textContent/style，绝不重建节点 —— 换职位时拖拽位置与
-  // 展开/收起态要保持不变。四行读数恒定存在，缺值走占位符，行结构不跳动。
+  // 展开/收起态要保持不变。五行读数恒定存在，缺值走占位符，行结构不跳动。
   const PANEL_HTML = [
     '<div class="ce-bar">',
     '<span class="ce-grip" title="拖动">⠿</span>',
@@ -353,6 +353,8 @@
     '<button class="ce-toggle" type="button" title="收起" aria-label="收起浮窗">–</button>',
     "</div>",
     '<div class="ce-body">',
+    '<div class="ce-row"><span class="ce-rail" data-r="report"></span><span class="ce-k">报告号</span>',
+    '<span class="ce-v" data-v="report"></span><span></span></div>',
     '<div class="ce-row"><span class="ce-rail" data-r="eval"></span><span class="ce-k">已评估</span>',
     '<span class="ce-v" data-v="eval"></span>',
     '<button class="ce-link" type="button" data-link="eval" title="打开评估报告">↗</button></div>',
@@ -473,8 +475,8 @@
       web: q(".ce-web"),
       btnEval: el.querySelector(`#${DETAIL_EVAL_BTN_ID}`),
       btnQuick: el.querySelector(`#${DETAIL_QUICK_BTN_ID}`),
-      rails: { eval: q('[data-r="eval"]'), quick: q('[data-r="quick"]'), status: q('[data-r="status"]'), checkup: q('[data-r="checkup"]') },
-      vals: { eval: q('[data-v="eval"]'), quick: q('[data-v="quick"]'), status: q('[data-v="status"]'), checkup: q('[data-v="checkup"]') },
+      rails: { report: q('[data-r="report"]'), eval: q('[data-r="eval"]'), quick: q('[data-r="quick"]'), status: q('[data-r="status"]'), checkup: q('[data-r="checkup"]') },
+      vals: { report: q('[data-v="report"]'), eval: q('[data-v="eval"]'), quick: q('[data-v="quick"]'), status: q('[data-v="status"]'), checkup: q('[data-v="checkup"]') },
       links: { eval: q('[data-link="eval"]'), checkup: q('[data-link="checkup"]') },
       pill: { dot: q('[data-pill="dot"]'), status: q('[data-pill="status"]'), score: q('[data-pill="score"]'), expand: q('[data-pill="expand"]') },
     };
@@ -550,12 +552,6 @@
     } else {
       v.appendChild(document.createTextNode(row.text));
     }
-    if (row.reportNum) {
-      const s = document.createElement("span");
-      s.className = "ce-rpt";
-      s.textContent = `#${row.reportNum}`;
-      v.appendChild(s);
-    }
     v.title = row.title || "";
     const link = panelRefs.links[name];
     if (link) {
@@ -579,6 +575,7 @@
     // 非空会让浮窗永不重建（与 ensureReader 同一个口径）。
     const sig = [
       key,
+      view.reportRow.text,
       view.evalRow.text,
       view.evalRow.reportNum,
       view.quickRow.text,
@@ -592,6 +589,7 @@
     if (!panelEl || !document.body.contains(panelEl)) buildDetailPanel();
     panelSig = sig;
     panelReportNum = view.evalRow.reportNum;
+    paintRow("report", view.reportRow);
     paintRow("eval", view.evalRow);
     paintRow("quick", view.quickRow);
     paintRow("status", view.statusRow);

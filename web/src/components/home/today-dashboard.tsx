@@ -229,7 +229,11 @@ function PlannedGroup({ label, apps }: { label: string; apps: Application[] }) {
           <li key={a.n} className="flex items-center gap-3 rounded-xl border border-border bg-surface/40 px-4 py-3">
             <span className="font-mono text-xs text-muted tabular-nums">{i + 1}</span>
             <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-medium">{a.company} · {a.role}</p>
+              <p className="truncate text-sm font-medium">
+                {/* 报告号（tracker# = 报告文件名前缀，与 /report/{n} 同号），与首页决策卡同口径。 */}
+                <span className="mr-1.5 font-mono text-xs tabular-nums text-faint">#{a.n}</span>
+                {a.company} · {a.role}
+              </p>
               <p className="text-xs text-muted">计划 {a.planned}</p>
             </div>
             <div className="flex shrink-0 items-center gap-3">
