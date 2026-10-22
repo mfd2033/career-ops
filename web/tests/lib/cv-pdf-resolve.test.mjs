@@ -10,7 +10,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync, utimesSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { resolveLatestCvPdf, resolveCvPdfByReport, resolveCvPdf } from "../../src/lib/cv-pdf-resolve.mjs";
+import { resolveLatestCvPdf, resolveCvPdfByReport, resolveCvPdf, cvPdfContentDisposition } from "../../src/lib/cv-pdf-resolve.mjs";
 
 function makeRoot() {
   return mkdtempSync(join(tmpdir(), "co-cvresolve-"));
@@ -200,4 +200,33 @@ test("resolveCvPdfByReport: an ADR-0076 short-name PDF resolves by report number
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+// Regression: /api/cv-pdf served a Chinese-named tailored CV by wrapping BOTH
+// the file read and `new Response()` in one try/catch. A raw CJK filename in the
+// Content-Disposition header is not a valid ByteString, so the Response
+// constructor threw and the route mis-reported 「could not read the PDF」 (500)
+// for report #1137 (`cv-1137-ai应用产品经理.pdf`) even though the PDF read fine.
+test("cvPdfContentDisposition: CJK filename yields a ByteString-safe, Response-constructible header", () => {
+  // Given a tailored CV whose role name is Chinese
+  const name = "cv-1137-ai应用产品经理.pdf";
+  const value = cvPdfContentDisposition(name);
+
+  // Then every code unit fits a ByteString (≤ 0xFF) — the exact precondition the
+  // fetch Headers check enforces before the throw happened
+  for (let i = 0; i < value.length; i++) {
+    assert.ok(value.charCodeAt(i) <= 255, `char at index ${i} exceeds 0xFF`);
+  }
+  // And constructing a Response with it no longer throws (the real failure mode)
+  assert.doesNotThrow(() => new Response("x", { headers: { "Content-Disposition": value } }));
+  // And the RFC 5987 filename* round-trips back to the exact UTF-8 name
+  const m = value.match(/filename\*=UTF-8''([^;]+)$/);
+  assert.ok(m, "filename* ext-value present");
+  assert.equal(decodeURIComponent(m[1]), name);
+});
+
+test("cvPdfContentDisposition: ASCII filename keeps a clean legacy filename and matching filename*", () => {
+  // Given a plain ASCII CV name, the legacy filename and filename* agree
+  const value = cvPdfContentDisposition("cv-064-acme.pdf");
+  assert.equal(value, `inline; filename="cv-064-acme.pdf"; filename*=UTF-8''cv-064-acme.pdf`);
 });

@@ -93,6 +93,36 @@ export function resolveLatestCvPdf(company, root) {
 }
 
 /**
+ * Build a ByteString-safe `Content-Disposition` header for a tailored CV PDF.
+ *
+ * HTTP header values must be a ByteString (every code unit ≤ 0xFF). Interpolating
+ * a raw CJK filename into `filename="…"` makes `new Response()` throw a TypeError
+ * — and because /api/cv-pdf wraps the read and the response in ONE try/catch, that
+ * throw surfaced as the misleading 500 「could not read the PDF」 even though the
+ * PDF read fine (report #1137: `cv-1137-ai应用产品经理.pdf`).
+ *
+ * Emit RFC 5987 / RFC 6266 form: an ASCII-rebuilt `filename="…"` for legacy
+ * clients plus a `filename*=UTF-8''…` (fully percent-encoded, so pure ASCII) that
+ * modern clients decode back to the real UTF-8 name.
+ *
+ * @param {string} basename the PDF's file name (may be non-ASCII)
+ * @param {string} [disposition] "inline" (view) or "attachment" (download)
+ * @returns {string} a header value safe to construct a Response with
+ */
+export function cvPdfContentDisposition(basename, disposition = "inline") {
+  const ascii = String(basename)
+    .replace(/[\x00-\x1f\x7f"]/g, "")
+    .replace(/[^\x20-\x7e]/g, "_");
+  // encodeURIComponent leaves !'()* unescaped — none are RFC 5987 attr-chars, so
+  // percent-encode them too, guaranteeing the ext-value is pure ASCII.
+  const ext = encodeURIComponent(String(basename)).replace(
+    /[!'()*]/g,
+    (c) => "%" + c.charCodeAt(0).toString(16).toUpperCase(),
+  );
+  return `${disposition}; filename="${ascii}"; filename*=UTF-8''${ext}`;
+}
+
+/**
  * One entrypoint both CV routes call: try the authoritative report-number link,
  * then fall back to the (hardened) company-slug match.
  *
