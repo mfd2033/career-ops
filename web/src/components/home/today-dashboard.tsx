@@ -73,13 +73,22 @@ export function TodayDashboard({
       () => applications.filter((a) => /^evaluat/i.test(a.status)).slice(0, 6),
       [applications],
     );
-    // 明日投递计划：Evaluated 且填了 Planned 日期（按文件行序；同日按 # 升序）。
-    const planned = useMemo(
-      () => applications
+    // 投递计划：Evaluated 且填了 Planned 日期，按本地今/明/未来分组（同日按文件行序）。
+    const plannedGroups = useMemo(() => {
+      const dt = new Date();
+      const fmt = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      const todayStr = fmt(dt);
+      const tmr = new Date(dt.getFullYear(), dt.getMonth(), dt.getDate() + 1);
+      const tomorrowStr = fmt(tmr);
+      const apps = applications
         .filter((a) => /^evaluat/i.test(a.status) && a.planned && /^\d{4}-\d{2}-\d{2}$/.test(a.planned))
-        .sort((a, b) => ((a.planned ?? "") < (b.planned ?? "") ? -1 : (a.planned ?? "") > (b.planned ?? "") ? 1 : 0)),
-      [applications],
-    );
+        .sort((a, b) => ((a.planned ?? "") < (b.planned ?? "") ? -1 : (a.planned ?? "") > (b.planned ?? "") ? 1 : 0));
+      return {
+        today: apps.filter((a) => a.planned === todayStr),
+        tomorrow: apps.filter((a) => a.planned === tomorrowStr),
+        later: apps.filter((a) => (a.planned ?? "") > tomorrowStr),
+      };
+    }, [applications]);
 
   const newThisWeek = freshCount;
   const allClear = newThisWeek === 0 && overdue === 0 && awaiting.length === 0;
@@ -147,34 +156,28 @@ export function TodayDashboard({
         </Section>
       )}
 
-      {/* B2. 明日投递计划 */}
-      {planned.length > 0 && (
-        <Section icon={CalendarDays} title="明日投递计划" hint={`${planned.length} 个待投`}>
-          <ol className="grid gap-2.5">
-            {planned.map((a, i) => (
-              <li key={a.n} className="flex items-center gap-3 rounded-xl border border-border bg-surface/40 px-4 py-3">
-                <span className="font-mono text-xs text-muted tabular-nums">{i + 1}</span>
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium">{a.company} · {a.role}</p>
-                  <p className="text-xs text-muted">计划 {a.planned}</p>
-                </div>
-                <div className="flex shrink-0 items-center gap-3">
-                  {a.report && a.report !== "—" && a.report.includes("](") && (
-                    <Link href={`/report/${a.n}`} className="text-xs text-brand hover:underline">
-                      报告 ↗
-                    </Link>
-                  )}
-                  {a.url && (
-                    <a href={a.url} target="_blank" rel="noopener noreferrer" className="text-xs text-brand hover:underline">
-                      职位 ↗
-                    </a>
-                  )}
-                </div>
-              </li>
-            ))}
-          </ol>
-        </Section>
-      )}
+      {/* B2. 投递计划：按 Planned 日期分 今日/明日/未来 子组（遵循用户规则：今明都有都显示，都没有显示「无」） */}
+      <Section
+        icon={CalendarDays}
+        title="投递计划"
+        hint={`${plannedGroups.today.length + plannedGroups.tomorrow.length + plannedGroups.later.length} 个待投`}
+      >
+        {plannedGroups.today.length === 0 && plannedGroups.tomorrow.length === 0 && plannedGroups.later.length === 0 ? (
+          <p className="text-sm text-muted">无</p>
+        ) : (
+          <div className="grid gap-4">
+            {plannedGroups.today.length > 0 && (
+              <PlannedGroup label="今日待投" apps={plannedGroups.today} />
+            )}
+            {plannedGroups.tomorrow.length > 0 && (
+              <PlannedGroup label="明日待投" apps={plannedGroups.tomorrow} />
+            )}
+            {plannedGroups.later.length > 0 && (
+              <PlannedGroup label="未来待投" apps={plannedGroups.later} />
+            )}
+          </div>
+        )}
+      </Section>
 
       {/* C. Fresh matches this week (supply loop) */}
       {fresh.length > 0 && (
@@ -214,5 +217,36 @@ function Section({ icon: Icon, title, hint, children }: { icon: React.ComponentT
       </div>
       {children}
     </section>
+  );
+}
+
+function PlannedGroup({ label, apps }: { label: string; apps: Application[] }) {
+  return (
+    <div>
+      <p className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-muted">{label}</p>
+      <ol className="grid gap-2.5">
+        {apps.map((a, i) => (
+          <li key={a.n} className="flex items-center gap-3 rounded-xl border border-border bg-surface/40 px-4 py-3">
+            <span className="font-mono text-xs text-muted tabular-nums">{i + 1}</span>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-medium">{a.company} · {a.role}</p>
+              <p className="text-xs text-muted">计划 {a.planned}</p>
+            </div>
+            <div className="flex shrink-0 items-center gap-3">
+              {a.report && a.report !== "—" && a.report.includes("](") && (
+                <Link href={`/report/${a.n}`} className="text-xs text-brand hover:underline">
+                  报告 ↗
+                </Link>
+              )}
+              {a.url && (
+                <a href={a.url} target="_blank" rel="noopener noreferrer" className="text-xs text-brand hover:underline">
+                  职位 ↗
+                </a>
+              )}
+            </div>
+          </li>
+        ))}
+      </ol>
+    </div>
   );
 }
