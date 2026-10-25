@@ -42,6 +42,16 @@ import {
 import { normalizeUrl } from "@/lib/core/url-key.mjs";
 
 /**
+ * careerOpsRoot() 的进程内记忆：一次渲染里它会被调 ~2000 次（每次 `read()`、每行
+ * `resolveReportPathFor()`），而每次探测都要跑最多 8 个 `fs.existsSync`。生产壳里
+ * cwd 不是仓库根（standalone 会 chdir 到 runtime 目录），得向上爬 3 层才命中，
+ * 于是首页一次渲染光「找根」就烧掉 ~390ms 的同步 stat（CPU profile 实测：existsSync
+ * 是首页自耗时榜首）。根在进程生命周期内不会移动，所以按 (env, cwd) 记忆即可：
+ * 键变（改了 CAREER_OPS_ROOT 或 chdir）就重新探测，语义与每次现探完全一致。
+ */
+let careerOpsRootCache: { key: string; root: string } | null = null;
+
+/**
  * Resolve the career-ops "home" — the directory holding the user's sibling
  * files (cv.md, data/, reports/). In production the web/ app lives inside the
  * career-ops checkout, so the home is its parent (..). Dev overrides via
@@ -57,6 +67,14 @@ import { normalizeUrl } from "@/lib/core/url-key.mjs";
  */
 export function careerOpsRoot(): string {
   const env = process.env.CAREER_OPS_ROOT?.trim();
+  const key = `${env ?? ""}\u0000${process.cwd()}`;
+  if (careerOpsRootCache && careerOpsRootCache.key === key) return careerOpsRootCache.root;
+  const root = resolveCareerOpsRoot(env);
+  careerOpsRootCache = { key, root };
+  return root;
+}
+
+function resolveCareerOpsRoot(env: string | undefined): string {
   if (env) return env;
   // Fast path: dev layout (cwd = web/), where the parent already is home.
   const devHome = path.resolve(process.cwd(), "..");
@@ -463,6 +481,45 @@ export type ReportFacts = {
 };
 
 /**
+ * 报告事实的进程内缓存（口径同 tracker-table.mjs 的 aliasCache）：按
+ * (是否 `?` 行, 报告路径) 缓存，每次命中只跑一个 statSync，mtime+size 变了才
+ * 重新读盘解析。报告正文只在评估/补写时变动，所以重复渲染（导航、预取）不再
+ * 重复读 700+ 个文件——这是首页渲染里 readFileUtf8 那 ~250ms 的来源。
+ * 读失败不入缓存，下一次请求会重试（缺失不等于损坏，不能让一次失败粘住）。
+ */
+const reportFactsCache = new Map<string, { mtimeMs: number; size: number; facts: ReportFacts }>();
+
+/** 单个报告的事实（缓存包裹）。调用方只读返回值， NEVER 就地改。 */
+function reportFactsFor(file: string, isUnknownEmployer: boolean): ReportFacts {
+  const empty: ReportFacts = { salary: null, ...(isUnknownEmployer ? { via: "" } : null) };
+  let stat: fs.Stats;
+  try {
+    stat = fs.statSync(file);
+  } catch {
+    return empty; // 报告不可读：保持空事实（pipelineSummary 的旧行为）
+  }
+  const key = `${isUnknownEmployer ? "?" : "-"}${file}`;
+  const cached = reportFactsCache.get(key);
+  if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) return cached.facts;
+
+  const facts: ReportFacts = { salary: null, ...(isUnknownEmployer ? { via: "" } : null) };
+  try {
+    const md = fs.readFileSync(file, "utf8");
+    const fields = parseReport(md).fields;
+    const url = fields.find((f) => f.label === "URL")?.value;
+    if (url && /^https?:\/\//i.test(url)) facts.url = url;
+    facts.salary = parseReportSalary(extractAdvertisedComp(md)) as ReportSalary | null;
+    if (isUnknownEmployer) facts.via = fields.find((f) => f.label === "Via")?.value ?? "";
+    const kws = extractSectionKeywords(md);
+    if (kws.length) facts.keywords = kws;
+  } catch {
+    return empty; // 解析失败：不入缓存，下次重试
+  }
+  reportFactsCache.set(key, { mtimeMs: stat.mtimeMs, size: stat.size, facts });
+  return facts;
+}
+
+/**
  * 逐行读报告并把三样事实取齐（ADR-0037 决议 9）：`**URL:**` 头（喂 score map）、
  * Machine Summary 的 `advertised_comp`（报告薪资）、`?` 行的 `**Via:**`。
  *
@@ -470,28 +527,14 @@ export type ReportFacts = {
  * 三趟全量报告读盘。这里按行只读一次，调用方各自 join。
  * 报告缺失/读失败不是错误——返回空事实（无 url、薪资 null），`?` 行的 via 退化为 ""，
  * 与合并前 `readReportVia` 的行为一致。
+ * 同一份报告的事实走 reportFactsCache（只 stat 不读盘），因此重复渲染近乎零成本。
  */
 export function readReportFacts(apps: Application[]): Map<string, ReportFacts> {
   const out = new Map<string, ReportFacts>();
   for (const app of apps) {
     const isUnknownEmployer = app.company.trim() === "?";
-    const facts: ReportFacts = { salary: null, ...(isUnknownEmployer ? { via: "" } : null) };
     const file = resolveReportPathFor(app);
-    if (file) {
-      try {
-        const md = fs.readFileSync(file, "utf8");
-        const fields = parseReport(md).fields;
-        const url = fields.find((f) => f.label === "URL")?.value;
-        if (url && /^https?:\/\//i.test(url)) facts.url = url;
-        facts.salary = parseReportSalary(extractAdvertisedComp(md)) as ReportSalary | null;
-        if (isUnknownEmployer) facts.via = fields.find((f) => f.label === "Via")?.value ?? "";
-        const kws = extractSectionKeywords(md);
-        if (kws.length) facts.keywords = kws;
-      } catch {
-        // 报告不可读：保持空事实（pipelineSummary 的旧行为）
-      }
-    }
-    out.set(app.n, facts);
+    out.set(app.n, file ? reportFactsFor(file, isUnknownEmployer) : { salary: null, ...(isUnknownEmployer ? { via: "" } : null) });
   }
   return out;
 }

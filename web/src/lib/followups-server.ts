@@ -93,20 +93,67 @@ export type CadencePayload = {
   cadenceConfig?: unknown;
 };
 
+/**
+ * cadence 判定的进程内缓存。followup-cadence.mjs 是一次 `node` 子进程 spawn
+ * （实测 ~350-470ms），而它的全部输入只有四份文件加「今天」这个日期：
+ * data/applications.md · data/follow-ups.md · config/profile.yml · templates/states.yml
+ * （脚本自身的 CAREER_OPS_PROFILE 覆盖与 applications.md 回退口径一致）。所以按
+ * 「四文件 mtime+size + 本地日期」做键：
+ * 任何一个被写（记跟进、改状态、改节奏配置）或跨了零点，键就变，下一请求重新跑；
+ * 其余重复打开（来回导航、首页卡片与 /followups 表格同读一份判定）直接命中，
+ * 省掉整次 spawn。
+ * 只缓存成功判定：available:false（脚本缺失/spawn 失败/stdout 坏）不入缓存，
+ * 否则一次瞬时失败会粘到下次文件变动为止。
+ */
+let cadenceCache: { key: string; payload: CadencePayload } | null = null;
+
+function fileStamp(p: string): string {
+  try {
+    const s = fs.statSync(p);
+    return `${s.mtimeMs}:${s.size}`;
+  } catch {
+    return "missing"; // 文件不存在也是确定性输入（脚本按空内容跑）
+  }
+}
+
+function cadenceCacheKey(): string {
+  const root = careerOpsRoot();
+  const profile = process.env.CAREER_OPS_PROFILE?.trim() || path.join(root, "config", "profile.yml");
+  // 跟脚本同口径：data/applications.md 不存在时它回退到根目录 applications.md。
+  const dataApps = path.join(root, "data", "applications.md");
+  const apps = fs.existsSync(dataApps) ? dataApps : path.join(root, "applications.md");
+  // 本地日期：cadence 的天数差全部以「今天」为原点（localToday），跨零点必须失效。
+  const d = new Date();
+  const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  return [
+    today,
+    fileStamp(apps),
+    fileStamp(path.join(root, "data", "follow-ups.md")),
+    fileStamp(profile),
+    // 规范状态表（templates/states.yml）也是脚本的输入：折叠状态机读它，
+    // 系统更新重写后判定可能变化。
+    fileStamp(path.join(root, "templates", "states.yml")),
+  ].join("|");
+}
+
 export async function readCadencePayload(): Promise<CadencePayload> {
   const script = rootScript("followup-cadence");
   if (!fs.existsSync(script)) return { available: false, metadata: null, entries: [] };
+  const key = cadenceCacheKey();
+  if (cadenceCache && cadenceCache.key === key) return cadenceCache.payload;
   const stdout = await new Promise<string>((resolve) => {
     execFile("node", [script, "--json"], { cwd: careerOpsRoot(), timeout: CADENCE_TIMEOUT_MS }, (_e, out) => resolve(out || ""));
   });
   const parsed = parseCadenceStdout(stdout);
   if (!parsed) return { available: false, metadata: null, entries: [] };
-  return {
+  const payload: CadencePayload = {
     available: true,
     metadata: parsed.metadata,
     entries: parsed.entries as CadenceEntry[],
     cadenceConfig: parsed.cadenceConfig,
   };
+  cadenceCache = { key, payload };
+  return payload;
 }
 
 /** 报告页「记录跟进」的读取（ADR-0075 决议 2/3）：本行的 cadence entry —— 可判定性
