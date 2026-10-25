@@ -3,12 +3,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Bell, CalendarDays, CircleHelp, Sparkles, ArrowRight } from "lucide-react";
+import { Bell, CalendarDays, CircleHelp, Sparkles, ArrowRight, Compass, ExternalLink } from "lucide-react";
 import { instrumentSerif } from "@/lib/fonts";
 import { HeroGlow } from "@/components/hero-glow";
 import type { Application, InboxJob } from "@/lib/career-ops";
 import type { DiscoveredOffer } from "@/lib/explore";
 import { DiscoveryCard } from "@/components/explore/discovery-card";
+import { CompanyLogo } from "@/components/company-logo";
 import { FollowUpCard, type FollowUp } from "@/components/home/follow-up-card";
 import { DecisionCard } from "@/components/home/decision-card";
 import { QuickEvaluate } from "@/components/quick-evaluate";
@@ -19,6 +20,16 @@ import { useI18n } from "@/lib/i18n/context";
 function hasPlannedDate(a: Application) {
   return !!a.planned && /^\d{4}-\d{2}-\d{2}$/.test(a.planned);
 }
+
+// 常用招聘网站快捷入口：静态、始终可见，即使「今日全部处理完」也保留一个
+// 主动浏览的下一步。站点名与 URL 是专有名词/技术字面量，保留原文不翻译。
+// logo 用本地静态资源（web/public/portals/*.png，透明底高清图标），离线可用、
+// 零网络；host 仅作展示（真实可访问域名）。
+const PORTALS = [
+  { name: "Boss直聘", host: "zhipin.com", url: "https://www.zhipin.com/", logo: "/portals/zhipin.png" },
+  { name: "智联招聘", host: "zhaopin.com", url: "https://www.zhaopin.com/", logo: "/portals/zhaopin.png" },
+  { name: "猎聘", host: "liepin.com", url: "https://c.liepin.com/", logo: "/portals/liepin.png" },
+] as const;
 
 // The retention "Today": a dual-loop action queue (the maintainer's
 // "N new matches this week · M follow-ups due"). SUPPLY loop = fresh free-scan
@@ -209,6 +220,30 @@ export function TodayDashboard({
           )}
         </Section>
       )}
+
+      {/* D. 常用招聘网站导航：静态快捷入口，始终可见，即使今日清空也保留主动浏览的一步。 */}
+      <Section icon={Compass} title={t("home.portalsTitle")} hint={t("home.portalsHint")}>
+        <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
+          {PORTALS.map((p) => (
+            <a
+              key={p.url}
+              href={p.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label={`${p.name} — ${t("home.portalOpenNewTab")}`}
+              className="group flex cursor-pointer items-center gap-3 rounded-xl border border-border bg-surface/40 px-4 py-3 transition-colors hover:border-brand/40 hover:bg-surface/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
+            >
+              <CompanyLogo name={p.name} src={p.logo} size={60} imgPadding={0} bareTile className="shrink-0" />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm font-medium text-foreground">{p.name}</span>
+                <span className="block truncate font-mono text-xs text-muted">{p.host}</span>
+              </span>
+              {/* hover 只对图标做 transform，不改尺寸/内边距，避免布局偏移。 */}
+              <ExternalLink className="size-4 shrink-0 text-faint transition-transform group-hover:translate-x-0.5 group-hover:text-brand" aria-hidden />
+            </a>
+          ))}
+        </div>
+      </Section>
 
       {allClear && (
         <div className="mt-8 rounded-2xl border border-border bg-surface/30 px-6 py-10 text-center">
