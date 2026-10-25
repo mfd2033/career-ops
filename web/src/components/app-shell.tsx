@@ -37,14 +37,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <ExploreProvider>
       <MobileNav />
       <div className="flex min-h-screen">
-        <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col overflow-y-auto border-r border-border bg-surface/30 p-4 md:flex">
+        {/* 工作器区（fitToHeight）用 flex-1 min-h-0 吸收剩余空间并按可用高度自适应张数，
+            正常窗口下内容恰好填满 h-screen → 整侧栏不会出现纵向滚动条。
+            仍保留 overflow-y-auto 作为兵底（而非 hidden）：ghost 已不再撑大溢出区，
+            只有当 logo+导航+底部控件本身都放不下（极高窗口内容区 < ~610px）时，才回退
+            为可滚动以保住底部语言/主题/用量控件；overflow-anchor:none 防止被静默滚动。 */}
+        <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col overflow-y-auto border-r border-border bg-surface/30 p-4 [overflow-anchor:none] md:flex">
           <Link href="/" className="mb-8 flex items-center gap-2.5 px-1">
             <CoMark size={32} />
             <span className={`${instrumentSerif.className} relative -top-px text-2xl font-normal tracking-tight text-landing`}>
               career-ops
             </span>
           </Link>
-          <nav className="flex flex-col gap-1">
+          <nav className="shrink-0 flex flex-col gap-1">
             {NAV_ITEMS.map(({ href, labelKey, icon: Icon }) => {
               const active = isActivePath(href, pathname);
               return (
@@ -65,9 +70,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             })}
           </nav>
 
-          <WorkerPills />
+          <WorkerPills fitToHeight />
 
-          <div className="mt-auto space-y-3 pt-4">
+          <div className="mt-auto shrink-0 space-y-3 pt-4">
             <UsageMeter />
             <LanguageToggle trailing={<ThemeToggle />} />
           </div>
