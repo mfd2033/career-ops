@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { X, History } from "lucide-react";
 import { useJobs } from "@/components/jobs/job-store";
 import { WorkerCard, pillTone, TONE } from "@/components/jobs/worker-card";
@@ -69,12 +70,20 @@ export function WorkerPills({ fitToHeight = false }: { fitToHeight?: boolean }) 
     setFit(count);
   }, [fitToHeight, full]);
 
-  useEffect(() => {
+  // useLayoutEffect 而非 useEffect：数据（jobs/台账）到达的 commit 会以过期 fit
+  // 先渲染若干张卡，useEffect 在 paint 后才收敛 → 每次数据到达都闪一帧滚动条。
+  // layout effect 在 paint 前同步测量并 setFit，React 同帧完成重渲后才上屏，
+  // 用户看不到溢出帧（刷新闪现两次滚动条的根因）。
+  useLayoutEffect(() => {
     if (!fitToHeight) return;
     recompute();
     const container = listRef.current;
     if (!container || typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver(recompute);
+    // RO 回调发生在浏览器渲染步骤内（布局后、绘制前）。高度被外部变化（如底部
+    // 用量计数据到达后 footer 变高）收缩的那一帧，普通 setState 异步调度、绘制
+    // 仍用过期张数 → 滚动条闪现一帧。flushSync 强制 React 在本回调栈内同步
+    // commit，绘制看到的已是收敛后的布局，无闪现帧。
+    const ro = new ResizeObserver(() => flushSync(recompute));
     ro.observe(container);
     return () => ro.disconnect();
   }, [fitToHeight, recompute]);
@@ -167,7 +176,17 @@ export function WorkerPills({ fitToHeight = false }: { fitToHeight?: boolean }) 
         // 进行中卡多于可用高度时可见列表内部滚动（overflow-y-auto）——此时无法完全不出
         // 滚动条，但至少不会把进行中的工作裁掉，侧栏整体仍不滚（overflow-anchor:none 防位移）。
         <div className="relative flex min-h-0 flex-1 flex-col">
-          <ul ref={listRef} className="min-h-0 flex-1 space-y-1.5 overflow-y-auto [overflow-anchor:none]">
+          <ul
+            ref={listRef}
+            className={cn(
+              "min-h-0 flex-1 space-y-1.5 [overflow-anchor:none]",
+              // 仅当进行中卡超出 fit、确需内部滚动时才放开 overflow-y:auto；其余时刻
+              // hidden——高度被外部变化（如底部用量计数据到达后 footer 变高）收缩的
+              // 过渡帧里，RO/flushSync 仍可能滞后一拍，auto 会让那一帧闪现滚动条，
+              // hidden 则最多裁一瞬内容、立即被下一拍收敛。
+              activeCount > fit ? "overflow-y-auto" : "overflow-y-hidden",
+            )}
+          >
             {tray.map(renderItem)}
           </ul>
           <div
