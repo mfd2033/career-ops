@@ -14,8 +14,10 @@
 //      re-evaluation's new number (ADR-0017 §4).
 //   3. `subtitle` of the form `#N` — what the server's pool cards carry
 //      (job-store.tsx). No local record and no URL: the subtitle is the only key.
-//   4. Derived: a pdf worker's `input` IS its report number — the fallback for
-//      records persisted before (1) existed (localStorage keeps 40).
+//   4. Derived, for the numeric-input kinds only (ADR-0089): a pdf worker's
+//      `input` IS its report number (the fallback for records persisted before
+//      (1) existed — localStorage keeps 40), and a checkup's `input` IS its
+//      tracker row #, which is the same number as its report.
 //
 // The number is for NAVIGATION only. It must never be read as "this worker's
 // 评估用时" — that is the evaluation's metric, scoped to the evaluation kinds
@@ -24,6 +26,15 @@ import { normalizeUrl } from "./core/url-key.mjs";
 
 const EVAL_KINDS = new Set(["evaluate", "batch-evaluate"]);
 const NUMERIC = /^\d+$/;
+
+// Kinds whose `input` IS the report number, per each kind's own launch contract
+// (ADR-0089): pdf captures the bare number, and a checkup's input is the tracker
+// row # — the same number as its report (applications.md's first column is the
+// report filename's prefix, and the /report/{n} route). A CLOSED whitelist on
+// purpose: ADR-0018 rejected generalising this, because every other kind's input
+// means a URL / company / target, and a future kind reusing a numeric input must
+// not silently mis-jump.
+const NUMERIC_INPUT_KINDS = new Set(["pdf", "checkup"]);
 
 /** Does this worker's card show 评估用时? Only evaluations have one: a report
  *  number resolved for navigation is not a duration claim. Records with no
@@ -53,10 +64,13 @@ export function resolveJobReportNum(job, reports) {
   const sub = typeof job.subtitle === "string" ? job.subtitle.match(/^#(\d+)$/) : null;
   if (sub) return sub[1];
 
-  // Derived pdf fallback: `input` means a company name / a target / a URL for
-  // every other kind, so this never generalizes beyond pdf.
+  // Derived fallback for the numeric-input kinds (ADR-0089): pdf's `input` is the
+  // captured bare number; a checkup's is its tracker row #. For every other kind
+  // `input` means a company name / a target / a URL, so this stays whitelisted.
+  // batch-checkup's aggregate input is a "#n +k" summary, never one number — its
+  // per-company numbers live on the child items (ADR-0046 §3), not here.
   const trimmed = input.trim();
-  if (job.kind === "pdf" && NUMERIC.test(trimmed)) return trimmed;
+  if (NUMERIC_INPUT_KINDS.has(job.kind) && NUMERIC.test(trimmed)) return trimmed;
 
   return null;
 }

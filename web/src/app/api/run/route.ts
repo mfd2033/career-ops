@@ -164,7 +164,11 @@ export async function POST(req: Request) {
     ? `公司体检：${checkupTarget.company}`
     : `${kind} ${input}`;
   let endRecorded = false;
-  const recordEnd = (status: "done" | "error", msg?: string) => {
+  // ADR-0089：报告号由 runPipeline 捕获或推得后作为第三参传入——pdf / checkup
+  // 的 input 就是号本身；evaluate 的号只有收尾 reconcile 推得出（见
+  // finishAfterReconcile），推不出就留空。台账行显式携带它，读取端（ledger-only
+  // 卡）不必再靠 URL join / kind 猜。
+  const recordEnd = (status: "done" | "error", msg?: string, reconciledNum?: string) => {
     if (endRecorded) return;
     endRecorded = true;
     try {
@@ -172,6 +176,10 @@ export async function POST(req: Request) {
       // 同层落盘），让页签不在线时事后回看也能重建时间线。空步骤不占位（沿
       // ADR-0043 缺失惯例）。缓冲区此刻仍在（completeRun 之后也保留）。
       const steps = buildRunLedgerSteps(getRunBuffer(runId));
+      // ADR-0089：pdf / checkup 的 input 就是报告号（各自 kind 的启动契约）；
+      // evaluate 的号由收尾 reconcile 推得。两者都过数字校验，凑不出就留空。
+      const bareInput = String(input).trim();
+      const capturedNum = (kind === "pdf" || kind === "checkup") && /^\d+$/.test(bareInput) ? bareInput : undefined;
       appendRunRecord(careerOpsRoot(), {
         id: runId,
         kind,
@@ -185,6 +193,8 @@ export async function POST(req: Request) {
         // 没这两个字段，读取端按「未记录」处理，不回填、不猜测。
         cliId,
         model: knownModel || undefined,
+        // ADR-0089：报告号（捕获值优先，否则收尾推得）；凑不出即不占位。
+        reportNum: capturedNum ?? reconciledNum,
         // 800（原 300）：门禁那一句 checkup 文案就 175 字，300 会把 ADR-0034 的证据
         // 段整段截掉——上限不抬，补丁等于没打。
         msg: msg ? String(msg).slice(0, 800) : undefined,
@@ -294,8 +304,10 @@ async function runPipeline({
   jdText?: string;
   /** ADR-0051: DOM-extracted employer name, already clamped at the edge. */
   employer?: string;
-  /** Server run-ledger recorder (once per run; passed in from POST scope). */
-  recordEnd: (status: "done" | "error", msg?: string) => void;
+  /** Server run-ledger recorder (once per run; passed in from POST scope).
+   *  ADR-0089: the third arg is the report number the run resolved to (evaluate's
+   *  is known only after the closing reconcile), recorded on the ledger row. */
+  recordEnd: (status: "done" | "error", msg?: string, reportNum?: string) => void;
 }) {
   const today = new Date().toISOString().slice(0, 10);
 
@@ -459,6 +471,9 @@ async function runPipeline({
   // ADR-0034：stdout 侧的同类线索。本机实测失败信号（代理层的 `API Error: …`、拒绝语）
   // 走的是 agent 可见正文，而 stderrTail 至今 0 条命中——两条通道都要有原料。
   let stdoutTail = "";
+  // ADR-0089：evaluate 的报告号到收尾 reconcile 才知道（finishAfterReconcile 赋值），
+  // 终态发出时随 recordEnd 一起落台账；推不出（并发歧义 / 无报告）保持 undefined。
+  let reconciledReportNum: string | undefined;
   const send = (obj: { type: string; [key: string]: unknown }) => {
     if (terminal) return;
     if (obj.type === "error") {
@@ -473,7 +488,7 @@ async function runPipeline({
       }
     }
     publish(runId, obj);
-    if (obj.type === "done") recordEnd("done");
+    if (obj.type === "done") recordEnd("done", undefined, reconciledReportNum);
     else if (obj.type === "error")
       // 证据组装抽成纯函数（ADR-0034 决议 3）：一句话原因 ｜ stderr ｜ 输出尾部。
       recordEnd("error", failureLedgerMsg(String(obj.msg ?? ""), { stderrTail, stdoutTail: failureEvidence(stdoutTail) }));
@@ -794,6 +809,9 @@ async function runPipeline({
       const finishAfterReconcile = async () => {
         try {
           const num = deriveRunReportNum({ beforeEntries: reportsBefore, afterEntries: reportEntries() });
+          // ADR-0089：把本 run 推得的号交给 recordEnd 一起落台账（done 还没送出，
+          // recordEnd 尚未触发）。推不出（并发歧义 / 无报告）就留空，不猜。
+          if (num != null) reconciledReportNum = String(num);
           const args = buildReconcileArgs({ kind, input, num });
           if (args) {
             send({ type: "status", label: "Reconciling pipeline.md..." });

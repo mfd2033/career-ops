@@ -42,13 +42,18 @@ test("resolveJobReportNum: the pool cards' `#N` subtitle", () => {
   assert.equal(resolveJobReportNum({ subtitle: "Evaluating 3 postings" }, null), null);
 });
 
-test("resolveJobReportNum: pdf fallback for records persisted before the field", () => {
+test("resolveJobReportNum: numeric-input kinds fall back to the bare number", () => {
   // localStorage keeps up to 40 records written before `reportNum` existed.
   assert.equal(resolveJobReportNum({ kind: "pdf", input: " 35 ", subtitle: "tailored for this role" }, null), "35");
-  // …but ONLY for pdf: `input` is a company name / a target elsewhere.
+  // ADR-0089: a checkup's input IS its tracker row # — the same number as its
+  // report (applications.md's first column is the report filename's prefix).
+  assert.equal(resolveJobReportNum({ kind: "checkup", input: "42" }, null), "42");
+  // …but ONLY for those kinds: `input` is a company name / a target elsewhere.
   assert.equal(resolveJobReportNum({ kind: "fix-portal", input: "35" }, null), null);
   assert.equal(resolveJobReportNum({ kind: "research", input: "35" }, null), null);
   assert.equal(resolveJobReportNum({ kind: "pdf", input: "acme" }, null), null);
+  // batch-checkup's aggregate input is a "#n +k" summary, never one number.
+  assert.equal(resolveJobReportNum({ kind: "batch-checkup", input: "#35 +3" }, null), null);
 });
 
 test("resolveJobReportNum: nothing to resolve → null, never a guess", () => {

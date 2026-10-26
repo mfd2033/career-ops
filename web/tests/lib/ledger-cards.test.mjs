@@ -63,3 +63,9 @@ test("a missing translator degrades without throwing (tolerant reader)", () => {
   // ledgerCardFields 的既有约定：缺 t 时回退恒等函数 → 标题是键名（生产总传 t）。
   assert.equal(cards[0].title, "jobs.evaluateTitle");
 });
+test("ADR-0089：台账行记的报告号原样透传到卡，缺失不占位", () => {
+  // recordEnd 落的是字符串（pdf/checkup 的 input 即号），子台账落的是数字。
+  assert.equal(ledgerRunsToCards([], [doneRun({ reportNum: "812" })], t)[0].reportNum, "812");
+  assert.equal(ledgerRunsToCards([], [doneRun({ reportNum: 42 })], t)[0].reportNum, "42");
+  assert.equal(ledgerRunsToCards([], [doneRun()], t)[0].reportNum, undefined, "未记录不回填、不猜测");
+});

@@ -141,6 +141,8 @@ type RunLedgerRow = {
   items?: JobItem[];
   total?: number;
   parentId?: string;
+  // ADR-0089：台账行显式携带的报告号（捕获值）；ledger-only 卡凭它跳报告。
+  reportNum?: number | string;
 };
 
 type Ctx = {

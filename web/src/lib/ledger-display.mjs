@@ -83,7 +83,7 @@ export function ledgerCardFields({ kind, input, title, page, t } = {}) {
  * 这种对台账行无效的死按钮，详情页凭 id 未命中本地卡走 ledger 兑底。
  *
  * @param {Array<{runId?: string, serverBatchId?: string}>} jobs 本地卡（含池投影）
- * @param {Array<{id?: string, kind?: string, input?: string, title?: string, page?: string, status?: string, startedAt?: number, finishedAt?: number, msg?: string, cliId?: string, model?: string, items?: unknown[], total?: number, parentId?: string}>} ledgerRuns /api/runs/history 的行
+ * @param {Array<{id?: string, kind?: string, input?: string, title?: string, page?: string, status?: string, startedAt?: number, finishedAt?: number, msg?: string, cliId?: string, model?: string, items?: unknown[], total?: number, parentId?: string, reportNum?: number | string}>} ledgerRuns /api/runs/history 的行
  * @param {(k: string, p?: Record<string, string | number>) => string} [t] i18n 翻译（缺失时保留裸标题）
  * @returns {Array<Record<string, unknown>>} 台账序（最新在前）的终态卡
  */
@@ -105,6 +105,9 @@ export function ledgerRunsToCards(jobs, ledgerRuns, t) {
     // 旧行无 items 时为 undefined，展示端自行保持诚实空白。
     items: r.items,
     batchTotal: r.total,
+    // ADR-0089：台账行显式记的报告号（捕获值）——ledger-only 卡凭它直接跳报告，
+    // 不必退回 URL join / kind 猜。缺失 = 未记录，不占位、不回填。
+    reportNum: r.reportNum != null ? String(r.reportNum) : undefined,
     ledgerOnly: true,
   }));
 }
