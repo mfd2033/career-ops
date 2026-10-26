@@ -655,8 +655,9 @@ export function PipelineView({
                       </span>
                     </th>
                     {/* 投递时机列（ADR-0085 修订）：纯展示、不排序——结论是实时时钟量，
-                        排序无意义。紧随薪资列插入（同为「投不投这份」的即时判断量）。 */}
-                    {k === "salary" && (
+                        排序无意义。紧随薪资列插入（同为「投不投这份」的即时判断量）。
+                        仅在「已评估」tab 显示：该列是决定要不要投的即时判断量，只看已评估行。 */}
+                    {tab === "EVALUATED" && k === "salary" && (
                       <th className="whitespace-nowrap px-4 py-2.5 font-medium">{t("pipeline.col.deliveryTiming")}</th>
                     )}
                   </Fragment>
@@ -680,7 +681,8 @@ export function PipelineView({
                       const r = filtered[vi.index];
                       // 投递时机（ADR-0085 修订）：按行算等级，文案在父层本地化——行组件只收
                       // 原始值字符串，memo 的浅比较才拦得住无关重渲染（同 suggestLabel 惯例）。
-                      const deliveryLevel = deliveryLevelOf(r.url);
+                      // 仅在「已评估」tab 算/传，其它 tab 该列不存在。
+                      const deliveryLevel = tab === "EVALUATED" ? deliveryLevelOf(r.url) : null;
                       return (
                         <TrackerRow
                           key={vi.key}
@@ -700,6 +702,7 @@ export function PipelineView({
                           deliveryLevel={deliveryLevel}
                           deliveryLabel={deliveryLevel ? t(`delivery.level.${deliveryLevel}`) : null}
                           deliveryTitle={deliveryLevel ? undefined : t("delivery.noSource")}
+                          showDelivery={tab === "EVALUATED"}
                           onToggle={toggleRow}
                         />
                       );
@@ -744,6 +747,7 @@ const TrackerRow = memo(function TrackerRow({
   deliveryLevel,
   deliveryLabel,
   deliveryTitle,
+  showDelivery,
   onToggle,
 }: {
   row: Application;
@@ -764,6 +768,7 @@ const TrackerRow = memo(function TrackerRow({
   deliveryLevel: DeliveryLevel | null;
   deliveryLabel: string | null;
   deliveryTitle: string | undefined;
+  showDelivery: boolean;
   onToggle: (n: string) => void;
 }) {
   return (
@@ -813,14 +818,17 @@ const TrackerRow = memo(function TrackerRow({
         {row.reportSalary?.range ? formatSalaryRange(row.reportSalary.range) : "—"}
       </td>
       {/* 投递时机列（ADR-0085 修订）：该行来源平台在当前时刻的可投结论，与页头建议条同一
-          引擎同口径；非三平台来源（拉勾/ATS/公司官网）→「—」，悬停如实说明没有规律。 */}
-      <td className="whitespace-nowrap px-4 py-3" title={deliveryTitle}>
-        {deliveryLevel && deliveryLabel ? (
-          <Badge tone={LEVEL_TONE[deliveryLevel]}>{deliveryLabel}</Badge>
-        ) : (
-          <span className="text-faint">—</span>
-        )}
-      </td>
+          引擎同口径；非三平台来源（拉勾/ATS/公司官网）→「—」，悬停如实说明没有规律。
+          仅在「已评估」tab 渲染该列。 */}
+      {showDelivery && (
+        <td className="whitespace-nowrap px-4 py-3" title={deliveryTitle}>
+          {deliveryLevel && deliveryLabel ? (
+            <Badge tone={LEVEL_TONE[deliveryLevel]}>{deliveryLabel}</Badge>
+          ) : (
+            <span className="text-faint">—</span>
+          )}
+        </td>
+      )}
       {/* 体检列三态（ADR-0064 修订决议 5）：有记录 → ★；无记录但命中建议 → chip；
           皆无 → 空格（不是「★0」）。 */}
       {checkupStar != null ? (
