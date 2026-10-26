@@ -53,7 +53,7 @@ export function inResultTab(tab, o) {
  *
  * @param {{company?: string, title?: string}} offer
  * @param {Array<{n?: string, company?: string, role?: string}>} apps
- * @param {(s: unknown) => string} norm - the core's normalizeTextKey key fn
+ * @param {(s: string) => string} norm - the core's normalizeTextKey key fn
  * @returns {string|undefined} the matched tracker `#n`, or undefined
  */
 export function evaluatedNoFor(offer, apps, norm) {
