@@ -125,7 +125,8 @@ export function TodayDashboard({
         <HeroGlow />
         {/* Readability scrim between the animated glow (z-0) and the copy (z-10). */}
         <div aria-hidden className="pointer-events-none absolute inset-0 z-[1] bg-surface/55 backdrop-blur-[2px] dark:bg-background/45" />
-        <div className="relative z-10">
+        <div className="relative z-10 flex flex-col gap-6 md:flex-row md:items-start md:justify-between md:gap-10">
+          <div className="min-w-0">
           <p className="font-mono text-xs uppercase tracking-[0.2em] text-muted">
             <span className="text-faint">//</span> {t("home.todayLabel")} · <span className="tabular-nums">{dateLabel}</span>
           </p>
@@ -160,6 +161,34 @@ export function TodayDashboard({
             </Link>
           </div>
           {inBetween && <QuickEvaluate />}
+          </div>
+
+          {/* D. 常用招聘网站导航：移到 hero 右上角，一列三行；窄屏回退为 hero 内堆叠。
+              静态快捷入口，始终可见，即使今日清空也保留主动浏览的一步。 */}
+          <div className="flex shrink-0 flex-col gap-2.5 md:mt-1 md:w-[248px]">
+            <div className="flex items-center gap-2">
+              <Compass className="size-4 text-brand" />
+              <h2 className="text-sm font-semibold uppercase tracking-[0.16em] text-muted">{t("home.portalsTitle")}</h2>
+            </div>
+            {PORTALS.map((p) => (
+              <a
+                key={p.url}
+                href={p.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label={`${p.name} — ${t("home.portalOpenNewTab")}`}
+                className="group flex cursor-pointer items-center gap-3 rounded-xl border border-border bg-surface/40 px-4 py-3 transition-colors hover:border-brand/40 hover:bg-surface/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
+              >
+                <CompanyLogo name={p.name} src={p.logo} size={60} imgPadding={0} bareTile className="shrink-0" />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-medium text-foreground">{p.name}</span>
+                  <span className="block truncate font-mono text-xs text-muted">{p.host}</span>
+                </span>
+                {/* hover 只对图标做 transform，不改尺寸/内边距，避免布局偏移。 */}
+                <ExternalLink className="size-4 shrink-0 text-faint transition-transform group-hover:translate-x-0.5 group-hover:text-brand" aria-hidden />
+              </a>
+            ))}
+          </div>
         </div>
       </section>
 
@@ -229,29 +258,6 @@ export function TodayDashboard({
         </div>
       </div>
 
-      {/* D. 常用招聘网站导航：静态快捷入口，始终可见，即使今日清空也保留主动浏览的一步。 */}
-      <Section icon={Compass} title={t("home.portalsTitle")} hint={t("home.portalsHint")} className="shrink-0">
-        <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
-          {PORTALS.map((p) => (
-            <a
-              key={p.url}
-              href={p.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              aria-label={`${p.name} — ${t("home.portalOpenNewTab")}`}
-              className="group flex cursor-pointer items-center gap-3 rounded-xl border border-border bg-surface/40 px-4 py-3 transition-colors hover:border-brand/40 hover:bg-surface/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
-            >
-              <CompanyLogo name={p.name} src={p.logo} size={60} imgPadding={0} bareTile className="shrink-0" />
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm font-medium text-foreground">{p.name}</span>
-                <span className="block truncate font-mono text-xs text-muted">{p.host}</span>
-              </span>
-              {/* hover 只对图标做 transform，不改尺寸/内边距，避免布局偏移。 */}
-              <ExternalLink className="size-4 shrink-0 text-faint transition-transform group-hover:translate-x-0.5 group-hover:text-brand" aria-hidden />
-            </a>
-          ))}
-        </div>
-      </Section>
 
       {allClear && (
         <div className="shrink-0 rounded-2xl border border-border bg-surface/30 px-6 py-10 text-center">
