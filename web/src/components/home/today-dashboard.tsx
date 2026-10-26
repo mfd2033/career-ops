@@ -14,6 +14,8 @@ import { FollowUpCard, type FollowUp } from "@/components/home/follow-up-card";
 import { DecisionCard } from "@/components/home/decision-card";
 import { QuickEvaluate } from "@/components/quick-evaluate";
 import { useI18n } from "@/lib/i18n/context";
+import { MAX_OFFER_LIMIT } from "@/lib/whats-new.mjs";
+import { EXPLORE_REMOVED_KEY, readRemovedUrls } from "@/lib/explore-removed.mjs";
 
 /** 是否已排进投递计划：填了合法的 Planned 日期（YYYY-MM-DD）。首页「Awaiting
  *  your decision」与「投递计划」两个分区据此互斥，避免同一行重复出现。 */
@@ -49,6 +51,9 @@ export function TodayDashboard({
   const [overdue, setOverdue] = useState(0);
   const [fresh, setFresh] = useState<DiscoveredOffer[]>([]);
   const [freshCount, setFreshCount] = useState(0);
+  // explore 结果区「移除所选」的记录（localStorage，显示层处置）。供应回路是服务端
+  // 读 scan-history 算出来的，天然看不到浏览器里的移除，所以首页要读同一份记录再挡一次。
+  const [removedUrls, setRemovedUrls] = useState<Set<string>>(new Set());
   const router = useRouter();
   const { t, lang } = useI18n();
   const dateLabel = useMemo(() => new Date().toLocaleDateString(lang === "zh" ? "zh-CN" : "en-US", { weekday: "long", month: "short", day: "numeric" }), [lang]);
@@ -61,7 +66,10 @@ export function TodayDashboard({
         setOverdue(d.metadata?.overdue ?? d.entries?.length ?? 0);
       })
       .catch(() => {});
-    fetch("/api/whats-new")
+    // 取到 MAX_OFFER_LIMIT 而不是默认 24 条：hero/「查看全部」的计数要减掉被移除的
+    // 岗位，而移除只可能发生在用户看过的结果里（explore 的「查看全部」同样取满上限），
+    // 拿满这 200 条才能把 count 修正准确。
+    fetch(`/api/whats-new?limit=${MAX_OFFER_LIMIT}`)
       .then((r) => r.json())
       .then((d) => {
         const offers = Array.isArray(d.offers) ? d.offers : [];
@@ -84,6 +92,16 @@ export function TodayDashboard({
     window.addEventListener("co-job-done", onDone);
     return () => window.removeEventListener("co-job-done", onDone);
   }, [refetch, router]);
+
+  // 进入首页时读一次移除记录；另一个 tab 里移除/恢复时靠 storage 事件同步。
+  useEffect(() => {
+    setRemovedUrls(readRemovedUrls());
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === EXPLORE_REMOVED_KEY) setRemovedUrls(readRemovedUrls());
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
 
     // Awaiting decision: scored (Evaluated) but no terminal status yet, and not
     // already scheduled into 投递计划 (section B2) — a planned row shows there,
@@ -109,7 +127,10 @@ export function TodayDashboard({
       };
     }, [applications]);
 
-  const newThisWeek = freshCount;
+  const visibleFresh = useMemo(() => fresh.filter((o) => !removedUrls.has(o.url)), [fresh, removedUrls]);
+  // 服务端 count 是完整总数，offers 只是前 MAX_OFFER_LIMIT 条。被移除的岗位只会出现在
+  // 用户实际看过的那批里，所以「count − 返回列表中被移除的条数」就是真实待处理数。
+  const newThisWeek = Math.max(0, freshCount - (fresh.length - visibleFresh.length));
   // 投递计划里的待投项也算「有需要你处理的事」：已排计划的岗位不再进 awaiting，
   // 若只看 awaiting 会误判为空并弹出「全部处理完」卡片。
   const plannedCount = plannedGroups.today.length + plannedGroups.tomorrow.length + plannedGroups.later.length;
@@ -244,20 +265,20 @@ export function TodayDashboard({
       {/* C. Fresh matches this week (supply loop) — 页面底部，弹性占满两列网格剩下的
           纵向空间：高度富余时 auto-fill 网格自动换行铺多行，高度不足时保底一行、
           区块内纵向滚动，列表本身不把页面撑出滚动条。 */}
-      {fresh.length > 0 && (
+      {visibleFresh.length > 0 && (
         <Section
           icon={Sparkles}
           title={t("home.freshMatchesTitle")}
           hint={t("home.freshMatchesHint")}
           className="flex min-h-[235px] flex-1 flex-col"
-          action={fresh.length > 12 ? (
+          action={visibleFresh.length > 12 ? (
             <Link href="/explore?view=fresh" className="inline-flex shrink-0 items-center text-sm text-muted transition hover:text-brand max-sm:min-h-[44px]">
-              {t("home.seeAll", { n: freshCount })} →
+              {t("home.seeAll", { n: newThisWeek })} →
             </Link>
           ) : null}
         >
           <div className="grid min-h-0 flex-1 content-start gap-3 overflow-y-auto overscroll-contain hide-scrollbar sm:grid-cols-[repeat(auto-fill,minmax(230px,1fr))]">
-            {fresh.slice(0, 12).map((o) => (
+            {visibleFresh.slice(0, 12).map((o) => (
               <DiscoveryCard key={o.url} offer={o} inPipeline={inboxUrls.has(o.url)} />
             ))}
           </div>

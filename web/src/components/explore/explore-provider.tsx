@@ -25,6 +25,7 @@ import {
 } from "@/lib/explore";
 import { makeAiStreamParser, type AiTraceChunk } from "@/lib/explore-ai";
 import { MAX_OFFER_LIMIT } from "@/lib/whats-new.mjs";
+import { readRemovedUrls, writeRemovedUrls } from "@/lib/explore-removed.mjs";
 import { isScannerMissing, isBrowserCollectorMissing } from "@/lib/explore-error.mjs";
 import { expandSearchTargets, hasMultipleKeywords } from "@/lib/browser-search.mjs";
 import { maxSnapshotByBoard } from "@/lib/browser-progress.mjs";
@@ -157,11 +158,8 @@ export function useExplore(): ExploreCtx {
 // tokens). Persist the SETTLED result set per-tab so a reload or a mode toggle never
 // throws the work away (disc#5 — "came back to explore, work is lost").
 const RESULTS_KEY = "career-ops:explore-results";
-// 结果区「移除所选」的持久层（ADR-0010 的 localStorage 轻量 triage 惯例，与收件箱
-// hidden/shortlist 同款）：跨搜索、跨刷新保持隐藏，但只影响显示，不写 pipeline.md。
-// 结果快照只活在一个 tab 的 sessionStorage 里，撑不住「下次搜索」；移除是用户的显式
-// 处置，必须比一次扫描活得久。清空入口是结果区的「恢复已移除」。
-const REMOVED_KEY = "career-ops:explore-removed";
+// 「移除所选」的持久层键名/读写集中在 lib/explore-removed.mjs——今日页的
+// 「本周新匹配」也要读同一份记录，键名只能有一个出处。
 type ResultSnapshot = {
   v: number;
   mode: ExploreMode;
@@ -779,22 +777,12 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
 
   // 挂载时回灌 localStorage；读完后才允许写入，避免首帧空集合覆盖历史记录。
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(REMOVED_KEY);
-      const arr = raw ? JSON.parse(raw) : [];
-      if (Array.isArray(arr)) setRemoved(new Set(arr.filter((u): u is string => typeof u === "string")));
-    } catch {
-      /* 记录损坏/不可用 → 从空集合开始 */
-    }
+    setRemoved(readRemovedUrls());
     setRemovedLoaded(true);
   }, []);
   useEffect(() => {
     if (!removedLoaded) return;
-    try {
-      localStorage.setItem(REMOVED_KEY, JSON.stringify([...removed]));
-    } catch {
-      /* quota — 非致命，当前会话内移除仍生效 */
-    }
+    writeRemovedUrls(removed);
   }, [removed, removedLoaded]);
 
   const addToPipeline = useCallback(async (list: DiscoveredOffer[]) => {
