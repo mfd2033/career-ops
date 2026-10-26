@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Bell, CalendarDays, CircleHelp, Sparkles, ArrowRight, Compass, ExternalLink } from "lucide-react";
+import { Bell, CalendarDays, CircleHelp, Sparkles, ArrowRight, ExternalLink } from "lucide-react";
 import { instrumentSerif } from "@/lib/fonts";
 import { HeroGlow } from "@/components/hero-glow";
 import type { Application, InboxJob } from "@/lib/career-ops";
@@ -166,10 +166,7 @@ export function TodayDashboard({
           {/* D. 常用招聘网站导航：移到 hero 右上角，一列三行；窄屏回退为 hero 内堆叠。
               静态快捷入口，始终可见，即使今日清空也保留主动浏览的一步。 */}
           <div className="flex shrink-0 flex-col gap-2.5 md:mt-1 md:w-[248px]">
-            <div className="flex items-center gap-2">
-              <Compass className="size-4 text-brand" />
-              <h2 className="text-sm font-semibold uppercase tracking-[0.16em] text-muted">{t("home.portalsTitle")}</h2>
-            </div>
+
             {PORTALS.map((p) => (
               <a
                 key={p.url}
