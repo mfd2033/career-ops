@@ -37,6 +37,8 @@ import { spawnHeadlessCli, terminateCli } from "@/lib/spawn-cli.mjs";
 import { careerOpsRoot, readMemory, readInbox, readScanDates, readMarketModesDir, listMarketModes } from "@/lib/career-ops";
 import { readAppConfig } from "@/lib/app-config";
 import { buildBatchPrompt } from "@/lib/run-prompts.mjs";
+// 任务卡可读标题（「公司 · 岗位」）：派发时从 pipeline 行带、完成后从报告回填。
+import { pipelineUrlLabels, reportJobLabel } from "@/lib/job-label.mjs";
 // 评估模式（CO-65）：profile.yml 的 language.modes_dir → 实际评估模式文件。
 import { resolveMarketMode } from "@/lib/market-modes.mjs";
 import { acquireTrackerWrite, releaseTrackerWrite } from "@/lib/core/run-registry";
@@ -107,7 +109,11 @@ export async function POST(req: Request) {
   }
 
   const today = new Date().toISOString().slice(0, 10);
-  const inboxPostedAt = new Map(readInbox().filter((j) => j.url).map((j) => [j.url as string, j.postedAt]));
+  // 派发时的可读标签：pipeline.md 待办行写着 `URL | 公司 | 岗位`，批量 URL 与它同源，
+  // 命中即让池卡片一开局就显示「公司 · 岗位」而不是裸链接（拼不出的仍回退 URL）。
+  const inbox = readInbox();
+  const inboxLabels = pipelineUrlLabels(inbox);
+  const inboxPostedAt = new Map(inbox.filter((j) => j.url).map((j) => [j.url as string, j.postedAt]));
   const scanDates = readScanDates();
   const reportsDir = path.join(root, "reports");
   const reportEntries = () => {
@@ -117,6 +123,30 @@ export async function POST(req: Request) {
       return [];
     }
   };
+  // 报告号 → 已完成报告文件（排除预留哨兵）。未知/找不到返回 null。
+  const reportFileForNum = (num: number): string | null => {
+    if (!Number.isFinite(num)) return null;
+    const prefix = String(num).padStart(3, "0") + "-";
+    const name = reportEntries().find((n) => n.startsWith(prefix) && n.endsWith(".md") && !isReservedReportFile(n));
+    return name ? path.join(reportsDir, name) : null;
+  };
+  // 任务卡展示标签：优先「完成后回填」的报告 Machine Summary，其次派发时从 pipeline
+  // 行带来的标签，两者都没有才回退 URL（不猜、不编造）。
+  const labelForNum = (num: number, url: string): string => {
+    const file = reportFileForNum(num);
+    if (file) {
+      try {
+        const label = reportJobLabel(fs.readFileSync(file, "utf8"));
+        if (label) return label;
+      } catch {
+        /* unreadable report falls back to the inbox label */
+      }
+    }
+    return inboxLabels.get(url) || url;
+  };
+  // 派发时的池卡片标题：pipeline 行标签 > 扩展详情页传来的公司名（仅单 URL 有效）> URL。
+  const dispatchedLabel = (u: string): string =>
+    inboxLabels.get(u) || (urls.length === 1 && company.trim() ? company.trim() : "") || u;
   const runNode = (script: string, args: string[]) =>
     execFileAsync(process.execPath, [path.join(root, script), ...args], { cwd: root });
 
@@ -248,7 +278,7 @@ export async function POST(req: Request) {
             // ADR-0049：收集逐工具事件供子台账持久化（T03 消费）。
             const collectedEvents: Array<{type: string, name?: string, detail?: string, ts?: number}> = [];
             const url = urls[i];
-            const poolHandle = acquire({ url, title: url, reportNum: num, source: "batch", cliId, model: model || undefined });
+            const poolHandle = acquire({ url, title: dispatchedLabel(url), reportNum: num, source: "batch", cliId, model: model || undefined });
             poolHandles.add(poolHandle);
             const postedAt = inboxPostedAt.get(url) ?? scanDates.get(url);
             // 内联 JD/雇主名只对唯一 URL(扩展详情页单评估)有意义;多 URL 时
@@ -400,6 +430,9 @@ export async function POST(req: Request) {
                     okEntries.push({ num, url: urls[i] });
                   }
                   else failed++;
+                  // 展示名：成功项读报告回填「公司 · 岗位」，失败项保留 URL（无报告可读，
+                  // 猜公司名就是编造）。子项清单与逐项登记表共用这个名字。
+                  const itemLabel = itemOk ? labelForNum(num, urls[i]) : urls[i];
                   // reason 判定链只算一次，NDJSON item 事件与服务端登记表共用
                   // （评审修复：两条通道的失败原因必须一致，恢复清单不得比实时
                   // 流少兜底文案）。
@@ -436,7 +469,7 @@ export async function POST(req: Request) {
                   // ADR-0042 决议 6：逐项结论同步入服务端登记表（幂等，事件乱序安全）。
                   recordBatchItem(batchId, {
                     key: urls[i],
-                    label: urls[i],
+                    label: itemLabel,
                     ok: itemOk,
                     skipped: false,
                     score,
@@ -454,7 +487,7 @@ export async function POST(req: Request) {
                         batchId,
                         childKind: "batch-evaluate-item",
                         key: urls[i],
-                        label: urls[i],
+                        label: itemLabel,
                         startedAt: outcome.startedMs || runStartedAt,
                         finishedAt: itemEndedMs,
                         cliId,
@@ -566,10 +599,13 @@ export async function POST(req: Request) {
         // ADR-0045 决议 2/5：终态即落台账，内嵌已完成部分的逐项快照。
         // fire-and-forget，与 /api/run 的 recordEnd 同纪律：台账失败绝不反噬 run。
         try {
+          // 单条批量（扩展详情页单评估走这条路径）在终态历史卡上也显示「公司 · 岗位」，
+          // 而不是笼统的「批量评估 · 1 项」；回填不到（无报告/无标签）时保留计数标题。
+          const singleTitle = urls.length === 1 ? labelForNum(reserved[0], urls[0]) : "";
           appendRunRecord(root, buildBatchLedgerRecord({
             batchId,
             kind: "batch-evaluate",
-            title: `批量评估 · ${urls.length} 项`,
+            title: singleTitle && singleTitle !== urls[0] ? singleTitle : `批量评估 · ${urls.length} 项`,
             input: urls.length === 1 ? urls[0] : `${urls[0]} +${urls.length - 1}`,
             startedAt: runStartedAt,
             total: urls.length,
