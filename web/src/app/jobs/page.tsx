@@ -83,8 +83,8 @@ function JobsRow({ job: j }: { job: Job }) {
   const tone = pillTone(j);
   const { reportNum, entry } = useJobTiming(j);
   const secs = j.status === "done" ? doneDurationSeconds(entry, j) : null;
-  // The pool cards carry "#N" as their subtitle — render it as the report jump
-  // instead of duplicating it beside the title.
+  // The pool cards carry "#N" as their subtitle — the report number now lives in
+  // its own column, so a bare "#N" subtitle is suppressed instead of duplicated.
   const subtitleIsNum = !!j.subtitle && /^#\d+$/.test(j.subtitle);
   // ADR-0043 运行引擎：列表里缺失不占位（详情页才写「未记录」）。
   const engine = formatRunEngine(j.cliId, j.model);
@@ -172,24 +172,15 @@ function JobsRow({ job: j }: { job: Job }) {
           <Check className="size-4 shrink-0 text-emerald-500" />
         )}
         <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-medium">
-            {j.title}
-            {reportNum && !subtitleIsNum && (
-              <>
-                {" "}
-                <ReportNumLink n={reportNum} className="text-xs font-normal text-faint transition-colors hover:text-brand" />
-              </>
-            )}
-          </div>
+          <div className="truncate text-sm font-medium">{j.title}</div>
           {summary?.hasItems ? (
             // ADR-0045 决议 9：折叠态也一眼看到批量结果计数（溢出截断时 n 以 total 为准）。
             <div className="truncate text-xs text-muted">{t("jobs.batchCounters", { n: summary.n, ok: summary.ok, failed: summary.failed })}</div>
-          ) : subtitleIsNum ? (
-            <div className="truncate text-xs text-muted">
-              <ReportNumLink n={reportNum!} className="text-xs text-muted transition-colors hover:text-brand" />
-            </div>
           ) : (
-            (j.subtitle || j.result?.summary) && <div className="truncate text-xs text-muted">{j.result?.summary || j.subtitle}</div>
+            !subtitleIsNum &&
+            (j.subtitle || j.result?.summary) && (
+              <div className="truncate text-xs text-muted">{j.result?.summary || j.subtitle}</div>
+            )
           )}
           {engineText && (
             <div className="truncate text-[11px] text-faint" title={`${engineText} — ${t("jobs.runEngineHint")}`}>
@@ -212,6 +203,9 @@ function JobsRow({ job: j }: { job: Job }) {
             <Clock className="size-3" /> {fmtDuration(secs)}
           </span>
         )}
+        {/* 报告号独立成列（原先是标题旁的附属 span）：移动端也保留——它是这一行
+            的关键标识，短且不参与标题 truncate。 */}
+        {reportNum && <ReportNumLink n={reportNum} className="text-xs" />}
         {j.result?.score != null && (
           <span className={cn("shrink-0 rounded-md px-1.5 py-0.5 text-xs font-semibold tabular-nums", TONE_CHIP[tone])}>
             {j.result.score}/5
