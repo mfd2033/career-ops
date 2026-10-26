@@ -90,7 +90,7 @@ function FilteredFold({ offers }: { offers: DiscoveredOffer[] }) {
 }
 
 export function ResultsList({ offers }: { offers: EnrichedOffer[] }) {
-  const { companiesScanned, partial, addToPipeline, added, mode, restoreSeen, restoring, folded, filters, setFilters, scanSource } = useExplore();
+  const { companiesScanned, partial, addToPipeline, added, removed, removeOffers, restoreRemoved, mode, restoreSeen, restoring, folded, filters, setFilters, scanSource } = useExplore();
   const isAi = mode === "ai";
   // 采集门跑在 browser 路径上（bsk 服务端 / 扩展页侧两条 driver），与 explorer-view 的
   // isBsk 同构。ATS 扫描也被标题门筛，但页面拿不到它的被毙条数——见 GateCard 注释。
@@ -98,9 +98,8 @@ export function ResultsList({ offers }: { offers: EnrichedOffer[] }) {
   const [sort, setSort] = useState<"fresh" | "company">("fresh");
   const [q, setQ] = useState("");
   const [tab, setTab] = useState<ResultTab>(DEFAULT_TAB);
-  // 被用户显式移除的结果 URL（点「移除所选」）。纯展示层、仅本会话：不写任何数据，
-  // 下次搜索得到新结果集即清空。放在 tab/keyword 之前过滤，让徽标与屏幕上的行一致。
-  const [removed, setRemoved] = useState<Set<string>>(new Set());
+  // 被用户显式移除的结果 URL（点「移除所选」）。只影响显示、不写任何数据；集合由
+  // provider 持有并持久化到 localStorage，刷新与下一次搜索都保持隐藏，直到点「恢复已移除」。
   const { t } = useI18n();
   // 标记是否首帧，阻止 persist effect 在挂载时用初始值覆盖 localStorage 里已存的 tab。
   const skipPersistFirstRender = useRef(true);
@@ -158,7 +157,6 @@ export function ResultsList({ offers }: { offers: EnrichedOffer[] }) {
     if (lastOffersRef.current === offers) return; // 只在结果集变化时重置默认勾选
     lastOffersRef.current = offers;
     setSelected(new Set(addable.filter((o) => o.source !== "explore-restore").map((o) => o.url)));
-    setRemoved(new Set()); // 新结果集（新一次搜索）从零开始，不继承上一轮的移除
   }, [offers, added, addable]);
   const toggleSelect = (url: string) =>
     setSelected((s) => {
@@ -195,11 +193,11 @@ export function ResultsList({ offers }: { offers: EnrichedOffer[] }) {
       });
     }
   };
-  // 移除所选：把勾选的行从结果区隐去（纯展示、仅本会话），随即清空勾选——勾选集的意义
-  // 已经用掉，留着会让下一次批量动作（加入管道）指向看不见的行，正是本文件要避免的那种
-  // 「数字与屏幕不符」。
+  // 移除所选：把勾选的行从结果区隐去（纯展示，不写 pipeline.md），随即清空勾选——
+  // 勾选集的意义已经用掉，留着会让下一次批量动作（加入管道）指向看不见的行，正是本
+  // 文件要避免的那种「数字与屏幕不符」。
   const removeSelected = () => {
-    setRemoved((r) => new Set([...r, ...selected]));
+    removeOffers([...selected]);
     setSelected(new Set());
   };
 
@@ -242,6 +240,16 @@ export function ResultsList({ offers }: { offers: EnrichedOffer[] }) {
               </button>
             ))}
           </div>
+          {removed.size > 0 && (
+            <button
+              type="button"
+              onClick={restoreRemoved}
+              title={t("explore.results.restoreRemovedTitle")}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface/40 px-2.5 py-1.5 text-xs font-medium text-muted transition-colors hover:bg-brand-soft hover:text-brand"
+            >
+              {t("explore.results.restoreRemoved", { n: removed.size })}
+            </button>
+          )}
           {!isAi && addable.length > 0 && (
             <button
               type="button"
@@ -262,8 +270,8 @@ export function ResultsList({ offers }: { offers: EnrichedOffer[] }) {
               {allAddableSelected ? t("explore.results.clearSelection") : t("explore.results.selectAll", { n: visibleAddable.length })}
             </button>
           )}
-          {/* 移除所选：把勾选的行从结果区隐去（仅本会话、纯展示，重新搜索即恢复）。排在
-              「清除选择」右侧、主按钮「加入管道」左侧——次级动作不抢主 CTA 的位置。 */}
+          {/* 移除所选：把勾选的行从结果区隐去（纯展示，刷新后仍保持；重新搜索即恢复）。
+              排在「清除选择」右侧、主按钮「加入管道」左侧——次级动作不抢主 CTA 的位置。 */}
           {selected.size > 0 && (
             <button
               type="button"

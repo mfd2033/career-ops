@@ -56,12 +56,13 @@ export function isSelectable(o, added) {
  *
  * This is the one narrowing that is NOT the keyword/tab filter: the user pointed
  * at specific rows and said "remove these". It is display state only — nothing is
- * written anywhere — so applying it BEFORE the tab/keyword derivation keeps the
- * tab badges and the rendered rows in agreement: a dismissed row is gone from
- * both, never counted-but-invisible.
+ * written to pipeline.md — and it is persisted with the result snapshot so a
+ * reload keeps the dismissed rows hidden. Applying it BEFORE the tab/keyword
+ * derivation keeps the tab badges and the rendered rows in agreement: a dismissed
+ * row is gone from both, never counted-but-invisible.
  *
  * @param {Array<{url: string}>} offers
- * @param {Set<string>} removed - URLs dismissed this session.
+ * @param {Set<string>} removed - URLs dismissed by the user.
  * @returns {Array<*>} the same offer objects minus the dismissed ones, in input order.
  */
 export function omitRemoved(offers, removed) {

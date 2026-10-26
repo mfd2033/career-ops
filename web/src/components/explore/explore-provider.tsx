@@ -110,6 +110,13 @@ type ExploreCtx = {
    *  not a runtime scan error, so it drives the "full toolkit" panel over a retry. */
   scannerMissing: boolean;
   added: Set<string>;
+  /** 结果区被用户显式移除（点「移除所选」）的 URL。持久化在 localStorage：
+   *  刷新、切 mode、下一次搜索都保持隐藏；清空入口是 restoreRemoved。 */
+  removed: Set<string>;
+  /** 把 URL 并入「已移除」集合（只影响结果区显示，不写 pipeline.md）。 */
+  removeOffers: (urls: string[]) => void;
+  /** 清空「已移除」集合，让被隐藏的行重新出现在结果区。 */
+  restoreRemoved: () => void;
   adding: Set<string>;
   discover: () => Promise<void>;
   /** Browser mode over the Chinese boards (BOSS直聘/猎聘/智联) via the user's
@@ -150,6 +157,11 @@ export function useExplore(): ExploreCtx {
 // tokens). Persist the SETTLED result set per-tab so a reload or a mode toggle never
 // throws the work away (disc#5 — "came back to explore, work is lost").
 const RESULTS_KEY = "career-ops:explore-results";
+// 结果区「移除所选」的持久层（ADR-0010 的 localStorage 轻量 triage 惯例，与收件箱
+// hidden/shortlist 同款）：跨搜索、跨刷新保持隐藏，但只影响显示，不写 pipeline.md。
+// 结果快照只活在一个 tab 的 sessionStorage 里，撑不住「下次搜索」；移除是用户的显式
+// 处置，必须比一次扫描活得久。清空入口是结果区的「恢复已移除」。
+const REMOVED_KEY = "career-ops:explore-removed";
 type ResultSnapshot = {
   v: number;
   mode: ExploreMode;
@@ -222,6 +234,9 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
   const [error, setError] = useState("");
   const [scannerMissing, setScannerMissing] = useState(false);
   const [added, setAdded] = useState<Set<string>>(new Set());
+  const [removed, setRemoved] = useState<Set<string>>(new Set());
+  // 守卫：localStorage 读取完成前不要把空集合写回去（会抹掉上次的移除记录）。
+  const [removedLoaded, setRemovedLoaded] = useState(false);
   const [adding, setAdding] = useState<Set<string>>(new Set());
   const [restoring, setRestoring] = useState(false);
   const [mode, setModeState] = useState<ExploreMode>("scan");
@@ -753,6 +768,35 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     }
   }, [t]);
 
+  // 结果区「移除所选」：只并入显示层集合，不写 pipeline.md。存在 provider 里是因为
+  // 它要跨组件生命周期与跨搜索存活 —— 刷新/新一次搜索都会重新拿到完整结果集，
+  // 状态若只活在 ResultsList 的组件内存里，被移除的行就会全部画回来。
+  const removeOffers = useCallback((urls: string[]) => {
+    if (urls.length === 0) return;
+    setRemoved((r) => new Set([...r, ...urls]));
+  }, []);
+  const restoreRemoved = useCallback(() => setRemoved(new Set()), []);
+
+  // 挂载时回灌 localStorage；读完后才允许写入，避免首帧空集合覆盖历史记录。
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(REMOVED_KEY);
+      const arr = raw ? JSON.parse(raw) : [];
+      if (Array.isArray(arr)) setRemoved(new Set(arr.filter((u): u is string => typeof u === "string")));
+    } catch {
+      /* 记录损坏/不可用 → 从空集合开始 */
+    }
+    setRemovedLoaded(true);
+  }, []);
+  useEffect(() => {
+    if (!removedLoaded) return;
+    try {
+      localStorage.setItem(REMOVED_KEY, JSON.stringify([...removed]));
+    } catch {
+      /* quota — 非致命，当前会话内移除仍生效 */
+    }
+  }, [removed, removedLoaded]);
+
   const addToPipeline = useCallback(async (list: DiscoveredOffer[]) => {
     const fresh = list.filter((o) => !added.has(o.url));
     if (fresh.length === 0) return 0;
@@ -1024,11 +1068,11 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     () => ({
       filters, setFilters, initFilters, phase,
       running: phase === "casting" || phase === "scanning" || phase === "revealing" || phase === "hunting",
-      offers, folded, sources, matchCount, companiesScanned, companiesAvailable, capHit, droppedNoDate, status, partial, error, scannerMissing, added, adding,
+      offers, folded, sources, matchCount, companiesScanned, companiesAvailable, capHit, droppedNoDate, status, partial, error, scannerMissing, added, removed, removeOffers, restoreRemoved, adding,
       discover, discoverBrowser, loadFresh, addToPipeline, restoreSeen, restoring, applyPatch, reset,
       mode, setMode, scanSource, setScanSource, enabledSources, aiIntent, setAiIntent, discoverAI, aiTrace, aiCost,
     }),
-    [filters, setFilters, initFilters, phase, offers, folded, sources, matchCount, companiesScanned, companiesAvailable, capHit, droppedNoDate, status, partial, error, scannerMissing, added, adding, discover, discoverBrowser, loadFresh, addToPipeline, restoreSeen, restoring, applyPatch, reset, mode, setMode, scanSource, setScanSource, enabledSources, aiIntent, discoverAI, aiTrace, aiCost],
+    [filters, setFilters, initFilters, phase, offers, folded, sources, matchCount, companiesScanned, companiesAvailable, capHit, droppedNoDate, status, partial, error, scannerMissing, added, removed, removeOffers, restoreRemoved, adding, discover, discoverBrowser, loadFresh, addToPipeline, restoreSeen, restoring, applyPatch, reset, mode, setMode, scanSource, setScanSource, enabledSources, aiIntent, discoverAI, aiTrace, aiCost],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

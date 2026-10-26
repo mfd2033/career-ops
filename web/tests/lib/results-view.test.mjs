@@ -173,7 +173,7 @@ test("the toolbar removes the selected rows without leaking into the filter boun
   assert.match(src, /const view = useMemo\(\(\) => \{ const list = visibleOffers\(remaining, tab, q\)/, "the rendered rows read the same narrowed set");
   assert.match(src, /const counts = useMemo\(\(\) => \{ const c: Record<ResultTab, number> = \{ all: remaining\.length/, "so do the tab badges");
   assert.match(src, /onClick=\{removeSelected\}/, "the button fires the removal");
-  assert.match(src, /setRemoved\(\(r\) => new Set\(\[\.\.\.r, \.\.\.selected\]\)\)/, "it dismisses exactly the current selection");
+  assert.match(src, /removeOffers\(\[\.\.\.selected\]\)/, "it dismisses exactly the current selection");
   assert.match(src, /t\("explore\.results\.removeSelected", \{ n: selected\.size \}\)/, "and its label states how many rows it will hide");
 });
 
