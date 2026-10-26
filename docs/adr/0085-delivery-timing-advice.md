@@ -59,6 +59,14 @@ Accepted (2026-10-20)
 - 已知边界二：引擎只看时段，不看「新岗位 24–48 小时内优先」这类与发布时刻相关的规则。
 - 回滚：新增文件（引擎/测试/i18n 簇/组件）+ 管道页一处挂载，删掉即回到原状；无数据迁移。
 
+## 修订记录
+
+- **2026-10-26 — 新增台账表行级「投递时机」列（推翻本 ADR「被拒方案」第 2 条）**：用户要求在 `/pipeline` 台账表的「薪资」列右侧增加一列「投递时机」，逐行显示该职位来源平台在当前时刻的可投结论（best/ok/avoid）。原否决理由（「同一平台的行结论完全相同，等于把一句全局文案复制 N 份；页头一条覆盖全部行」）在实操中被权衡掉：用户明确要把结论就近放进决策点（与薪资/分数并列的另一列），而非只在页头抬头看。
+  - 单一口径不破：行级列与页头 `DeliveryTimeHint` **复用同一引擎**（`delivery-window.mjs` 的 `windowAt`）与同一「来源 → 平台」映射（`source-label.mjs` 的 `sourcePlatform`）；等级 → 语义色复用从 `delivery-time-hint.tsx` 导出的 `LEVEL_TONE`，不新建第二套翻译/配色口径。
+  - 列形态：纯展示、不参与排序（结论是实时时钟量，排序无意义），紧随薪资列插入；非三平台来源（拉勾/ATS/公司官网）显示「—」，悬停走 `delivery.noSource` 如实说明没有规律。
+  - 时钟纪律同页头条：只在浏览器算，首帧 `now=null` 走「—」占位（避免 hydration 不一致），每 30 秒重算；按平台等级（而非 `now` 引用）下发到行，跨窗口边界时结论才真正翻面，`memo` 行不白白重渲染。
+  - 影响面：`web/src/components/pipeline-view.tsx`（列头/列体/时钟）、`web/src/components/delivery-time-hint.tsx`（导出 `LEVEL_TONE`）、`web/src/lib/i18n/clusters/pipeline.ts`（新增 `pipeline.col.deliveryTiming`），测试 `web/tests/lib/delivery-window.test.mjs` 增补接线守卫。
+
 ## References
 
 - 需求来源：Kaneo 任务 CO-44（工作区 Nono工作室 / 项目 CareerOps），附件《投简历黄金时间指南-20261010》

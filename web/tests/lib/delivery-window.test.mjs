@@ -169,7 +169,7 @@ test("i18n：delivery 语料簇 en/zh 键集合对称且同序", () => {
 
 test("组件接线：管道页页头挂上了投递时机条，且文案全部走 delivery.* 键", () => {
   const view = readFileSync(join(here, "../../src/components/pipeline-view.tsx"), "utf8");
-  assert.match(view, /import \{ DeliveryTimeHint \} from "@\/components\/delivery-time-hint"/);
+  assert.match(view, /import \{[^}]*\bDeliveryTimeHint\b[^}]*\} from "@\/components\/delivery-time-hint"/);
   assert.match(view, /<DeliveryTimeHint \/>/);
 
   const hint = readFileSync(join(here, "../../src/components/delivery-time-hint.tsx"), "utf8");
@@ -177,6 +177,17 @@ test("组件接线：管道页页头挂上了投递时机条，且文案全部�
   // 文案一律走 i18n：把中文注释剔除后，组件正文不应再出现中文。
   const code = hint.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
   assert.doesNotMatch(code, /[\u4e00-\u9fa5]/, "组件正文不应含硬编码中文（注释除外）");
+});
+
+test("组件接线：管道页台账表行级「投递时机」列（ADR-0085 修订，纯展示）", () => {
+  const view = readFileSync(join(here, "../../src/components/pipeline-view.tsx"), "utf8");
+  // 列头走 i18n 键（与薪资列相邻插入）
+  assert.match(view, /t\("pipeline\.col\.deliveryTiming"\)/);
+  // 行级结论复用同一套引擎与来源→平台映射，不新建第二套口径
+  assert.match(view, /windowAt\(platform, now\)\.level/);
+  assert.match(view, /sourcePlatform\(url\)/);
+  // 等级 → 语义色复用常驻条导出的 LEVEL_TONE（单一颜色口径）
+  assert.match(view, /LEVEL_TONE\[deliveryLevel\]/);
 });
 
 test("组件接线：报告详情页只显示「该报告来源平台」的建议（/pipeline/{n} 与 /report/{n} 共用 ReportView）", () => {

@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useEffect, useDeferredValue, useMemo, useRef, useState } from "react";
+import { Fragment, memo, useCallback, useEffect, useDeferredValue, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { CompanyLogo } from "@/components/company-logo";
 import { RowSlot } from "@/components/row-slot";
 // 投递时机常驻条（Kaneo CO-44 / ADR-0085）：把三平台黄金时间矩阵变成页头一句建议。
-import { DeliveryTimeHint } from "@/components/delivery-time-hint";
+import { DeliveryTimeHint, LEVEL_TONE } from "@/components/delivery-time-hint";
 import { canonStatus, fmtDuration, scoreTone, statusDot, checkupTone } from "@/lib/format";
 import type { CheckupEntry } from "@/lib/format";
 import { CHECKUP_RISK_LABELS } from "@/lib/company-checkups.mjs";
@@ -21,7 +21,9 @@ import { normalizeUrl } from "@/lib/core/url-key.mjs";
 import { parseKwdParam, serializeKwd } from "@/lib/inbox-keywords.mjs";
 // 报告薪资（ADR-0037）：列里显示归一化月薪区间，字段原文进悬停提示。
 import { formatSalaryRange } from "@/lib/report-salary.mjs";
-import { sourceLabel } from "@/lib/source-label.mjs";
+import { sourceLabel, sourcePlatform } from "@/lib/source-label.mjs";
+import { windowAt } from "@/lib/delivery-window.mjs";
+import type { DeliveryLevel } from "@/lib/delivery-window.mjs";
 import { InboxTriage } from "@/components/inbox/inbox-triage";
 import { useJobs } from "@/components/jobs/job-store";
 import { cn } from "@/lib/cn";
@@ -148,6 +150,21 @@ export function PipelineView({
       setQ(urlQ);
     }
   }, [params]);
+
+  // 投递时机列（ADR-0085 修订）：该行来源平台在当前时刻的可投结论（best/ok/avoid）。
+  // 与页头 DeliveryTimeHint 同一引擎、同一纪律——时钟只在浏览器里算，首帧 now=null 走
+  // 「—」占位，避免 hydration 文案不一致；每 30 秒重算一次，跨窗口边界时结论才真正翻面。
+  const [now, setNow] = useState<Date | null>(null);
+  useEffect(() => {
+    setNow(new Date());
+    const timer = setInterval(() => setNow(new Date()), 30_000);
+    return () => clearInterval(timer);
+  }, []);
+  const deliveryLevelOf = (url: string): DeliveryLevel | null => {
+    const platform = sourcePlatform(url);
+    if (!platform || !now) return null;
+    return windowAt(platform, now).level as DeliveryLevel;
+  };
 
   const setParams = useCallback(
     (updates: Record<string, string | number | null>) => {
@@ -627,16 +644,22 @@ export function PipelineView({
                 {/* 报告号列：纯展示，不参与排序（tracker# 即报告文件名前缀），置于公司列前。 */}
                 <th className="whitespace-nowrap px-4 py-2.5 font-medium">{t("pipeline.col.reportNo")}</th>
                 {SORT_KEYS.map((k) => (
-                  <th
-                    key={k}
-                    className="cursor-pointer select-none whitespace-nowrap px-4 py-2.5 font-medium hover:text-foreground"
-                    onClick={() => setParams({ sort: k, dir: sort.key === k ? sort.dir * -1 : -1 })}
-                  >
-                    <span className="inline-flex items-center gap-1">
-                      {SORT_LABELS[k]}
-                      <ChevronsUpDown className="size-3" />
-                    </span>
-                  </th>
+                  <Fragment key={k}>
+                    <th
+                      className="cursor-pointer select-none whitespace-nowrap px-4 py-2.5 font-medium hover:text-foreground"
+                      onClick={() => setParams({ sort: k, dir: sort.key === k ? sort.dir * -1 : -1 })}
+                    >
+                      <span className="inline-flex items-center gap-1">
+                        {SORT_LABELS[k]}
+                        <ChevronsUpDown className="size-3" />
+                      </span>
+                    </th>
+                    {/* 投递时机列（ADR-0085 修订）：纯展示、不排序——结论是实时时钟量，
+                        排序无意义。紧随薪资列插入（同为「投不投这份」的即时判断量）。 */}
+                    {k === "salary" && (
+                      <th className="whitespace-nowrap px-4 py-2.5 font-medium">{t("pipeline.col.deliveryTiming")}</th>
+                    )}
+                  </Fragment>
                 ))}
                 {/* 来源列：纯展示，不参与排序，置于日期列后 */}
                 <th className="whitespace-nowrap px-4 py-2.5 font-medium">{t("pipeline.col.source")}</th>
@@ -651,10 +674,13 @@ export function PipelineView({
                 return (
                   <>
                     {topPad > 0 && (
-                      <tr aria-hidden="true"><td colSpan={11} style={{ height: topPad, padding: 0, border: 0 }} /></tr>
+                      <tr aria-hidden="true"><td colSpan={12} style={{ height: topPad, padding: 0, border: 0 }} /></tr>
                     )}
                     {items.map((vi) => {
                       const r = filtered[vi.index];
+                      // 投递时机（ADR-0085 修订）：按行算等级，文案在父层本地化——行组件只收
+                      // 原始值字符串，memo 的浅比较才拦得住无关重渲染（同 suggestLabel 惯例）。
+                      const deliveryLevel = deliveryLevelOf(r.url);
                       return (
                         <TrackerRow
                           key={vi.key}
@@ -671,12 +697,15 @@ export function PipelineView({
                           suggestLabel={t("pipeline.suggestCheckup")}
                           suggestTitle={t("pipeline.suggestCheckupTitle")}
                           revalText={r.revalDate && r.revalDate !== r.date ? t("pipeline.revalOn", { date: r.revalDate }) : null}
+                          deliveryLevel={deliveryLevel}
+                          deliveryLabel={deliveryLevel ? t(`delivery.level.${deliveryLevel}`) : null}
+                          deliveryTitle={deliveryLevel ? undefined : t("delivery.noSource")}
                           onToggle={toggleRow}
                         />
                       );
                     })}
                     {bottomPad > 0 && (
-                      <tr aria-hidden="true"><td colSpan={11} style={{ height: bottomPad, padding: 0, border: 0 }} /></tr>
+                      <tr aria-hidden="true"><td colSpan={12} style={{ height: bottomPad, padding: 0, border: 0 }} /></tr>
                     )}
                   </>
                 );
@@ -712,6 +741,9 @@ const TrackerRow = memo(function TrackerRow({
   suggestLabel,
   suggestTitle,
   revalText,
+  deliveryLevel,
+  deliveryLabel,
+  deliveryTitle,
   onToggle,
 }: {
   row: Application;
@@ -729,6 +761,9 @@ const TrackerRow = memo(function TrackerRow({
   suggestLabel: string;
   suggestTitle: string;
   revalText: string | null;
+  deliveryLevel: DeliveryLevel | null;
+  deliveryLabel: string | null;
+  deliveryTitle: string | undefined;
   onToggle: (n: string) => void;
 }) {
   return (
@@ -776,6 +811,15 @@ const TrackerRow = memo(function TrackerRow({
         title={row.reportSalary?.text || undefined}
       >
         {row.reportSalary?.range ? formatSalaryRange(row.reportSalary.range) : "—"}
+      </td>
+      {/* 投递时机列（ADR-0085 修订）：该行来源平台在当前时刻的可投结论，与页头建议条同一
+          引擎同口径；非三平台来源（拉勾/ATS/公司官网）→「—」，悬停如实说明没有规律。 */}
+      <td className="whitespace-nowrap px-4 py-3" title={deliveryTitle}>
+        {deliveryLevel && deliveryLabel ? (
+          <Badge tone={LEVEL_TONE[deliveryLevel]}>{deliveryLabel}</Badge>
+        ) : (
+          <span className="text-faint">—</span>
+        )}
       </td>
       {/* 体检列三态（ADR-0064 修订决议 5）：有记录 → ★；无记录但命中建议 → chip；
           皆无 → 空格（不是「★0」）。 */}

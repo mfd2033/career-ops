@@ -12,7 +12,8 @@ const WEEKDAY_KEYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"] as const;
 
 // 等级与全局结论都复用既有语义色：good = 该投，warn = 别投，muted = 可以但非最佳。
 // 品牌橙留给「选中/激活」，不参与等级编码。
-const LEVEL_TONE: Record<DeliveryLevel, "good" | "muted" | "warn"> = {
+// 导出给管道页的「投递时机」行级列复用（ADR-0085 修订）：等级 → 语义色只有这一处口径。
+export const LEVEL_TONE: Record<DeliveryLevel, "good" | "muted" | "warn"> = {
   best: "good",
   ok: "muted",
   avoid: "warn",
