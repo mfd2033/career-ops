@@ -152,21 +152,14 @@ export function TodayDashboard({
           <p className="mt-4 max-w-xl text-sm text-muted">
             {allClear ? t("home.allClearSub") : t("home.actionQueueSub")}
           </p>
-          <div className="mt-6 flex flex-wrap gap-2.5">
-            <Link href="/explore" className="inline-flex items-center gap-2 rounded-full bg-brand px-5 py-2.5 text-sm font-medium text-brand-foreground transition hover:bg-brand-200 max-sm:min-h-[44px]">
-              {t("home.findNewRoles")} <ArrowRight className="size-4" />
-            </Link>
-            <Link href="/pipeline" className="inline-flex items-center gap-2 rounded-full border border-border px-5 py-2.5 text-sm font-medium text-foreground transition hover:border-brand/40 hover:text-brand max-sm:min-h-[44px]">
-              {t("home.openPipeline")}
-            </Link>
-          </div>
           {inBetween && <QuickEvaluate />}
           </div>
 
-          {/* D. 常用招聘网站导航：移到 hero 右上角，一行三个图标按钮。
+          {/* D. 常用招聘网站导航：移到 hero 右上角，一行三个图标按钮，主 CTA 按钮排其下方。
               站点名走 aria-label/title（hover 提示），不再占版面。
               静态快捷入口，始终可见，即使今日清空也保留主动浏览的一步。 */}
-          <div className="flex shrink-0 items-center gap-2.5 md:mt-1">
+          <div className="flex shrink-0 flex-col gap-4 md:mt-1 md:items-end">
+            <div className="flex items-center gap-2.5">
 
             {PORTALS.map((p) => (
               <a
@@ -182,6 +175,15 @@ export function TodayDashboard({
                 <CompanyLogo name={p.name} src={p.logo} size={56} imgPadding={0} bareTile className="shrink-0 opacity-90 transition-opacity group-hover:opacity-100" />
               </a>
             ))}
+            </div>
+            <div className="flex flex-wrap gap-2.5">
+              <Link href="/explore" className="inline-flex items-center gap-2 rounded-full bg-brand px-5 py-2.5 text-sm font-medium text-brand-foreground transition hover:bg-brand-200 max-sm:min-h-[44px]">
+                {t("home.findNewRoles")} <ArrowRight className="size-4" />
+              </Link>
+              <Link href="/pipeline" className="inline-flex items-center gap-2 rounded-full border border-border px-5 py-2.5 text-sm font-medium text-foreground transition hover:border-brand/40 hover:text-brand max-sm:min-h-[44px]">
+                {t("home.openPipeline")}
+              </Link>
+            </div>
           </div>
         </div>
       </section>
