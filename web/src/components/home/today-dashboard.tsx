@@ -117,8 +117,11 @@ export function TodayDashboard({
   const inboxUrls = useMemo(() => new Set(inbox.map((j) => j.url)), [inbox]);
 
   return (
-    <div className="mx-auto max-w-5xl px-6 py-10 max-sm:pb-24">
-      <section className="dot-bg relative overflow-hidden rounded-2xl border border-border bg-surface/40 px-7 py-10 md:px-10 md:py-12">
+    // 一屏自适应（md+）：在桌面/最大化窗口下整页锁定视口高度、不产生文档级滚动条，
+    // 纵向空间用两列网格 + 列内（隐藏滚动条的）滚动兜底。窄屏（<md）回退为自然高度
+    // 的单列堆叠，保留原有纵向滚动，不裁剪内容。
+    <div className="mx-auto flex w-full max-w-[1600px] flex-col gap-5 px-6 py-6 max-sm:pb-24 md:h-screen md:overflow-hidden">
+      <section className="dot-bg relative shrink-0 overflow-hidden rounded-2xl border border-border bg-surface/40 px-7 py-7 md:px-9 md:py-8">
         <HeroGlow />
         {/* Readability scrim between the animated glow (z-0) and the copy (z-10). */}
         <div aria-hidden className="pointer-events-none absolute inset-0 z-[1] bg-surface/55 backdrop-blur-[2px] dark:bg-background/45" />
@@ -160,69 +163,74 @@ export function TodayDashboard({
         </div>
       </section>
 
-      {/* A. Follow-ups due (demand loop) */}
-      {followups.length > 0 && (
-        <Section icon={Bell} title={t("home.followUpsDueTitle")} hint={t("home.followUpsDueHint")}>
-          <div className="grid gap-2.5">
-            {followups.map((f) => (
-              <FollowUpCard key={`${f.num}-${f.company}`} followup={f} onLogged={() => { setOverdue((n) => Math.max(0, n - 1)); refetch(); }} />
-            ))}
-          </div>
-        </Section>
-      )}
-
-      {/* B. Awaiting your decision */}
-      {awaiting.length > 0 && (
-        <Section icon={CircleHelp} title={t("home.awaitingTitle")} hint={t("home.awaitingHint")}>
-          <div className="grid gap-2.5 sm:grid-cols-2">
-            {awaiting.map((a) => (
-              <DecisionCard key={a.n} app={a} />
-            ))}
-          </div>
-        </Section>
-      )}
-
-      {/* B2. 投递计划：按 Planned 日期分 今日/明日/未来 子组（遵循用户规则：今明都有都显示，都没有显示「无」） */}
-      <Section
-        icon={CalendarDays}
-        title="投递计划"
-        hint={`${plannedCount} 个待投`}
-      >
-        {plannedCount === 0 ? (
-          <p className="text-sm text-muted">无</p>
-        ) : (
-          <div className="grid gap-4">
-            {plannedGroups.today.length > 0 && (
-              <PlannedGroup label="今日待投" apps={plannedGroups.today} />
-            )}
-            {plannedGroups.tomorrow.length > 0 && (
-              <PlannedGroup label="明日待投" apps={plannedGroups.tomorrow} />
-            )}
-            {plannedGroups.later.length > 0 && (
-              <PlannedGroup label="未来待投" apps={plannedGroups.later} />
-            )}
-          </div>
-        )}
-      </Section>
-
-      {/* C. Fresh matches this week (supply loop) */}
-      {fresh.length > 0 && (
-        <Section icon={Sparkles} title={t("home.freshMatchesTitle")} hint={t("home.freshMatchesHint")}>
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-            {fresh.slice(0, 6).map((o) => (
-              <DiscoveryCard key={o.url} offer={o} inPipeline={inboxUrls.has(o.url)} />
-            ))}
-          </div>
-          {fresh.length > 6 && (
-            <Link href="/explore?view=fresh" className="mt-3 inline-flex items-center text-sm text-muted transition hover:text-brand max-sm:min-h-[44px]">
-              {t("home.seeAll", { n: freshCount })} →
-            </Link>
+      {/* 主体：桌面（md+）用两列网格把「待跟进/等待决定」与「投递计划/本周新匹配」并排，
+          换取纵向空间；每列溢出时在列内滚动（滚动条隐藏），从而页面本身不滚动。
+          窄屏回退单列堆叠。 */}
+      <div className="flex min-h-0 flex-1 flex-col gap-5 md:grid md:grid-cols-2">
+        <div className="flex min-h-0 flex-col gap-5 md:overflow-y-auto md:overscroll-contain hide-scrollbar">
+          {/* A. Follow-ups due (demand loop) */}
+          {followups.length > 0 && (
+            <Section icon={Bell} title={t("home.followUpsDueTitle")} hint={t("home.followUpsDueHint")}>
+              <div className="grid gap-2.5">
+                {followups.map((f) => (
+                  <FollowUpCard key={`${f.num}-${f.company}`} followup={f} onLogged={() => { setOverdue((n) => Math.max(0, n - 1)); refetch(); }} />
+                ))}
+              </div>
+            </Section>
           )}
-        </Section>
-      )}
+
+          {/* B. Awaiting your decision */}
+          {awaiting.length > 0 && (
+            <Section icon={CircleHelp} title={t("home.awaitingTitle")} hint={t("home.awaitingHint")}>
+              <div className="grid gap-2.5 sm:grid-cols-2">
+                {awaiting.map((a) => (
+                  <DecisionCard key={a.n} app={a} />
+                ))}
+              </div>
+            </Section>
+          )}
+        </div>
+
+        <div className="flex min-h-0 flex-col gap-5 md:overflow-y-auto md:overscroll-contain hide-scrollbar">
+          {/* B2. 投递计划：按 Planned 日期分 今日/明日/未来 子组（遵循用户规则：今明都有都显示，都没有显示「无」） */}
+          <Section icon={CalendarDays} title="投递计划" hint={`${plannedCount} 个待投`}>
+            {plannedCount === 0 ? (
+              <p className="text-sm text-muted">无</p>
+            ) : (
+              <div className="grid gap-4">
+                {plannedGroups.today.length > 0 && (
+                  <PlannedGroup label="今日待投" apps={plannedGroups.today} />
+                )}
+                {plannedGroups.tomorrow.length > 0 && (
+                  <PlannedGroup label="明日待投" apps={plannedGroups.tomorrow} />
+                )}
+                {plannedGroups.later.length > 0 && (
+                  <PlannedGroup label="未来待投" apps={plannedGroups.later} />
+                )}
+              </div>
+            )}
+          </Section>
+
+          {/* C. Fresh matches this week (supply loop) */}
+          {fresh.length > 0 && (
+            <Section icon={Sparkles} title={t("home.freshMatchesTitle")} hint={t("home.freshMatchesHint")}>
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                {fresh.slice(0, 6).map((o) => (
+                  <DiscoveryCard key={o.url} offer={o} inPipeline={inboxUrls.has(o.url)} />
+                ))}
+              </div>
+              {fresh.length > 6 && (
+                <Link href="/explore?view=fresh" className="mt-3 inline-flex items-center text-sm text-muted transition hover:text-brand max-sm:min-h-[44px]">
+                  {t("home.seeAll", { n: freshCount })} →
+                </Link>
+              )}
+            </Section>
+          )}
+        </div>
+      </div>
 
       {/* D. 常用招聘网站导航：静态快捷入口，始终可见，即使今日清空也保留主动浏览的一步。 */}
-      <Section icon={Compass} title={t("home.portalsTitle")} hint={t("home.portalsHint")}>
+      <Section icon={Compass} title={t("home.portalsTitle")} hint={t("home.portalsHint")} className="shrink-0">
         <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
           {PORTALS.map((p) => (
             <a
@@ -246,7 +254,7 @@ export function TodayDashboard({
       </Section>
 
       {allClear && (
-        <div className="mt-8 rounded-2xl border border-border bg-surface/30 px-6 py-10 text-center">
+        <div className="shrink-0 rounded-2xl border border-border bg-surface/30 px-6 py-10 text-center">
           <Sparkles className="mx-auto size-6 text-brand" />
           <p className="mx-auto mt-3 max-w-md text-sm text-muted">
              {t("home.nothingNeedsYou1")} <Link href="/explore" className="text-brand hover:underline">{t("home.freeScanLink")}</Link> {t("home.nothingNeedsYou2")} <Link href="/pipeline" className="text-brand hover:underline">{t("nav.pipeline")}</Link>{t("home.nothingNeedsYou3")}
@@ -257,9 +265,11 @@ export function TodayDashboard({
   );
 }
 
-function Section({ icon: Icon, title, hint, children }: { icon: React.ComponentType<{ className?: string }>; title: string; hint: string; children: React.ReactNode }) {
+function Section({ icon: Icon, title, hint, children, className }: { icon: React.ComponentType<{ className?: string }>; title: string; hint: string; children: React.ReactNode; className?: string }) {
   return (
-    <section className="mt-10">
+    // 区块间距由父容器（首页根 / 两列网格列）的 gap 提供，Section 自身不再带 mt，
+    // 以便在「一屏自适应」的网格布局中精确控制纵向空间。
+    <section className={className}>
       <div className="mb-3 flex items-center gap-2">
         <Icon className="size-4 text-brand" />
         <h2 className="text-sm font-semibold uppercase tracking-[0.16em] text-muted">{title}</h2>

@@ -88,6 +88,15 @@ html {
     background-image: radial-gradient(circle, hsl(var(--dot)) 1px, transparent 1px);
     background-size: 24px 24px;
   }
+  /* 首页「一屏自适应」(md+) 的列内容滚动：超出视口的部分仍可滚轮/触屏滚动，
+     但不渲染可见滚动条 —— 首页整体不出现纵向/横向滚动条。 */
+  .hide-scrollbar {
+    scrollbar-width: none; /* Firefox */
+    -ms-overflow-style: none; /* legacy Edge / IE */
+  }
+  .hide-scrollbar::-webkit-scrollbar {
+    display: none; /* Chromium / WebKit */
+  }
 }
 
 /* ── Animations ported from the docs home ───────────────────────────────── */
