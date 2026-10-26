@@ -9,7 +9,7 @@ import { DiscoveryCard } from "./discovery-card";
 import { GatePanel } from "./gate-panel";
 import { InputClearButton } from "@/components/input-clear-button";
 import { useExplore } from "./explore-provider";
-import { isSelectable, resultTabOf, visibleOffers } from "@/lib/results-view.mjs";
+import { isSelectable, omitRemoved, resultTabOf, visibleOffers } from "@/lib/results-view.mjs";
 import { useI18n } from "@/lib/i18n/context";
 
 export type EnrichedOffer = DiscoveredOffer & { inPipeline: boolean; evaluatedN?: string };
@@ -98,6 +98,9 @@ export function ResultsList({ offers }: { offers: EnrichedOffer[] }) {
   const [sort, setSort] = useState<"fresh" | "company">("fresh");
   const [q, setQ] = useState("");
   const [tab, setTab] = useState<ResultTab>(DEFAULT_TAB);
+  // 被用户显式移除的结果 URL（点「移除所选」）。纯展示层、仅本会话：不写任何数据，
+  // 下次搜索得到新结果集即清空。放在 tab/keyword 之前过滤，让徽标与屏幕上的行一致。
+  const [removed, setRemoved] = useState<Set<string>>(new Set());
   const { t } = useI18n();
   // 标记是否首帧，阻止 persist effect 在挂载时用初始值覆盖 localStorage 里已存的 tab。
   const skipPersistFirstRender = useRef(true);
@@ -125,30 +128,37 @@ export function ResultsList({ offers }: { offers: EnrichedOffer[] }) {
     }
   }, [tab]);
 
-  // 各 tab 计数基于完整结果集（与管道页一致：tab 计数看全集，搜索只过滤行）。
+  // 结果集去掉用户已移除的行。计数、视图、可加入项都建在 remaining 上：被移除的行
+  // 既不在屏幕上、也不该再被徽标算进数字（否则又回到「数字比行多」的老毛病；对照本
+  // 文件顶部注释里记录的那条回归）。
+  const remaining = useMemo(() => omitRemoved(offers, removed), [offers, removed]);
+
+  // 各 tab 计数基于完整结果集（与管道页一致：tab 计数看全集，搜索只过滤行）。全集指
+  // 去掉已移除行之后的集合——移除是用户显式处置，不是搜索词收窄。
   const counts = useMemo(() => {
-    const c: Record<ResultTab, number> = { all: offers.length, new: 0, pipeline: 0, evaluated: 0 };
-    for (const o of offers) c[resultTabOf(o)] += 1;
+    const c: Record<ResultTab, number> = { all: remaining.length, new: 0, pipeline: 0, evaluated: 0 };
+    for (const o of remaining) c[resultTabOf(o)] += 1;
     return c;
-  }, [offers]);
+  }, [remaining]);
 
   const view = useMemo(() => {
-    const list = visibleOffers(offers, tab, q);
+    const list = visibleOffers(remaining, tab, q);
     return [...list].sort((a, b) =>
       sort === "fresh" ? (b.postedAt || "").localeCompare(a.postedAt || "") : a.company.localeCompare(b.company),
     );
-  }, [offers, q, sort, tab]);
+  }, [remaining, q, sort, tab]);
 
   // ADR-0021 确认入管：勾选集 + 「加入管道 (N)」。默认全选「本次新采」的可加入项
   // （offers 引用变化视为一次新结果集）；恢复出来的旧发现（source=explore-restore）
   // 不进默认勾选，要入管得显式勾上。
-  const addable = useMemo(() => offers.filter((o) => isSelectable(o, added)), [offers, added]);
+  const addable = useMemo(() => remaining.filter((o) => isSelectable(o, added)), [remaining, added]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const lastOffersRef = useRef<typeof offers | null>(null);
   useEffect(() => {
     if (lastOffersRef.current === offers) return; // 只在结果集变化时重置默认勾选
     lastOffersRef.current = offers;
     setSelected(new Set(addable.filter((o) => o.source !== "explore-restore").map((o) => o.url)));
+    setRemoved(new Set()); // 新结果集（新一次搜索）从零开始，不继承上一轮的移除
   }, [offers, added, addable]);
   const toggleSelect = (url: string) =>
     setSelected((s) => {
@@ -185,13 +195,20 @@ export function ResultsList({ offers }: { offers: EnrichedOffer[] }) {
       });
     }
   };
+  // 移除所选：把勾选的行从结果区隐去（纯展示、仅本会话），随即清空勾选——勾选集的意义
+  // 已经用掉，留着会让下一次批量动作（加入管道）指向看不见的行，正是本文件要避免的那种
+  // 「数字与屏幕不符」。
+  const removeSelected = () => {
+    setRemoved((r) => new Set([...r, ...selected]));
+    setSelected(new Set());
+  };
 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-3">
         <div>
           <p className="text-sm text-foreground">
-            <span className="font-semibold">{counts[tab]}</span> {isAi ? t(offers.length === 1 ? "explore.results.candidateOne" : "explore.results.candidateMany", { n: counts[tab] }) : t(offers.length === 1 ? "explore.results.freshRoleOne" : "explore.results.freshRoleMany", { n: counts[tab] })}
+            <span className="font-semibold">{counts[tab]}</span> {isAi ? t(remaining.length === 1 ? "explore.results.candidateOne" : "explore.results.candidateMany", { n: counts[tab] }) : t(remaining.length === 1 ? "explore.results.freshRoleOne" : "explore.results.freshRoleMany", { n: counts[tab] })}
             <CostBadge kind={isAi ? "spend" : "free-network"} size="xs" className="ml-2 align-middle" />
           </p>
           <p className="text-[12px] text-faint">
@@ -237,23 +254,34 @@ export function ResultsList({ offers }: { offers: EnrichedOffer[] }) {
             </button>
           )}
           {visibleAddable.length > 0 && (
-            <>
-              <button
-                type="button"
-                onClick={toggleAll}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface/40 px-2.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-brand-soft hover:text-brand"
-              >
-                {allAddableSelected ? t("explore.results.clearSelection") : t("explore.results.selectAll", { n: visibleAddable.length })}
-              </button>
-              <button
-                type="button"
-                disabled={selectedAddable.length === 0}
-                onClick={() => void addSelected()}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-xs font-semibold text-brand-foreground shadow-sm transition-all hover:brightness-110 disabled:opacity-50"
-              >
-                <Plus className="size-3.5" /> {t("explore.results.addSelected", { n: selectedAddable.length })}
-              </button>
-            </>
+            <button
+              type="button"
+              onClick={toggleAll}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface/40 px-2.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-brand-soft hover:text-brand"
+            >
+              {allAddableSelected ? t("explore.results.clearSelection") : t("explore.results.selectAll", { n: visibleAddable.length })}
+            </button>
+          )}
+          {/* 移除所选：把勾选的行从结果区隐去（仅本会话、纯展示，重新搜索即恢复）。排在
+              「清除选择」右侧、主按钮「加入管道」左侧——次级动作不抢主 CTA 的位置。 */}
+          {selected.size > 0 && (
+            <button
+              type="button"
+              onClick={removeSelected}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface/40 px-2.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-brand-soft hover:text-brand"
+            >
+              {t("explore.results.removeSelected", { n: selected.size })}
+            </button>
+          )}
+          {visibleAddable.length > 0 && (
+            <button
+              type="button"
+              disabled={selectedAddable.length === 0}
+              onClick={() => void addSelected()}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-xs font-semibold text-brand-foreground shadow-sm transition-all hover:brightness-110 disabled:opacity-50"
+            >
+              <Plus className="size-3.5" /> {t("explore.results.addSelected", { n: selectedAddable.length })}
+            </button>
           )}
         </div>
       </div>

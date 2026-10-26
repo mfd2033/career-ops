@@ -52,6 +52,24 @@ export function isSelectable(o, added) {
 }
 
 /**
+ * Drop the offers the user explicitly dismissed from the results area.
+ *
+ * This is the one narrowing that is NOT the keyword/tab filter: the user pointed
+ * at specific rows and said "remove these". It is display state only — nothing is
+ * written anywhere — so applying it BEFORE the tab/keyword derivation keeps the
+ * tab badges and the rendered rows in agreement: a dismissed row is gone from
+ * both, never counted-but-invisible.
+ *
+ * @param {Array<{url: string}>} offers
+ * @param {Set<string>} removed - URLs dismissed this session.
+ * @returns {Array<*>} the same offer objects minus the dismissed ones, in input order.
+ */
+export function omitRemoved(offers, removed) {
+  if (!removed || removed.size === 0) return offers;
+  return offers.filter((o) => !removed.has(o.url));
+}
+
+/**
  * The rows on screen: the tab's rows, narrowed by the keyword box (title or
  * company, case-insensitive, and — when the query is a bare number — by the
  * report number of an already-evaluated offer). Order is NOT applied here —

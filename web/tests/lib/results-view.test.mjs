@@ -21,10 +21,11 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { isSelectable, inResultTab, resultTabOf, visibleOffers } from "../../src/lib/results-view.mjs";
+import { isSelectable, inResultTab, omitRemoved, resultTabOf, visibleOffers } from "../../src/lib/results-view.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const LIST = "components/explore/results-list.tsx";
+const I18N = "lib/i18n/clusters/explore.ts";
 const read = (rel) => readFileSync(join(here, "../../src", rel), "utf8");
 const flat = (rel) => read(rel).replace(/\s+/g, " ");
 
@@ -106,7 +107,7 @@ test("the bar counts, ticks and confirms the visible derivation — not a second
   const src = flat(LIST);
   assert.match(
     src,
-    /import \{ isSelectable, resultTabOf, visibleOffers \} from "@\/lib\/results-view\.mjs"/,
+    /import \{ isSelectable, omitRemoved, resultTabOf, visibleOffers \} from "@\/lib\/results-view\.mjs"/,
     "the derivation must come from the shared module",
   );
   assert.match(
@@ -142,12 +143,42 @@ test("the tab counts still look at the whole result set (a deliberate contrast, 
   assert.ok(end > start, "could not bound the counts memo");
   const body = src.slice(start, end).replace(/\s+/g, " ");
 
-  assert.match(body, /all: offers\.length, new: 0, pipeline: 0, evaluated: 0/, "tab badges count the full set");
-  assert.match(body, /for \(const o of offers\) c\[resultTabOf\(o\)\] \+= 1/, "…over every offer, not over the filtered list");
+  assert.match(body, /all: remaining\.length, new: 0, pipeline: 0, evaluated: 0/, "tab badges count the full set");
+  assert.match(body, /for \(const o of remaining\) c\[resultTabOf\(o\)\] \+= 1/, "…over every surviving offer, not over the filtered list");
   // The contrast is deliberate (pipeline-page behaviour): only the bulk bar is
   // scoped to the keyword. Widening the fix into the badges would be a silent
   // behaviour change, so pin the boundary.
+  //
+  // `remaining` (offers minus the rows the user explicitly dismissed) is the one
+  // narrowing the badges DO inherit — a removed row must leave the badges too, or
+  // the count would keep promising rows that are no longer on screen. That is why
+  // the source is `remaining` and not `offers`; it is not the filter box leaking in.
   for (const forbidden of ["q", "visibleOffers", "view"]) {
     assert.ok(!body.includes(forbidden), `the tab badges must not be narrowed by the filter box (found "${forbidden}")`);
   }
+});
+// ── 3. removing selected rows from the results ────────────────────────────────
+
+test("omitRemoved drops exactly the dismissed URLs and keeps the rest in order", () => {
+  const out = omitRemoved(offers, new Set(["https://x/2", "https://x/4"]));
+  assert.deepEqual(out.map((o) => o.url), ["https://x/1", "https://x/3", "https://x/5"], "only the dismissed rows leave, order kept");
+  assert.equal(omitRemoved(offers, new Set()).length, 5, "an empty set is a no-op");
+  assert.equal(omitRemoved(offers, new Set(["https://x/nope"])).length, 5, "an unknown URL removes nothing");
+  assert.equal(out.length, offers.length - 2, "removal never invents or duplicates rows");
+});
+
+test("the toolbar removes the selected rows without leaking into the filter boundary", () => {
+  const src = flat(LIST);
+  assert.match(src, /const remaining = useMemo\(\(\) => omitRemoved\(offers, removed\), \[offers, removed\]\)/, "removal is derived from offers, ahead of the tab/keyword narrowing");
+  assert.match(src, /const view = useMemo\(\(\) => \{ const list = visibleOffers\(remaining, tab, q\)/, "the rendered rows read the same narrowed set");
+  assert.match(src, /const counts = useMemo\(\(\) => \{ const c: Record<ResultTab, number> = \{ all: remaining\.length/, "so do the tab badges");
+  assert.match(src, /onClick=\{removeSelected\}/, "the button fires the removal");
+  assert.match(src, /setRemoved\(\(r\) => new Set\(\[\.\.\.r, \.\.\.selected\]\)\)/, "it dismisses exactly the current selection");
+  assert.match(src, /t\("explore\.results\.removeSelected", \{ n: selected\.size \}\)/, "and its label states how many rows it will hide");
+});
+
+test("the remove button is labelled in both locales", () => {
+  const src = read(I18N);
+  const hits = (src.match(/"explore\.results\.removeSelected":/g) ?? []).length;
+  assert.equal(hits, 2, "explore.results.removeSelected must exist in both locales");
 });
