@@ -11,6 +11,7 @@ import { paramsToFilters, paramsToAi, paramsToBrowser, type ExploreFilters } fro
 import { hasMultipleKeywords } from "@/lib/browser-search.mjs";
 import { carriesFilterParams, shouldAutoRunOnHandoff } from "@/lib/explore-params.mjs";
 import { SCAN_SOURCES, readScanSources, type ScanSource } from "@/lib/scan-mode";
+import { evaluatedNoFor } from "@/lib/results-view.mjs";
 import { FilterBuilder } from "./filter-builder";
 import { DiscoveringState } from "./discovering-state";
 import { AiHuntView } from "./ai-hunt-view";
@@ -128,17 +129,13 @@ export function ExplorerView({
   const inboxUrls = useMemo(() => new Set(inboxSnapshot.map((j) => j.url)), [inboxSnapshot]);
   const enriched: EnrichedOffer[] = useMemo(
     () =>
-      offers.map((o) => {
-        const inPipeline = inboxUrls.has(o.url);
-        const c = norm(o.company);
-        const t = norm(o.title);
-        const ev = appsSnapshot.find((a) => {
-          if (norm(a.company) !== c) return false;
-          const ar = norm(a.role);
-          return ar.length > 3 && (t.includes(ar) || ar.includes(t.split(" ").slice(0, 3).join(" ")));
-        });
-        return { ...o, inPipeline, evaluatedN: ev?.n };
-      }),
+      offers.map((o) => ({
+        ...o,
+        inPipeline: inboxUrls.has(o.url),
+        // 匹配规则与「空键不是通配符」的来由见 results-view.mjs evaluatedNoFor ——
+        // company="" 的浏览器板卡片曾被追踪表里 company="?" 的行按岗位名误配成已评估。
+        evaluatedN: evaluatedNoFor(o, appsSnapshot, norm),
+      })),
     [offers, inboxUrls, appsSnapshot],
   );
 

@@ -38,6 +38,37 @@ export function inResultTab(tab, o) {
 }
 
 /**
+ * The tracker number of the row this offer was already evaluated as, or
+ * undefined when it was never evaluated.
+ *
+ * The company key is the FIRST dimension and it must be a REAL key. An empty
+ * key is not a wildcard: browser-board scan rows carry `company: ""` (智联/BOSS
+ * 采集时公司列就是空的), and the tracker writes `?` for an unknown employer
+ * (ADR-0004 的 sentinel) — and `normalizeTextKey("?")` is ALSO the empty string.
+ * Both sides normalizing to "" then matched on the role overlap alone, so every
+ * 「产品经理」/「项目经理」 posting from 智联/BOSS was labelled 已评估 against a
+ * single unrelated `?` row. Measured on the live data: 18 of the 200 whats-new
+ * offers were falsely badged (and pushed out of the default 新增 tab) by 24
+ * `?` rows, while not one of those postings existed in the tracker.
+ *
+ * @param {{company?: string, title?: string}} offer
+ * @param {Array<{n?: string, company?: string, role?: string}>} apps
+ * @param {(s: unknown) => string} norm - the core's normalizeTextKey key fn
+ * @returns {string|undefined} the matched tracker `#n`, or undefined
+ */
+export function evaluatedNoFor(offer, apps, norm) {
+  const c = norm(offer.company ?? "");
+  if (!c) return undefined;
+  const t = norm(offer.title ?? "");
+  const hit = apps.find((a) => {
+    if (norm(a.company ?? "") !== c) return false;
+    const ar = norm(a.role ?? "");
+    return ar.length > 3 && (t.includes(ar) || ar.includes(t.split(" ").slice(0, 3).join(" ")));
+  });
+  return hit?.n;
+}
+
+/**
  * Is this offer confirmable into the pipeline? No if it is already there, was
  * already evaluated (that implies a pipeline row), or was confirmed earlier in
  * this session (`added` covers the window before the pipeline snapshot catches

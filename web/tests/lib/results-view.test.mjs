@@ -21,7 +21,10 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { isSelectable, inResultTab, omitRemoved, resultTabOf, visibleOffers } from "../../src/lib/results-view.mjs";
+import { isSelectable, inResultTab, omitRemoved, resultTabOf, visibleOffers, evaluatedNoFor } from "../../src/lib/results-view.mjs";
+import { normalizeTextKey } from "../../src/lib/core/normalize-text-key.mjs";
+
+const norm = (s) => normalizeTextKey(s, " ");
 
 const here = dirname(fileURLToPath(import.meta.url));
 const LIST = "components/explore/results-list.tsx";
@@ -181,4 +184,51 @@ test("the remove button is labelled in both locales", () => {
   const src = read(I18N);
   const hits = (src.match(/"explore\.results\.removeSelected":/g) ?? []).length;
   assert.equal(hits, 2, "explore.results.removeSelected must exist in both locales");
+});
+
+// ── 4. 已评估判定：空公司键不是通配符 ──────────────────────────────────────────
+//
+// 线上实测（/api/whats-new 的 200 条 vs 追踪表 739 行）：18 条卡片被标成「已评估」
+// 并从默认的「新增」tab 里消失，可它们的职位 id 一条都不在追踪表里 —— 全是误判。
+// 原因是两边的公司键都归一化成空串：浏览器板采集行 `company: ""`，追踪表未知雇主
+// 行 `company: "?"`（ADR-0004 sentinel），`normalizeTextKey("?")` 也是空串。公司维度
+// 于是形同虚设，只剩岗位名重叠这一条 —— 24 行 `?` 行把任何「产品经理」「项目经理」
+// 都认成了同一条旧记录。
+
+const TRACKER = [
+  { n: "#470", company: "?", role: "项目经理" },
+  { n: "#701", company: "?", role: "PLM产品经理" },
+  { n: "#900", company: "郑州智小游企业管理有限公司", role: "产品经理" },
+];
+
+test("an empty company key never matches — it is not a wildcard", () => {
+  // 浏览器板卡片：公司列本来就是空的，不该被「?」行按岗位名认领
+  assert.equal(evaluatedNoFor({ company: "", title: "项目经理" }, TRACKER, norm), undefined, "空公司 + 泛岗位名不得命中");
+  assert.equal(evaluatedNoFor({ company: "", title: "产品经理" }, TRACKER, norm), undefined);
+  assert.equal(evaluatedNoFor({ company: "", title: "PLM项目经理" }, TRACKER, norm), undefined);
+  // 扫描行自带的 `?`（未知雇主）归一化后同样是空串，也不能与 `?` 行互相认领
+  assert.equal(evaluatedNoFor({ company: "?", title: "项目经理" }, TRACKER, norm), undefined);
+  assert.equal(evaluatedNoFor({ title: "项目经理" }, TRACKER, norm), undefined, "缺字段按空处理");
+});
+
+test("a real company key still matches on the role overlap", () => {
+  assert.equal(
+    evaluatedNoFor({ company: "郑州智小游企业管理有限公司", title: "高级产品经理" }, TRACKER, norm),
+    "#900",
+    "公司维度命中（换域名/路径前缀时靠它兜底）",
+  );
+  assert.equal(
+    evaluatedNoFor({ company: "郑州智小游企业管理有限公司", title: "前端工程师" }, TRACKER, norm),
+    undefined,
+    "公司对但岗位不对，不算已评估",
+  );
+  assert.equal(evaluatedNoFor({ company: "从未评估过的公司", title: "产品经理" }, TRACKER, norm), undefined);
+});
+
+test("the results view asks the shared derivation, not a private copy", () => {
+  const src = flat("components/explore/explorer-view.tsx");
+  assert.match(src, /import \{ evaluatedNoFor \} from "@\/lib\/results-view\.mjs"/, "判定必须来自共享模块");
+  assert.match(src, /evaluatedN: evaluatedNoFor\(o, appsSnapshot, norm\)/, "卡片徽章读同一个判定");
+  // 旧的内联写法（没有空键保护）不许回来
+  assert.ok(!/if \(norm\(a\.company\) !== c\) return false/.test(src), "内联的已评估匹配必须删掉，否则空键通配会复发");
 });
