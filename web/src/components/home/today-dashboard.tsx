@@ -245,17 +245,22 @@ export function TodayDashboard({
           纵向空间：高度富余时 auto-fill 网格自动换行铺多行，高度不足时保底一行、
           区块内纵向滚动，列表本身不把页面撑出滚动条。 */}
       {fresh.length > 0 && (
-        <Section icon={Sparkles} title={t("home.freshMatchesTitle")} hint={t("home.freshMatchesHint")} className="flex min-h-[235px] flex-1 flex-col">
+        <Section
+          icon={Sparkles}
+          title={t("home.freshMatchesTitle")}
+          hint={t("home.freshMatchesHint")}
+          className="flex min-h-[235px] flex-1 flex-col"
+          action={fresh.length > 12 ? (
+            <Link href="/explore?view=fresh" className="inline-flex shrink-0 items-center text-sm text-muted transition hover:text-brand max-sm:min-h-[44px]">
+              {t("home.seeAll", { n: freshCount })} →
+            </Link>
+          ) : null}
+        >
           <div className="grid min-h-0 flex-1 content-start gap-3 overflow-y-auto overscroll-contain hide-scrollbar sm:grid-cols-[repeat(auto-fill,minmax(230px,1fr))]">
             {fresh.slice(0, 12).map((o) => (
               <DiscoveryCard key={o.url} offer={o} inPipeline={inboxUrls.has(o.url)} />
             ))}
           </div>
-          {fresh.length > 12 && (
-            <Link href="/explore?view=fresh" className="mt-3 inline-flex shrink-0 items-center text-sm text-muted transition hover:text-brand max-sm:min-h-[44px]">
-              {t("home.seeAll", { n: freshCount })} →
-            </Link>
-          )}
         </Section>
       )}
 
@@ -272,7 +277,7 @@ export function TodayDashboard({
   );
 }
 
-function Section({ icon: Icon, title, hint, children, className }: { icon: React.ComponentType<{ className?: string }>; title: string; hint: string; children: React.ReactNode; className?: string }) {
+function Section({ icon: Icon, title, hint, children, className, action }: { icon: React.ComponentType<{ className?: string }>; title: string; hint: string; children: React.ReactNode; className?: string; action?: React.ReactNode }) {
   return (
     // 区块间距由父容器（首页根 / 两列网格列）的 gap 提供，Section 自身不再带 mt，
     // 以便在「一屏自适应」的网格布局中精确控制纵向空间。
@@ -281,6 +286,7 @@ function Section({ icon: Icon, title, hint, children, className }: { icon: React
         <Icon className="size-4 text-brand" />
         <h2 className="text-sm font-semibold uppercase tracking-[0.16em] text-muted">{title}</h2>
         <span className="text-xs text-faint">· {hint}</span>
+        {action ? <div className="ml-auto">{action}</div> : null}
       </div>
       {children}
     </section>
