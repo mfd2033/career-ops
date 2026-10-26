@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Bell, CalendarDays, CircleHelp, Sparkles, ArrowRight, ExternalLink } from "lucide-react";
+import { Bell, CalendarDays, CircleHelp, Sparkles, ArrowRight } from "lucide-react";
 import { instrumentSerif } from "@/lib/fonts";
 import { HeroGlow } from "@/components/hero-glow";
 import type { Application, InboxJob } from "@/lib/career-ops";
@@ -163,9 +163,10 @@ export function TodayDashboard({
           {inBetween && <QuickEvaluate />}
           </div>
 
-          {/* D. 常用招聘网站导航：移到 hero 右上角，一列三行；窄屏回退为 hero 内堆叠。
+          {/* D. 常用招聘网站导航：移到 hero 右上角，一行三个图标按钮。
+              站点名走 aria-label/title（hover 提示），不再占版面。
               静态快捷入口，始终可见，即使今日清空也保留主动浏览的一步。 */}
-          <div className="flex shrink-0 flex-col gap-2.5 md:mt-1 md:w-[248px]">
+          <div className="flex shrink-0 items-center gap-2.5 md:mt-1">
 
             {PORTALS.map((p) => (
               <a
@@ -174,15 +175,11 @@ export function TodayDashboard({
                 target="_blank"
                 rel="noopener noreferrer"
                 aria-label={`${p.name} — ${t("home.portalOpenNewTab")}`}
-                className="group flex cursor-pointer items-center gap-3 rounded-xl border border-border bg-surface/40 px-4 py-3 transition-colors hover:border-brand/40 hover:bg-surface/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
+                title={`${p.name} — ${t("home.portalOpenNewTab")}`}
+                className="group flex cursor-pointer items-center justify-center rounded-xl border border-border bg-surface/40 p-1.5 transition-colors hover:border-brand/40 hover:bg-surface/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
               >
-                <CompanyLogo name={p.name} src={p.logo} size={60} imgPadding={0} bareTile className="shrink-0" />
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm font-medium text-foreground">{p.name}</span>
-                  <span className="block truncate font-mono text-xs text-muted">{p.host}</span>
-                </span>
-                {/* hover 只对图标做 transform，不改尺寸/内边距，避免布局偏移。 */}
-                <ExternalLink className="size-4 shrink-0 text-faint transition-transform group-hover:translate-x-0.5 group-hover:text-brand" aria-hidden />
+                {/* hover 只对图标做透明度过渡，不改尺寸/内边距，避免布局偏移。 */}
+                <CompanyLogo name={p.name} src={p.logo} size={56} imgPadding={0} bareTile className="shrink-0 opacity-90 transition-opacity group-hover:opacity-100" />
               </a>
             ))}
           </div>
