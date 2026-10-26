@@ -50,7 +50,6 @@ export function TodayDashboard({
   const [followups, setFollowups] = useState<FollowUp[]>([]);
   const [overdue, setOverdue] = useState(0);
   const [fresh, setFresh] = useState<DiscoveredOffer[]>([]);
-  const [freshCount, setFreshCount] = useState(0);
   // explore 结果区「移除所选」的记录（localStorage，显示层处置）。供应回路是服务端
   // 读 scan-history 算出来的，天然看不到浏览器里的移除，所以首页要读同一份记录再挡一次。
   const [removedUrls, setRemovedUrls] = useState<Set<string>>(new Set());
@@ -66,16 +65,13 @@ export function TodayDashboard({
         setOverdue(d.metadata?.overdue ?? d.entries?.length ?? 0);
       })
       .catch(() => {});
-    // 取到 MAX_OFFER_LIMIT 而不是默认 24 条：hero/「查看全部」的计数要减掉被移除的
-    // 岗位，而移除只可能发生在用户看过的结果里（explore 的「查看全部」同样取满上限），
-    // 拿满这 200 条才能把 count 修正准确。
+    // 取满 explore「查看全部」同一上限：两边拿到的是同一批行、同一个渲染天花板，
+    // 「查看全部 N」的 N 才可能等于点进去后真实看到的行数。服务端 count 是 7 天窗口
+    // 的完整总数，远超可渲染上限，拿它报数会变成一个点不进去的承诺（用户报的 724）。
     fetch(`/api/whats-new?limit=${MAX_OFFER_LIMIT}`)
       .then((r) => r.json())
       .then((d) => {
-        const offers = Array.isArray(d.offers) ? d.offers : [];
-        const count = Number(d.count);
-        setFresh(offers);
-        setFreshCount(Number.isFinite(count) ? Math.max(0, Math.trunc(count)) : offers.length);
+        setFresh(Array.isArray(d.offers) ? d.offers : []);
       })
       .catch(() => {});
   }, []);
@@ -128,9 +124,10 @@ export function TodayDashboard({
     }, [applications]);
 
   const visibleFresh = useMemo(() => fresh.filter((o) => !removedUrls.has(o.url)), [fresh, removedUrls]);
-  // 服务端 count 是完整总数，offers 只是前 MAX_OFFER_LIMIT 条。被移除的岗位只会出现在
-  // 用户实际看过的那批里，所以「count − 返回列表中被移除的条数」就是真实待处理数。
-  const newThisWeek = Math.max(0, freshCount - (fresh.length - visibleFresh.length));
+  // 报「实际能看到的行数」，而不是服务端 7 天窗口的完整 count：offers 已被上限截断，
+  // count 里的行在 explore 同样渲染不出来。用 count 会让「查看全部 724」点进去只有
+  // 十几条（用户报的不一致）。这个数与 explore 结果区头部计数同源同口径。
+  const newThisWeek = visibleFresh.length;
   // 投递计划里的待投项也算「有需要你处理的事」：已排计划的岗位不再进 awaiting，
   // 若只看 awaiting 会误判为空并弹出「全部处理完」卡片。
   const plannedCount = plannedGroups.today.length + plannedGroups.tomorrow.length + plannedGroups.later.length;

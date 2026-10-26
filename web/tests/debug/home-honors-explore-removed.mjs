@@ -4,8 +4,7 @@
 // 而首页的「本周新匹配」是客户端 fetch /api/whats-new 后直接渲染，从未读这份记录。
 // 服务端读的是 data/scan-history.tsv，压根不知道浏览器里移除了什么。
 //
-// 断言：快照 3 条（服务端 count=5），其中 2 条已被移除 →
-//   卡片只剩 1 条，hero 计数 5 应显示为 3（5 减掉返回列表里被移除的 2 条）。
+// 断言：快照 3 条，其中 2 条已被移除 → 卡片只剩 1 条，hero 也显示 1（与可见行同口径）。
 //
 // 运行：node web/tests/debug/home-honors-explore-removed.mjs   (PORT=3000)
 import { chromium } from "playwright-core";
@@ -35,8 +34,8 @@ await page.addInitScript(
   },
   [REMOVED_KEY, removed],
 );
-// 固定供应回路的数据，不依赖真实 scan-history：返回 3 条，count 声称 5。
-await page.route("**/api/whats-new**", (route) => route.fulfill({ json: { offers, count: 5 } }));
+// 固定供应回路的数据，不依赖真实 scan-history：返回 3 条。
+await page.route("**/api/whats-new**", (route) => route.fulfill({ json: { offers, count: offers.length } }));
 await page.route("**/api/followups**", (route) => route.fulfill({ json: { entries: [], metadata: { overdue: 0 } } }));
 
 const countCards = () => page.getByRole("heading", { name: /Test Role/ }).count();
@@ -51,10 +50,10 @@ try {
   const hero = (await page.locator("h1").first().innerText()).replace(/\s+/g, " ");
 
   console.log(`[repro] 可见卡片=${cards} hero="${hero}"`);
-  const heroOk = hero.includes("3 个本周新匹配");
+  const heroOk = hero.includes("1 个本周新匹配");
   if (cards !== 1 || !heroOk) {
     failed = true;
-    console.log("[repro] FAIL: 期望只剩 1 张卡片、hero 显示「3 个本周新匹配」");
+    console.log("[repro] FAIL: 期望只剩 1 张卡片、hero 显示「1 个本周新匹配」");
   } else {
     console.log("[repro] PASS");
   }
