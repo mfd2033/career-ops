@@ -128,6 +128,16 @@ export const en: Dict = {
   "pipeline.statusError.offline": "Couldn't reach the local server — is the dashboard still running?",
   "pipeline.statusError.generic": "Status not saved: {detail}",
 
+  // ── Status history popup (status-history-button.tsx) ──
+  "pipeline.statusHistory": "History",
+  "pipeline.statusHistoryTitle": "Show every recorded status change for this row",
+  "pipeline.statusHistoryAria": "Status change history",
+  "pipeline.statusHistoryLoading": "Loading…",
+  "pipeline.statusHistoryEmpty": "No status changes recorded yet.",
+  "pipeline.statusHistoryError": "Couldn't load the status history.",
+  "pipeline.statusHistoryClose": "Close",
+  "pipeline.statusHistoryVia": "via {source}",
+
   // ── Delete from tracker (delete-from-tracker.tsx) ──
   "pipeline.removeFromTracker": "Remove from tracker",
   "pipeline.removeConfirm": "Permanently remove application #{n} from your tracker?",
@@ -405,6 +415,16 @@ export const zh: Dict = {
   "pipeline.statusError.timeoutUnknown": "写入超时，是否生效未知 —— 先刷新页面确认，再决定要不要重试。",
   "pipeline.statusError.offline": "连不上本地服务，确认 dashboard 还在运行。",
   "pipeline.statusError.generic": "状态没写成：{detail}",
+
+  // ── Status history popup (status-history-button.tsx) ──
+  "pipeline.statusHistory": "状态记录",
+  "pipeline.statusHistoryTitle": "查看这一行所有已记录的状态变化",
+  "pipeline.statusHistoryAria": "状态变化记录",
+  "pipeline.statusHistoryLoading": "加载中…",
+  "pipeline.statusHistoryEmpty": "暂无状态变化记录。",
+  "pipeline.statusHistoryError": "无法加载状态变化记录。",
+  "pipeline.statusHistoryClose": "关闭",
+  "pipeline.statusHistoryVia": "来源：{source}",
 
   // ── Delete from tracker (delete-from-tracker.tsx) ──
   "pipeline.removeFromTracker": "从追踪器移除",

@@ -18,6 +18,7 @@ import { Badge } from "@/components/ui/badge";
 import { scoreTone, scoreNum, legitimacyTone, parseReport } from "@/lib/format";
 import { cleanHeading, splitSections } from "@/lib/report-sections.mjs";
 import { StatusSelect } from "@/components/status-select";
+import { StatusHistoryButton } from "@/components/status-history-button";
 import { CompanyLogo } from "@/components/company-logo";
 import { ScoreMethodology } from "@/components/score-methodology";
 import { GeneratePdfButton } from "@/components/generate-pdf-button";
@@ -538,6 +539,8 @@ export function ReportView({
             </span>
           )}
           {app && <StatusSelect n={id} current={app.status} />}
+          {/* 状态变化记录（status-log.tsv 审计轨迹）：紧邻状态选择框，只读弹窗 */}
+          {app && <StatusHistoryButton n={id} />}
           {/* 跳过 = 写盘 SKIP 后前进（ADR-0040，与批量跳过同落点）：路径由
               SkipFromTracker 内的 skipDestination 决定。next 链接与无下一份时的
               列表兜底都带上本页的列表上下文（contextQuery）；深链页

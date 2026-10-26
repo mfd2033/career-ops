@@ -48,3 +48,44 @@ export function submittedDatesFromStatusLog(text, submittedTokens) {
   }
   return dates;
 }
+/**
+ * Every recorded transition for ONE tracker row, newest first.
+ *
+ * The ledger is append-only and one line per real status change (set-status.mjs
+ * writes it), so this is the audit trail behind a row's current state — what the
+ * status history popup on the report page shows. Rows that predate the ledger
+ * (bulk-seeded) simply have no events.
+ *
+ * Same column layout as submittedDatesFromStatusLog: `# · date · from · to ·
+ * source · note`; source/note may be absent on older rows. Same-day events keep
+ * the file's own order but are reversed so the most recent append reads first.
+ *
+ * @param {string} text - Raw status-log.tsv content (BOM/CRLF tolerated;
+ *   missing file / empty string → empty array).
+ * @param {number|string} n - Tracker row number.
+ * @returns {Array<{date:string, from:string, to:string, source:string, note:string}>}
+ */
+export function statusEventsFromStatusLog(text, n) {
+  const target = Number.parseInt(String(n ?? ""), 10);
+  if (!Number.isFinite(target) || typeof text !== "string" || !text.trim()) return [];
+  const events = [];
+  let seq = 0;
+  for (const line of text.replace(LEADING_BOM, "").replace(/\r/g, "").split("\n")) {
+    const cells = line.split("\t");
+    if (cells.length < 4) continue;
+    // parseInt rejects the header line ("num"), malformed rows and short lines.
+    if (Number.parseInt(cells[0], 10) !== target) continue;
+    const date = String(cells[1] ?? "").trim();
+    if (!DATE_RE.test(date)) continue;
+    events.push({
+      date,
+      from: String(cells[2] ?? "").trim(),
+      to: String(cells[3] ?? "").trim(),
+      source: String(cells[4] ?? "").trim(),
+      note: String(cells[5] ?? "").trim(),
+      seq: seq++,
+    });
+  }
+  events.sort((a, b) => (a.date === b.date ? b.seq - a.seq : a.date < b.date ? 1 : -1));
+  return events.map(({ date, from, to, source, note }) => ({ date, from, to, source, note }));
+}
