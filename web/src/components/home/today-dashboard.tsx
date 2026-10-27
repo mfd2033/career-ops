@@ -210,86 +210,84 @@ export function TodayDashboard({
         </div>
       </section>
 
-      {/* 主体：桌面（md+）两列网格——左列「待跟进/等待决定」，右列「投递计划」拉伸与
-          左列同高（内容超出时区块内滚动）。网格占自身内容高度、空间不足时收缩；
-          剩余纵向空间全部让给底部「本周新匹配」。窄屏（<md）回退单列堆叠。 */}
-      <div className="flex min-h-0 shrink flex-col gap-5 md:grid md:grid-cols-2">
-        <div className="flex min-h-0 flex-col gap-5 md:overflow-y-auto md:overscroll-contain hide-scrollbar">
-          {/* A. Follow-ups due (demand loop) —— 常显区块，无数据显示「无」（与「投递计划」口径一致）。 */}
-          <Section icon={Bell} title={t("home.followUpsDueTitle")} hint={t("home.followUpsDueHint")}>
-            {followups.length === 0 ? (
-              <p className="text-sm text-muted">无</p>
-            ) : (
-              <div className="grid gap-2.5">
-                {followups.map((f) => (
-                  <FollowUpCard key={`${f.num}-${f.company}`} followup={f} onLogged={() => { setOverdue((n) => Math.max(0, n - 1)); refetch(); }} />
-                ))}
-              </div>
-            )}
-          </Section>
+      {/* 主体：桌面（md+）2×2 网格——左上「待跟进」、左下「等待你的决定」，右上「投递
+          计划」、右下「本周新匹配」（与「等待你的决定」同排，占其右侧）。第一行按内容
+          高度（两块各自内部滚动封顶，避免长列表把第二行挤没），第二行吃掉剩余纵向空间、
+          内部滚动。窄屏（<md）回退单列堆叠，DOM 顺序即视觉顺序：待跟进 → 等待你的决定
+          → 投递计划 → 本周新匹配。 */}
+      <div className="flex min-h-0 shrink flex-col gap-5 md:grid md:grid-cols-2 md:grid-rows-[auto_minmax(0,1fr)]">
+        {/* A. Follow-ups due (demand loop) —— 常显区块，无数据显示「无」（与「投递计划」口径一致）。 */}
+        <Section icon={Bell} title={t("home.followUpsDueTitle")} hint={t("home.followUpsDueHint")} className="min-h-0 md:col-start-1 md:row-start-1">
+          {followups.length === 0 ? (
+            <p className="text-sm text-muted">无</p>
+          ) : (
+            <div className="grid max-h-[38vh] gap-2.5 overflow-y-auto overscroll-contain hide-scrollbar">
+              {followups.map((f) => (
+                <FollowUpCard key={`${f.num}-${f.company}`} followup={f} onLogged={() => { setOverdue((n) => Math.max(0, n - 1)); refetch(); }} />
+              ))}
+            </div>
+          )}
+        </Section>
 
-          {/* B. Awaiting your decision —— 常显区块，无数据显示「无」；
-              拉伸占满左列剩余高度，与右列「投递计划」完全等高。 */}
-          <Section icon={CircleHelp} title={t("home.awaitingTitle")} hint={t("home.awaitingHint")} className="flex min-h-0 flex-1 flex-col">
-            {awaiting.length === 0 ? (
-              <p className="text-sm text-muted">无</p>
-            ) : (
-              <div className="grid gap-2.5 sm:grid-cols-2">
-                {awaiting.map((a) => (
-                  <DecisionCard key={a.n} app={a} />
-                ))}
-              </div>
-            )}
-          </Section>
-        </div>
+        {/* B. Awaiting your decision —— 常显区块，无数据显示「无」；
+            落在网格左下，与右下「本周新匹配」同排左右相邻。 */}
+        <Section icon={CircleHelp} title={t("home.awaitingTitle")} hint={t("home.awaitingHint")} className="flex min-h-0 flex-col md:col-start-1 md:row-start-2">
+          {awaiting.length === 0 ? (
+            <p className="text-sm text-muted">无</p>
+          ) : (
+            <div className="grid min-h-0 flex-1 content-start gap-2.5 overflow-y-auto overscroll-contain hide-scrollbar sm:grid-cols-2">
+              {awaiting.map((a) => (
+                <DecisionCard key={a.n} app={a} />
+              ))}
+            </div>
+          )}
+        </Section>
 
-        <div className="flex min-h-0 flex-col gap-5">
-          {/* B2. 投递计划：按 Planned 日期分 今日/明日/未来 子组（遵循用户规则：今明都有都显示，都没有显示「无」）。
-              区块拉伸占满右列，与左列「等待你的决定」保持同高；内容超出时区块内滚动。 */}
-          <Section icon={CalendarDays} title="投递计划" hint={`${plannedCount} 个待投`} className="flex min-h-0 flex-1 flex-col">
-            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain hide-scrollbar">
-              {plannedCount === 0 ? (
-                <p className="text-sm text-muted">无</p>
-              ) : (
-                <div className="grid gap-4">
-                  {plannedGroups.today.length > 0 && (
-                    <PlannedGroup label="今日待投" apps={plannedGroups.today} />
-                  )}
-                  {plannedGroups.tomorrow.length > 0 && (
-                    <PlannedGroup label="明日待投" apps={plannedGroups.tomorrow} />
-                  )}
-                  {plannedGroups.later.length > 0 && (
-                    <PlannedGroup label="未来待投" apps={plannedGroups.later} />
-                  )}
-                </div>
+        {/* B2. 投递计划：按 Planned 日期分 今日/明日/未来 子组（遵循用户规则：今明都有都显示，都没有显示「无」）。
+            落在网格右上，内容超出时区块内滚动（滚动高度与左列「待跟进」同口径）。 */}
+        <Section icon={CalendarDays} title="投递计划" hint={`${plannedCount} 个待投`} className="min-h-0 md:col-start-2 md:row-start-1">
+          {plannedCount === 0 ? (
+            <p className="text-sm text-muted">无</p>
+          ) : (
+            <div className="grid max-h-[38vh] gap-4 overflow-y-auto overscroll-contain hide-scrollbar">
+              {plannedGroups.today.length > 0 && (
+                <PlannedGroup label="今日待投" apps={plannedGroups.today} />
+              )}
+              {plannedGroups.tomorrow.length > 0 && (
+                <PlannedGroup label="明日待投" apps={plannedGroups.tomorrow} />
+              )}
+              {plannedGroups.later.length > 0 && (
+                <PlannedGroup label="未来待投" apps={plannedGroups.later} />
               )}
             </div>
-          </Section>
-        </div>
-      </div>
+          )}
+        </Section>
 
-      {/* C. Fresh matches this week (supply loop) — 页面底部，弹性占满两列网格剩下的
-          纵向空间：高度富余时 auto-fill 网格自动换行铺多行，高度不足时保底一行、
-          区块内纵向滚动，列表本身不把页面撑出滚动条。 */}
-      {visibleFresh.length > 0 && (
+        {/* C. Fresh matches this week (supply loop) —— 常显区块，无数据显示「无」；
+            移到「等待你的决定」右侧（网格右下）。桌面高度由第二行的剩余空间决定，
+            窄屏保底一行高度；卡片超出时区块内纵向滚动，列表本身不把页面撑出滚动条。 */}
         <Section
           icon={Sparkles}
           title={t("home.freshMatchesTitle")}
           hint={t("home.freshMatchesHint")}
-          className="flex min-h-[235px] flex-1 flex-col"
+          className={`flex min-h-0 flex-col md:col-start-2 md:row-start-2 ${visibleFresh.length > 0 ? "max-md:min-h-[235px]" : ""}`}
           action={visibleFresh.length > 12 ? (
             <Link href="/explore?view=fresh" className="inline-flex shrink-0 items-center text-sm text-muted transition hover:text-brand max-sm:min-h-[44px]">
               {t("home.seeAll", { n: newThisWeek })} →
             </Link>
           ) : null}
         >
-          <div className="grid min-h-0 flex-1 content-start gap-3 overflow-y-auto overscroll-contain hide-scrollbar sm:grid-cols-[repeat(auto-fill,minmax(230px,1fr))]">
-            {visibleFresh.slice(0, 12).map((o) => (
-              <DiscoveryCard key={o.url} offer={o} inPipeline={inboxUrls.has(o.url)} />
-            ))}
-          </div>
+          {visibleFresh.length === 0 ? (
+            <p className="text-sm text-muted">无</p>
+          ) : (
+            <div className="grid min-h-0 flex-1 content-start gap-3 overflow-y-auto overscroll-contain hide-scrollbar sm:grid-cols-[repeat(auto-fill,minmax(220px,1fr))]">
+              {visibleFresh.slice(0, 12).map((o) => (
+                <DiscoveryCard key={o.url} offer={o} inPipeline={inboxUrls.has(o.url)} />
+              ))}
+            </div>
+          )}
         </Section>
-      )}
+      </div>
 
 
       {allClear && (
