@@ -20,6 +20,7 @@ import os from "node:os";
 import path from "node:path";
 import { runTailorWorker } from "../../src/lib/tailor-worker.mjs";
 import { applicationArtifactPaths } from "../../../application-artifacts.mjs";
+import { cvShortStem } from "../../src/lib/pdf-paths.mjs";
 
 const LONG_JD = "岗位职责：负责数据治理项目交付与跨职能团队协作，推动方案落地。要求 5 年以上经验。".repeat(3);
 
@@ -96,7 +97,7 @@ function makeDeps({ tailorExit = 0, pdfExit = 0, tailorSavesHtml = true, markExi
   };
 }
 
-test("正常链路：定制 HTML/PDF 落 output/<key>/cv/tailored/vNNN/，pdf-index 登记该报告号", async () => {
+test("正常链路：产物同时落 flat 短名（与报告页 pdf 按钮同款形态）和 bundle，pdf-index 按报告号登 flat", async () => {
   const h = makeDeps();
   try {
     const target = { company: "Acme AI", role: "Senior Engineer", jdText: LONG_JD, reportPath: path.join(h.deps.root, "reports", "042-acme-2026-10-26.md") };
@@ -105,17 +106,25 @@ test("正常链路：定制 HTML/PDF 落 output/<key>/cv/tailored/vNNN/，pdf-in
     assert.equal(res.ok, true, `worker failed: ${res.error}`);
     assert.equal(res.reportNum, "042");
 
-    // 产物落点：bundle 的 tailored/vNNN 下，且文件真实存在。
+    // 产物形态对齐（2026-10-27 用户验收）：主交付必须是 ADR-0076 flat 短名
+    // output/cv-{报告号}-{职位}.html/pdf——和报告页点「生成定制简历」(kind:pdf) 落点一致，
+    // 用户在 output/ 目录里直接看得见；bundle vNNN 降为历史副本。
+    const stem = cvShortStem("042", "Senior Engineer");
+    assert.equal(res.html, path.join(h.deps.root, "output", `${stem}.html`));
+    assert.equal(res.pdf, path.join(h.deps.root, "output", `${stem}.pdf`));
+    const pdfCall = h.calls.find((c) => c.file === "generate-pdf.mjs");
+    assert.equal(pdfCall.args[0], res.html, "渲染必须吃 flat 短名 HTML（D 热键从它重渲染）");
+    assert.equal(pdfCall.args[1], res.pdf, "渲染必须落 flat 短名 PDF");
+
+    // 历史副本：bundle 的 tailored/v001 下仍各留一份同内容文件。
     const bundle = h.bundle();
     assert.match(bundle.cv.tailored.html, /cv[\\/]tailored[\\/]v001[\\/]cv\.html$/);
-    assert.ok(fs.existsSync(res.html), "tailored html not written to bundle");
-    assert.ok(fs.existsSync(res.pdf), "tailored pdf not written to bundle");
+    assert.ok(fs.existsSync(res.html), "flat html not written");
+    assert.ok(fs.existsSync(res.pdf), "flat pdf not written");
+    assert.ok(fs.existsSync(bundle.cv.tailored.html), "bundle history html missing");
+    assert.ok(fs.existsSync(bundle.cv.tailored.pdf), "bundle history pdf missing");
 
-    // generate-pdf 被以 --report=042 调起（这是 /api/cv-pdf?report=N 能命中的前提）。
-    const pdfCall = h.calls.find((c) => c.file === "generate-pdf.mjs");
-    assert.ok(pdfCall.args.includes("--report=042"), "generate-pdf missing --report registration");
-
-    // pdf-index.tsv 首列即报告号，路径指向 bundle pdf。
+    // pdf-index 登记的是 flat pdf 路径（report 精确回读、打开所在目录都指向 output 根）。
     const idx = fs.readFileSync(path.join(h.deps.root, "data", "pdf-index.tsv"), "utf8").trim();
     const [col0, col1] = idx.split("\t");
     assert.equal(col0, "042");

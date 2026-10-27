@@ -42,9 +42,12 @@ Content-Type: application/json
 
 ## 产物
 
-成功后：
+成功后（产物形态与报告页「生成定制简历」按钮完全同形，ADR-0076）：
 
-- 定制 HTML/PDF 落 `output/<reportNum>-<company-slug>-<role-slug>/cv/tailored/vNNN/`（`cv.html` / `cv.pdf`；中文公司名的 slug 可能是占位形状如 `1153-application-role`，不要自己拼路径，用下面的 API 取）。
+- **主交付（flat 短名，output/ 根目录直接可见）**：`output/cv-{reportNum}-{职位}.html` 与 `output/cv-{reportNum}-{职位}.pdf`
+  （文件名含扩展名 ≤20 码点，中文职位保留并截断；D 热键可从该 HTML 重渲染）。
+- 历史副本：`output/<reportNum>-<company-slug>-<role-slug>/cv/tailored/vNNN/`（`cv.html` / `cv.pdf`；
+  中文公司名的 slug 可能是占位形状如 `1153-application-role`，不要自己拼路径，用下面的 API 取）。
 - 渲染成功后 worker 会自动调 `mark-pdf-ready.mjs <reportNum>` 把 tracker 该行 PDF 列 ❌→✅
   （报告页的「已生成定制简历」状态即读自此格）；回写失败会以 `stage:mark` 的 ERROR 终态上报，
   不会静默留下「产物已生成但 UI 说没生成」的矛盾态。

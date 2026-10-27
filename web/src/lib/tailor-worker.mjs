@@ -22,6 +22,7 @@
 // 形状与 checkup worker 对齐）；任一步失败以 { ok:false, stage, error } 返回，绝不静默。
 
 import path from "node:path";
+import { cvShortStem } from "./pdf-paths.mjs";
 
 /** 从报告文件名前缀推真实报告号（re-eval 会把行改指向新号）。取不到回退调用方给的兜底。 */
 function deriveReportNum(reportPath, fallback) {
@@ -102,16 +103,26 @@ export async function runTailorWorker(target, deps) {
   if (!savedHtml) {
     return { ok: false, stage: "tailor", error: "openai-tailor exited 0 but reported no saved HTML path" };
   }
-  // 把 flat 定制 HTML 归位到 bundle 的 tailored/vNNN/cv.html（工单要求产物落这一路径）。
+  // 把定制 HTML 同时归位到两处：① flat 短名 output/cv-{报告号}-{职位}.html/pdf（主交付，
+  // 与报告页「生成定制简历」按钮的产物形态完全一致，用户在 output/ 根目录直接看得见，
+  // D 热键也从这个 HTML 重渲染）；② bundle tailored/vNNN/cv.*（历史副本，#2172 路径惯例）。
+  const stem = cvShortStem(reportNum, target.role);
+  const flatHtml = path.join(deps.root, "output", `${stem}.html`);
+  const flatPdf = path.join(deps.root, "output", `${stem}.pdf`);
+  await copyFile(savedHtml, flatHtml);
   await copyFile(savedHtml, bundleHtml);
 
-  // 3) 渲染 PDF 并登记：bundleHtml → bundlePdf，--report=N 让 generate-pdf 写 data/pdf-index.tsv，
-  //    GET /api/cv-pdf?report=N 由此精确命中。缺 --report 登记 = 产物无法被回读，视为失败。
+  // 3) 渲染 PDF 并登记：flatHtml → flatPdf，--report=N 让 generate-pdf 写 data/pdf-index.tsv
+  //    （登的是 flat 路径，/api/cv-pdf?report=N 和「打开所在目录」都落在 output 根，与按钮
+  //    链路同形）。缺 --report 登记 = 产物无法被回读，视为失败。
   stage("pdf", { reportNum });
-  const pdfRes = await runScript("generate-pdf.mjs", [bundleHtml, bundlePdf, "--report=" + reportNum]);
+  const pdfRes = await runScript("generate-pdf.mjs", [flatHtml, flatPdf, "--report=" + reportNum]);
   if (pdfRes.code !== 0) {
     return { ok: false, stage: "pdf", error: failReason(pdfRes, "generate-pdf failed") };
   }
+  // bundle 历史副本：把渲染好的 PDF 同步一份进 vNNN（失败不影响主交付，但宁严不宽：
+  // 留半成品 bundle 会让 hm-audit 把旧版当现状，重试幂等更安全）。
+  await copyFile(flatPdf, bundlePdf);
 
   // 4) 回写 tracker 完成态：mark-pdf-ready 按真实报告号把 PDF 列 ❌→✅（#2172 的 canonical
   //    写路径，幂等）。报告页的 pdfReady 读的就是这个格子——不落下这一步，产物虽在盘上，
@@ -124,6 +135,6 @@ export async function runTailorWorker(target, deps) {
     return { ok: false, stage: "mark", error: failReason(markRes, "mark-pdf-ready failed (tracker PDF column not flipped)") };
   }
 
-  stage("done", { reportNum, html: bundleHtml, pdf: bundlePdf });
-  return { ok: true, reportNum, html: bundleHtml, pdf: bundlePdf };
+  stage("done", { reportNum, html: flatHtml, pdf: flatPdf });
+  return { ok: true, reportNum, html: flatHtml, pdf: flatPdf, bundle: { html: bundleHtml, pdf: bundlePdf } };
 }

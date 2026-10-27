@@ -21,6 +21,7 @@
 7. **凭据 = 密钥库使用中密钥束，经 env 注入**（修订 2026-10-27，首跑实弹报障）：初版假设 `.env` 里的 `OPENAI_*` 变量，但本机密钥唯一事实源是 ADR-0083 密钥库（配置页可维护、`.env` 没有也不该有明文）。现在派发时读 `readVault`/`activeKey`，把使用中那把的 key/baseUrl/model 写进 `openai-tailor.mjs` 子进程 env（不进 argv/事件流/台账；dotenv 不覆盖既有 env，注入即生效）；库里无可用密钥时前哨当场 400 `no-tailor-credential`，不派必死的 worker。
 8. **严格网关兼容 + worker 场景超时**（修订 2026-10-27，二次实弹）：部分严格 OpenAI 兼容网关（实测 maas-api.unisound.com）拒收 `cache_control` 扩展字段——`openai-tailor.mjs` 对首个 400 含 `cache_control` 时降级为纯字符串 system message 重试一次（prompt 文本不变，只去缓存提示）。整页 HTML 生成在快模型网关上可超 5 分钟，worker 派发时注入 `OPENAI_TIMEOUT_MS=600000`（调用方显式设过则尊重）。应答体/台账补 `reportNum`（真实报告号，行号 ≠ 报告号时调用方靠它取 PDF）。
 9. **链路收尾回写 tracker 完成态**（修订 2026-10-27，三次实弹报障：任务 done 但报告页仍显示未生成）：报告页的 `pdfReady` 读的是 tracker PDF 列的 ✅，其 canonical 写手是 `mark-pdf-ready.mjs`（#2172，按**报告号**解析行、幂等）——初版 worker 只写了 pdf-index，漏了这一步。现在渲染成功后第四步调 `mark-pdf-ready <reportNum> --json`，失败以 `stage:mark` ERROR 上报：完成态没落盘就不算任务成功，绝不留「产物在盘上、UI 说没有」的矛盾态。
+10. **产物形态对齐报告页按钮**（修订 2026-10-27，用户验收要求）：初版只落 bundle 的 `cv/tailored/vNNN/cv.*`，而报告页「生成定制简历」（kind:pdf）的主交付是 ADR-0076 flat 短名 `output/cv-{报告号}-{职位}.html/pdf`（直接在 output/ 根可见，D 热键从它重渲染）。现在 worker 用同一把尺（web 内部纯函数 `cvShortStem`）把渲染输入/输出都指向 flat 短名，pdf-index 登记的也是 flat 路径；bundle vNNN 降为历史副本。定制引擎仍是 headless `openai-tailor`（内容质量与 agent 驱动的 pdf 模式有差，属设计边界，不随本次改变）。
 
 ## 范围（不动）
 
