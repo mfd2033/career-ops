@@ -24,10 +24,11 @@ import { applicationArtifactPaths } from "../../../application-artifacts.mjs";
 const LONG_JD = "岗位职责：负责数据治理项目交付与跨职能团队协作，推动方案落地。要求 5 年以上经验。".repeat(3);
 
 // 造一个临时 root，并返回 fake runScript / writeTempJd / copyFile + 记录调用。
-function makeDeps({ tailorExit = 0, pdfExit = 0, tailorSavesHtml = true } = {}) {
+function makeDeps({ tailorExit = 0, pdfExit = 0, tailorSavesHtml = true, markExit = 0 } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cops-tailor-"));
   const calls = [];
   const stages = [];
+  const marked = [];
   let bundleRef = null;
 
   const runScript = async (file, args) => {
@@ -68,6 +69,12 @@ function makeDeps({ tailorExit = 0, pdfExit = 0, tailorSavesHtml = true } = {}) 
       fs.appendFileSync(idxPath, `${reportNum}\t${relPdf}\t-\ta4\t2026-10-27\n`, "utf8");
       return { code: 0, stdout: "Manifest updated", stderr: "" };
     }
+    if (file === "mark-pdf-ready.mjs") {
+      // 复刻 #2172 契约：按报告号把 tracker PDF 列 ❌→✅；这里只记录被调起与退出码。
+      if (markExit !== 0) return { code: markExit, stdout: "", stderr: "tracker row not found for report 042" };
+      marked.push(args[0]);
+      return { code: 0, stdout: JSON.stringify({ ok: true, changed: true }), stderr: "" };
+    }
     throw new Error(`unexpected script: ${file}`);
   };
 
@@ -83,6 +90,7 @@ function makeDeps({ tailorExit = 0, pdfExit = 0, tailorSavesHtml = true } = {}) 
     deps: { root, runScript, writeTempJd, copyFile, publish },
     calls,
     stages,
+    marked,
     bundle: () => bundleRef,
     cleanup: () => fs.rmSync(root, { recursive: true, force: true }),
   };
@@ -113,8 +121,15 @@ test("正常链路：定制 HTML/PDF 落 output/<key>/cv/tailored/vNNN/，pdf-in
     assert.equal(col0, "042");
     assert.equal(path.resolve(h.deps.root, col1.replace(/\//g, path.sep)), res.pdf);
 
-    // 阶段事件按序广播（artifacts → tailor → pdf → done）。
-    assert.deepEqual(h.stages.map((s) => s.stage), ["artifacts", "tailor", "pdf", "done"]);
+    // 阶段事件按序广播（artifacts → tailor → pdf → mark → done）。
+    assert.deepEqual(h.stages.map((s) => s.stage), ["artifacts", "tailor", "pdf", "mark", "done"]);
+
+    // 回写 tracker 完成态（2026-10-27 实弹报障）：渲染成功后必须按**报告号**调
+    // mark-pdf-ready，否则报告页 pdfReady 永远显示「未生成」——它读的就是 tracker
+    // PDF 列的 ✅，而那是 mark-pdf-ready 的 canonical 领地。
+    const markCall = h.calls.find((c) => c.file === "mark-pdf-ready.mjs");
+    assert.ok(markCall, "worker never marks the tracker PDF-ready");
+    assert.deepEqual(h.marked, ["042"], "mark 必须吃真实报告号");
   } finally {
     h.cleanup();
   }
@@ -146,6 +161,21 @@ test("PDF 渲染失败 → stage:pdf 的 ERROR", async () => {
     assert.equal(res.ok, false);
     assert.equal(res.stage, "pdf");
     assert.match(res.error, /generate-pdf failed/);
+  } finally {
+    h.cleanup();
+  }
+});
+
+test("tracker 回写失败 → stage:mark 的 ERROR（产物已生成但完成态没落盘不算成功）", async () => {
+  const h = makeDeps({ markExit: 2 });
+  try {
+    const res = await runTailorWorker(
+      { company: "Acme", role: "Eng", jdText: LONG_JD, reportPath: path.join(h.deps.root, "reports", "042-a.md") },
+      h.deps,
+    );
+    assert.equal(res.ok, false);
+    assert.equal(res.stage, "mark");
+    assert.match(res.error, /mark-pdf-ready failed/);
   } finally {
     h.cleanup();
   }

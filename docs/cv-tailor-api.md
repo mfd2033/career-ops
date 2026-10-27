@@ -45,6 +45,9 @@ Content-Type: application/json
 成功后：
 
 - 定制 HTML/PDF 落 `output/<reportNum>-<company-slug>-<role-slug>/cv/tailored/vNNN/`（`cv.html` / `cv.pdf`；中文公司名的 slug 可能是占位形状如 `1153-application-role`，不要自己拼路径，用下面的 API 取）。
+- 渲染成功后 worker 会自动调 `mark-pdf-ready.mjs <reportNum>` 把 tracker 该行 PDF 列 ❌→✅
+  （报告页的「已生成定制简历」状态即读自此格）；回写失败会以 `stage:mark` 的 ERROR 终态上报，
+  不会静默留下「产物已生成但 UI 说没生成」的矛盾态。
 - `generate-pdf.mjs --report=<reportNum>` 把 report→pdf 写入 `data/pdf-index.tsv`，于是
   `GET /api/cv-pdf?report=<reportNum>` 精确命中该 PDF（中文公司名亦可靠）。这里的参数是
   **应答体里的 `reportNum`（评估报告号），不是请求里的行号 `n`**（两者在 re-eval 后不同）。

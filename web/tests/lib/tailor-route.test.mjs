@@ -67,6 +67,7 @@ test("mock worker 跑完链路后，GET /api/cv-pdf 的解析器按报告号精�
     const bundle = applicationArtifactPaths({ reportNum: "1162", company, role: "项目经理", root: path.join(root, "output") });
     ensureApplicationArtifactDirs(bundle); // 真实 CLI 的 --init 就是干这个的
 
+    const markedWith = [];
     const runScript = async (file, args) => {
       if (file === "application-artifacts.mjs") {
         return { code: 0, stdout: JSON.stringify(bundle), stderr: "" };
@@ -85,6 +86,11 @@ test("mock worker 跑完链路后，GET /api/cv-pdf 的解析器按报告号精�
         fs.mkdirSync(path.dirname(idx), { recursive: true });
         fs.appendFileSync(idx, `${reportNum}\t${rel}\t-\ta4\t2026-10-27\n`);
         return { code: 0, stdout: "Manifest updated", stderr: "" };
+      }
+      if (file === "mark-pdf-ready.mjs") {
+        // 复刻 #2172 契约的调起形状：第一参数是真实报告号（tracker 行由它解析）。
+        markedWith.push(args[0]);
+        return { code: 0, stdout: JSON.stringify({ ok: true, changed: true }), stderr: "" };
       }
       throw new Error(`unexpected: ${file}`);
     };
@@ -108,6 +114,8 @@ test("mock worker 跑完链路后，GET /api/cv-pdf 的解析器按报告号精�
       },
     );
     assert.equal(res.ok, true, `worker failed: ${res.error}`);
+    // 用户症状锁（2026-10-27）：渲染完必须回写 tracker 完成态，否则报告页永远显示未生成。
+    assert.deepEqual(markedWith, ["1162"], "链路收尾必须按报告号调 mark-pdf-ready");
 
     // /api/cv-pdf?report=1162 的解析路径（同一份 resolveCvPdf，view 与 open 共用）。
     const hit = resolveCvPdf({ report: "1162" }, root);

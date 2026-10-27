@@ -48,6 +48,8 @@ const STAGE_LABEL: Record<string, string> = {
   artifacts: "phase:running",
   tailor: "phase:tailoring",
   pdf: "phase:finalizing:render",
+  // tracker 完成态回写（mark-pdf-ready）：渲染尾巴上的动作，不另开新粗阶段。
+  mark: "phase:finalizing:render",
 };
 
 export async function POST(req: Request) {
