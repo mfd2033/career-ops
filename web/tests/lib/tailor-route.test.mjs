@@ -54,6 +54,10 @@ test("route 接线锁：worker 编排与落盘登记不被绕过", () => {
   assert.ok(ROUTE_SRC.includes("no-tailor-credential"), "缺凭据在派发前就 400，不派必死的 worker");
   assert.match(ROUTE_SRC, /OPENAI_API_KEY/, "密钥经 env 递给 openai-tailor");
   assert.doesNotMatch(ROUTE_SRC, /"--key"/, "密钥绝不拼进 argv（进程列表可见）");
+  // 台账链接契约锁（2026-10-27 自埋回归）：/report/{id} 的 id 是全系统统一的 **tracker
+  // 行号**；写成报告号会让 re-eval 行的页面无 tracker 行、「查看定制简历」按钮消失。
+  assert.ok(ROUTE_SRC.includes("page: `/report/${n}`"), "台账 page 必须用行号 n");
+  assert.doesNotMatch(ROUTE_SRC, /\/report\/\$\{reportNum\}/, "绝不把 reportNum 拼进 /report/ 链接");
   // 纯后端触发器：路由里不许 import 任何前端组件（无 UI 是本 feature 的边界）。
   assert.doesNotMatch(ROUTE_SRC, /@\/components/, "不带任何 UI——仅供 agent/脚本调用");
 });

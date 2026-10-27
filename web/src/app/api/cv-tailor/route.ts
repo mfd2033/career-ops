@@ -181,7 +181,11 @@ function dispatchTailorWorker(n: string, target: NonNullable<ReturnType<typeof f
         kind: "cv-tailor",
         input: n,
         title: `定制简历：${target.company}`,
-        page: `/report/${reportNum}`,
+        // 台账链接按系统契约用 **tracker 行号**（/report/{n} 的 id 就是行号，列表/今日页/
+        // 跟进卡全部如此）；re-eval 行用报告号会落到没有 tracker 行的页面，按钮/状态全丢
+        //（2026-10-27 自埋回归：曾误改成 /report/{reportNum}）。取 PDF 用 reportNum 字段，
+        // 不要拿 page 链里的号去拼 /api/cv-pdf。
+        page: `/report/${n}`,
         status,
         startedAt,
         finishedAt: Date.now(),
