@@ -13,9 +13,9 @@ import { CompanyLogo } from "@/components/company-logo";
 import { FollowUpCard, type FollowUp } from "@/components/home/follow-up-card";
 import { DecisionCard } from "@/components/home/decision-card";
 import { QuickEvaluate } from "@/components/quick-evaluate";
+import { useExplore } from "@/components/explore/explore-provider";
 import { useI18n } from "@/lib/i18n/context";
 import { MAX_OFFER_LIMIT } from "@/lib/whats-new.mjs";
-import { EXPLORE_REMOVED_KEY, readRemovedUrls } from "@/lib/explore-removed.mjs";
 
 /** 是否已排进投递计划：填了合法的 Planned 日期（YYYY-MM-DD）。首页「Awaiting
  *  your decision」与「投递计划」两个分区据此互斥，避免同一行重复出现。 */
@@ -50,9 +50,12 @@ export function TodayDashboard({
   const [followups, setFollowups] = useState<FollowUp[]>([]);
   const [overdue, setOverdue] = useState(0);
   const [fresh, setFresh] = useState<DiscoveredOffer[]>([]);
-  // explore 结果区「移除所选」的记录（localStorage，显示层处置）。供应回路是服务端
+  // explore 结果区「移除」的记录（removed 集合，显示层处置）。供应回路是服务端
   // 读 scan-history 算出来的，天然看不到浏览器里的移除，所以首页要读同一份记录再挡一次。
-  const [removedUrls, setRemovedUrls] = useState<Set<string>>(new Set());
+  // 直接订阅 shell 级 ExploreProvider 的 removed（单一事实源），而不是另读一份
+  // localStorage：单卡 ✕ 与批量「移除所选」都只改 provider 状态，storage 事件在同
+  // tab 内不触发，自建副本会漏掉本 tab 的即时移除（用户报的今日页点 ✕ 无反应）。
+  const { removed, syncRemovedFromStorage } = useExplore();
   const router = useRouter();
   const { t, lang } = useI18n();
   const dateLabel = useMemo(() => new Date().toLocaleDateString(lang === "zh" ? "zh-CN" : "en-US", { weekday: "long", month: "short", day: "numeric" }), [lang]);
@@ -89,15 +92,16 @@ export function TodayDashboard({
     return () => window.removeEventListener("co-job-done", onDone);
   }, [refetch, router]);
 
-  // 进入首页时读一次移除记录；另一个 tab 里移除/恢复时靠 storage 事件同步。
+  // 另一个 tab 里移除/恢复时本 tab 的 provider 不会自动跟（storage 事件只在源 tab
+  // 之外触发），监听同一事件并重读 localStorage 回灌单一事实源；同 tab 内的变化由
+  // removed 引用变化直接驱动。
   useEffect(() => {
-    setRemovedUrls(readRemovedUrls());
     const onStorage = (e: StorageEvent) => {
-      if (e.key === EXPLORE_REMOVED_KEY) setRemovedUrls(readRemovedUrls());
+      if (e.key === "career-ops:explore-removed") syncRemovedFromStorage();
     };
     window.addEventListener("storage", onStorage);
     return () => window.removeEventListener("storage", onStorage);
-  }, []);
+  }, [syncRemovedFromStorage]);
 
     // Awaiting decision: scored (Evaluated) but no terminal status yet, and not
     // already scheduled into 投递计划 (section B2) — a planned row shows there,
@@ -123,7 +127,7 @@ export function TodayDashboard({
       };
     }, [applications]);
 
-  const visibleFresh = useMemo(() => fresh.filter((o) => !removedUrls.has(o.url)), [fresh, removedUrls]);
+  const visibleFresh = useMemo(() => fresh.filter((o) => !removed.has(o.url)), [fresh, removed]);
   // 报「实际能看到的行数」，而不是服务端 7 天窗口的完整 count：offers 已被上限截断，
   // count 里的行在 explore 同样渲染不出来。用 count 会让「查看全部 724」点进去只有
   // 十几条（用户报的不一致）。这个数与 explore 结果区头部计数同源同口径。

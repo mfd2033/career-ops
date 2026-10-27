@@ -118,6 +118,8 @@ type ExploreCtx = {
   removeOffers: (urls: string[]) => void;
   /** 清空「已移除」集合，让被隐藏的行重新出现在结果区。 */
   restoreRemoved: () => void;
+  /** 从 localStorage 回灌「已移除」集合（跨 tab 同步：另一 tab 写入触发 storage 事件时调）。 */
+  syncRemovedFromStorage: () => void;
   adding: Set<string>;
   discover: () => Promise<void>;
   /** Browser mode over the Chinese boards (BOSS直聘/猎聘/智联) via the user's
@@ -774,6 +776,10 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     setRemoved((r) => new Set([...r, ...urls]));
   }, []);
   const restoreRemoved = useCallback(() => setRemoved(new Set()), []);
+  // 跨 tab：另一 tab 的移除/恢复只改了它自己的 localStorage + provider，本 tab 的
+  // provider 不会自动跟（storage 事件只在源 tab 之外触发）。这里主动重读存储回灌，
+  // 让单一事实源在所有 tab 保持一致。
+  const syncRemovedFromStorage = useCallback(() => setRemoved(readRemovedUrls()), []);
 
   // 挂载时回灌 localStorage；读完后才允许写入，避免首帧空集合覆盖历史记录。
   useEffect(() => {
@@ -1056,11 +1062,11 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     () => ({
       filters, setFilters, initFilters, phase,
       running: phase === "casting" || phase === "scanning" || phase === "revealing" || phase === "hunting",
-      offers, folded, sources, matchCount, companiesScanned, companiesAvailable, capHit, droppedNoDate, status, partial, error, scannerMissing, added, removed, removeOffers, restoreRemoved, adding,
+      offers, folded, sources, matchCount, companiesScanned, companiesAvailable, capHit, droppedNoDate, status, partial, error, scannerMissing, added, removed, removeOffers, restoreRemoved, syncRemovedFromStorage, adding,
       discover, discoverBrowser, loadFresh, addToPipeline, restoreSeen, restoring, applyPatch, reset,
       mode, setMode, scanSource, setScanSource, enabledSources, aiIntent, setAiIntent, discoverAI, aiTrace, aiCost,
     }),
-    [filters, setFilters, initFilters, phase, offers, folded, sources, matchCount, companiesScanned, companiesAvailable, capHit, droppedNoDate, status, partial, error, scannerMissing, added, removed, removeOffers, restoreRemoved, adding, discover, discoverBrowser, loadFresh, addToPipeline, restoreSeen, restoring, applyPatch, reset, mode, setMode, scanSource, setScanSource, enabledSources, aiIntent, discoverAI, aiTrace, aiCost],
+    [filters, setFilters, initFilters, phase, offers, folded, sources, matchCount, companiesScanned, companiesAvailable, capHit, droppedNoDate, status, partial, error, scannerMissing, added, removed, removeOffers, restoreRemoved, syncRemovedFromStorage, adding, discover, discoverBrowser, loadFresh, addToPipeline, restoreSeen, restoring, applyPatch, reset, mode, setMode, scanSource, setScanSource, enabledSources, aiIntent, discoverAI, aiTrace, aiCost],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

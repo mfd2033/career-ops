@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ExternalLink, Plus, Check, Loader2, ShieldQuestion, Sparkles, Coins } from "lucide-react";
+import { ExternalLink, Plus, Check, Loader2, ShieldQuestion, Sparkles, Coins, X } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { instrumentSerif } from "@/lib/fonts";
 import { ATS_LABEL, isSalaryUnknown, type AtsSource, type DiscoveredOffer } from "@/lib/explore";
@@ -55,7 +55,7 @@ export function DiscoveryCard({
   onToggleSelect?: () => void;
 }) {
   const { t } = useI18n();
-  const { added, adding, addToPipeline } = useExplore();
+  const { added, adding, addToPipeline, removeOffers } = useExplore();
   const { jobs, startJob } = useJobs();
   const WORKER_LABEL: Record<string, string> = {
     evaluate: t("explore.card.evaluating"),
@@ -121,6 +121,17 @@ export function DiscoveryCard({
         >
           <ExternalLink className="size-4" />
         </a>
+        {/* 单卡移除：复用批量「移除所选」的显示层机制（removeOffers → removed 集合，
+            provider 持久化到 localStorage），只隐去这一行，不写 pipeline.md。 */}
+        <button
+          type="button"
+          onClick={() => removeOffers([offer.url])}
+          title={t("explore.card.dismissTitle")}
+          aria-label={t("explore.card.dismiss")}
+          className="-m-1 inline-flex shrink-0 items-center justify-center rounded p-1 text-faint opacity-0 transition-all hover:text-foreground focus-visible:opacity-100 max-sm:min-h-[44px] max-sm:min-w-[44px] max-sm:opacity-100 group-hover:opacity-100"
+        >
+          <X className="size-4" />
+        </button>
       </div>
 
       <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
