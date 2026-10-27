@@ -48,6 +48,12 @@ test("route 接线锁：派发到全局并发池 + 事件总线，不在请求�
 test("route 接线锁：worker 编排与落盘登记不被绕过", () => {
   assert.ok(ROUTE_SRC.includes("runTailorWorker"), "派发体复用 tailor-worker 编排壳");
   assert.ok(ROUTE_SRC.includes("appendRunRecord"), "终态落运行账本（无 UI 也要可回看）");
+  // 凭据接线（2026-10-27 实弹报障）：密钥必须来自 ADR-0083 密钥库而不是进程 env，
+  // 且只走 env 注入不开 argv（命令行参数会漏进进程列表）；缺密钥当场 400。
+  assert.ok(ROUTE_SRC.includes("quick-vault.mjs"), "凭据复用密钥库（readVault/activeKey）");
+  assert.ok(ROUTE_SRC.includes("no-tailor-credential"), "缺凭据在派发前就 400，不派必死的 worker");
+  assert.match(ROUTE_SRC, /OPENAI_API_KEY/, "密钥经 env 递给 openai-tailor");
+  assert.doesNotMatch(ROUTE_SRC, /"--key"/, "密钥绝不拼进 argv（进程列表可见）");
   // 纯后端触发器：路由里不许 import 任何前端组件（无 UI 是本 feature 的边界）。
   assert.doesNotMatch(ROUTE_SRC, /@\/components/, "不带任何 UI——仅供 agent/脚本调用");
 });

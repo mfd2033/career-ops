@@ -18,6 +18,7 @@
 4. **并发护栏与 replace**（工单 04）：`decideTailorPreflight` 是纯决策，**委托给通用的 `decideCheckupPreflight`**（它只依赖 `{live, replace}` 形状、与 kind 无关），不复制会漂移的副本。在跑登记表逻辑抽成通用工厂 `live-registry.mjs`，checkup 与 tailor 各持一具**独立实例**（tracker# 空间互不污染）：`checkup-live.mjs` 变薄封装、契约一字未改（原回归锁仍 17/17 绿）。同 tracker# 在跑 → 409（带 runId 供轮询或 `/api/run/cancel`）；`replace:true` → 先 `awaitTailorGone` 等旧进程真不在再派新的；任一等待 timeout → 放行但如实标 `unconfirmed`。
 5. **传输与可观测**：走 ADR-0020 事件总线——`registerRun` → `phase:queued/running/tailoring/finalizing:render` 阶段事件 → 唯一终态 `done|error`；`registerTailor` 在进入并发池之前、runId 回到调用方之前完成（跨标签页/跨浏览器权威）。终态落运行账本（`appendRunRecord kind:"cv-tailor"`），无 UI 也能事后回看。取消经 `setCancelHandler`：排队中出队、运行中杀当前子进程。
 6. **worker 阶段失败以终态 ERROR 上报，绝不静默**：LLM 调用失败 / 渲染失败 / tailor 退 0 却没报保存路径，各自映射到 `{ok:false, stage, error}` 并发 error 事件。
+7. **凭据 = 密钥库使用中密钥束，经 env 注入**（修订 2026-10-27，首跑实弹报障）：初版假设 `.env` 里的 `OPENAI_*` 变量，但本机密钥唯一事实源是 ADR-0083 密钥库（配置页可维护、`.env` 没有也不该有明文）。现在派发时读 `readVault`/`activeKey`，把使用中那把的 key/baseUrl/model 写进 `openai-tailor.mjs` 子进程 env（不进 argv/事件流/台账；dotenv 不覆盖既有 env，注入即生效）；库里无可用密钥时前哨当场 400 `no-tailor-credential`，不派必死的 worker。
 
 ## 范围（不动）
 
@@ -28,7 +29,7 @@
 ## 后果
 
 - 「生成定制简历」成为 agent/脚本可直接 `POST` 的能力：`POST /api/cv-tailor {n}` 秒回 runId，再订阅 `/api/events` 或直接轮询 `GET /api/cv-pdf?report=N` 取产物。
-- 依赖运行环境具备 OpenAI 兼容端点凭据（`OPENAI_API_KEY` 等，见 `.env`）；缺凭据时 worker 在 tailor 阶段以 ERROR 终态报「check OPENAI_API_KEY / endpoint」，不产生半成品。
+- 依赖 ADR-0083 密钥库里有一把使用中的 OpenAI 兼容密钥束（配置页「AI 引擎」维护，切换即生效）；库里无密钥时端点当场 400，缺 baseUrl 指向非 https 远端时 `openai-tailor.mjs` 自己的守卫拒跑（tailor 阶段 ERROR）。
 - 请求/响应契约详见 [docs/cv-tailor-api.md](../cv-tailor-api.md)。
 
 ## 关键文件

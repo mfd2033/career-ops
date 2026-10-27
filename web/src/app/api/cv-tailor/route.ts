@@ -27,6 +27,7 @@ import { careerOpsRoot, findTailorTarget } from "@/lib/career-ops";
 import { decideTailorPreflight, tailorReplaceBody } from "@/lib/tailor-request.mjs";
 import { listLiveTailors, registerTailor, markTailorRunning, clearTailor, awaitTailorGone } from "@/lib/tailor-live.mjs";
 import { runTailorWorker } from "@/lib/tailor-worker.mjs";
+import { readVault, activeKey } from "@/lib/quick-vault.mjs";
 import { cancelRun, registerRun, setCancelHandler, publish, completeRun } from "@/lib/core/run-events";
 import { acquire, release, __setSizeSource, DEFAULT_POOL_SIZE } from "@/lib/core/concurrency-pool";
 import { readAppConfig } from "@/lib/app-config";
@@ -68,6 +69,13 @@ export async function POST(req: Request) {
   }
   const meta = { company: target.company, role: target.role };
 
+  // 前哨 1.5：定制引擎凭据。worker 是无 agent 的离线链路，LLM 调用靠密钥库（ADR-0083，
+  // data/quick-eval.json）里使用中那把密钥束；库里没有可用密钥时当场 400，不派一个必死
+  // 的 worker（它的死因只会活在事件流/台账里，调用方要轮询才知道）。reason 稳定、消息不含密钥。
+  if (!activeKey(readVault(careerOpsRoot()))) {
+    return Response.json({ error: "no-tailor-credential", hint: "在配置页「AI 引擎」密钥库中添加并启用一把 OpenAI 兼容密钥" }, { status: 400 });
+  }
+
   // 前哨 2：同编号在途守卫（复用通用的 decideTailorPreflight，与 checkup 对称）。
   const decision = decideTailorPreflight({ live: listLiveTailors(n), replace: body.replace });
 
@@ -100,6 +108,13 @@ function dispatchTailorWorker(n: string, target: NonNullable<ReturnType<typeof f
   const runId = randomUUID();
   const startedAt = Date.now();
   const root = careerOpsRoot();
+  // 密钥束在派发时读一次（与前哨同一把）：只进子进程 env，绝不进 argv / 事件流 / 台账。
+  // openai-tailor.mjs 自带 dotenv 且不覆盖既有 env，所以这里注入的 OPENAI_* 就是生效值。
+  const bundle = activeKey(readVault(root));
+  const tailorEnv: Record<string, string> = {};
+  if (bundle?.key) tailorEnv.OPENAI_API_KEY = bundle.key;
+  if (bundle?.baseUrl) tailorEnv.OPENAI_BASE_URL = bundle.baseUrl;
+  if (bundle?.model) tailorEnv.OPENAI_MODEL = bundle.model;
   registerRun(runId);
   publish(runId, { type: "status", label: "phase:queued" });
   // 在跑登记发生在进入并发池之前（此时 queued），且早于 runId 回到调用方——它是「这一行此刻
@@ -182,7 +197,8 @@ function dispatchTailorWorker(n: string, target: NonNullable<ReturnType<typeof f
             const child = execFile(
               process.execPath,
               [scriptPath, ...args],
-              { cwd: root, maxBuffer: 32 * 1024 * 1024, env: process.env },
+              // env 只附加在 process.env 之上（application-artifacts / generate-pdf 不消费这些键）。
+              { cwd: root, maxBuffer: 32 * 1024 * 1024, env: { ...process.env, ...tailorEnv } },
               (err, stdout, stderr) => {
                 currentChild = null;
                 if (terminal) return; // 取消已收尾，不再改写终态

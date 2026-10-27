@@ -27,6 +27,7 @@ Content-Type: application/json
 | 200 | `{ ok: true, runId, company, role }` | 已派发 worker，`runId` 用于订阅事件总线。 |
 | 200 | `{ ok: true, replaced: [runId…], runId, company, role }` | `replace:true` 路径：旧在跑已停、新任务已起。若任一旧任务等待退出超时，附 `unconfirmed: true`（放行了但不确定旧进程是否真死）。 |
 | 400 | `{ error: "missing-jd" }` | 该行无可定制的 JD/报告（`jds/` 无归档正文且报告正文缺失/过短）。 |
+| 400 | `{ error: "no-tailor-credential", hint }` | 密钥库（配置页「AI 引擎」）里没有使用中的密钥束；不派发 worker，当场拒绝。 |
 | 400 | `{ error: "bad json" \| "a numeric application number is required" }` | 请求体非 JSON，或 `n` 非纯数字。 |
 | 404 | `{ error: "row-not-found" }` | tracker 里没有这个编号的行。 |
 | 409 | `{ running: [{ runId, state, startedAt }…], company, role }` | 同编号已有生成在跑。`state` 为 `queued`（排队中）或 `running`（执行中）。拿 `runId` 可轮询，或 `POST /api/run/cancel {runId}` 取消；确认后带 `replace:true` 重发即替换。 |
@@ -49,7 +50,11 @@ Content-Type: application/json
 
 ## 前置条件
 
-- 运行环境需具备 OpenAI 兼容端点凭据（`OPENAI_API_KEY` / `OPENAI_BASE_URL` / `OPENAI_MODEL`，见 `.env`）；缺失时 worker 在 tailor 阶段以 ERROR 终态上报，不产生半成品。
+- 定制 LLM 调用使用 **ADR-0083 密钥库**（配置页「AI 引擎」区，落盘 `data/quick-eval.json`）中
+  **使用中**的那把 OpenAI 兼容密钥束；派发时路由把其 key/baseUrl/model 注入 `openai-tailor.mjs`
+  子进程的 `OPENAI_API_KEY` / `OPENAI_BASE_URL` / `OPENAI_MODEL` 环境变量（明文不进命令行、
+  不进事件流、不进台账）。库里无可用密钥 → 当场 400 `no-tailor-credential`，不派必死的 worker。
+  换端点/换模型：在配置页切换使用中密钥即可，无需重启。
 - 该行须有评估报告（`openai-tailor.mjs` 硬要求 `--report`）。
 
 ## 调用示例
