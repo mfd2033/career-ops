@@ -116,7 +116,8 @@ export async function runTailorWorker(target, deps) {
   // 4) 回写 tracker 完成态：mark-pdf-ready 按真实报告号把 PDF 列 ❌→✅（#2172 的 canonical
   //    写路径，幂等）。报告页的 pdfReady 读的就是这个格子——不落下这一步，产物虽在盘上，
   //    UI 永远显示「未生成定制简历」（2026-10-27 实弹报障）。严格失败：完成态没落盘
-  //    就不算任务成功，调用方靠 error 终态重试（worker 重跑对已有 vNNN 是新版本目录，安全）。
+  //    就不算任务成功。重跑安全性不靠版本递增：既有系统惯例（modes/pdf.md）把 bundle 的活动
+  //    版本固定在 v001，重复生成就是覆盖同一目录并刷新 pdf-index 登记，重试无副作用。
   stage("mark", { reportNum });
   const markRes = await runScript("mark-pdf-ready.mjs", [reportNum, "--json"]);
   if (markRes.code !== 0) {
