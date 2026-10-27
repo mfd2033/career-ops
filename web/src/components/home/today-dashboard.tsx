@@ -215,27 +215,32 @@ export function TodayDashboard({
           剩余纵向空间全部让给底部「本周新匹配」。窄屏（<md）回退单列堆叠。 */}
       <div className="flex min-h-0 shrink flex-col gap-5 md:grid md:grid-cols-2">
         <div className="flex min-h-0 flex-col gap-5 md:overflow-y-auto md:overscroll-contain hide-scrollbar">
-          {/* A. Follow-ups due (demand loop) */}
-          {followups.length > 0 && (
-            <Section icon={Bell} title={t("home.followUpsDueTitle")} hint={t("home.followUpsDueHint")}>
+          {/* A. Follow-ups due (demand loop) —— 常显区块，无数据显示「无」（与「投递计划」口径一致）。 */}
+          <Section icon={Bell} title={t("home.followUpsDueTitle")} hint={t("home.followUpsDueHint")}>
+            {followups.length === 0 ? (
+              <p className="text-sm text-muted">无</p>
+            ) : (
               <div className="grid gap-2.5">
                 {followups.map((f) => (
                   <FollowUpCard key={`${f.num}-${f.company}`} followup={f} onLogged={() => { setOverdue((n) => Math.max(0, n - 1)); refetch(); }} />
                 ))}
               </div>
-            </Section>
-          )}
+            )}
+          </Section>
 
-          {/* B. Awaiting your decision —— 拉伸占满左列剩余高度，与右列「投递计划」完全等高 */}
-          {awaiting.length > 0 && (
-            <Section icon={CircleHelp} title={t("home.awaitingTitle")} hint={t("home.awaitingHint")} className="flex min-h-0 flex-1 flex-col">
+          {/* B. Awaiting your decision —— 常显区块，无数据显示「无」；
+              拉伸占满左列剩余高度，与右列「投递计划」完全等高。 */}
+          <Section icon={CircleHelp} title={t("home.awaitingTitle")} hint={t("home.awaitingHint")} className="flex min-h-0 flex-1 flex-col">
+            {awaiting.length === 0 ? (
+              <p className="text-sm text-muted">无</p>
+            ) : (
               <div className="grid gap-2.5 sm:grid-cols-2">
                 {awaiting.map((a) => (
                   <DecisionCard key={a.n} app={a} />
                 ))}
               </div>
-            </Section>
-          )}
+            )}
+          </Section>
         </div>
 
         <div className="flex min-h-0 flex-col gap-5">
