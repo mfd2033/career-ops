@@ -326,11 +326,12 @@ export function countSelectedOffView(applications, visible, selected) {
  * page to build prev/next + back links — both must emit IDENTICAL queries so a
  * round-trip preserves the view.
  *
- * The tab is ALWAYS serialized: the list page's no-param default is INBOX (the
- * triage queue), which has no tracker rows to link. Omitting tab=ALL would make
- * a row link (and the report page's back link) fall back to INBOX instead of
- * the table the user actually came from. Only min/max/company/sort/dir/q — whose omissions
- * resolve to the same tracker-table defaults — are elided.
+ * The tab is ALWAYS serialized: the list page's no-param default is ALL (the
+ * tracker table), and INBOX is reached only via an explicit tab=INBOX — omitting
+ * the tab would make a row link (and the report page's back link) fall back to
+ * the default view instead of the table the user actually came from. Only
+ * min/max/company/sort/dir/q — whose omissions resolve to the same tracker-table
+ * defaults — are elided.
  * @param {{tab?: string, min?: number|null, max?: number|null, company?: string, q?: string, sortKey?: string, dir?: number}} ctx
  *   `dir` accepts any number (the URL param / navNeighbors' own inferred
  *   return): only `1` means ascending, everything else serializes as descending.

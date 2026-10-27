@@ -488,7 +488,7 @@ export function PipelineView({
           return (
             <button
               key={tabKey}
-              onClick={() => setParams({ tab: tabKey === "INBOX" ? null : tabKey })}
+              onClick={() => setParams({ tab: tabKey })}
               className={cn(
                 "-mb-px inline-flex items-center justify-center border-b-2 px-3 py-2 text-xs font-medium transition-colors max-sm:min-h-[44px]",
                 tab === tabKey

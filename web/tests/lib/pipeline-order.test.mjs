@@ -132,9 +132,9 @@ test("status sorts as a plain string (dir=1)", () => {
 });
 
 test("buildContextQuery always serializes tab, elides only tracker-defaults", () => {
-  // The list page's no-param default is INBOX (triage); the tracker table's
-  // default is tab=ALL — so tab must ALWAYS be explicit or a round-trip would
-  // fall back to INBOX (#back-link-context regression).
+  // The list page's no-param default is ALL (the tracker table, 0bac3f7 起)；
+  // INBOX 只能靠显式 tab=INBOX 抵达——tab 必须永远显式序列化，否则行链接/报告页
+  // 返回链接会掉回默认视图而不是用户真正来的那张表（#back-link-context regression）。
   assert.equal(buildContextQuery({}), "?tab=ALL");
   assert.equal(buildContextQuery({ tab: "ALL", sortKey: "score", dir: -1, min: null, q: "" }), "?tab=ALL");
   assert.equal(buildContextQuery({ tab: "APPLIED" }), "?tab=APPLIED");
