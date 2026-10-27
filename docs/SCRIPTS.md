@@ -747,11 +747,12 @@ The read-modify-write runs under the shared tracker lock with an atomic replace,
 
 ## tracker-edit
 
-Canonical CLI to edit the fields of **one existing** row — the writer behind `PATCH /api/tracker/[id]`. `set-status.mjs` owns the Status cell; this owns the rest (date, company, role, via, url, score, notes), so field edits no longer mean hand-editing markdown outside the lock.
+Canonical CLI to edit the fields of **one existing** row — the writer behind `PATCH /api/tracker/[id]`. `set-status.mjs` owns the Status cell; this owns the rest (date, company, role, via, url, score, notes, planned), so field edits no longer mean hand-editing markdown outside the lock.
 
 ```bash
 node tracker-edit.mjs --row 42 --score 4.6/5 --note "moved to final round" --json
 node tracker-edit.mjs --row 42 --status Interview --source web
+node tracker-edit.mjs --row 42 --planned 2026-10-27   # "" or — clears the cell
 ```
 
 Only the named cells change; every other byte round-trips. A field the tracker has no column for is refused (`no-column`) rather than dropped silently. `--note` **replaces** the Notes cell — use `set-status.mjs --note` to append. A status change goes through `templates/states.yml` and appends the same transition-ledger line `set-status.mjs` writes (closed-set source column), so `funnel-velocity.mjs` counts it. The content hash is re-checked immediately before the write: the lock serializes cooperating writers, so a change there means something wrote the tracker **without** the lock, and the edit is refused (`concurrent-modification`) instead of overwriting it.

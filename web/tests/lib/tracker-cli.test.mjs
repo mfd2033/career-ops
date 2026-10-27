@@ -143,6 +143,13 @@ test("an edit body needs a row number and at least one whitelisted field", () =>
   assert.equal(editArgv({ company: "Acme" }, "7").argv.length > 0, true);
 });
 
+test("an edit body forwards planned to --planned, set and clear alike", () => {
+  // planned is a date cell the core CLI validates; the route layer only forwards.
+  // "" is the clear-the-cell sentinel agreed in tracker-edit.mjs.
+  assert.deepEqual(editArgv({ planned: "2026-10-27" }, "7").argv, ["--row", "7", "--planned", "2026-10-27"]);
+  assert.deepEqual(editArgv({ planned: "" }, "7").argv, ["--row", "7", "--planned", ""]);
+});
+
 test("query argv carries only the filters that were sent, plus a bounded limit", () => {
   const bare = queryArgv(new URLSearchParams(""));
   assert.deepEqual(bare.argv, ["query", "--json", "--limit", "20"]);

@@ -50,16 +50,24 @@ const HEADER = [
   '|---|------|---------|------|-------|--------|-----|--------|-------|',
 ];
 
+// The user's real tracker layout carries a Planned column between Status and
+// PDF; --planned writes must land there and nowhere else.
+const HEADER_PLANNED = [
+  '| # | Date | Company | Via | Role | Score | Status | Planned | PDF | Report | Notes | URL |',
+  '|---|------|---------|-----|------|-------|--------|---------|-----|--------|-------|-----|',
+];
+
 /**
  * A throwaway workspace holding one tracker file (and its status ledger).
  *
  * @param {string[]} rows - Data rows.
+ * @param {string[]} [header] - Header + separator lines (defaults to the legacy 9-column layout).
  * @returns {{dir: string, tracker: string, env: Record<string,string>, read: () => string, ledger: () => string, cleanup: () => void}}
  */
-function fixture(rows) {
+function fixture(rows, header = HEADER) {
   const dir = mkdtempSync(join(tmpdir(), 'career-ops-tracker-edit-'));
   const tracker = join(dir, 'applications.md');
-  writeFileSync(tracker, ['# Applications Tracker', '', ...HEADER, ...rows, ''].join('\n'));
+  writeFileSync(tracker, ['# Applications Tracker', '', ...header, ...rows, ''].join('\n'));
   return {
     dir,
     tracker,
@@ -250,6 +258,63 @@ test('a duplicate row number is refused rather than resolved to the first match'
     const run = edit(fx.env, ['--row', '1', '--note', 'x']);
     assert.equal(run.code, 3);
     assert.equal(run.doc.code, 'ambiguous');
+    assert.equal(fx.read(), before);
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test('planned: writes the date, clears with "", rejects invalid dates', () => {
+  const fx = fixture([
+    '| 1 | 2026-01-01 | Acme | — | Engineer | 4.0/5 | Evaluated | — | ❌ | — | seed | https://example.com/1 |',
+  ], HEADER_PLANNED);
+  try {
+    const run = edit(fx.env, ['--row', '1', '--planned', '2026-10-27']);
+    assert.equal(run.code, 0, run.stderr);
+    assert.equal(run.doc.changed, true);
+    assert.deepEqual(run.doc.changedFields, ['planned']);
+    assert.match(fx.read(), /\| Evaluated \| 2026-10-27 \| ❌/);
+    // planned is not a status transition — the ledger must stay untouched.
+    assert.equal(fx.ledger(), '');
+
+    const bad = edit(fx.env, ['--row', '1', '--planned', '2026-13-45']);
+    assert.equal(bad.code, 1);
+    assert.equal(bad.doc.code, 'invalid-field');
+    assert.match(fx.read(), /\| Evaluated \| 2026-10-27 \| ❌/, 'invalid date must not rewrite the file');
+
+    const clear = edit(fx.env, ['--row', '1', '--planned', '']);
+    assert.equal(clear.code, 0, clear.stderr);
+    assert.equal(clear.doc.changed, true);
+    assert.match(fx.read(), /\| Evaluated \| {1,2}\| ❌/, 'clear must empty the Planned cell');
+
+    // The tracker's own empty-cell sentinel clears as well — a PowerShell
+    // caller cannot pass "" to a native command, and — is what unplanned rows
+    // historically carry.
+    const sent = edit(fx.env, ['--row', '1', '--planned', '2026-11-01']);
+    assert.equal(sent.code, 0, sent.stderr);
+    const dashClear = edit(fx.env, ['--row', '1', '--planned', '—']);
+    assert.equal(dashClear.code, 0, dashClear.stderr);
+    assert.equal(dashClear.doc.changed, true);
+    assert.match(fx.read(), /\| Evaluated \| {1,2}\| ❌/, '— must empty the Planned cell too');
+    // A whitespace-only value normalizes to the same clear, not an invalid date.
+    const blank = edit(fx.env, ['--row', '1', '--planned', '  ']);
+    assert.equal(blank.code, 0, blank.stderr);
+    assert.equal(blank.doc.changed, false, 'already-cleared cell stays cleared');
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test('planned: refused with no-column when the tracker has no Planned column', () => {
+  const fx = fixture([
+    '| 1 | 2026-01-01 | Acme | Engineer | 4.0/5 | Evaluated | ❌ | — | seed |',
+  ]);
+  try {
+    const before = fx.read();
+    const run = edit(fx.env, ['--row', '1', '--planned', '2026-10-27']);
+    assert.equal(run.code, 1);
+    assert.equal(run.doc.code, 'no-column');
+    assert.deepEqual(run.doc.missingColumns, ['planned']);
     assert.equal(fx.read(), before);
   } finally {
     fx.cleanup();

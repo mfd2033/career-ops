@@ -17,6 +17,7 @@
  *   node tracker-edit.mjs --row N [--date YYYY-MM-DD] [--company TEXT]
  *                         [--role TEXT] [--via TEXT] [--url URL]
  *                         [--score N/5] [--note TEXT] [--status STATE]
+ *                         [--planned YYYY-MM-DD]
  *                         [--on YYYY-MM-DD] [--source web]
  *                         [--dry-run] [--json]
  *
@@ -68,6 +69,7 @@ const USAGE = `Usage: node tracker-edit.mjs --row N [field options]
   --note TEXT        Replace the Notes cell (replace, not append — use
                      set-status.mjs --note to APPEND a note)
   --status STATE     Canonical state from templates/states.yml
+  --planned DATE     Planned application date (YYYY-MM-DD); "" or — clears it
   --on YYYY-MM-DD    Real event date for the status-log entry (defaults to today)
   --source NAME      Attribution for the transition ledger: set-status (default),
                      web, or correction
@@ -85,11 +87,13 @@ const WRITER_SOURCES = new Set(['set-status', 'web', 'correction']);
 const rawArgs = process.argv.slice(2);
 const fields = {
   date: null, company: null, role: null, via: null, url: null, score: null, note: null, status: null,
+  planned: null,
 };
 const flags = { row: null, on: null, source: null, dryRun: false, json: false };
 const FIELD_FLAGS = {
   '--date': 'date', '--company': 'company', '--role': 'role', '--via': 'via',
   '--url': 'url', '--score': 'score', '--note': 'note', '--status': 'status',
+  '--planned': 'planned',
 };
 const VALUE_FLAGS = { ...FIELD_FLAGS, '--row': 'row', '--on': 'on', '--source': 'source' };
 
@@ -161,6 +165,15 @@ function isCalendarDate(value) {
 
 if (fields.date !== null && !isCalendarDate(fields.date)) {
   failWith(EXIT_USAGE, 'invalid-field', `--date expects a real calendar date as YYYY-MM-DD, got "${fields.date}"`);
+}
+// planned is a date cell, not a status. The clear token is the empty string,
+// but the tracker's own empty-cell sentinel (—, and bare -) clears too: a
+// Windows PowerShell caller cannot pass "" through to a native command at all,
+// and — is what earlier writers left in an unplanned row.
+const PLANNED_CLEAR = new Set(['', '—', '-']);
+const plannedCell = fields.planned === null ? null : cell(fields.planned);
+if (plannedCell !== null && !PLANNED_CLEAR.has(plannedCell) && !isCalendarDate(plannedCell)) {
+  failWith(EXIT_USAGE, 'invalid-field', `--planned expects a real calendar date as YYYY-MM-DD (or ""/— to clear), got "${fields.planned}"`);
 }
 if (fields.score !== null) {
   const score = cell(fields.score);
@@ -260,6 +273,7 @@ const nextValue = {
   score: fields.score === null ? null : cell(fields.score),
   note: fields.note === null ? null : cell(fields.note),
   status: newStatus,
+  planned: plannedCell === null ? null : (PLANNED_CLEAR.has(plannedCell) ? '' : plannedCell),
 };
 
 const changedFields = [];

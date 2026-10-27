@@ -13,7 +13,11 @@ import { parseCliJson, parseCliJsonArray } from "./status-cli.mjs";
 export { parseCliJson, parseCliJsonArray };
 
 /** Field names a caller may send, matching tracker-aliases.json's canonical names. */
-export const TRACKER_FIELDS = ["date", "company", "role", "via", "url", "score", "status", "notes"];
+// `planned` joins the whitelist for the PATCH edit path (tracker-edit.mjs owns
+// the --planned flag and its date validation). POST/PUT forward it to
+// tracker-add.mjs, which rejects the unknown flag with a usage error (400) —
+// honest refusal, no silent drop.
+export const TRACKER_FIELDS = ["date", "company", "role", "via", "url", "score", "status", "notes", "planned"];
 
 /**
  * CLI error code → HTTP status.
