@@ -83,7 +83,9 @@ export function DiscoveryCard({
   // 解析失败展示「薪资未知」标记」；CONTEXT.md「展示时打标提示」）。offer.salaryUnknown
   // 是落库侧的门控打标（pipeline.md note 用），不能替代这里的判定：没有填薪资下限时
   // 它一律不置位。只作用于浏览器卡片——AI 搜索的 offer 压根不带薪资字段，不该被误标。
-  const salaryUnknown = offer.ats === "browser" && isSalaryUnknown(offer);
+  // 浏览器 ats 有两种形态：实时探索写 "browser"，持久化的见过台账（whats-new）里 ats
+  // 取自 portal 列 = "browser-{平台}"，故用前缀匹配同时覆盖两者。
+  const salaryUnknown = offer.ats.startsWith("browser") && isSalaryUnknown(offer);
 
   const evaluate = () => {
     addToPipeline([offer]); // evaluating implies it's in the pipeline — record it

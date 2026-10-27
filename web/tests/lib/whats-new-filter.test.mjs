@@ -115,3 +115,36 @@ test("no pipelineUrls in ctx → pipeline filtering is a no-op (backward compati
   assert.ok(offer);
   assert.equal(offer.url, "https://zhaopin.meituan.com/web/position/detail?jobUnionId=4507304662");
 });
+
+test("salary column (array index 12) is read back into offer.salaryText", () => {
+  // 工单 03 全链路：浏览器采集把薪资落进 scan-history 的追加尾列（col 13 /
+  // array index 12），今日页 whats-new 读回它，卡片才能对「本周新匹配」直接显示
+  // 薪资。前面 7 列沿用 row() 形态，第 8~12 列（fingerprint…normalized_company）
+  // 对本读取无关，用占位填充。
+  const withSalary = [
+    "https://www.zhipin.com/job_detail/newjob999.html", "2026-10-27", "browser-zhipin",
+    "医疗高级项目交付经理", "", "added", "", "fp", "", "", "", "", "25-40K·14薪",
+  ];
+  const offer = rowToOfferOrNull(ctx, withSalary);
+  assert.ok(offer);
+  assert.equal(offer.salaryText, "25-40K·14薪");
+});
+
+test("missing salary column (legacy 7-col row) → salaryText is undefined, not empty string", () => {
+  // Older rows predate the salary column and carry only the first 7 cells; the
+  // DiscoveredOffer contract wants an ABSENT salaryText (so the card falls to
+  // the 「薪资未知」 marker), never a spurious "".
+  const offer = rowToOfferOrNull(ctx, row("https://www.zhipin.com/job_detail/legacyRow1.html"));
+  assert.ok(offer);
+  assert.equal(offer.salaryText, undefined);
+});
+
+test("empty salary cell trims to undefined (scan surfaced no comp)", () => {
+  const blankSalary = [
+    "https://www.zhipin.com/job_detail/nosalary777.html", "2026-10-27", "browser-zhipin",
+    "项目经理", "", "added", "", "fp", "", "", "", "", "   ",
+  ];
+  const offer = rowToOfferOrNull(ctx, blankSalary);
+  assert.ok(offer);
+  assert.equal(offer.salaryText, undefined);
+});

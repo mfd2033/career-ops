@@ -13,7 +13,9 @@ export const dynamic = "force-dynamic";
 // free scans (data/scan-history.tsv) in the last N days that the user hasn't
 // evaluated yet. No scan runs here — it reads the history a past scan already
 // wrote, so the home stays instant + free (directly answers the #1 token-cost
-// complaint). cols: url, first_seen, portal, title, company, status, location.
+// complaint). cols: url, first_seen, portal, title, company, status, location,
+// …, salary (append-only col 13 — read back into the offer's salaryText so a
+// fresh browser match shows comp on the card).
 // Company matching keys come from the CORE (see lib/core/text-key.ts), never a
 // local reimplementation. The previous ASCII-only key deleted every non-Latin
 // letter, so "Škoda" collided with "Koda" — suppressing a real offer as

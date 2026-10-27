@@ -7454,9 +7454,10 @@ try {
   const historyRow = formatScanHistoryRow(hostileOffer, '2026-06-18');
   const historyColumns = historyRow.split('\t');
   if (
-    historyColumns.length === 12 && // 7 metadata + fingerprint (#1597) + postedAt + trust score/flags (#1743) + normalized_company (#2093)
+    historyColumns.length === 13 && // 7 metadata + fingerprint (#1597) + postedAt + trust score/flags (#1743) + normalized_company (#2093) + salary (工单03)
     historyColumns[8] === '' && // no postedAt on hostileOffer → empty trailing col
     historyColumns[9] === '' && historyColumns[10] === '' && // no trust signal → empty trailing cols
+    historyColumns[12] === '' && // no salary on hostileOffer → empty trailing col
     !historyColumns.some(col => /[\r\n\t]/.test(col)) &&
     historyColumns[0] === 'https://jobs.example.com/123|evil' &&
     historyColumns[3].includes('- [ ] https://evil.example/job') &&
@@ -7485,10 +7486,11 @@ try {
   const datedHistory = formatScanHistoryRow(datedOffer, '2026-07-09').split('\t');
   const noDateHistory = formatScanHistoryRow({ ...datedOffer, postedAt: undefined }, '2026-07-09').split('\t');
   if (
-    datedHistory.length === 12 &&
+    datedHistory.length === 13 &&
     datedHistory[8] === '2026-06-18' && // epoch ms → YYYY-MM-DD in the trailing column
     datedHistory[11] === 'acme' && // normalized company key (#2093), trailing col 12
-    noDateHistory.length === 12 &&
+    datedHistory[12] === '' && // no salary on datedOffer → empty trailing col 13
+    noDateHistory.length === 13 &&
     noDateHistory[8] === '' && // missing postedAt → empty trailing column, never a bogus date
     noDateHistory[11] === 'acme'
   ) {
@@ -7524,10 +7526,10 @@ try {
   const flaggedHist = formatScanHistoryRow(flaggedOffer, '2026-07-09').split('\t');
   const cleanHist = formatScanHistoryRow(cleanOffer, '2026-07-09').split('\t');
   if (
-    flaggedHist.length === 12 &&
+    flaggedHist.length === 13 &&
     flaggedHist[9] === '60' && flaggedHist[10] === 'missing_apply_url,suspicious_domain' &&
     flaggedHist[11] === 'acme' && // normalized company key (#2093), after the trust cols
-    cleanHist.length === 12 && cleanHist[9] === '' && cleanHist[10] === '' // score 100 → not flagged → empty
+    cleanHist.length === 13 && cleanHist[9] === '' && cleanHist[10] === '' // score 100 → not flagged → empty
   ) {
     pass('scan-history writer appends trust score + flags trailing columns when flagged, empty otherwise (#1743)');
   } else {
@@ -15835,7 +15837,7 @@ try {
     '2026-07-06',
   );
   const cols = withBody.split('\t');
-  if (cols.length === 12 && /^[0-9a-f]{16}$/.test(cols[7]) && cols[11] === 'acme') {
+  if (cols.length === 13 && /^[0-9a-f]{16}$/.test(cols[7]) && cols[11] === 'acme') {
     pass('formatScanHistoryRow appends a fingerprint column for described offers');
   } else {
     fail(`formatScanHistoryRow columns: ${cols.length}, fingerprint=${JSON.stringify(cols[7])}`);
@@ -15845,13 +15847,54 @@ try {
     '2026-07-06',
   );
   const cols2 = withoutBody.split('\t');
-  if (cols2.length === 12 && cols2[7] === '' && cols2[11] === 'acme') {
+  if (cols2.length === 13 && cols2[7] === '' && cols2[11] === 'acme') {
     pass('formatScanHistoryRow leaves the fingerprint empty when no description is available');
   } else {
     fail(`formatScanHistoryRow (no body) columns: ${cols2.length}, last=${JSON.stringify(cols2[7])}`);
   }
 } catch (e) {
   fail(`scan-history fingerprint tests crashed: ${e.message}`);
+}
+
+console.log('\n57b. Scan history — salary column (工单 03)');
+try {
+  const { formatScanHistoryRow } = await import(pathToFileURL(join(ROOT, 'scan.mjs')).href);
+  // Browser boards carry the raw listing-card salary string as offer.salaryText →
+  // it lands in the trailing salary column (array index 12 / col 13) so the
+  // home / explore whats-new card can show comp for a fresh, un-confirmed match.
+  const bossRow = formatScanHistoryRow(
+    { url: 'https://www.zhipin.com/job_detail/abc.html', source: 'browser-zhipin', title: '医疗高级项目交付经理', company: '', location: '郑州', salaryText: '25-40K·14薪' },
+    '2026-10-27',
+  ).split('\t');
+  if (bossRow.length === 13 && bossRow[12] === '25-40K·14薪') {
+    pass('scan-history writer persists the browser salaryText into the trailing salary column');
+  } else {
+    fail(`scan-history salary column (browser) wrong: ${JSON.stringify(bossRow)}`);
+  }
+  // ATS providers carry a parsed {min,max,currency} object instead → the writer
+  // flattens it via formatCompensation into the same cell.
+  const atsRow = formatScanHistoryRow(
+    { url: 'https://x.example/j/9', source: 'ashby', title: 'MLE', company: 'Acme', location: '', salary: { min: 120000, max: 160000, currency: 'USD' } },
+    '2026-10-27',
+  ).split('\t');
+  if (atsRow.length === 13 && atsRow[12] === '120000-160000 USD') {
+    pass('scan-history writer flattens an ATS salary object into the salary column');
+  } else {
+    fail(`scan-history salary column (ATS) wrong: ${JSON.stringify(atsRow)}`);
+  }
+  // No salary anywhere → empty trailing cell (older readers and the card fall to
+  // the 「薪资未知」 path); the first 12 columns are byte-identical to before.
+  const noSalRow = formatScanHistoryRow(
+    { url: 'https://x.example/j/10', source: 'greenhouse', title: 'BE', company: 'Acme', location: '' },
+    '2026-10-27',
+  ).split('\t');
+  if (noSalRow.length === 13 && noSalRow[12] === '' && noSalRow[11] === 'acme') {
+    pass('scan-history writer leaves the salary column empty when the scan surfaced no comp');
+  } else {
+    fail(`scan-history salary column (absent) wrong: ${JSON.stringify(noSalRow)}`);
+  }
+} catch (e) {
+  fail(`scan-history salary column tests crashed: ${e.message}`);
 }
 
 // ── 58. TITLES MODE (#1632) ─────────────────────────────────────

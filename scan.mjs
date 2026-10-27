@@ -1797,6 +1797,16 @@ export function formatScanHistoryRow(offer, date, status = 'added') {
     // cols) are unaffected, and older rows that lack it are tolerated by
     // consumers normalizing the raw name on the fly.
     normalizeCompanyName(offer.company || ''),
+    // Trailing col 13 (array index 12): raw salary display text. Browser boards
+    // (BOSS/智联/猎聘) carry the listing card's salary string as offer.salaryText
+    // (工单 03); ATS providers attach a parsed {min,max,currency} on offer.salary
+    // instead, which formatCompensation flattens to the same compact cell. ''
+    // when the scan surfaced no salary at all. Purely additive — index-based
+    // readers (fingerprint@7 … normalized_company@11, and the web parser's first
+    // 7 cols) are unaffected, and older rows lacking it read back as no-salary.
+    // Read by the whats-new supply loop so the home / explore cards can show comp
+    // for a fresh match the user hasn't yet confirmed into pipeline.md.
+    (typeof offer.salaryText === 'string' ? offer.salaryText.trim() : '') || formatCompensation(offer.salary),
   ].map(sanitizeTsvField).join('\t');
 }
 
@@ -1947,7 +1957,7 @@ export async function appendToScanHistory(offers, date, status = 'added') {
     // (formatScanHistoryRow) emits, in the same order: the original 7 positional
     // cols (url…location) plus the append-only trailing cols added since —
     // fingerprint (7), posted_at (8), trust_score (9), trust_flags (10),
-    // normalized_company (11). Written ONLY on fresh-file creation; existing files
+    // normalized_company (11), salary (12). Written ONLY on fresh-file creation; existing files
     // (including headerless legacy files and older 7-col-header files) are never
     // rewritten. All readers either skip line 0 unconditionally, detect the header
     // by its `url\t` prefix, or skip non-URL col-0 rows, so widening it stays
@@ -1955,7 +1965,7 @@ export async function appendToScanHistory(offers, date, status = 'added') {
     // outcomes (`skipped_expired`, etc.) without the legacy `(expired)` suffix.
     if (!existsSync(SCAN_HISTORY_PATH)) {
       mkdirSync(path.dirname(SCAN_HISTORY_PATH), { recursive: true });
-      writeFileSync(SCAN_HISTORY_PATH, 'url\tfirst_seen\tportal\ttitle\tcompany\tstatus\tlocation\tfingerprint\tposted_at\ttrust_score\ttrust_flags\tnormalized_company\n', 'utf-8');
+      writeFileSync(SCAN_HISTORY_PATH, 'url\tfirst_seen\tportal\ttitle\tcompany\tstatus\tlocation\tfingerprint\tposted_at\ttrust_score\ttrust_flags\tnormalized_company\tsalary\n', 'utf-8');
     }
 
     const lines = offers.map(o => formatScanHistoryRow(o, date, status)).join('\n') + '\n';

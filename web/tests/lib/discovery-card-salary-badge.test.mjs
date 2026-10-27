@@ -35,5 +35,8 @@ test("薪资原文与「薪资未知」是并列徽章，不是二选一", () =>
 
 test("标记只作用于浏览器采集的卡片", () => {
   // AI 搜索（modes/discover.md）的 offer 压根不带薪资字段，不该被标成「薪资未知」。
-  assert.match(src, /offer\.ats === "browser" && isSalaryUnknown\(offer\)/);
+  // 浏览器 ats 有两种形态：实时探索写 "browser"，持久化的见过台账（whats-new）里
+  // ats 取自 portal 列 = "browser-{平台}"（如 "browser-zhipin"），故用 startsWith
+  // 前缀匹配同时覆盖两者——工单 03 全链路落库后，今日页新匹配卡片也要能打标。
+  assert.match(src, /offer\.ats\.startsWith\("browser"\) && isSalaryUnknown\(offer\)/);
 });

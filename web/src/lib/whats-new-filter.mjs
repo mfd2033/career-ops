@@ -44,14 +44,14 @@ import { normalizeUrl } from "./core/url-key.mjs";
  *   - evaluatedUrls: canonical posting URLs already in the tracker
  *   - pipelineUrls: canonical posting URLs pending in the inbox (data/pipeline.md
  *     `- [ ]` rows). Optional — absent means "don't filter on the pipeline".
- * @param {string[]} c - scan-history row columns [url, first_seen, portal, title, company, status, location]
+ * @param {string[]} c - scan-history row columns [url, first_seen, portal, title, company, status, location, …, salary(array index 12)]
  * @returns {object|null} DiscoveredOffer-shaped object, or null when the row
  *   is malformed, expired, already evaluated (by company OR URL), or already
  *   pending in the pipeline (by URL).
  */
 export function rowToOfferOrNull(ctx, c) {
   const { norm, evaluated, evaluatedUrls, pipelineUrls } = ctx;
-  const [url, firstSeen, portal, title, company, status, location] = c;
+  const [url, firstSeen, portal, title, company, status, location, , , , , , salary] = c;
   if (!url || !/^https?:\/\//i.test(url)) return null;
   if (status && /skipped|expired/i.test(status)) return null;
   if (company && evaluated.has(norm(company))) return null;
@@ -65,6 +65,13 @@ export function rowToOfferOrNull(ctx, c) {
     postedAt: /^\d{4}-\d{2}-\d{2}$/.test(firstSeen || "") ? firstSeen : "",
     ats: (portal || "").replace(/-full$/, "").trim() || "other",
     source: "whats-new",
+    // Salary display text from the append-only scan-history salary column
+    // (array index 12 / col 13, 工单 03): present on browser-board rows captured
+    // after the salary column landed. Older rows / non-browser scans read as no
+    // salary → the card shows the 「薪资未知」 marker instead. Trimmed empty
+    // collapses to undefined so the DiscoveredOffer contract (salaryText absent =
+    // none) stays clean.
+    salaryText: (salary || "").trim() || undefined,
   };
 }
 

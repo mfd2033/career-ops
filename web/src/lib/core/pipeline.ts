@@ -49,6 +49,13 @@ function cleanOffers(offers: DiscoveredOffer[]) {
       title: o.title || "",
       location: o.location || "",
       source: o.source || o.ats || "explorer",
+      // Preserve the raw salary string as its OWN field so appendToScanHistory
+      // can drop it into the scan-history salary column (col 13) — the today /
+      // explore cards read comp back from the seen ledger via whats-new without
+      // the posting ever being confirmed into pipeline.md. The web offer shape
+      // carries salary as a display string only (salaryText); an ATS object
+      // would be flattened by the core writer itself.
+      salaryText: o.salaryText || "",
       // Preserve the optional per-offer signal so it survives to pipeline.md.
       // The core writer treats an empty note as absent (byte-identical output).
       // Browser-mode salary rides the note (工单 03) — the canonical writer has
