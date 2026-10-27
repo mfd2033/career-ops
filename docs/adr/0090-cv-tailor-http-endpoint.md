@@ -19,6 +19,7 @@
 5. **传输与可观测**：走 ADR-0020 事件总线——`registerRun` → `phase:queued/running/tailoring/finalizing:render` 阶段事件 → 唯一终态 `done|error`；`registerTailor` 在进入并发池之前、runId 回到调用方之前完成（跨标签页/跨浏览器权威）。终态落运行账本（`appendRunRecord kind:"cv-tailor"`），无 UI 也能事后回看。取消经 `setCancelHandler`：排队中出队、运行中杀当前子进程。
 6. **worker 阶段失败以终态 ERROR 上报，绝不静默**：LLM 调用失败 / 渲染失败 / tailor 退 0 却没报保存路径，各自映射到 `{ok:false, stage, error}` 并发 error 事件。
 7. **凭据 = 密钥库使用中密钥束，经 env 注入**（修订 2026-10-27，首跑实弹报障）：初版假设 `.env` 里的 `OPENAI_*` 变量，但本机密钥唯一事实源是 ADR-0083 密钥库（配置页可维护、`.env` 没有也不该有明文）。现在派发时读 `readVault`/`activeKey`，把使用中那把的 key/baseUrl/model 写进 `openai-tailor.mjs` 子进程 env（不进 argv/事件流/台账；dotenv 不覆盖既有 env，注入即生效）；库里无可用密钥时前哨当场 400 `no-tailor-credential`，不派必死的 worker。
+8. **严格网关兼容 + worker 场景超时**（修订 2026-10-27，二次实弹）：部分严格 OpenAI 兼容网关（实测 maas-api.unisound.com）拒收 `cache_control` 扩展字段——`openai-tailor.mjs` 对首个 400 含 `cache_control` 时降级为纯字符串 system message 重试一次（prompt 文本不变，只去缓存提示）。整页 HTML 生成在快模型网关上可超 5 分钟，worker 派发时注入 `OPENAI_TIMEOUT_MS=600000`（调用方显式设过则尊重）。应答体/台账补 `reportNum`（真实报告号，行号 ≠ 报告号时调用方靠它取 PDF）。
 
 ## 范围（不动）
 

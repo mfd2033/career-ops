@@ -273,21 +273,43 @@ const headers = { 'Content-Type': 'application/json' };
 if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
 
 let tailoredHtml;
+const userMessage = { role: 'user',   content: `EVALUATION REPORT:\n\n${reportText}\n\nJOB DESCRIPTION:\n\n${jdText}\n\nNow, generate and output the fully filled HTML CV matching the rules above. Output ONLY raw HTML.` };
+const requestPayload = (systemMessage) => JSON.stringify({
+  model:    modelName,
+  messages: [systemMessage, userMessage],
+  stream:      false,
+  temperature: 0.2,
+});
 try {
-  const res = await fetch(endpoint, {
+  let res = await fetch(endpoint, {
     method: 'POST',
     headers,
-    body: JSON.stringify({
-      model:    modelName,
-      messages: [
-        buildSystemMessage(systemPrompt, endpointHost),
-        { role: 'user',   content: `EVALUATION REPORT:\n\n${reportText}\n\nJOB DESCRIPTION:\n\n${jdText}\n\nNow, generate and output the fully filled HTML CV matching the rules above. Output ONLY raw HTML.` },
-      ],
-      stream:      false,
-      temperature: 0.2,
-    }),
+    body: requestPayload(buildSystemMessage(systemPrompt, endpointHost)),
     signal: AbortSignal.timeout(timeoutMs),
   });
+
+  // Strict OpenAI-compatible gateways (e.g. some enterprise MaaS proxies) reject
+  // the non-standard `cache_control` field with HTTP 400 — unlike OpenRouter/
+  // DeepSeek, they are not the plain api.openai.com host that the gate in
+  // buildSystemMessage already covers. Rather than fail the whole run, drop the
+  // cache hint (prompt TEXT unchanged — only the packaging) and retry once.
+  // Discovered 2026-10-27 against maas-api.unisound.com via cv-tailor worker.
+  if (!res.ok && res.status === 400) {
+    const body = await res.text();
+    if (body.includes('cache_control')) {
+      console.warn('⚠️   Endpoint rejected cache_control — retrying with a plain system message (prompt text unchanged).');
+      res = await fetch(endpoint, {
+        method: 'POST',
+        headers,
+        body: requestPayload(buildSystemMessage(systemPrompt, 'api.openai.com')),
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+    } else {
+      console.error(`❌  API error: HTTP ${res.status}`);
+      console.error(`    ${body.slice(0, 300)}`);
+      process.exit(1);
+    }
+  }
 
   if (!res.ok) {
     const body = await res.text();

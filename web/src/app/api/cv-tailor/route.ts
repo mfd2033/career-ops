@@ -67,7 +67,7 @@ export async function POST(req: Request) {
   if (!target.ok) {
     return Response.json({ error: target.reason }, { status: target.reason === "row-not-found" ? 404 : 400 });
   }
-  const meta = { company: target.company, role: target.role };
+  const meta = { company: target.company, role: target.role, reportNum: reportNumOf(target.reportPath, n) };
 
   // 前哨 1.5：定制引擎凭据。worker 是无 agent 的离线链路，LLM 调用靠密钥库（ADR-0083，
   // data/quick-eval.json）里使用中那把密钥束；库里没有可用密钥时当场 400，不派一个必死
@@ -101,6 +101,16 @@ export async function POST(req: Request) {
 }
 
 /**
+ * 行号 ≠ 报告号（re-eval 会把行改指向新报告，如 tracker 行 1148 → 报告 1153）。
+ * pdf-index 登记、/api/cv-pdf 查询、报告页链接全部用真实报告号（与 worker 的
+ * deriveReportNum 同一规则：报告文件名数字前缀，取不到回退行号）。
+ */
+function reportNumOf(reportPath: string, fallback: string): string {
+  const m = /^(\d+)-/.exec(path.basename(String(reportPath ?? "")));
+  return m ? m[1] : fallback;
+}
+
+/**
  * 登记 run + 在跑表 + 并发池，转入 after() 后台跑 worker。请求不等待完成（ADR-0020）。
  * 返回 runId 供响应体携带；后续事件经 /api/events 广播。
  */
@@ -108,6 +118,7 @@ function dispatchTailorWorker(n: string, target: NonNullable<ReturnType<typeof f
   const runId = randomUUID();
   const startedAt = Date.now();
   const root = careerOpsRoot();
+  const reportNum = reportNumOf(target.reportPath, n);
   // 密钥束在派发时读一次（与前哨同一把）：只进子进程 env，绝不进 argv / 事件流 / 台账。
   // openai-tailor.mjs 自带 dotenv 且不覆盖既有 env，所以这里注入的 OPENAI_* 就是生效值。
   const bundle = activeKey(readVault(root));
@@ -115,6 +126,10 @@ function dispatchTailorWorker(n: string, target: NonNullable<ReturnType<typeof f
   if (bundle?.key) tailorEnv.OPENAI_API_KEY = bundle.key;
   if (bundle?.baseUrl) tailorEnv.OPENAI_BASE_URL = bundle.baseUrl;
   if (bundle?.model) tailorEnv.OPENAI_MODEL = bundle.model;
+  // 离线 worker 的生成量是一整页 HTML（远大于快评单次调用）；openai-tailor 默认 300s
+  // 在慢网关（实测 u2-flash 含 cache_control 重试在内超 5 分钟）上会撞墙。给足 10 分钟，
+  // 调用方显式设过环境变量则尊重其值。
+  tailorEnv.OPENAI_TIMEOUT_MS = process.env.OPENAI_TIMEOUT_MS || "600000";
   registerRun(runId);
   publish(runId, { type: "status", label: "phase:queued" });
   // 在跑登记发生在进入并发池之前（此时 queued），且早于 runId 回到调用方——它是「这一行此刻
@@ -124,7 +139,7 @@ function dispatchTailorWorker(n: string, target: NonNullable<ReturnType<typeof f
   const poolHandle = acquire({
     url: `#${n}`,
     title: `定制简历：${target.company}`,
-    reportNum: Number(n),
+    reportNum: Number(reportNum),
     source: "run",
     runId,
     kind: "cv-tailor",
@@ -164,11 +179,11 @@ function dispatchTailorWorker(n: string, target: NonNullable<ReturnType<typeof f
         kind: "cv-tailor",
         input: n,
         title: `定制简历：${target.company}`,
-        page: `/report/${n}`,
+        page: `/report/${reportNum}`,
         status,
         startedAt,
         finishedAt: Date.now(),
-        reportNum: String(n),
+        reportNum,
         msg: msg ? String(msg).slice(0, 800) : undefined,
       });
     } catch (e) {

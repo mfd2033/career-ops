@@ -15,7 +15,7 @@ Content-Type: application/json
 
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| `n` | string/number | 是 | tracker 报告号（`data/applications.md` 的 `#` 列）。必须为纯数字。 |
+| `n` | string/number | 是 | tracker 行号（`data/applications.md` 的 `#` 列）。必须为纯数字。注意行号 ≠ 评估报告号（re-eval 会把行改指向新报告，如行 1148 → 报告 1153），取产物请用应答里的 `reportNum`。 |
 | `replace` | boolean | 否 | 严格 `true` 才生效：同编号有在跑生成时，先停掉旧的再重开一个。非严格真值（`1`/`"true"`/`{}` 等）一律按缺省处理，不放行杀进程。 |
 
 ## 响应
@@ -24,13 +24,13 @@ Content-Type: application/json
 
 | 状态码 | body | 含义 |
 |--------|------|------|
-| 200 | `{ ok: true, runId, company, role }` | 已派发 worker，`runId` 用于订阅事件总线。 |
-| 200 | `{ ok: true, replaced: [runId…], runId, company, role }` | `replace:true` 路径：旧在跑已停、新任务已起。若任一旧任务等待退出超时，附 `unconfirmed: true`（放行了但不确定旧进程是否真死）。 |
+| 200 | `{ ok: true, runId, company, role, reportNum }` | 已派发 worker；`runId` 用于订阅事件总线，`reportNum` 是真实评估报告号（取 PDF 用）。 |
+| 200 | `{ ok: true, replaced: [runId…], runId, company, role, reportNum }` | `replace:true` 路径：旧在跑已停、新任务已起。若任一旧任务等待退出超时，附 `unconfirmed: true`（放行了但不确定旧进程是否真死）。 |
 | 400 | `{ error: "missing-jd" }` | 该行无可定制的 JD/报告（`jds/` 无归档正文且报告正文缺失/过短）。 |
 | 400 | `{ error: "no-tailor-credential", hint }` | 密钥库（配置页「AI 引擎」）里没有使用中的密钥束；不派发 worker，当场拒绝。 |
 | 400 | `{ error: "bad json" \| "a numeric application number is required" }` | 请求体非 JSON，或 `n` 非纯数字。 |
 | 404 | `{ error: "row-not-found" }` | tracker 里没有这个编号的行。 |
-| 409 | `{ running: [{ runId, state, startedAt }…], company, role }` | 同编号已有生成在跑。`state` 为 `queued`（排队中）或 `running`（执行中）。拿 `runId` 可轮询，或 `POST /api/run/cancel {runId}` 取消；确认后带 `replace:true` 重发即替换。 |
+| 409 | `{ running: [{ runId, state, startedAt }…], company, role, reportNum }` | 同编号已有生成在跑。`state` 为 `queued`（排队中）或 `running`（执行中）。拿 `runId` 可轮询，或 `POST /api/run/cancel {runId}` 取消；确认后带 `replace:true` 重发即替换。 |
 
 ## 进度与终态
 
@@ -44,9 +44,10 @@ Content-Type: application/json
 
 成功后：
 
-- 定制 HTML/PDF 落 `output/<reportNum>-<company-slug>-<role-slug>/cv/tailored/vNNN/`（`cv.html` / `cv.pdf`）。
-- `generate-pdf.mjs --report=N` 把 report→pdf 写入 `data/pdf-index.tsv`，于是
-  `GET /api/cv-pdf?report=N` 精确命中该 PDF（中文公司名亦可靠）。
+- 定制 HTML/PDF 落 `output/<reportNum>-<company-slug>-<role-slug>/cv/tailored/vNNN/`（`cv.html` / `cv.pdf`；中文公司名的 slug 可能是占位形状如 `1153-application-role`，不要自己拼路径，用下面的 API 取）。
+- `generate-pdf.mjs --report=<reportNum>` 把 report→pdf 写入 `data/pdf-index.tsv`，于是
+  `GET /api/cv-pdf?report=<reportNum>` 精确命中该 PDF（中文公司名亦可靠）。这里的参数是
+  **应答体里的 `reportNum`（评估报告号），不是请求里的行号 `n`**（两者在 re-eval 后不同）。
 
 ## 前置条件
 
