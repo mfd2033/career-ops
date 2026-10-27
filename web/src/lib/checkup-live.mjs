@@ -24,7 +24,14 @@
 // 内存态，重启即清（与并发池、活跃运行视图同语义，ADR-0014 Q8）；不做持久化——被
 // 重启清掉的在跑体检，下一次按下直接再派一个即可。
 //
+// 表本身的逻辑已抽成通用工厂 live-registry.mjs（工单 generate-tailored-cv/04：tailor
+// worker 需要同一条护栏，与其复制一份会漂移的副本，不如共享同一份正确逻辑）。本文件
+// 只是对那层的一具命名实例 + checkup 专属命名的薄封装——对外 API 与语义一字未改，
+// web/tests/lib/checkup-live.test.mjs 仍是它的回归锁。
+//
 // Plain .mjs（同 job-ledger-reconcile.mjs）：node --test 锁定，不 import tsx。
+
+import { createLiveRegistry } from "./live-registry.mjs";
 
 /**
  * 一次体检运行的进程内登记。`gone` 是「进程已经不在了」的信号，与「run 是否还在进行」
@@ -41,52 +48,8 @@
 
 /** @typedef {{runId: string, state: "queued" | "running", startedAt: number | null}} CheckupLiveSnapshot */
 
-/** tracker# → 该行的在跑条目。列表（而非单条）是因为极端并发下同一 tracker# 允许短暂
- *  出现多条，替换动作据此「停全部」（ADR-0033 决议 3）。 */
-const byTracker = new Map();
-
-/** runId → 已离开在跑列表、但进程还没确认死掉的条目（等死用）。runId 是 UUID，全局唯一。
- *  有界：kill 不掉且永不退出的进程不该让登记表无限长大（超出即淘汰最老的墓碑——
- *  之后的等待返回 unknown，按「已停」处理，等同于没有登记表时的行为）。 */
-const settling = new Map();
-const MAX_SETTLING = 64;
-
-function normalize(tracker) {
-  return String(tracker ?? "").trim();
-}
-
-function bucket(tracker, create = false) {
-  const k = normalize(tracker);
-  if (!k) return null;
-  let list = byTracker.get(k);
-  if (!list && create) {
-    list = [];
-    byTracker.set(k, list);
-  }
-  return list ?? null;
-}
-
-function findLive(tracker, runId) {
-  const list = bucket(tracker);
-  if (!list) return null;
-  return list.find((e) => e.runId === runId) ?? null;
-}
-
-function markGone(entry) {
-  if (entry.gone) return;
-  entry.gone = true;
-  entry.resolveGone();
-}
-
-function settleTombstone(runId, entry) {
-  settling.set(runId, entry);
-  if (settling.size > MAX_SETTLING) {
-    const oldest = settling.keys().next();
-    if (!oldest.done) settling.delete(oldest.value);
-  }
-  // 确认死掉后墓碑即可退休（此时所有已开始的等待都已经拿到同一个 promise）。
-  entry.gonePromise.then(() => settling.delete(runId));
-}
+// checkup 专属的一具登记表实例（tracker# 空间与 tailor 各自独立，互不污染）。
+const registry = createLiveRegistry();
 
 /**
  * 登记一次体检派发。登记发生在进入并发池**之前**，所以初始状态是 queued。
@@ -96,14 +59,7 @@ function settleTombstone(runId, entry) {
  * @returns {void}
  */
 export function registerCheckup(tracker, runId) {
-  const list = bucket(tracker, true);
-  if (!list || !runId) return;
-  if (list.some((e) => e.runId === runId)) return;
-  let resolveGone;
-  const gonePromise = new Promise((res) => {
-    resolveGone = res;
-  });
-  list.push({ runId, state: "queued", startedAt: null, gone: false, resolveGone, gonePromise });
+  registry.register(tracker, runId);
 }
 
 /**
@@ -115,10 +71,7 @@ export function registerCheckup(tracker, runId) {
  * @returns {void}
  */
 export function markCheckupRunning(tracker, runId, now = Date.now()) {
-  const entry = findLive(tracker, runId);
-  if (!entry) return;
-  entry.state = "running";
-  entry.startedAt = now;
+  registry.markRunning(tracker, runId, now);
 }
 
 /**
@@ -132,14 +85,7 @@ export function markCheckupRunning(tracker, runId, now = Date.now()) {
  * @returns {void}
  */
 export function clearCheckup(tracker, runId, { processGone = false } = {}) {
-  const list = bucket(tracker);
-  if (!list) return;
-  const idx = list.findIndex((e) => e.runId === runId);
-  if (idx === -1) return;
-  const [entry] = list.splice(idx, 1);
-  if (list.length === 0) byTracker.delete(normalize(tracker));
-  if (processGone) markGone(entry);
-  else settleTombstone(runId, entry);
+  registry.clear(tracker, runId, { processGone });
 }
 
 /**
@@ -148,9 +94,7 @@ export function clearCheckup(tracker, runId, { processGone = false } = {}) {
  * @returns {CheckupLiveSnapshot[]}
  */
 export function listLiveCheckups(tracker) {
-  const list = bucket(tracker);
-  if (!list) return [];
-  return list.map(({ runId, state, startedAt }) => ({ runId, state, startedAt }));
+  return registry.list(tracker);
 }
 
 /**
@@ -162,13 +106,7 @@ export function listLiveCheckups(tracker) {
  * @returns {void}
  */
 export function attachCheckupExit(tracker, runId, exitPromise) {
-  const entry = findLive(tracker, runId) ?? settling.get(runId) ?? null;
-  if (!entry || entry.gone) return;
-  if (!exitPromise || typeof exitPromise.then !== "function") return;
-  exitPromise.then(
-    () => markGone(entry),
-    () => markGone(entry),
-  );
+  registry.attachExit(tracker, runId, exitPromise);
 }
 
 /**
@@ -181,23 +119,11 @@ export function attachCheckupExit(tracker, runId, exitPromise) {
  *          未确认——调用方必须把它当「不确定」，而不是「已死」。
  */
 export async function awaitCheckupGone(tracker, runId, timeoutMs = 5000) {
-  const entry = findLive(tracker, runId) ?? settling.get(runId) ?? null;
-  if (!entry) return "unknown";
-  if (entry.gone) return "gone";
-  let timer;
-  const timeout = new Promise((res) => {
-    timer = setTimeout(() => res("timeout"), Math.max(0, timeoutMs));
-  });
-  try {
-    return await Promise.race([entry.gonePromise.then(() => "gone"), timeout]);
-  } finally {
-    clearTimeout(timer);
-  }
+  return registry.awaitGone(tracker, runId, timeoutMs);
 }
 
 // --- test hooks (unit tests only; not part of the runtime surface) ----------
 
 export function __resetCheckupLiveForTest() {
-  byTracker.clear();
-  settling.clear();
+  registry.__reset();
 }

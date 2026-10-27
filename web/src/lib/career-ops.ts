@@ -40,6 +40,9 @@ import {
   assembleRowKeywords,
 } from "@/lib/inbox-keywords.mjs";
 import { normalizeUrl } from "@/lib/core/url-key.mjs";
+// 定制简历目标解析（findTailorTarget 纯内核，node --test 锁定）：这里只把 deps 接成
+// 真实读盘，判定/取值顺序全在 tailor-target.mjs。
+import { resolveTailorTarget } from "@/lib/tailor-target.mjs";
 
 /**
  * careerOpsRoot() 的进程内记忆：一次渲染里它会被调 ~2000 次（每次 `read()`、每行
@@ -730,6 +733,69 @@ export function findCheckupTarget(
 
 /** 单一类型来源：按钮组件与报告视图从这里 import，不再各自手写形状。 */
 export type CheckupTargetResult = ReturnType<typeof findCheckupTarget>;
+
+/**
+ * 定制简历目标解析结果（findTailorTarget 的契约形状，与 CheckupTargetResult 对称）。
+ * 显式声明而不是 ReturnType<typeof resolveTailorTarget>——纯内核是 .mjs 无类型，
+ * 从它推会得 any；这里定死一份，路由与 worker 都 import 它。
+ */
+export type TailorTargetResult =
+  | { ok: true; company: string; role: string; jdText: string; reportPath: string }
+  | { ok: false; reason: "row-not-found" | "missing-jd" };
+
+/** 按报告号命中 `jds/` 里的文本类归档（.md/.txt）绝对路径，取最近改动的一份；无则 null。
+ *  与 jd-capture.mjs 的号匹配同规则（比较前缀整数，`64` 不误取 `640` 的归档），但只取
+ *  能当 jdText 直读的文本格式——pdf 归档留给 CLI 侧处理，web 定制链路不二进制抽取。
+ *  过 containment 校验：手放的符号链接不能把 jds/ 外的文件带进来。 */
+function findJdCapturePath(n: string): string | null {
+  const target = parseInt(n, 10);
+  if (Number.isNaN(target)) return null;
+  const root = careerOpsRoot();
+  const dir = path.join(root, "jds");
+  let entries: string[];
+  try {
+    entries = fs.readdirSync(dir);
+  } catch {
+    return null; // 无 jds/ 目录 → 无归档
+  }
+  const matches = entries.filter((name) => {
+    if (!name.endsWith(".md") && !name.endsWith(".txt")) return false;
+    const m = /^(\d+)-/.exec(name);
+    return m ? parseInt(m[1], 10) === target : false;
+  });
+  if (matches.length === 0) return null;
+  matches.sort((a, b) => {
+    try {
+      return fs.statSync(path.join(dir, b)).mtimeMs - fs.statSync(path.join(dir, a)).mtimeMs;
+    } catch {
+      return 0;
+    }
+  });
+  const p = path.join(dir, matches[0]);
+  return containedRealpath(p, root) ? p : null;
+}
+
+/**
+ * 定制简历生成目标判定（工单 generate-tailored-cv/01）：给定 tracker 编号，解析出
+ * 生成链路所需 company / role / jdText / reportPath。纯判定在 tailor-target.mjs，
+ * 这里只把读取依赖接成真实读盘（findApplication / findCheckupTarget / findReportFile /
+ * findJdCapturePath）。整条链路的入口服务，worker 与端点都依赖它；本身不碰网络或写。
+ */
+export function findTailorTarget(n: string): TailorTargetResult {
+  return resolveTailorTarget(n, {
+    findApplication: (k) => findApplication(k),
+    findCheckupTarget: (k) => findCheckupTarget(k),
+    findReportFilePath: (k) => findReportFile(k),
+    readTextFile: (abs) => {
+      try {
+        return fs.readFileSync(abs, "utf8");
+      } catch {
+        return null;
+      }
+    },
+    findJdCapturePath: (k) => findJdCapturePath(k),
+  }) as TailorTargetResult;
+}
 
 /** 本行的最近一次公司体检（checkupIndex 按 tracker# 索引）；无台账/无记录 → null。 */
 export function readCheckupFor(n: string): CheckupEntry | null {
