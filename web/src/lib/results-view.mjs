@@ -14,6 +14,7 @@
 // helpers only read it.
 
 import { matchesReportNo } from "./report-no-search.mjs";
+import { normalizeUrl } from "./core/url-key.mjs";
 
 /**
  * Which result tab an enriched offer belongs to.
@@ -41,7 +42,18 @@ export function inResultTab(tab, o) {
  * The tracker number of the row this offer was already evaluated as, or
  * undefined when it was never evaluated.
  *
- * The company key is the FIRST dimension and it must be a REAL key. An empty
+ * Dimension 1 — URL (exact): the SAME canonical normalizeUrl key every other
+ * surface uses (whats-new's evaluatedUrls, /api/report-status). A re-discovered
+ * posting whose tracker row carries the same URL IS that posting — no fuzzy
+ * matching can disagree. This dimension is load-bearing for browser boards
+ * (智联/BOSS/猎聘): their scan/offer records carry `company: ""`, so the text
+ * dimension below can never fire for them (584 of 736 real (tracker, scan)
+ * pairs missed before this existed — the explore results badged evaluated
+ * postings as fresh).
+ *
+ * Dimension 2 — company+role text (fallback): covers tracker rows written
+ * without a URL column. The company key is the FIRST dimension here and it
+ * must be a REAL key. An empty
  * key is not a wildcard: browser-board scan rows carry `company: ""` (智联/BOSS
  * 采集时公司列就是空的), and the tracker writes `?` for an unknown employer
  * (ADR-0004 的 sentinel) — and `normalizeTextKey("?")` is ALSO the empty string.
@@ -51,12 +63,20 @@ export function inResultTab(tab, o) {
  * offers were falsely badged (and pushed out of the default 新增 tab) by 24
  * `?` rows, while not one of those postings existed in the tracker.
  *
- * @param {{company?: string, title?: string}} offer
- * @param {Array<{n?: string, company?: string, role?: string}>} apps
+ * @param {{url?: string, company?: string, title?: string}} offer
+ * @param {Array<{n?: string, url?: string, company?: string, role?: string}>} apps
  * @param {(s: string) => string} norm - the core's normalizeTextKey key fn
  * @returns {string|undefined} the matched tracker `#n`, or undefined
  */
 export function evaluatedNoFor(offer, apps, norm) {
+  // 维度 1：URL 精确匹配。空键永不互等（normalizeUrl 解析失败返回 ""，
+  // 下方相等比较天然落空，不需要额外守卫）。
+  const urlKey = normalizeUrl(offer.url ?? "");
+  if (urlKey) {
+    const byUrl = apps.find((a) => normalizeUrl(a.url ?? "") === urlKey);
+    if (byUrl?.n) return byUrl.n;
+  }
+  // 维度 2：公司+岗位文本兜底（tracker 行没写 URL 的场景）。
   const c = norm(offer.company ?? "");
   if (!c) return undefined;
   const t = norm(offer.title ?? "");
