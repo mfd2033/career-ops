@@ -158,7 +158,7 @@ export const en: Dict = {
   "config.saveJobTarget": "Save intention",
   "config.jobTargetSaved": "Saved",
   "config.jobTargetArchetypes": "Archetypes",
-  "config.jobTargetArchetypeHint": "One per line. These names also feed the explore page's keyword box and evaluation targeting (ADR-0091). Saving keeps each existing archetype's level/fit; an empty list removes all archetypes.",
+  "config.jobTargetArchetypeHint": "One per line — the kinds of jobs you want (e.g. software project manager). After saving, the explore page uses these names to find jobs for you, and evaluations judge fit against them. Your existing level and fit settings are kept when saving; clearing the list and saving removes all of them.",
   "config.jobTargetArchetypePlaceholder": "软件项目经理\n技术经理",
 
   "config.jdRulesTitle": "JD evaluation rules",
@@ -393,7 +393,7 @@ export const zh: Dict = {
   "config.saveJobTarget": "保存意向",
   "config.jobTargetSaved": "已保存",
   "config.jobTargetArchetypes": "原型（Archetypes）",
-  "config.jobTargetArchetypeHint": "每行一个。这些名字也会进入探索页的关键词框与评估定位（ADR-0091）。保存时按名保留已有原型的 level/fit；清空保存即删除全部原型。",
+  "config.jobTargetArchetypeHint": "每行写一个你想要的职位方向（如：软件项目经理）。保存后，探索页会按这些名字帮你找职位，评估打分时也按它们判断合不合适。保存时已设置的等级和匹配偏好不会丢；全部清空再保存，就等于删掉所有职位方向。",
   "config.jobTargetArchetypePlaceholder": "软件项目经理\n技术经理",
 
   "config.jdRulesTitle": "JD 评估规则",
