@@ -220,11 +220,11 @@ export const en: Dict = {
   "pipeline.checkupReport": "Checkup report",
 
   // ── Batch re-evaluate (pipeline-view.tsx) ──
-  // Empty-state copy for the batch bar's reserved slot (ADR-0039): the slot is always
-  // there, so it says what checking a row buys you. Actions are named per tab — only
-  // the EVALUATED tab has a batch skip (ADR-0038).
-  "pipeline.batchHint": "Check rows to re-evaluate them in bulk",
-  "pipeline.batchHintEvaluated": "Check rows to re-evaluate or skip them in bulk",
+  // The bar itself is always visible (user request 2026-10-28, same as the inbox bar),
+  // so "nothing checked" is the resting state rather than an empty state: the count
+  // slot names it, and the disabled actions share one hint as their title.
+  "pipeline.batchNoneSelected": "Nothing selected",
+  "pipeline.batchNeedSelection": "Check rows to enable this action",
   "pipeline.batchSelected": "{count} selected",
   "pipeline.batchOffView": "{count} outside the current filter",
   "pipeline.batchReevaluableHint": "{count} of {total} have a posting URL",
@@ -509,8 +509,10 @@ export const zh: Dict = {
   "pipeline.checkupReport": "体检报告",
 
   // ── 批量重新评估（pipeline-view.tsx） ──
-  "pipeline.batchHint": "勾选行后可批量重新评估",
-  "pipeline.batchHintEvaluated": "勾选行后可批量重新评估或跳过",
+  // 批量条常显（用户要求 2026-10-28，与收件箱同口径）：未勾选是常态而非空态，
+  // 所以计数位说「未选择」，置灰按钮共用一句 title 指引。
+  "pipeline.batchNoneSelected": "未选择",
+  "pipeline.batchNeedSelection": "勾选行后启用此操作",
   "pipeline.batchSelected": "已选 {count} 项",
   "pipeline.batchOffView": "{count} 项在当前筛选之外",
   "pipeline.batchReevaluableHint": "{total} 项中有 {count} 项含职位链接",

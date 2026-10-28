@@ -298,6 +298,10 @@ export function PipelineView({
     [selected, urlMap],
   );
 
+  // 批量条常显后未勾选是常态而不是空态：三个动作按钮一律置灰，title 改成同一句
+  // 「先勾选」指引（条体自己说明白了它在那里能干什么）。
+  const needSelection = selected.size === 0;
+
   // 勾选与筛选是两件事：在「全部」勾、切到某个 tab 或输入搜索词后再确认，是这个持久
   // 批量条的正当用法（勾选集就是批次，筛选只是当前窗口）。所以这里不把计数收窄——收窄
   // 会把半批勾选静默丢掉——而是把「有多少勾选在屏幕外」说出来。重新评估按 URL 烧评估
@@ -541,19 +545,22 @@ export function PipelineView({
         )}
       </div>
 
-      {/* 批量条的常驻槽位（ADR-0039 决议 1/2/3）：非 INBOX tab 恒在，只切内容——条的出现/
-          消失不再把表格容器顶开，勾选时列表不再下滑。`md:` 以下没有定高布局，槽位不存在
-          （条出现时照旧下推列表：已知残差）。空态那一句提示语由 RowSlot 渲染，按 tab 对齐
-          动作（已评估 tab 才有批量跳过，ADR-0038 决议 2）。 */}
+      {/* 批量条（ADR-0039 决议 1/2/3）：非 INBOX tab 恒在。2026-10-28 用户要求由「勾选后才
+          出现」改为整条常显（与收件箱批量条同口径）：未勾选时按钮置灰、计数位显「未选择」，
+          提示语不再挂（条体已自解释）。
+          `md:` 以下没有定高布局，条体从此刻起也始终占一行——与收件箱一致的取舍。 */}
       {tab !== "INBOX" && (
-        <RowSlot hint={tab === "EVALUATED" ? t("pipeline.batchHintEvaluated") : t("pipeline.batchHint")}>
-          {selected.size > 0 && (
-            <div className="flex flex-wrap items-center gap-2 rounded-full border border-brand/30 bg-brand-soft/40 px-3 py-1.5 text-xs max-md:mt-3 md:flex-nowrap">
-              <span className="shrink-0 font-medium text-brand">{t("pipeline.batchSelected", { count: selected.size })}</span>
-              {selectedOffView > 0 && (
-                <span className="min-w-0 truncate text-muted">{t("pipeline.batchOffView", { count: selectedOffView })}</span>
-              )}
-              {urlMapLoading ? (
+        <RowSlot hint="">
+          <div className="flex flex-wrap items-center gap-2 rounded-full border border-brand/30 bg-brand-soft/40 px-3 py-1.5 text-xs max-md:mt-3 md:flex-nowrap md:overflow-x-auto">
+            <span className="shrink-0 font-medium text-brand tabular-nums">
+              {needSelection ? t("pipeline.batchNoneSelected") : t("pipeline.batchSelected", { count: selected.size })}
+            </span>
+            {selectedOffView > 0 && (
+              <span className="min-w-0 truncate text-muted">{t("pipeline.batchOffView", { count: selectedOffView })}</span>
+            )}
+            {needSelection
+              ? null
+              : urlMapLoading ? (
                 <span className="inline-flex shrink-0 items-center gap-1 text-muted">
                   <Loader2 className="size-3 animate-spin" /> {t("pipeline.batchUrlsLoading")}
                 </span>
@@ -564,46 +571,46 @@ export function PipelineView({
                     : t("pipeline.batchReevaluableHint", { count: reevaluableCount, total: selected.size })}
                 </span>
               ) : null}
-              <button
-                type="button"
-                onClick={reevaluateSelected}
-                disabled={reevaluableCount === 0 || urlMapLoading || urlMap === null}
-                className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-brand px-3 py-1 font-medium text-brand-foreground transition-colors hover:bg-brand-200 disabled:cursor-not-allowed disabled:opacity-50 max-sm:min-h-[44px]"
-                title={t("pipeline.batchReevaluateTitle", { count: reevaluableCount })}
-              >
-                <RotateCcw className="size-3.5" /> {t("pipeline.batchReevaluate", { count: reevaluableCount })}
-              </button>
-              {tab === "EVALUATED" && (
-                <>
-                  <button
-                    type="button"
-                    onClick={checkupSelected}
-                    disabled={selected.size > CHECKUP_BATCH_MAX}
-                    className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border px-3 py-1 font-medium text-muted transition-colors hover:border-brand/50 hover:text-brand disabled:cursor-not-allowed disabled:opacity-50 max-sm:min-h-[44px]"
-                    title={t(selected.size > CHECKUP_BATCH_MAX ? "pipeline.batchCheckupTooMany" : "pipeline.batchCheckupTitle", { count: selected.size, max: CHECKUP_BATCH_MAX })}
-                  >
-                    <HeartPulse className="size-3.5" /> {t("pipeline.batchCheckup", { count: selected.size })}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={skipSelected}
-                    disabled={skipBusy}
-                    className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border px-3 py-1 font-medium text-muted transition-colors hover:border-red-400/50 hover:text-red-400 disabled:cursor-not-allowed disabled:opacity-50 max-sm:min-h-[44px]"
-                    title={t("pipeline.batchSkipTitle", { count: selected.size })}
-                  >
-                    {skipBusy ? <Loader2 className="size-3.5 animate-spin" /> : <SkipForward className="size-3.5" />} {t("pipeline.batchSkip", { count: selected.size })}
-                  </button>
-                </>
-              )}
-              <button
-                type="button"
-                onClick={() => setSelected(new Set())}
-                className="inline-flex shrink-0 items-center gap-1 rounded-full border border-border px-2.5 py-1 text-muted transition-colors hover:text-foreground max-sm:min-h-[44px]"
-              >
-                <X className="size-3" /> {t("pipeline.batchClear")}
-              </button>
-            </div>
-          )}
+            <button
+              type="button"
+              onClick={reevaluateSelected}
+              disabled={needSelection || reevaluableCount === 0 || urlMapLoading || urlMap === null}
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-brand px-3 py-1 font-medium text-brand-foreground transition-colors hover:bg-brand-200 disabled:cursor-not-allowed disabled:opacity-50 max-sm:min-h-[44px]"
+              title={needSelection ? t("pipeline.batchNeedSelection") : t("pipeline.batchReevaluateTitle", { count: reevaluableCount })}
+            >
+              <RotateCcw className="size-3.5" /> {t("pipeline.batchReevaluate", { count: reevaluableCount })}
+            </button>
+            {tab === "EVALUATED" && (
+              <>
+                <button
+                  type="button"
+                  onClick={checkupSelected}
+                  disabled={needSelection || selected.size > CHECKUP_BATCH_MAX}
+                  className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border px-3 py-1 font-medium text-muted transition-colors hover:border-brand/50 hover:text-brand disabled:cursor-not-allowed disabled:opacity-50 max-sm:min-h-[44px]"
+                  title={needSelection ? t("pipeline.batchNeedSelection") : t(selected.size > CHECKUP_BATCH_MAX ? "pipeline.batchCheckupTooMany" : "pipeline.batchCheckupTitle", { count: selected.size, max: CHECKUP_BATCH_MAX })}
+                >
+                  <HeartPulse className="size-3.5" /> {t("pipeline.batchCheckup", { count: selected.size })}
+                </button>
+                <button
+                  type="button"
+                  onClick={skipSelected}
+                  disabled={skipBusy || needSelection}
+                  className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border px-3 py-1 font-medium text-muted transition-colors hover:border-red-400/50 hover:text-red-400 disabled:cursor-not-allowed disabled:opacity-50 max-sm:min-h-[44px]"
+                  title={needSelection ? t("pipeline.batchNeedSelection") : t("pipeline.batchSkipTitle", { count: selected.size })}
+                >
+                  {skipBusy ? <Loader2 className="size-3.5 animate-spin" /> : <SkipForward className="size-3.5" />} {t("pipeline.batchSkip", { count: selected.size })}
+                </button>
+              </>
+            )}
+            <button
+              type="button"
+              onClick={() => setSelected(new Set())}
+              disabled={needSelection}
+              className="inline-flex shrink-0 items-center gap-1 rounded-full border border-border px-2.5 py-1 text-muted transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 max-sm:min-h-[44px]"
+            >
+              <X className="size-3" /> {t("pipeline.batchClear")}
+            </button>
+          </div>
         </RowSlot>
       )}
 
