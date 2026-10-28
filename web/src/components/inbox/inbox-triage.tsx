@@ -441,6 +441,11 @@ export function InboxTriage({ inbox, scoredUrls, kwdSet, onToggleKwd, onClearKwd
   // 在两种布局间不会丢失。
   const keywordBar = <KeywordBar counts={keywordCounts} selected={kwdSet ?? new Set<string>()} onToggle={(w) => onToggleKwd?.(w)} />;
 
+  // 分数列头条件渲染（用户反馈 2026-10-28）：可见行里没有任何评分/评分中时，
+  // 行右侧全是保存/跳过按钮，「分数」是空标签——此时不挂。默认「未评分」墙
+  // 正是这种状态。isEvaluatedRow 与过滤口径同源，两处永不打架。
+  const anyVisibleScored = visible.some((e) => isEvaluatedRow(resolveRowScore(liveScores.get(e.urlKey), persistedScores.get(e.urlKey))));
+
   return (
     /* 内容区宽度自适应（ADR-0065）：去掉 mx-auto/max-w-3xl，与表格 tab 同宽铺满；
        行内列表的定高/独立滚动与批次条槽位仍按 ADR-0011/0039。 */
@@ -530,7 +535,7 @@ export function InboxTriage({ inbox, scoredUrls, kwdSet, onToggleKwd, onClearKwd
             />
             <span className="size-5 shrink-0" aria-hidden="true" />
             <span className="min-w-0 flex-1">{t("inbox.col.position")}</span>
-            <span className="shrink-0">{t("pipeline.col.score")}</span>
+            {anyVisibleScored && <span className="shrink-0">{t("pipeline.col.score")}</span>}
             <span className="shrink-0">{t("inbox.col.actions")}</span>
           </div>
           <ul className="divide-y divide-border md:min-h-0 md:flex-1 md:overflow-y-auto">
