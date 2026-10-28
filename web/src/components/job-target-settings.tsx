@@ -5,17 +5,21 @@ import { Check, Loader2, Save } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { useI18n } from "@/lib/i18n/context";
 
-// 求职意向（目标职位） → config/profile.yml 的 target_roles.primary，
-// 与 JD 评估规则一样由服务器持久化（profile-patch.mjs 把 roles 映射到
-// target_roles.primary）。评估流水线会直接读取 profile.yml，因此在这里
-// 保存的求职意向对整个评估生效。每个职位占一行；加载失败时不回退默认值
-// （否则会显示过期数据且保存会覆盖真实 profile.yml），而是显示错误 + 重试。
+// 求职意向 → config/profile.yml 的 target_roles，两个同级字段由同一张卡管理
+// （ADR-0091）：profile-patch.mjs 把 roles 映射到 target_roles.primary，把
+// archetype 名单按名 reconcile 进 target_roles.archetypes（旧条目整条保留
+// level/fit，新名字补默认 fit；空名单删键）。探索页/扫描的关键词播种口径是
+// primary + archetypes.name 合并（与核心 providers/_profile-keywords.mjs 同
+// 口径），因此这里的名录对整个评估与探索页生效。每个职位/原型各占一行；加载
+// 失败时不回退默认值（否则会显示过期数据且保存会覆盖真实 profile.yml），而是
+// 显示错误 + 重试。
 
 export function JobTargetSettings() {
   const { t } = useI18n();
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState(false);
   const [roleText, setRoleText] = useState("");
+  const [archetypeText, setArchetypeText] = useState("");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -27,11 +31,17 @@ export function JobTargetSettings() {
         if (!r.ok) throw new Error(String(r.status));
         return r.json();
       })
-      .then((d: { roles?: unknown }) => {
+      .then((d: { roles?: unknown; archetypes?: unknown }) => {
         const roles = Array.isArray(d.roles)
           ? d.roles.filter((r): r is string => typeof r === "string")
           : [];
         setRoleText(roles.join("\n"));
+        const archetypes = Array.isArray(d.archetypes)
+          ? d.archetypes
+              .filter((a): a is { name: string } => !!a && typeof a === "object" && typeof (a as { name?: unknown }).name === "string")
+              .map((a) => a.name)
+          : [];
+        setArchetypeText(archetypes.join("\n"));
       })
       .catch(() => setLoadError(true))
       .finally(() => setLoaded(true));
@@ -47,13 +57,19 @@ export function JobTargetSettings() {
       setError(t("config.jobTargetEmpty"));
       return;
     }
+    // 原型名单与目标职位同一次 PATCH：全空 = 删键（ADR-0091 三态语义），
+    // 不拦「原型为空」——目标职位不能空，原型可以。
+    const archetypes = archetypeText
+      .split("\n")
+      .map((s) => s.trim())
+      .filter(Boolean);
     setSaving(true);
     setError(null);
     try {
       const res = await fetch("/api/profile", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ roles }),
+        body: JSON.stringify({ roles, archetypes }),
       });
       const j = (await res.json().catch(() => ({}))) as { error?: string };
       if (!res.ok) {
@@ -97,6 +113,17 @@ export function JobTargetSettings() {
               onChange={(e) => setRoleText(e.target.value)}
               rows={3}
               placeholder={t("config.jobTargetPlaceholder")}
+              className="mt-1.5 min-h-[74px] w-full flex-1 resize-y rounded-md border border-border bg-surface/60 px-3 py-2 text-sm outline-none transition-colors focus:border-brand/50 focus-visible:ring-2 focus-visible:ring-brand/40"
+            />
+          </label>
+          <label className="mt-3 flex flex-1 flex-col">
+            <span className="block text-sm font-medium text-foreground">{t("config.jobTargetArchetypes")}</span>
+            <span className="mt-0.5 block text-xs text-faint">{t("config.jobTargetArchetypeHint")}</span>
+            <textarea
+              value={archetypeText}
+              onChange={(e) => setArchetypeText(e.target.value)}
+              rows={3}
+              placeholder={t("config.jobTargetArchetypePlaceholder")}
               className="mt-1.5 min-h-[74px] w-full flex-1 resize-y rounded-md border border-border bg-surface/60 px-3 py-2 text-sm outline-none transition-colors focus:border-brand/50 focus-visible:ring-2 focus-visible:ring-brand/40"
             />
           </label>

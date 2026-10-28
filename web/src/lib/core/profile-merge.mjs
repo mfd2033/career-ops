@@ -18,7 +18,10 @@
 //   • every byte outside the touched leaves survives verbatim, comments too;
 //   • a scalar's own trailing comment survives its value being replaced;
 //   • `null` deletes the key *and* the comment block directly above it, so no
-//     orphaned explanation is left pointing at a key that is gone.
+//     orphaned explanation is left pointing at a key that is gone;
+//   • a list may carry object items (ADR-0091's `target_roles.archetypes`):
+//     they render as block mappings riding the `- `, while a nested object
+//     VALUE refuses the whole list (never a half-splice).
 //
 // Dependency-free on purpose (like portals-merge.mjs / portals-serialize.mjs):
 // it takes text and returns text, so `node --test` exercises it without a Next
@@ -205,55 +208,95 @@ function deleteKey(lines, path) {
 }
 
 /**
+ * Render one list item into its YAML lines at the given item indent, or null
+ * when the item is outside the contract (a nested object value cannot be
+ * rendered losslessly — the caller refuses the whole list rather than
+ * half-splice, mirroring writeScalar's scalar-where-block refusal).
+ *
+ * Scalar items → `- <scalar>`. Object items → a block mapping: first key rides
+ * the `- ` (ADR-0091's archetypes shape), later keys align to the first key's
+ * column. Keys go through the same quoting rule as values (`needsQuote`) —
+ * reconciled entries carry hand-written keys verbatim, and a bare
+ * quote-needing key would corrupt the whole file. `null` renders as `null`,
+ * not an empty string, so a type survives the round-trip. An empty object
+ * renders as flow `- {}`.
+ */
+function renderItemLines(item, step) {
+  if (item === null || typeof item !== "object") return [`${step}- ${renderScalar(item)}`];
+  const entries = Object.entries(item);
+  if (entries.length === 0) return [`${step}- {}`];
+  const cont = " ".repeat(step.length + 2);
+  const lines = [];
+  for (const [k, v] of entries) {
+    if (v !== null && typeof v === "object") return null;
+    const rk = needsQuote(k) ? JSON.stringify(k) : k;
+    const rv = v === null ? "null" : renderScalar(v);
+    lines.push(lines.length === 0 ? `${step}- ${rk}: ${rv}` : `${cont}${rk}: ${rv}`);
+  }
+  return lines;
+}
+
+/**
  * Replace a list block wholesale (the patch always carries the complete list —
- * `target_roles.primary`, `narrative.deal_breakers`). Item-level comments inside
- * the old block are dropped with it: a card that rewrites the whole list has no
- * way to say which item a note belonged to.
+ * `target_roles.primary`, `target_roles.archetypes`, `narrative.deal_breakers`).
+ * Item-level comments inside the old block are dropped with it: a card that
+ * rewrites the whole list has no way to say which item a note belonged to.
+ * Every item is rendered BEFORE any splice: an unrenderable item refuses the
+ * whole write so no half-replaced block is ever left behind.
  */
 function writeList(lines, path, items) {
   const key = path[path.length - 1];
   const at = findKey(lines, path);
+  let step, insertAt, removeCount, prefix;
 
   // ── key absent: create the block under its parent chain ──
   if (at === -1) {
     const parent = ensureMapping(lines, path.slice(0, -1));
     const base = parent.line === -1 ? -2 : parent.indent;
-    const insertAt = parent.line === -1 ? lines.length : contentEndOf(lines, parent.line, parent.indent);
-    lines.splice(
-      insertAt,
-      0,
-      `${" ".repeat(base + 2)}${key}:`,
-      ...items.map((w) => `${" ".repeat(base + 4)}- ${renderScalar(w)}`),
-    );
-    return true;
-  }
+    step = " ".repeat(base + 4);
+    insertAt = parent.line === -1 ? lines.length : contentEndOf(lines, parent.line, parent.indent);
+    removeCount = 0;
+    prefix = [`${" ".repeat(base + 2)}${key}:`];
+  } else {
+    const m = lines[at].match(KEY_LINE);
+    const indent = indentOf(lines[at]);
+    const rest = (m[3] ?? "").trim();
+    const contentEnd = contentEndOf(lines, at, indent);
 
-  const m = lines[at].match(KEY_LINE);
-  const indent = indentOf(lines[at]);
-  const rest = (m[3] ?? "").trim();
-  const contentEnd = contentEndOf(lines, at, indent);
-
-  if (rest.startsWith("[")) {
-    // Inline flow list → becomes a block sequence (there are no item lines to
-    // replace, and the inline form cannot hold item comments anyway).
-    lines.splice(at, 1, `${m[1]}${m[2]}:`, ...items.map((w) => `${m[1]}  - ${renderScalar(w)}`));
-    return true;
-  }
-  if (rest !== "") {
-    // A scalar where a list is expected: the scalar was real content, so keep it
-    // out of the blast radius and let the caller report instead of overwriting.
-    return false;
-  }
-  // Keep the block's own item indentation when it already has items.
-  let step = `${m[1]}  `;
-  for (let j = at + 1; j < contentEnd; j++) {
-    const item = lines[j].match(SEQ_ITEM);
-    if (item) {
-      step = item[1];
-      break;
+    if (rest.startsWith("[")) {
+      // Inline flow list → becomes a block sequence (there are no item lines to
+      // replace, and the inline form cannot hold item comments anyway).
+      step = `${m[1]}  `;
+      insertAt = at;
+      removeCount = 1;
+      prefix = [`${m[1]}${m[2]}:`];
+    } else if (rest !== "") {
+      // A scalar where a list is expected: the scalar was real content, so keep it
+      // out of the blast radius and let the caller report instead of overwriting.
+      return false;
+    } else {
+      // Keep the block's own item indentation when it already has items.
+      step = `${m[1]}  `;
+      for (let j = at + 1; j < contentEnd; j++) {
+        const item = lines[j].match(SEQ_ITEM);
+        if (item) {
+          step = item[1];
+          break;
+        }
+      }
+      insertAt = at + 1;
+      removeCount = contentEnd - (at + 1);
+      prefix = [];
     }
   }
-  lines.splice(at + 1, contentEnd - (at + 1), ...items.map((w) => `${step}- ${renderScalar(w)}`));
+
+  const itemLines = [];
+  for (const w of items) {
+    const rendered = renderItemLines(w, step);
+    if (!rendered) return false;
+    itemLines.push(...rendered);
+  }
+  lines.splice(insertAt, removeCount, ...prefix, ...itemLines);
   return true;
 }
 

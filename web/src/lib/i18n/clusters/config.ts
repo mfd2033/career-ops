@@ -157,6 +157,9 @@ export const en: Dict = {
   "config.jobTargetEmpty": "Add at least one target role.",
   "config.saveJobTarget": "Save intention",
   "config.jobTargetSaved": "Saved",
+  "config.jobTargetArchetypes": "Archetypes",
+  "config.jobTargetArchetypeHint": "One per line. These names also feed the explore page's keyword box and evaluation targeting (ADR-0091). Saving keeps each existing archetype's level/fit; an empty list removes all archetypes.",
+  "config.jobTargetArchetypePlaceholder": "软件项目经理\n技术经理",
 
   "config.jdRulesTitle": "JD evaluation rules",
   "config.jdRulesDesc": "Exclusion and flexibility rules applied to every evaluation. Saved to config/profile.yml — they also apply to CLI evaluations and re-evaluations.",
@@ -389,6 +392,9 @@ export const zh: Dict = {
   "config.jobTargetEmpty": "至少填写一个目标职位。",
   "config.saveJobTarget": "保存意向",
   "config.jobTargetSaved": "已保存",
+  "config.jobTargetArchetypes": "原型（Archetypes）",
+  "config.jobTargetArchetypeHint": "每行一个。这些名字也会进入探索页的关键词框与评估定位（ADR-0091）。保存时按名保留已有原型的 level/fit；清空保存即删除全部原型。",
+  "config.jobTargetArchetypePlaceholder": "软件项目经理\n技术经理",
 
   "config.jdRulesTitle": "JD 评估规则",
   "config.jdRulesDesc": "每次评估都会应用的排除与灵活性规则。保存到 config/profile.yml——同样适用于 CLI 评估与重新评估。",

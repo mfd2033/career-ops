@@ -203,3 +203,72 @@ test("全部清空后再写回：等价门也成立", () => {
   // 清空时删掉的那两行注释不会自己长回来（那是用户没再写的事实，不假装恢复）。
   assert.ok(!back.includes("评估模式（ADR-0087"));
 });
+
+// ── 对象块列表（ADR-0091）：archetypes 这类 {name, level, fit} 条目 ──
+
+test("对象块列表整体替换：写成块映射，其余字节与注释逐字保留", () => {
+  const patch = {
+    target_roles: {
+      archetypes: [
+        { name: "软件项目经理", level: "资深", fit: "primary" },
+        { name: "技术经理", fit: "primary" },
+      ],
+    },
+  };
+  const { text, changed, written, skipped } = mergeYamlPatch(PROFILE, patch);
+  assert.deepEqual(written, ["target_roles.archetypes"]);
+  assert.deepEqual(skipped, []);
+  assert.equal(changed, true);
+  assert.deepEqual(yaml.load(text).target_roles.archetypes, [
+    { name: "软件项目经理", level: "资深", fit: "primary" },
+    { name: "技术经理", fit: "primary" },
+  ]);
+  // 块形态：首键跟在 "- " 后，后续键与首键列对齐（PROFILE 的 item 缩进是 4 空格）。
+  assert.ok(text.includes("    - name: 软件项目经理\n      level: 资深\n      fit: primary"));
+  assert.ok(text.includes("    - name: 技术经理\n      fit: primary"));
+  // 未触碰的字节：文件头注释、primary、后续段落原样。
+  assert.ok(text.includes("# 求职档案 —— 配置页与 CLI 读的都是这一份。"));
+  assert.ok(text.includes("  primary:\n    - 软件项目经理"));
+  assert.ok(text.includes("\ncompensation:\n  target_range: 25K-30K"));
+});
+
+test("对象条目的值走标量渲染：数字留数字、特殊字符串加引号", () => {
+  const patch = { target_roles: { archetypes: [{ name: "注意: 这是 #1", level: 3, bare: "007" }] } };
+  const { text, skipped } = mergeYamlPatch(PROFILE, patch);
+  assert.deepEqual(skipped, []);
+  assert.ok(text.includes('    - name: "注意: 这是 #1"'));
+  assert.ok(text.includes("      level: 3"));
+  assert.ok(text.includes('      bare: "007"'));
+  assert.deepEqual(yaml.load(text).target_roles.archetypes, [{ name: "注意: 这是 #1", level: 3, bare: "007" }]);
+});
+
+test("对象条目与标量条目可混排；嵌套对象值宁可拒写也不留半个块", () => {
+  const mixed = mergeYamlPatch(PROFILE, { target_roles: { archetypes: ["替补", { name: "技术经理" }] } });
+  assert.deepEqual(yaml.load(mixed.text).target_roles.archetypes, ["替补", { name: "技术经理" }]);
+
+  const nested = mergeYamlPatch(PROFILE, { target_roles: { archetypes: [{ name: { deep: 1 } }] } });
+  assert.deepEqual(nested.skipped, ["target_roles.archetypes"]);
+  assert.equal(nested.changed, false);
+  assert.equal(nested.text, PROFILE);
+});
+
+test("对象块写入幂等：同一 patch 再来一次文本不变", () => {
+  const patch = { target_roles: { archetypes: [{ name: "技术经理", level: "资深", fit: "primary" }] } };
+  const once = mergeYamlPatch(PROFILE, patch).text;
+  const twice = mergeYamlPatch(once, patch);
+  assert.equal(twice.changed, false);
+  assert.equal(twice.text, once);
+});
+
+test("对象键名与值走同一条引号规则：需引号的键不被写坏，null 写回 null", () => {
+  // reconcile 保留的手写条目可能带任意键：需引号的键裸渲染会写坏整个文件，
+  // null 值不能被静默改型成空字符串（#数据丢失类守卫）。
+  const patch = { target_roles: { archetypes: [{ name: "A", "007": 1, "fit: x": "y", level: null }] } };
+  const { text, skipped } = mergeYamlPatch(PROFILE, patch);
+  assert.deepEqual(skipped, []);
+  assert.ok(text.includes('    - name: A'));
+  assert.ok(text.includes('      "007": 1'));
+  assert.ok(text.includes('      "fit: x": y'));
+  assert.ok(text.includes("      level: null"));
+  assert.deepEqual(yaml.load(text).target_roles.archetypes, [{ name: "A", "007": 1, "fit: x": "y", level: null }]);
+});

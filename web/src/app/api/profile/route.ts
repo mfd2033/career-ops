@@ -4,17 +4,21 @@ import * as yaml from "js-yaml";
 import { careerOpsRoot, listMarketModes } from "@/lib/career-ops";
 import { atomicWriteWithBackup } from "@/lib/core/safe-write";
 import { mergeYamlPatch } from "@/lib/core/profile-merge.mjs";
-import { patchToProfile } from "@/lib/profile-patch.mjs";
+import { extractArchetypes, patchToProfile } from "@/lib/profile-patch.mjs";
 import { extractDealBreakers, replaceDealBreakersSection } from "@/lib/profile-md-sync.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 // Merge-safe writer for config/profile.yml (a USER-LAYER file — DATA_CONTRACT:
-// never clobber the user's archetypes/narrative/proof-points). On first create we
-// seed from config/profile.example.yml; on an existing file we deep-merge ONLY the
-// proposed keys, write atomically (temp + rename), and only ever via the confirm-
-// gated setProfile action. The web orchestrates the real file — no parallel store.
+// never clobber the user's narrative/proof-points, and archetypes only through
+// ADR-0091's name-reconciled path: the job-target card may replace the NAME
+// list, but an existing entry keeps its whole object — level/fit/unknown keys
+// survive; anything else leaves archetypes untouched). On first create we
+// seed from config/profile.example.yml; on an existing file we deep-merge ONLY
+// the proposed keys, write atomically (temp + rename), and only ever via the
+// confirm-gated setProfile action. The web orchestrates the real file — no
+// parallel store.
 
 type ProfilePatch = {
   name?: string;
@@ -31,6 +35,8 @@ type ProfilePatch = {
   locationFlexibility?: string;
   /** 评估模式（CO-51）：`modes/<lang>`；"root" / 空串 = 清空回通用模式。 */
   marketMode?: string;
+  /** 原型名单（ADR-0091）：undefined = 不动；空数组 = 删键；非空 = 按名 reconcile。 */
+  archetypes?: string[];
 };
 
 function isObj(v: unknown): v is Record<string, unknown> {
@@ -56,6 +62,7 @@ export async function GET() {
   let dealBreakers: string[] = [];
   let locationFlexibility = "";
   let roles: string[] = [];
+  let archetypes: Record<string, unknown>[] = [];
   let marketMode: string | null = null;
   if (fs.existsSync(file)) {
     let parsed: unknown;
@@ -75,6 +82,7 @@ export async function GET() {
     if (Array.isArray(targets.primary)) {
       roles = (targets.primary as unknown[]).filter((r): r is string => typeof r === "string");
     }
+    archetypes = extractArchetypes(profile);
     const language = isObj(profile.language) ? (profile.language as Record<string, unknown>) : {};
     if (typeof language.modes_dir === "string" && language.modes_dir.trim()) {
       marketMode = language.modes_dir.trim();
@@ -95,7 +103,7 @@ export async function GET() {
       dealBreakers = merged;
     }
   }
-  return Response.json({ dealBreakers, locationFlexibility, roles, marketMode, marketModes: listMarketModes() });
+  return Response.json({ dealBreakers, locationFlexibility, roles, archetypes, marketMode, marketModes: listMarketModes() });
 }
 
 export async function POST(req: Request) {
@@ -105,11 +113,24 @@ export async function POST(req: Request) {
   } catch {
     return Response.json({ error: "bad json" }, { status: 400 });
   }
-  const proposed = patchToProfile(patch);
-  if (Object.keys(proposed).length === 0) return Response.json({ error: "nothing to write" }, { status: 400 });
-
   const root = careerOpsRoot();
   const file = path.join(root, "config", "profile.yml");
+  // ADR-0091: only a patch that carries an archetype list needs the on-disk
+  // entries to reconcile against; a roles-only save keeps its old cheap path.
+  // Malformed YAML refuses here already (the same guard the merge re-checks).
+  let existingArchetypes: Record<string, unknown>[] = [];
+  if (Array.isArray(patch.archetypes) && fs.existsSync(file)) {
+    let parsed: unknown;
+    try {
+      parsed = yaml.load(fs.readFileSync(file, "utf8"));
+    } catch {
+      return Response.json({ error: "config/profile.yml exists but is not valid YAML — refusing to overwrite it." }, { status: 409 });
+    }
+    existingArchetypes = extractArchetypes(parsed);
+  }
+  const proposed = patchToProfile(patch, existingArchetypes);
+  if (Object.keys(proposed).length === 0) return Response.json({ error: "nothing to write" }, { status: 400 });
+
   let next: string;
   let seeded = false;
   let changed = true;
