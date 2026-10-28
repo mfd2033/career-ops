@@ -20,6 +20,9 @@ export const en: Dict = {
   // there, so it names the two actions checking a card buys you.
   "inbox.batchHint": "Check postings to save them to the shortlist or skip them in bulk",
   "inbox.selected": "{n} selected",
+  // Batch bar is always visible (user request 2026-10-28); this is the count slot
+  // when nothing is checked and the buttons sit disabled.
+  "inbox.noneSelected": "Nothing selected",
   "inbox.saveToShortlist": "Save to shortlist",
   "inbox.noMatches": "No matches",
   "inbox.loosenFilters": "Loosen the filters to see more of your inbox.",
@@ -89,6 +92,7 @@ export const zh: Dict = {
   "inbox.hiddenRestore": "{n} 个已隐藏 · 恢复",
   "inbox.batchHint": "勾选岗位后可批量存入短名单或跳过",
   "inbox.selected": "{n} 个已选",
+  "inbox.noneSelected": "未选择",
   "inbox.saveToShortlist": "保存到候选清单",
   "inbox.noMatches": "无匹配结果",
   "inbox.loosenFilters": "放宽筛选条件以查看更多收件箱内容。",

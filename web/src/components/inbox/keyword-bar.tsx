@@ -6,10 +6,11 @@ import { useI18n } from "@/lib/i18n/context";
 import { cn } from "@/lib/cn";
 import { KEYWORD_TOP_N } from "@/lib/inbox-keywords.mjs";
 
-// 收件箱关键词条（ADR-0068）：工具条下方独立一行的 chip 过滤器。零 token——
-// chip 数据由服务端装配（报告词节 ∪ 词典命中），这里只展示与选中。按命中行数
-// 降序取前 KEYWORD_TOP_N 枚带计数；行数为 0 的词条不会进 counts。窄屏行内
-// 横向滚动（与 facet 工具条同款姿态），桌面 flex-wrap。
+// 收件箱关键词条（ADR-0068）：零 token 的 chip 过滤器。chip 数据由服务端
+// 装配（报告词节 ∪ 词典命中），这里只展示与选中。按命中行数降序取前
+// KEYWORD_TOP_N 枚带计数；行数为 0 的词条不会进 counts。2026-10-28 从工具条
+// chips 行移到常驻批量条右侧（由调用方包 ml-auto），本组件只负责单行 chip 列，
+// 横向滚动/换行都交给外层条体。
 export function KeywordBar({
   counts,
   selected,
@@ -27,7 +28,8 @@ export function KeywordBar({
   const shown = expanded ? counts : counts.slice(0, KEYWORD_TOP_N);
   return (
     <div
-      className="mt-2 flex items-center gap-1.5 overflow-x-auto pb-0.5 sm:flex-wrap sm:overflow-visible sm:pb-0"
+      // 常驻批量条右侧内联单行；不再自带纵距/横滚（外层条体处理）。
+      className="flex shrink-0 items-center gap-1.5"
       aria-label={t("inbox.kwBarAria")}
     >
       <Tag className="size-3 shrink-0 text-faint" aria-hidden="true" />

@@ -436,6 +436,11 @@ export function InboxTriage({ inbox, scoredUrls, kwdSet, onToggleKwd, onClearKwd
   // have ≥1 raw posting.
   if (inbox.length === 0) return null;
 
+  // 关键词条实例（ADR-0068）：桌面下注入 FacetChips 的 chips 行尾部，窄屏在工具条
+  // 下方单独渲染——两处只挂载其一（CSS 互斥），常驻折叠状态（组件内部 useState）
+  // 在两种布局间不会丢失。
+  const keywordBar = <KeywordBar counts={keywordCounts} selected={kwdSet ?? new Set<string>()} onToggle={(w) => onToggleKwd?.(w)} />;
+
   return (
     /* 内容区宽度自适应（ADR-0065）：去掉 mx-auto/max-w-3xl，与表格 tab 同宽铺满；
        行内列表的定高/独立滚动与批次条槽位仍按 ADR-0011/0039。 */
@@ -465,64 +470,57 @@ export function InboxTriage({ inbox, scoredUrls, kwdSet, onToggleKwd, onClearKwd
           // 否则会落入已退役的 fresh-batch 截断视图；清除后的开关状态照常持久化
           onClear={() => { setWithin(null); setSources(new Set()); setSeniorities(new Set()); setLocQ(""); setKw(""); setSalaryMin(null); setUnscoredOnly(true); setSortBySalary(true); onClearKwd?.(); }}
         />
-        {/* 关键词条（ADR-0068）：工具条下方独立一行，可折叠、零 token；
-            没有任何关键词时组件自返 null，不占位。 */}
-        <KeywordBar counts={keywordCounts} selected={kwdSet ?? new Set<string>()} onToggle={(w) => onToggleKwd?.(w)} />
-      </div>
-
-      {/* batch header: fresh slice by default, or the full filtered set —— 命中数在此处
-          唯一呈现（筛选工具条不再重复 N/total）。「全选 / 已隐藏恢复」是作用于命中集合的
-          动作，紧跟标题成同一视觉组：ADR-0065 后内容区全宽，原先的 justify-between 会把
-          按钮甩到远端右角，宽屏下与它作用的范围相距上千像素，形同失踪。 */}
-      <div className="mt-3 flex flex-wrap items-baseline gap-x-4 gap-y-1 md:shrink-0">
-        <p className="text-sm font-medium text-foreground">
-          {capped
-            ? t("inbox.freshWorthLook")
-            : anyFacet
-              ? filtered.length === 1
-                ? t("inbox.matchOne")
-                : t("inbox.matches", { n: filtered.length })
-              : t("inbox.allRoles")}
-        </p>
-        {filtered.length > 0 && (
-          <button
-            type="button"
-            onClick={toggleSelectAll}
-            className="text-xs text-muted transition-colors hover:text-foreground"
-            aria-pressed={allFilteredSelected}
-          >
-            {allFilteredSelected ? t("inbox.selectNone") : t("inbox.selectAll")}
-          </button>
-        )}
-        {hiddenCount > 0 && (
-          <button type="button" onClick={() => setHidden([])} className="text-xs text-muted transition-colors hover:text-foreground">
-            {t("inbox.hiddenRestore", { n: hiddenCount })}
-          </button>
-        )}
       </div>
 
       {/* multi-select action bar —— 常驻槽位（ADR-0039 决议 1/2/3，与管道页同机制）：槽位恒在、
-          高度锁定，勾选/取消不再把卡片列表顶开。空态由 RowSlot 渲染一句提示语。`md:` 以下没有
-          定高布局，槽位不存在，条出现时照旧下推列表（已知残差）。 */}
-      <RowSlot hint={t("inbox.batchHint")} className="md:mt-2 md:h-11">
-        {selected.size > 0 && (
-          <div className="flex items-center gap-3 rounded-lg border border-brand/30 bg-brand-soft px-3 py-2 text-sm max-md:mt-2">
-            <span className="shrink-0 font-medium text-brand tabular-nums">{t("inbox.selected", { n: selected.size })}</span>
-            <button type="button" onClick={saveSelected} className="shrink-0 rounded-md bg-brand px-2.5 py-1 text-xs font-medium text-brand-foreground max-sm:min-h-[44px]">
-              {t("inbox.saveToShortlist")}
+          高度锁定，勾选/取消不再把卡片列表顶开。2026-10-28 用户要求改常显并删掉独立批次头：
+          命中数（唯一呈现处）、「已隐藏恢复」（批量撤销 skip 的唯一入口）一并上收到此条；
+          关键词条（ADR-0068）也从 chips 行移到此条右侧 ml-auto 收尾（用户要求 2026-10-28）。
+          未勾选时按钮置灰、计数位显「未选择」，提示语不再挂（条体已自解释）。 */}
+      <RowSlot hint="" className="md:mt-3 md:h-11">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-brand/30 bg-brand-soft px-3 py-2 text-sm max-md:mt-2 md:flex-nowrap md:overflow-x-auto">
+          {/* 命中数——原独立批次头删后住这里（条体首位） */}
+          <span className="shrink-0 font-medium text-foreground">
+            {capped
+              ? t("inbox.freshWorthLook")
+              : anyFacet
+                ? filtered.length === 1
+                  ? t("inbox.matchOne")
+                  : t("inbox.matches", { n: filtered.length })
+                : t("inbox.allRoles")}
+          </span>
+          {hiddenCount > 0 && (
+            <button type="button" onClick={() => setHidden([])} className="shrink-0 text-xs text-muted transition-colors hover:text-foreground max-sm:min-h-[44px]">
+              {t("inbox.hiddenRestore", { n: hiddenCount })}
             </button>
-            <button type="button" onClick={skipSelected} className="shrink-0 text-xs text-muted hover:text-foreground max-sm:min-h-[44px]">
-              {t("inbox.skipSelected")}
+          )}
+          {/* 「全选 / 取消全选」——无命中行时不渲染。 */}
+          {filtered.length > 0 && (
+            <button
+              type="button"
+              onClick={toggleSelectAll}
+              className="shrink-0 text-xs text-muted transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 max-sm:min-h-[44px]"
+              aria-pressed={allFilteredSelected}
+            >
+              {allFilteredSelected ? t("inbox.selectNone") : t("inbox.selectAll")}
             </button>
-            {/* ADR-0057: destructive action, visually red and farthest from the safer ones */}
-            <button type="button" onClick={openDeleteConfirm} disabled={deleting} className="shrink-0 text-xs text-red-500 hover:text-red-600 disabled:opacity-50 max-sm:min-h-[44px]">
-              {deleting ? "…" : t("inbox.deleteSelected")}
-            </button>
-            <button type="button" onClick={() => setSelected(new Set())} className="shrink-0 text-xs text-muted hover:text-foreground max-sm:min-h-[44px]">
-              {t("inbox.clear")}
-            </button>
-          </div>
-        )}
+          )}
+          <span className="shrink-0 font-medium text-brand tabular-nums">
+            {selected.size > 0 ? t("inbox.selected", { n: selected.size }) : t("inbox.noneSelected")}
+          </span>
+          <button type="button" onClick={saveSelected} disabled={selected.size === 0} className="shrink-0 rounded-md bg-brand px-2.5 py-1 text-xs font-medium text-brand-foreground disabled:cursor-not-allowed disabled:opacity-50 max-sm:min-h-[44px]">
+            {t("inbox.saveToShortlist")}
+          </button>
+          <button type="button" onClick={skipSelected} disabled={selected.size === 0} className="shrink-0 text-xs text-muted transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 max-sm:min-h-[44px]">
+            {t("inbox.skipSelected")}
+          </button>
+          {/* ADR-0057: destructive action, visually red and farthest from the safer ones */}
+          <button type="button" onClick={openDeleteConfirm} disabled={deleting || selected.size === 0} className="shrink-0 text-xs text-red-500 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-50 max-sm:min-h-[44px]">
+            {deleting ? "…" : t("inbox.deleteSelected")}
+          </button>
+          {/* 关键词条（ADR-0068）——ml-auto 推到条体右侧收尾；无关键词时组件自返 null */}
+          <span className="ml-auto shrink-0">{keywordBar}</span>
+        </div>
       </RowSlot>
 
       {visible.length > 0 ? (
