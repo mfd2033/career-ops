@@ -62,7 +62,7 @@ export function AiHuntView({ cliName }: { cliName?: string }) {
         <AiHuntTrace trace={aiTrace} />
 
         {offers.length > 0 && (
-          <div className="mt-2 grid w-full max-w-4xl gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          <div className="mt-2 grid w-full gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
             {offers.map((o) => (
               <DiscoveryCard key={o.url} offer={o} inPipeline={false} />
             ))}

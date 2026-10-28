@@ -152,8 +152,9 @@ export function ExplorerView({
   const canDiscover = isBsk ? !browserKeywordMissing && !browserKeywordMulti : filters.ats.length > 0;
   const isResults = phase === "results";
 
+  // 自适应浏览器宽度：铺满可用宽度，上限与今日页一致（max-w-[1600px]）
   return (
-    <div className="mx-auto max-w-5xl px-5 py-8 md:px-8">
+    <div className="mx-auto w-full max-w-[1600px] px-5 py-8 md:px-8">
       <header className="mb-6">
         <div className="flex flex-wrap items-center gap-3">
           <div className="flex items-center gap-2.5">
