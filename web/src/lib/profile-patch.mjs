@@ -34,7 +34,7 @@
  *   name?: string; email?: string; location?: string; roles?: string[];
  *   compMin?: number; compMax?: number; currency?: string; remote?: string;
  *   dealBreakers?: string[]; locationFlexibility?: string; marketMode?: string;
- *   archetypes?: string[];
+ *   archetypes?: (string | {name: string; level?: string; fit?: string})[];
  * }} patch
  * @param {unknown[]} [existingArchetypes] 磁盘上已存的原型条目，仅供 archetypes
  *   名单按名对账（ADR-0091）：旧名字整条保留 level/fit，新名字补默认 fit。
@@ -106,12 +106,42 @@ export function extractArchetypes(profile) {
 }
 
 /**
- * Reconcile a submitted archetype NAME list against the entries on disk
- * (ADR-0091 决议 3). The output order follows the submitted names; a name that
- * still exists keeps its WHOLE old entry object (level/fit/unknown keys
- * survive untouched); a new name becomes `{name, fit: "primary"}` with no
- * level (that nuance stays hand-editable in profile.yml). Names are trimmed,
- * blank items dropped, duplicates deduped to the first occurrence.
+ * fit 分层封闭枚举（ADR-0092）：评估打分按此分层（primary=梦想/secondary=合适/
+ * adjacent=够得着）。提交里出现枚举外的值（手编 profile.yml 的残留）按「未提供」
+ * 处理——沿用磁盘旧值或缺省 primary，绝不静默改写或丢弃。UI 据此渲染下拉选项。
+ */
+export const ARCHETYPE_FIT_VALUES = ["primary", "secondary", "adjacent"];
+
+/**
+ * 把提交的原型条目归一成 {name, level, fit} 三元组：字符串条目（旧调用方）
+ * 等价 {name}；对象条目取 name/level/fit 的字符串形态，缺失记空串。
+ * 空 name 由调用方丢弃——这里只做归一，不做取舍，永不 throw。
+ */
+function normalizeArchetypeEntry(entry) {
+  if (entry && typeof entry === "object" && !Array.isArray(entry)) {
+    const n = entry.name;
+    const name = typeof n === "string" ? n.trim() : n == null ? "" : String(n).trim();
+    return {
+      name,
+      level: typeof entry.level === "string" ? entry.level.trim() : "",
+      fit: typeof entry.fit === "string" ? entry.fit.trim() : "",
+    };
+  }
+  return { name: String(entry ?? "").trim(), level: "", fit: "" };
+}
+
+/**
+ * Reconcile a submitted archetype list against the entries on disk
+ * (ADR-0091 决议 3 + ADR-0092 扩展). The output order follows the submitted
+ * entries; a name that still exists keeps its WHOLE old entry object as the
+ * base (level/fit/unknown keys survive untouched), then the submission's
+ * EXPLICIT fields override: a valid-enum `fit` replaces the disk fit, a
+ * non-blank `level` replaces the disk level. A missing/invalid fit and a
+ * blank/missing level keep the disk values (new names default to
+ * `fit: "primary"` with no level — that nuance stays hand-editable in
+ * profile.yml). Entries may be bare name strings (legacy) or `{name, level?,
+ * fit?}` objects. Names are trimmed, blank items dropped, duplicates deduped
+ * to the first occurrence.
  *
  * Matching identity is normalized on BOTH sides — submitted names are trimmed
  * strings, so disk names are matched by `String(name).trim()` while the
@@ -119,11 +149,18 @@ export function extractArchetypes(profile) {
  * `" TechLead "` or YAML-typed numeric name survives verbatim).
  *
  * @param {unknown[]} existing entries on disk (malformed shapes tolerated)
- * @param {unknown[]} names the submitted list (non-strings tolerated)
+ * @param {unknown[]} entries the submitted list (strings or objects, junk tolerated)
  * @returns {Record<string, unknown>[]}
  */
-export function reconcileArchetypes(existing, names) {
-  const clean = [...new Set((Array.isArray(names) ? names : []).map((n) => String(n ?? "").trim()).filter(Boolean))];
+export function reconcileArchetypes(existing, entries) {
+  const clean = [];
+  const seen = new Set();
+  for (const raw of Array.isArray(entries) ? entries : []) {
+    const { name, level, fit } = normalizeArchetypeEntry(raw);
+    if (name === "" || seen.has(name)) continue;
+    seen.add(name);
+    clean.push({ name, level, fit });
+  }
   const byName = new Map();
   for (const e of Array.isArray(existing) ? existing : []) {
     if (!e || typeof e !== "object" || Array.isArray(e)) continue;
@@ -132,5 +169,18 @@ export function reconcileArchetypes(existing, names) {
     if (key === "" || byName.has(key)) continue;
     byName.set(key, e);
   }
-  return clean.map((name) => byName.get(name) ?? { name, fit: "primary" });
+  return clean.map(({ name, level, fit }) => {
+    const old = byName.get(name);
+    if (!old) {
+      const next = { name, fit: ARCHETYPE_FIT_VALUES.includes(fit) ? fit : "primary" };
+      if (level) next.level = level;
+      return next;
+    }
+    // 旧条目整份浅拷贝作 base（unknown keys 不丢、不改动磁盘对象），再按
+    // 提交显式覆盖（ADR-0092）：UI 显示什么就存什么，未暴露的键原样保留。
+    const next = { ...old };
+    if (ARCHETYPE_FIT_VALUES.includes(fit)) next.fit = fit;
+    if (level) next.level = level;
+    return next;
+  });
 }

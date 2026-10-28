@@ -35,8 +35,10 @@ type ProfilePatch = {
   locationFlexibility?: string;
   /** 评估模式（CO-51）：`modes/<lang>`；"root" / 空串 = 清空回通用模式。 */
   marketMode?: string;
-  /** 原型名单（ADR-0091）：undefined = 不动；空数组 = 删键；非空 = 按名 reconcile。 */
-  archetypes?: string[];
+  /** 原型名单（ADR-0091 + ADR-0092）：undefined = 不动；空数组 = 删键；非空 =
+   *  按名 reconcile。条目可以是名字字符串（旧形态）或 {name, level?, fit?}——
+   *  合法枚举 fit / 非空 level 覆盖磁盘值，缺失或非法沿用旧值。 */
+  archetypes?: (string | { name: string; level?: string; fit?: string })[];
 };
 
 function isObj(v: unknown): v is Record<string, unknown> {
