@@ -56,6 +56,11 @@ export const en: Dict = {
   "inbox.sortBySalary": "By salary",
   "inbox.selectAll": "Select all",
   "inbox.selectNone": "Clear selection",
+  // Inbox list column header (2026-10-28, parity with the tracker table header):
+  // the main column holds company·role + the meta line; score/actions share the
+  // right band (a row shows one or the other, never both).
+  "inbox.col.position": "company · role",
+  "inbox.col.actions": "actions",
   "inbox.skipSelected": "Skip selected",
   "inbox.skippedN": "Skipped {n}",
   "inbox.openPosting": "Open original posting",
@@ -126,6 +131,10 @@ export const zh: Dict = {
   "inbox.sortBySalary": "按薪资",
   "inbox.selectAll": "全选",
   "inbox.selectNone": "取消全选",
+  // 收件箱列头（2026-10-28，与「全部」tab 表头同款）；主列为公司·职位 + 元信息行，
+  // 评分/操作共用右侧区（行内二者互斥出现）。
+  "inbox.col.position": "公司 · 职位",
+  "inbox.col.actions": "操作",
   "inbox.skipSelected": "跳过选中",
   "inbox.skippedN": "已跳过 {n} 个",
   "inbox.openPosting": "打开原始职位网页",

@@ -494,17 +494,6 @@ export function InboxTriage({ inbox, scoredUrls, kwdSet, onToggleKwd, onClearKwd
               {t("inbox.hiddenRestore", { n: hiddenCount })}
             </button>
           )}
-          {/* 「全选 / 取消全选」——无命中行时不渲染。 */}
-          {filtered.length > 0 && (
-            <button
-              type="button"
-              onClick={toggleSelectAll}
-              className="shrink-0 text-xs text-muted transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 max-sm:min-h-[44px]"
-              aria-pressed={allFilteredSelected}
-            >
-              {allFilteredSelected ? t("inbox.selectNone") : t("inbox.selectAll")}
-            </button>
-          )}
           <span className="shrink-0 font-medium text-brand tabular-nums">
             {selected.size > 0 ? t("inbox.selected", { n: selected.size }) : t("inbox.noneSelected")}
           </span>
@@ -524,7 +513,27 @@ export function InboxTriage({ inbox, scoredUrls, kwdSet, onToggleKwd, onClearKwd
       </RowSlot>
 
       {visible.length > 0 ? (
-        <ul className="mt-3 divide-y divide-border overflow-hidden rounded-2xl border border-border bg-surface/40 md:min-h-0 md:flex-1 md:overflow-y-auto">
+        /* 容器壳（圆角边框）与滚动体分离：列头常驻在滚动区外（与 tracker 表的
+           sticky thead 同效果），ul 只负责行列表与纵向滚动。 */
+        <div className="mt-3 overflow-hidden rounded-2xl border border-border bg-surface/40 md:flex md:min-h-0 md:flex-1 md:flex-col">
+          {/* 列头（用户要求 2026-10-28，与「全部」tab 表格同款）：占位段对齐行内的
+              头像列；首格为全选框（同 tracker 表头，2026-10-28 用户要求移入此处，
+              批量操作条里的独立「全选」按钮同时删除）。评分/操作两列共用右侧区
+              （行内二者互斥出现，列头作归组标签，不逐列硬对齐）。 */}
+          <div className="flex shrink-0 items-center gap-2.5 border-b border-border bg-surface px-3 py-2 text-xs uppercase tracking-wide text-faint sm:gap-3 sm:px-4">
+            <input
+              type="checkbox"
+              checked={allFilteredSelected}
+              onChange={toggleSelectAll}
+              aria-label={t("pipeline.batchSelectAll")}
+              className="size-4 shrink-0 cursor-pointer accent-brand"
+            />
+            <span className="size-5 shrink-0" aria-hidden="true" />
+            <span className="min-w-0 flex-1">{t("inbox.col.position")}</span>
+            <span className="shrink-0">{t("pipeline.col.score")}</span>
+            <span className="shrink-0">{t("inbox.col.actions")}</span>
+          </div>
+          <ul className="divide-y divide-border md:min-h-0 md:flex-1 md:overflow-y-auto">
           {visible.map((e) => (
             <TriageRow
               key={e.urlKey}
@@ -540,7 +549,8 @@ export function InboxTriage({ inbox, scoredUrls, kwdSet, onToggleKwd, onClearKwd
               onSkip={() => skip(e.job)}
             />
           ))}
-        </ul>
+          </ul>
+        </div>
       ) : (
         <div className="mt-3 rounded-2xl border border-dashed border-border bg-surface/30 px-6 py-10 text-center">
           <p className="font-display text-lg">{t("inbox.noMatches")}</p>
