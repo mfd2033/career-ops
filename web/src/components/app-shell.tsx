@@ -65,14 +65,29 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             collapsed ? "w-16 overflow-visible px-2 py-4" : "w-60 overflow-y-auto p-4",
           )}
         >
-          <Link href="/" className={cn("mb-8 flex items-center gap-2.5 px-1", collapsed && "justify-center px-0")}>
-            <CoMark size={32} />
-            {!collapsed && (
-              <span className={`${instrumentSerif.className} relative -top-px text-2xl font-normal tracking-tight text-landing`}>
-                career-ops
-              </span>
-            )}
-          </Link>
+          {/* 顶栏：logo 左、收起/展开开关右上角。收起态宽度放不下两列，
+              退化为纵向：logo 在上，展开按钮在其下居中。 */}
+          <div className={cn("mb-8 flex items-center", collapsed && "flex-col")}>
+            <Link href="/" className={cn("flex items-center gap-2.5 px-1", collapsed && "px-0")}>
+              <CoMark size={32} />
+              {!collapsed && (
+                <span className={`${instrumentSerif.className} relative -top-px text-2xl font-normal tracking-tight text-landing`}>
+                  career-ops
+                </span>
+              )}
+            </Link>
+            <button
+              type="button"
+              onClick={toggleCollapsed}
+              aria-label={t(collapsed ? "nav.expandSidebar" : "nav.collapseSidebar")}
+              className={cn(
+                "flex size-8 cursor-default items-center justify-center rounded-md text-muted transition-colors hover:bg-surface-hover hover:text-foreground",
+                collapsed ? "mt-1" : "ml-auto",
+              )}
+            >
+              {collapsed ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}
+            </button>
+          </div>
           <nav className="shrink-0 flex flex-col gap-1">
             {NAV_ITEMS.map(({ href, labelKey, icon: Icon }) => {
               const active = isActivePath(href, pathname);
@@ -106,33 +121,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
           {!collapsed && <WorkerPills fitToHeight />}
 
-          <div className="mt-auto shrink-0 space-y-3 pt-4">
-            {collapsed ? (
-              <button
-                type="button"
-                onClick={toggleCollapsed}
-                aria-label={t("nav.expandSidebar")}
-                title={t("nav.expandSidebar")}
-                className="group relative flex w-full cursor-default items-center justify-center rounded-md py-2 text-muted transition-colors hover:bg-surface-hover hover:text-foreground"
-              >
-                <PanelLeftOpen className="size-4" />
-              </button>
-            ) : (
-              <>
-                <UsageMeter />
-                <LanguageToggle trailing={<ThemeToggle />} />
-                <button
-                  type="button"
-                  onClick={toggleCollapsed}
-                  aria-label={t("nav.collapseSidebar")}
-                  className="flex w-full cursor-default items-center gap-3 rounded-md px-3 py-2 text-sm text-muted transition-colors hover:bg-surface-hover hover:text-foreground"
-                >
-                  <PanelLeftClose className="size-4" />
-                  {t("nav.collapseSidebar")}
-                </button>
-              </>
-            )}
-          </div>
+          {!collapsed && (
+            <div className="mt-auto shrink-0 space-y-3 pt-4">
+              <UsageMeter />
+              <LanguageToggle trailing={<ThemeToggle />} />
+            </div>
+          )}
         </aside>
         {/* overflow-x-clip（非 hidden）：hidden 会把 overflow-y 计算值强制成 auto，使 main
             变成滚动容器，从而破坏页内 sticky 侧栏（配置页 TOC）——clip 同样裁剪横向溢出
