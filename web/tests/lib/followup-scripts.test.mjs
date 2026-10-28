@@ -187,7 +187,7 @@ test("fillScript 返回三行 + 合并后的缺值清单", () => {
   const script = parseScripts(SHIPPED).find((s) => s.name.includes("投递后无回应"));
   const filled = fillScript(script, ROW);
   assert.deepEqual(filled.lines.map((l) => l.label), LINE_LABELS);
-  assert.equal(filled.lines[0].text, "我 10-02 投了「高级后端工程师」（#137），到今天第 14 天");
+  assert.equal(filled.lines[0].text, "您好，我是10-02投递咱们「高级后端工程师」岗位的候选人，想跟进一下简历筛选的进度");
   assert.deepEqual(filled.missing, []);
 });
 
