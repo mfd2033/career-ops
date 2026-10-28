@@ -148,8 +148,8 @@ export const en: Dict = {
   "followups.scriptLoading": "Loading scripts…",
   "followups.scriptUnavailable": "Scripts unavailable — check templates/followup-scripts.md.",
   "followups.scriptDiscipline": "Three sentences: fact + intent + next step ｜ ask about travel before the interview ｜ never three in a row at one company",
-  "followups.scriptPickGroup": "Pick the round",
-  "followups.scriptPickVariant": "Pick a variant",
+  // 当前阶段自动推导（status/followupCount/freezeSuggested），不设 chips。
+  "followups.scriptStage": "Current stage: {stage}",
   "followups.scriptSource": "Filled from row #{num} · dashed box = yours to complete",
   "followups.scriptNoSend": "Generated only — you paste and send it yourself",
   "followups.scriptCopy": "Copy script",
@@ -323,8 +323,8 @@ export const zh: Dict = {
   "followups.scriptLoading": "正在读取话术…",
   "followups.scriptUnavailable": "话术模板暂不可用——请检查 templates/followup-scripts.md。",
   "followups.scriptDiscipline": "三句话：事实 ＋ 意向 ＋ 下一步 ｜ 售前先问出差 ｜ 同公司别三连发",
-  "followups.scriptPickGroup": "选这一轮",
-  "followups.scriptPickVariant": "选一句变体",
+  // 当前阶段自动推导（status/followupCount/freezeSuggested），不设 chips。
+  "followups.scriptStage": "当前阶段：{stage}",
   "followups.scriptSource": "已按 #{num} 自动填入 · 虚线框 = 复制后你自己补",
   "followups.scriptNoSend": "系统只生成，粘贴发送由你自己来",
   "followups.scriptCopy": "复制话术",

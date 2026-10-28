@@ -5,13 +5,13 @@ import { Check, ChevronDown, Copy, ExternalLink, Loader2 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { useI18n } from "@/lib/i18n/context";
 import type { CadenceEntry } from "@/lib/followups";
-import { groupLabel, scriptsInGroup, shortName } from "@/lib/followup-scripts.mjs";
+import { suggestScriptIndex } from "@/lib/followup-scripts.mjs";
 import type { FollowupScript, FollowupScriptsPayload } from "@/lib/followups-server";
 
 // 「生成话术」（ADR-0080）：LogDialog 底部的可折叠区，**默认展开**（ADR-0082）——
 // 它是 复制话术 → 打开职位 → 粘贴 → 发送 闭环的起点，不该藏在一次点击之后。
-// 一级 chips 选轮次（四个场景桶），二级 chips 选变体（该桶 ≥2 条时才出现），正文按
-// 「事实／意向／下一步」三行标注——纪律就长在界面上，不用另写说明。
+// 当前阶段按本行推进情况自动推导（suggestScriptIndex），UI 只展示、不选择——
+// 正文按「事实／意向／下一步」三行标注，纪律就长在界面上，不用另写说明。
 //
 // 边界：复制只进剪贴板，系统只生成不代发。不写备注、不写 data/follow-ups.md、
 // 不调任何写接口——用户必须自己粘、自己发。
@@ -20,8 +20,6 @@ export function GenerateScriptPanel({ entry }: { entry: CadenceEntry }) {
   const [open, setOpen] = useState(true); // ADR-0082：默认展开
   const [payload, setPayload] = useState<FollowupScriptsPayload | null>(null);
   const [loading, setLoading] = useState(false);
-  const [groupIdx, setGroupIdx] = useState(0);
-  const [variantIdx, setVariantIdx] = useState(0);
   const [copied, setCopied] = useState<"idle" | "copied" | "selected">("idle");
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const timerRef = useRef<number | null>(null);
@@ -37,13 +35,12 @@ export function GenerateScriptPanel({ entry }: { entry: CadenceEntry }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
-  const groups = payload?.groups ?? [];
-  const activeGroup = groups[groupIdx] ?? null;
-  const inGroup: FollowupScript[] = useMemo(
-    () => (activeGroup ? scriptsInGroup(payload?.scripts ?? [], activeGroup) : []),
-    [payload, activeGroup],
-  );
-  const script = inGroup[Math.min(variantIdx, Math.max(inGroup.length - 1, 0))] ?? null;
+  const scripts = payload?.scripts ?? [];
+  // 当前阶段：status/followupCount/freezeSuggested → 桶 + 变体，纯函数推导。
+  const script: FollowupScript | null = useMemo(() => {
+    const idx = suggestScriptIndex(scripts, entry);
+    return idx >= 0 ? (scripts[idx] ?? null) : null;
+  }, [scripts, entry]);
 
   // 读接口是只读的（没有写面、不需要锁），所以无需乐观锁/重建——失败一律
   // fail-closed，UI 安静说一句「暂不可用」，不摆一个填不了的空话术。
@@ -64,12 +61,6 @@ export function GenerateScriptPanel({ entry }: { entry: CadenceEntry }) {
     const next = !open;
     setOpen(next);
     if (next && !payload && !loading) void load();
-  };
-
-  const pickGroup = (index: number) => {
-    setGroupIdx(index);
-    setVariantIdx(0); // 换桶就回到该桶第一条，避免指向不存在的变体
-    setCopied("idle");
   };
 
   const copy = async () => {
@@ -93,11 +84,6 @@ export function GenerateScriptPanel({ entry }: { entry: CadenceEntry }) {
     if (timerRef.current !== null) window.clearTimeout(timerRef.current);
     timerRef.current = window.setTimeout(() => setCopied("idle"), 2400);
   };
-
-  const chipCls =
-    "rounded-full border px-3 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40";
-  const chipOff = "border-border bg-surface-hover text-muted hover:text-foreground";
-  const chipOn = "border-brand bg-surface text-brand-text";
 
   return (
     <div className="border-t border-border pt-3">
@@ -128,52 +114,11 @@ export function GenerateScriptPanel({ entry }: { entry: CadenceEntry }) {
                 {t("followups.scriptDiscipline")}
               </p>
 
-              <div role="radiogroup" aria-label={t("followups.scriptPickGroup")} className="mt-3 flex flex-wrap gap-1.5">
-                {groups.map((group, index) => (
-                  <button
-                    key={group}
-                    type="button"
-                    role="radio"
-                    aria-checked={index === groupIdx}
-                    onClick={() => pickGroup(index)}
-                    className={cn(chipCls, index === groupIdx ? chipOn : chipOff)}
-                  >
-                    {groupLabel(group, t)}
-                  </button>
-                ))}
-              </div>
-
-              {/* 二级只在该桶有多条时才出现——用户往文件里加第二条变体，UI 自己长出来。 */}
-              {inGroup.length > 1 && (
-                <div role="radiogroup" aria-label={t("followups.scriptPickVariant")} className="mt-2 flex flex-wrap gap-1.5">
-                  {inGroup.map((item, index) => (
-                    <button
-                      key={item.name}
-                      type="button"
-                      role="radio"
-                      aria-checked={index === variantIdx}
-                      onClick={() => {
-                        setVariantIdx(index);
-                        setCopied("idle");
-                      }}
-                      title={item.scenario}
-                      className={cn(
-                        "rounded-full border px-2.5 py-0.5 text-[11px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40",
-                        index === variantIdx ? chipOn : chipOff,
-                      )}
-                    >
-                      {shortName(item.name)}
-                    </button>
-                  ))}
-                </div>
-              )}
-
-              <p className="mt-2 text-[11px] text-faint">{t("followups.scriptSource", { num: entry.num })}</p>
-
               <div ref={bodyRef} className="mt-2 rounded-lg border border-border bg-surface-hover px-3 py-2.5">
+                {/* 当前阶段（自动推导）+ 变体名 + 场景，一行说清为什么是这条话术。 */}
                 <p className="text-[11px] text-faint">
-                  {script.name}
-                  {script.scenario ? ` · ${script.scenario}` : ""}
+                  {t("followups.scriptStage", { stage: script.name })}
+                  {script.scenario ? ` — ${script.scenario}` : ""}
                 </p>
                 <div className="mt-2 space-y-1.5">
                   {script.lines.map((line) => (
@@ -194,6 +139,8 @@ export function GenerateScriptPanel({ entry }: { entry: CadenceEntry }) {
                   ))}
                 </div>
               </div>
+
+              <p className="mt-2 text-[11px] text-faint">{t("followups.scriptSource", { num: entry.num })}</p>
 
               <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
                 <span className="text-[11px] leading-relaxed text-faint">{t("followups.scriptNoSend")}</span>

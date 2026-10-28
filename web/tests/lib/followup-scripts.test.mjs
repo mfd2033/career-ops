@@ -24,6 +24,7 @@ import {
   fillScripts,
   groupOrder,
   scriptsInGroup,
+  suggestScriptIndex,
   shortName,
   groupLabelKey,
   groupLabel,
@@ -258,4 +259,59 @@ test("groupLabel 对未知分组原样返回，不查表", () => {
   const t = (key) => `T:${key}`;
   assert.equal(groupLabel("留档", t), "T:followups.scriptGroup.留档");
   assert.equal(groupLabel("新桶", t), "新桶");
+});
+
+// ---- suggestScriptIndex：按推进情况自动挑话术（不让用户选轮次）----------------
+
+const ENTRY = (over = {}) => ({ status: "applied", followupCount: 0, ...over });
+
+test("applied 且从未跟进 → 首轮跟进·投递后无回应", () => {
+  const scripts = parseScripts(SHIPPED);
+  const idx = suggestScriptIndex(scripts, ENTRY());
+  assert.match(scripts[idx].name, /首轮跟进 · 投递后无回应/);
+});
+
+test("applied 且已跟进仍无回应 → 已读不回再触达", () => {
+  const scripts = parseScripts(SHIPPED);
+  const idx = suggestScriptIndex(scripts, ENTRY({ followupCount: 1 }));
+  assert.match(scripts[idx].name, /已读不回/);
+});
+
+test("applied 且已跟进、引擎判定冻结 → 二轮保岗·岗位或将关闭（冻结优先于常规再触达）", () => {
+  const scripts = parseScripts(SHIPPED);
+  const idx = suggestScriptIndex(scripts, ENTRY({ followupCount: 2, freezeSuggested: true }));
+  assert.match(scripts[idx].name, /岗位或将关闭/);
+});
+
+test("responded（约面阶段）→ 售前问出差·约面先问清", () => {
+  const scripts = parseScripts(SHIPPED);
+  const idx = suggestScriptIndex(scripts, ENTRY({ status: "responded" }));
+  assert.match(scripts[idx].name, /约面先问清/);
+});
+
+test("interview（面后等结果）→ 二轮保岗·面后等结果", () => {
+  const scripts = parseScripts(SHIPPED);
+  const idx = suggestScriptIndex(scripts, ENTRY({ status: "interview", followupCount: 3 }));
+  assert.match(scripts[idx].name, /面后等结果/);
+});
+
+test("变体关键词匹配不到时落桶内第一条——用户改写模板名不空手", () => {
+  const scripts = parseScripts(
+    "## 首轮跟进 · 换了个名字\n- 分组: 首轮跟进\n- 事实: a\n## 首轮跟进 · 又一个\n- 分组: 首轮跟进\n- 事实: b",
+  );
+  const idx = suggestScriptIndex(scripts, ENTRY());
+  assert.equal(idx, 0); // 目标桶第一条，而不是整体消失
+});
+
+test("目标桶整个不存在 → 落第一条，不报错不空手", () => {
+  const scripts = parseScripts("## 留档 · 婉拒\n- 分组: 留档\n- 事实: a");
+  assert.equal(suggestScriptIndex(scripts, ENTRY()), 0);
+});
+
+test("未知状态 / row 为空 / 空数组的兜底", () => {
+  const scripts = parseScripts(SHIPPED);
+  assert.equal(suggestScriptIndex(scripts, ENTRY({ status: "offer" })), 0);
+  assert.equal(suggestScriptIndex(scripts, null), 0);
+  assert.equal(suggestScriptIndex([], ENTRY()), -1);
+  assert.equal(suggestScriptIndex(undefined, ENTRY()), -1);
 });

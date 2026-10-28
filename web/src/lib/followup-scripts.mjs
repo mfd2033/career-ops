@@ -163,6 +163,63 @@ export function scriptsInGroup(scripts, group) {
   return scripts.filter((script) => script.group === group);
 }
 
+// 按推进情况自动挑话术的规则表（用户决策：不让用户选轮次，UI 直接显示当前阶段）。
+// 顺序即优先级——freezeSuggested 要在「已跟进」之前判，冻结优先于常规再触达。
+// prefer 是变体关键词：在目标桶里按模板名匹配，匹配不到落桶内第一条。
+const STAGE_RULES = [
+  {
+    when: (row) => row.status === "applied" && (row.followupCount ?? 0) === 0,
+    group: "首轮跟进",
+    prefer: "投递",
+  },
+  {
+    when: (row) => row.status === "applied" && row.freezeSuggested === true,
+    group: "二轮保岗",
+    prefer: "关闭",
+  },
+  {
+    when: (row) => row.status === "applied",
+    group: "首轮跟进",
+    prefer: "已读",
+  },
+  {
+    when: (row) => row.status === "responded",
+    group: "售前问出差",
+    prefer: "约面",
+  },
+  {
+    when: (row) => row.status === "interview",
+    group: "二轮保岗",
+    prefer: "面",
+  },
+];
+
+/**
+ * 按本行推进情况自动挑一条话术。返回 scripts 的下标；空数组返回 -1。
+ *
+ * 规则（由 tracker 行的 status/followupCount/freezeSuggested 推导）：
+ * - applied 且从未跟进过 → 首轮跟进·投递后无回应
+ * - applied 且已跟进、引擎判定该冻结 → 二轮保岗·岗位或将关闭
+ * - applied 且已跟进（其余情况）→ 首轮跟进·已读不回再触达
+ * - responded（对方已回，约面阶段）→ 售前问出差·约面先问清
+ * - interview（面后在等结果）→ 二轮保岗·面后等结果
+ *
+ * 模板名由用户随时改写，prefer 关键词只做「尽量」：目标桶里匹配不到就落桶内
+ * 第一条，目标桶整个不存在就落第一条——绝不因名字变了而空手而归。
+ */
+export function suggestScriptIndex(scripts, row) {
+  const list = Array.isArray(scripts) ? scripts : [];
+  if (!list.length) return -1;
+  const r = row && typeof row === "object" ? row : {};
+  const status = String(r.status ?? "").toLowerCase();
+  const rule = STAGE_RULES.find(({ when }) => when({ ...r, status }));
+  if (!rule) return 0;
+  const inGroup = scriptsInGroup(list, rule.group);
+  if (!inGroup.length) return 0;
+  const preferred = inGroup.find((script) => String(script.name ?? "").includes(rule.prefer));
+  return list.indexOf(preferred ?? inGroup[0]);
+}
+
 /**
  * 二级 chips 的短名：模板名按 `·` 拆开后取最后一段（「首轮跟进 · 投递后无回应」
  * → 「投递后无回应」）。没有分隔符就整名返回——用户新写的命名不会因为格式不同
