@@ -439,9 +439,8 @@ export function PipelineView({
       <div className="flex items-end justify-between gap-4 md:shrink-0">
         <div>
           <h1 className="font-display text-2xl tracking-tight text-landing">{t("pipeline.title")}</h1>
-          <p className="mt-1 text-sm text-muted">
-            {t("pipeline.inboxSummary", { count: pendingInbox.length, total: applications.length })}
-          </p>
+          {/* 「N 在收件箱 · M 已追踪」摘要行已按用户要求移除（2026-10-28）：
+              收件箱数在 INBOX tab 批量条有呈现，tracker 总数分析页可见，标题下不再挂。 */}
         </div>
         {/* the tracker has its own search; the inbox brings its own facet filters */}
         {tab !== "INBOX" && (

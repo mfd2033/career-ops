@@ -6,7 +6,7 @@ import type { Dict } from "../types";
 export const en: Dict = {
   // ── Pipeline view (pipeline-view.tsx) ──
   "pipeline.title": "Pipeline",
-  "pipeline.inboxSummary": "{count} in inbox · {total} tracked",
+  // "pipeline.inboxSummary" removed 2026-10-28 (user asked to drop the subtitle line).
   "pipeline.searchPlaceholder": "Search company, role, or #report no…",
   "pipeline.clearSearch": "Clear search",
   "pipeline.filtered": "Filtered:",
@@ -297,7 +297,6 @@ export const en: Dict = {
 export const zh: Dict = {
   // ── Pipeline view (pipeline-view.tsx) ──
   "pipeline.title": "求职管道",
-  "pipeline.inboxSummary": "{count} 在收件箱 · {total} 已追踪",
   "pipeline.searchPlaceholder": "搜索公司、职位或报告号…",
   "pipeline.clearSearch": "清除搜索",
   "pipeline.filtered": "已筛选：",

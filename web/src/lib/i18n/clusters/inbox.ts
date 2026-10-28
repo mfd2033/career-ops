@@ -27,7 +27,7 @@ export const en: Dict = {
   "inbox.noMatches": "No matches",
   "inbox.loosenFilters": "Loosen the filters to see more of your inbox.",
   "inbox.seeAll": "See all {n} in inbox →",
-  "inbox.saveHint": "Save roles worth a look, then score them together — one token spend.",
+  // "inbox.saveHint" removed 2026-10-28 (user asked to drop the empty-shortlist hint line).
   "inbox.skipped": "Skipped {company}",
   "inbox.undo": "Undo",
   "inbox.shortlist": "Shortlist",
@@ -97,7 +97,7 @@ export const zh: Dict = {
   "inbox.noMatches": "无匹配结果",
   "inbox.loosenFilters": "放宽筛选条件以查看更多收件箱内容。",
   "inbox.seeAll": "查看收件箱中的全部 {n} 个 →",
-  "inbox.saveHint": "保存值得一看的职位，然后一起评分 —— 只消耗一次 tokens。",
+  // "inbox.saveHint" 已随移除删除（2026-10-28）。
   "inbox.skipped": "已跳过 {company}",
   "inbox.undo": "撤销",
   "inbox.shortlist": "候选清单",

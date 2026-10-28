@@ -559,10 +559,8 @@ export function InboxTriage({ inbox, scoredUrls, kwdSet, onToggleKwd, onClearKwd
         </button>
       )}
 
-      {/* empty-shortlist guidance (only once there's nothing saved) */}
-      {shortlist.length === 0 && (
-        <p className="mt-4 text-center text-xs text-faint">{t("inbox.saveHint")}</p>
-      )}
+      {/* empty-shortlist guidance（「保存值得一看的职位…」）已按用户要求移除
+          （2026-10-28），候选清单为空时不再挂提示句。 */}
 
       {/* undo toast (sits above the tray) */}
       {undo && (
