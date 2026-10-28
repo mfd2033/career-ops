@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
+import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { CoMark } from "@/components/co-mark";
 import { AssistantConsole } from "@/components/assistant-console";
@@ -25,6 +26,18 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { t } = useI18n();
 
+  // 桌面侧栏收起态：先按展开渲染避免 SSR/水合不一致，挂载后再读 localStorage 恢复。
+  const [collapsed, setCollapsed] = useState(false);
+  useEffect(() => {
+    if (localStorage.getItem("career-ops:sidebar-collapsed") === "1") setCollapsed(true);
+  }, []);
+  const toggleCollapsed = () => {
+    setCollapsed((c) => {
+      localStorage.setItem("career-ops:sidebar-collapsed", c ? "0" : "1");
+      return !c;
+    });
+  };
+
   // 记录应用内导航：路由变化时把当前完整路由压入会话栈，供详情页“返回”按钮判断
   // 回到进入详情页之前的页面。软导航下 AppShell 不重挂载，因此依赖 pathname 变化触发。
   useEffect(() => {
@@ -42,12 +55,23 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             仍保留 overflow-y-auto 作为兵底（而非 hidden）：ghost 已不再撑大溢出区，
             只有当 logo+导航+底部控件本身都放不下（极高窗口内容区 < ~610px）时，才回退
             为可滚动以保住底部语言/主题/用量控件；overflow-anchor:none 防止被静默滚动。 */}
-        <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col overflow-y-auto border-r border-border bg-surface/30 p-4 [overflow-anchor:none] md:flex">
-          <Link href="/" className="mb-8 flex items-center gap-2.5 px-1">
+        {/* 收起态只留图标列：hover 图标时用 tooltip 显示菜单文字。展开态保持原有的
+            overflow-y-auto 兵底；收起态改为 overflow-visible，否则溢出裁剪会把
+            伸到侧栏右侧的 tooltip 一起裁掉（overflow-y 非 visible 会把 overflow-x
+            强制成 auto，建立滚动容器）。收起后内容只有一列图标，本身不需要滚动。 */}
+        <aside
+          className={cn(
+            "sticky top-0 hidden h-screen shrink-0 flex-col border-r border-border bg-surface/30 [overflow-anchor:none] transition-[width,padding] duration-200 md:flex",
+            collapsed ? "w-16 overflow-visible px-2 py-4" : "w-60 overflow-y-auto p-4",
+          )}
+        >
+          <Link href="/" className={cn("mb-8 flex items-center gap-2.5 px-1", collapsed && "justify-center px-0")}>
             <CoMark size={32} />
-            <span className={`${instrumentSerif.className} relative -top-px text-2xl font-normal tracking-tight text-landing`}>
-              career-ops
-            </span>
+            {!collapsed && (
+              <span className={`${instrumentSerif.className} relative -top-px text-2xl font-normal tracking-tight text-landing`}>
+                career-ops
+              </span>
+            )}
           </Link>
           <nav className="shrink-0 flex flex-col gap-1">
             {NAV_ITEMS.map(({ href, labelKey, icon: Icon }) => {
@@ -57,24 +81,57 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   key={href}
                   href={href}
                   className={cn(
-                    "flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors",
+                    "group relative flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors",
+                    collapsed && "justify-center px-0",
                     active
                       ? "bg-brand-soft text-brand-text"
                       : "text-muted hover:bg-surface-hover hover:text-foreground",
                   )}
                 >
                   <Icon className="size-4" />
-                  {t(labelKey)}
+                  {!collapsed && t(labelKey)}
+                  {/* 收起态 tooltip：hover（或键盘 focus）图标 300ms 后浮现，随点击目标导航 */}
+                  {collapsed && (
+                    <span
+                      role="tooltip"
+                      className="pointer-events-none absolute left-full top-1/2 z-50 ml-2 -translate-y-1/2 whitespace-nowrap rounded-md border border-border bg-surface px-2 py-1 text-xs text-foreground opacity-0 shadow-md transition-opacity duration-150 group-hover:opacity-100 group-hover:delay-300 group-focus-visible:opacity-100 group-focus-visible:delay-300"
+                    >
+                      {t(labelKey)}
+                    </span>
+                  )}
                 </Link>
               );
             })}
           </nav>
 
-          <WorkerPills fitToHeight />
+          {!collapsed && <WorkerPills fitToHeight />}
 
           <div className="mt-auto shrink-0 space-y-3 pt-4">
-            <UsageMeter />
-            <LanguageToggle trailing={<ThemeToggle />} />
+            {collapsed ? (
+              <button
+                type="button"
+                onClick={toggleCollapsed}
+                aria-label={t("nav.expandSidebar")}
+                title={t("nav.expandSidebar")}
+                className="group relative flex w-full cursor-default items-center justify-center rounded-md py-2 text-muted transition-colors hover:bg-surface-hover hover:text-foreground"
+              >
+                <PanelLeftOpen className="size-4" />
+              </button>
+            ) : (
+              <>
+                <UsageMeter />
+                <LanguageToggle trailing={<ThemeToggle />} />
+                <button
+                  type="button"
+                  onClick={toggleCollapsed}
+                  aria-label={t("nav.collapseSidebar")}
+                  className="flex w-full cursor-default items-center gap-3 rounded-md px-3 py-2 text-sm text-muted transition-colors hover:bg-surface-hover hover:text-foreground"
+                >
+                  <PanelLeftClose className="size-4" />
+                  {t("nav.collapseSidebar")}
+                </button>
+              </>
+            )}
           </div>
         </aside>
         {/* overflow-x-clip（非 hidden）：hidden 会把 overflow-y 计算值强制成 auto，使 main

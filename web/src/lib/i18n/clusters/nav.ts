@@ -17,6 +17,8 @@ export const en: Dict = {
   "nav.closeMenu": "Close menu",
   "nav.menu": "Menu",
   "nav.navMenu": "Navigation menu",
+  "nav.collapseSidebar": "Collapse sidebar",
+  "nav.expandSidebar": "Expand sidebar",
   "nav.localFirst": "local-first · v0",
 };
 
@@ -35,5 +37,7 @@ export const zh: Dict = {
   "nav.closeMenu": "关闭菜单",
   "nav.menu": "菜单",
   "nav.navMenu": "导航菜单",
+  "nav.collapseSidebar": "收起侧栏",
+  "nav.expandSidebar": "展开侧栏",
   "nav.localFirst": "本地优先 · v0",
 };
