@@ -416,7 +416,7 @@ Headless worker command per CLI:
 
 - Node.js (`.mjs`), Playwright (PDF + scraping), YAML (config), HTML/CSS (template), Markdown (data), Canva MCP (optional visual CV)
 - Output in `output/` (gitignored) · Reports in `reports/` · JDs in `jds/` (referenced as `local:jds/{file}` in pipeline.md) · Batch in `batch/` (gitignored except scripts and prompt)
-- Report numbering: sequential 3-digit zero-padded, max existing + 1
+- Report numbering: sequential zero-padded, max existing + 1. A report number is unique across the live set — two files sharing one is an **error** (`verify-pipeline.mjs` Check 15) because `jd-capture.mjs` resolves archived JDs by that prefix. Numbers are never reused: a superseded or merged report moves to `reports/archive/` (the single archive dir; it is not scanned by Checks 9/10, so no orphan/duplicate warning), never silently deleted and never renumbered into the live set. `reports/checkups/` holds company-checkup HTML, not evaluations.
 
 ### JD captures (`jds/`)
 

@@ -128,3 +128,25 @@ test("zhaopin: retained search-query params (jl/kw) survive beside stripped beac
   assert.equal(webKey(url), expected);
   assert.equal(webKey(url), coreKey(url));
 });
+
+// BOSS 列表卡片/推荐位信标：pk/lid/sessionId 与 _security_check 只描述「这次点击从
+// 哪来」。漏 strip 的代价是同一职位两个去重键 → 重复评估（#1117/#1129、#1161/#1164）。
+// 核心清单在本 fork 由 local/dedup-params.mjs 扩展，web 镜像读不到该文件，故硬编码；
+// 这个用例把两侧锁在一起。
+test("zhipin: list-card beacons (pk/lid/sessionId/_security_check) strip, on both sides", () => {
+  const url =
+    "https://www.zhipin.com/job_detail/52df484a60f195910nx62dS4FFBU.html" +
+    "?pk=cpc_job_index_zhengzhou&ka=rcmd_list_job_7" +
+    "&lid=b1633eab-0482-44b9-8a2b-16e87b9f786a.f1%3Acommon.abc.8" +
+    "&sessionId=dc25bcc1-f493-4b9b-b437-3808c460d3c3&_security_check=3_1759100000000";
+  const expected = "https://www.zhipin.com/job_detail/52df484a60f195910nx62dS4FFBU.html";
+  assert.equal(webKey(url), expected);
+  assert.equal(webKey(url), coreKey(url), "parity: web mirror must match core");
+});
+
+test("zhipin: a retained functional param survives beside the stripped beacons", () => {
+  const url = "https://www.zhipin.com/job_detail/abc123.html?pk=cpc&expectId=9001";
+  const expected = "https://www.zhipin.com/job_detail/abc123.html?expectId=9001";
+  assert.equal(webKey(url), expected);
+  assert.equal(webKey(url), coreKey(url));
+});

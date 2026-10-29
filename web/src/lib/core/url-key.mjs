@@ -37,7 +37,14 @@ const TRACKING_PARAMS = [
   // a click-source param — both vary per-request, never identify the posting.
   // A listing's detail URL carries ?securityId=...&ka=... while the list card
   // link doesn't, so stripping keeps both views on the same dedup key.
-  /^securityId$/i, /^ka$/i,
+  //
+  // The same applies to pk (ad slot), lid (list position UUID) and sessionId,
+  // plus _security_check (<n>_<timestamp>, regenerated per check). Those four
+  // arrive via the fork-local denylist (local/dedup-params.mjs, ADR-0022) on
+  // the Node side; a browser cannot read that file, so they are mirrored here
+  // by hand. Without them the same posting keyed twice and was evaluated twice
+  // — reports #1117/#1129 and #1161/#1164.
+  /^securityId$/i, /^ka$/i, /^_security_check$/i, /^pk$/i, /^lid$/i, /^sessionId$/i,
   // 猎聘 board-specific: 反爬/跟踪参数每次请求变化,strip 后仅留 job/{id}.shtml
   // 作去重键。skId/fkId/ckId 等价 BOSS 的 securityId。与扩展 site-liepin.js 的
   // extraTrackingParams 保持同一清单。

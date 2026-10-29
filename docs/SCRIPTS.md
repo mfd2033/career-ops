@@ -69,7 +69,7 @@ npm run doctor
 
 ## verify
 
-Health check for pipeline data integrity. Validates `data/applications.md` against nine rules: canonical statuses (per `templates/states.yml`), no duplicate company+role pairs, all report links point to existing files, scores match `X.XX/5` / `N/A` / `DUP`, rows have proper pipe-delimited format, no pending TSVs in `batch/tracker-additions/`, no markdown bold in scores, no two `reports/*.md` files covering the same company+role, and no orphan reports without a tracker row (#1425). The report checks are warning-level: duplicate reports can be legitimate (re-evaluation after a JD change), so they never fail the run.
+Health check for pipeline data integrity. Validates `data/applications.md` against these rules: canonical statuses (per `templates/states.yml`), no duplicate company+role pairs, all report links point to existing files, scores match `X.XX/5` / `N/A` / `DUP`, rows have proper pipe-delimited format, no pending TSVs in `batch/tracker-additions/`, no markdown bold in scores, no two `reports/*.md` files covering the same company+role, no orphan reports without a tracker row (#1425), no report number shared by two report files (error — `jd-capture.mjs` resolves captures by number prefix), and no pending `data/pipeline.md` entry whose URL is already in the tracker (warning — an entry left unticked gets re-evaluated by the next batch run, the #1161/#1164 duplicate). The company+role / orphan report checks are warning-level: duplicate reports can be legitimate (re-evaluation after a JD change), so they never fail the run; superseded reports belong in `reports/archive/`, which the report scans do not read.
 
 ```bash
 npm run verify

@@ -16,6 +16,9 @@
  * 11. Via channel consistency (see #1596)
  * 12. No # value reused across 2+ tracker rows (error — see #1704)
  * 13. applications.md <-> active-interviews.md status sync (see #1504)
+ * 14. data/follow-ups.md table schema parses as stats.mjs reads it (see #2971)
+ * 15. No report number reused by 2+ report files (error)
+ * 16. No pending pipeline entry whose URL is already in the tracker (warning)
  *
  * Run: node career-ops/verify-pipeline.mjs
  */
@@ -28,6 +31,7 @@ import {
   normalizeTextKey, normalizeVia,
 } from './tracker-parse.mjs';
 import { extractReportLinkTargets } from './tracker-links.mjs';
+import { normalizeUrl } from './url-key.mjs';
 import { checkTrackerSync } from './tracker-sync-check.mjs';
 import { checkFollowupsSchema } from './stats.mjs';
 
@@ -116,6 +120,9 @@ for (const line of lines) {
     pdf: parts[COLMAP.pdf],
     report: parts[COLMAP.report],
     notes: COLMAP.notes != null ? (parts[COLMAP.notes] || '') : '',
+    // Optional URL column — the stable posting key (url-key.mjs). Only Check 16
+    // uses it; rows without the column normalize to '' (NO KEY).
+    url: COLMAP.url != null ? (parts[COLMAP.url] || '') : '',
   });
 }
 
@@ -498,6 +505,71 @@ if (!existsSync(FOLLOWUPS_FILE)) {
     warn(`follow-ups.md: ${fups.unparsedLines.length} of ${fups.dataRows} rows will be skipped by stats.mjs and followup-cadence.mjs (line${fups.unparsedLines.length === 1 ? '' : 's'} ${fups.unparsedLines.join(', ')}) — expected ${FOLLOWUPS_COLUMNS}`);
   } else {
     ok(`follow-ups.md schema valid (${fups.parsed} logged follow-up${fups.parsed === 1 ? '' : 's'})`);
+  }
+}
+
+// --- Check 15: One report number, one file (error) ---
+// Report numbers are handed out one per worker by reserve-report-num.mjs, but a
+// worker that computes `max + 1` itself (the #749 race) can still pick a number
+// another worker just took. Because the filename slug differs, nothing is
+// overwritten and nothing complains — two files quietly share a number. That
+// breaks jd-capture.mjs, which resolves an archived JD by that number prefix and
+// will happily return whichever capture it finds first. The tracker cannot see
+// the collision either: it keeps one row per report link.
+const reportsByNum = new Map();
+for (const name of reportFiles) {
+  const num = parseInt(name.match(REPORT_FILE_RE)[1], 10);
+  if (!reportsByNum.has(num)) reportsByNum.set(num, []);
+  reportsByNum.get(num).push(name);
+}
+let dupReportNums = 0;
+for (const [num, group] of [...reportsByNum].sort((a, b) => a[0] - b[0])) {
+  if (group.length > 1) {
+    error(`Duplicate report number #${num}: ${group.join(', ')} — renumber one, jd-capture.mjs resolves captures by number prefix`);
+    dupReportNums++;
+  }
+}
+if (dupReportNums === 0) ok('No duplicate report numbers');
+
+// --- Check 16: Pending pipeline entry whose URL is already in the tracker (warning) ---
+// The duplicate this catches cost two full evaluations (#1161/#1164): an entry
+// evaluated on 10-26 was never ticked off in pipeline.md, so the next batch run
+// treated it as new and evaluated it again under another report number. Neither
+// existing guard covers that state — merge-tracker dedups the TRACKER, and the
+// scanner's write-point dedup only rejects NEW pipeline rows, not one already
+// sitting there. Warning, not error: a historical backlog makes this noisy, and
+// a re-evaluation after a JD change is legitimate.
+const PIPELINE_FILE = process.env.CAREER_OPS_PIPELINE || join(CAREER_OPS, 'data', 'pipeline.md');
+const PENDING_PIPELINE_RE = /^\s*- \[ \]\s*/;
+const MAX_PIPELINE_HITS = 10;
+if (!existsSync(PIPELINE_FILE)) {
+  ok('No pipeline.md yet — nothing to cross-check against the tracker');
+} else {
+  const trackedByKey = new Map();
+  for (const e of entries) {
+    const key = normalizeUrl(e.url);
+    if (key && !trackedByKey.has(key)) trackedByKey.set(key, e.num);
+  }
+  const alreadyEvaluated = [];
+  for (const line of readFileSync(PIPELINE_FILE, 'utf-8').split('\n')) {
+    if (!PENDING_PIPELINE_RE.test(line)) continue;
+    const m = line.match(/https?:\/\/[^\s|>]+/);
+    if (!m) continue;
+    // Markdown autolinks end at `>`, which the URL regex stops at last.
+    const url = m[0].replace(/>$/, '');
+    const key = normalizeUrl(url);
+    if (!key) continue;
+    const rowNum = trackedByKey.get(key);
+    if (rowNum != null) alreadyEvaluated.push({ url, rowNum });
+  }
+  if (alreadyEvaluated.length === 0) {
+    ok('No pending pipeline entry is already in the tracker');
+  } else {
+    for (const hit of alreadyEvaluated.slice(0, MAX_PIPELINE_HITS)) {
+      warn(`Pending pipeline entry already evaluated as #${hit.rowNum}: ${hit.url} — tick it off in pipeline.md so the next batch does not re-evaluate it`);
+    }
+    const hidden = alreadyEvaluated.length - MAX_PIPELINE_HITS;
+    if (hidden > 0) warn(`...and ${hidden} more pending entries already evaluated (${alreadyEvaluated.length} total)`);
   }
 }
 
