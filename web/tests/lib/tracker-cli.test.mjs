@@ -150,15 +150,19 @@ test("an edit body forwards planned to --planned, set and clear alike", () => {
   assert.deepEqual(editArgv({ planned: "" }, "7").argv, ["--row", "7", "--planned", ""]);
 });
 
-test("query argv carries only the filters that were sent, plus a bounded limit", () => {
+test("query argv carries only the filters that were sent, and never a CLI limit", () => {
   const bare = queryArgv(new URLSearchParams(""));
-  assert.deepEqual(bare.argv, ["query", "--json", "--limit", "20"]);
+  // --limit is NOT forwarded: with it the route could only report `total` = page
+  // size, so a 300-row tracker would answer `{rows: 20, total: 20}`. The route
+  // slices the parsed rows itself and `total` stays the full match count.
+  assert.deepEqual(bare.argv, ["query", "--json"]);
   assert.equal(bare.limit, 20);
 
   const filtered = queryArgv(new URLSearchParams("status=Applied&company=acme&since=2026-01-01&limit=5"));
   assert.deepEqual(filtered.argv, [
-    "query", "--json", "--status", "Applied", "--company", "acme", "--since", "2026-01-01", "--limit", "5",
+    "query", "--json", "--status", "Applied", "--company", "acme", "--since", "2026-01-01",
   ]);
+  assert.equal(filtered.limit, 5);
 
   // An over-large limit is clamped rather than rejected: the caller asked for
   // "more than we serve", which is a request we can answer.

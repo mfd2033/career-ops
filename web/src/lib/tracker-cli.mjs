@@ -246,6 +246,9 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
  * (canonicalizeStatus), because tracker.mjs's own rejection exits without a JSON
  * document and the caller deserves a message about the field rather than a 500.
  *
+ * The returned `limit` is applied by the CALLER, not pushed into argv — see the
+ * comment on the return below.
+ *
  * @param {URLSearchParams} params
  * @returns {{argv: string[], limit: number}|{error: {code: string, message: string}}}
  */
@@ -271,7 +274,11 @@ export function queryArgv(params) {
     }
     limit = Math.min(Number(rawLimit), MAX_LIMIT);
   }
-  argv.push("--limit", String(limit));
+  // `--limit` is deliberately NOT forwarded to the CLI. Forwarding it makes the
+  // route's `total` echo the page size, so a caller asking for 20 rows of 300
+  // gets `{rows: 20, total: 20}` — a field that means "there are 20" when there
+  // are 300. The route slices after parsing instead, which keeps `total` the
+  // full match count and leaves the CLI's LIMIT meaning exactly what it says.
   return { argv, limit };
 }
 

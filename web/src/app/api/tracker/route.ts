@@ -23,7 +23,8 @@ export const dynamic = "force-dynamic";
  * would be a second reader of the same source, which is how readers drift.
  *
  * @param req - Incoming request; `status`, `company`, `role`, `since`, `limit`.
- * @returns `{ok, data: {rows, total}}`.
+ * @returns `{ok, data: {rows, total}}` — `rows` is at most `limit` long, `total`
+ *   counts every row the filters match (not the page size).
  */
 export async function GET(req: Request): Promise<Response> {
   if (!coreScriptAvailable("tracker")) return coreScriptMissing();
@@ -48,7 +49,11 @@ export async function GET(req: Request): Promise<Response> {
   if (!run.rows) {
     return badRequest("internal", "tracker query returned no rows document");
   }
-  return okResponse({ rows: run.rows, total: run.rows.length });
+  // `total` is the number of rows that MATCH the filters; `rows` is one page of
+  // them. The CLI's own --limit is deliberately not in argv (see queryArgv), so
+  // the child returns the whole match set and the page is cut here — otherwise
+  // `total` would always equal the page size and mean nothing.
+  return okResponse({ rows: run.rows.slice(0, built.limit), total: run.rows.length });
 }
 
 /**
