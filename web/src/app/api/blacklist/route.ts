@@ -1,4 +1,4 @@
-import { readBlacklist, readPreambleAndRows, writeBlacklist, mutators, type BlacklistRow } from "@/lib/blacklist-store";
+import { readBlacklist, readPreambleAndRows, writeBlacklist, mutators, localTodayStr, type BlacklistRow } from "@/lib/blacklist-store";
 
 // Company blacklist management (ADR-0084). GET lists entries with joined
 // evidence; POST adds, DELETE removes, PATCH sets/clears the `Exempt until`
@@ -8,7 +8,9 @@ import { readBlacklist, readPreambleAndRows, writeBlacklist, mutators, type Blac
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const todayStr = () => new Date().toISOString().slice(0, 10);
+// `today` is the USER's calendar day (lib/local-today.mjs), never the UTC day:
+// the exemption window is compared against local dates, and the UTC answer is
+// off by one for the first/last hours of the day (#2765, #2932).
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 async function parseBody(req: Request): Promise<Record<string, unknown> | null> {
@@ -24,7 +26,7 @@ function bad(msg: string) {
 }
 
 export async function GET() {
-  const today = todayStr();
+  const today = await localTodayStr();
   const { entries, totalBlocked } = await readBlacklist(today);
   return Response.json({ today, totalBlocked, entries });
 }
@@ -43,7 +45,7 @@ export async function POST(req: Request) {
   const { addRow } = await mutators();
   const next: BlacklistRow[] = addRow(rows, {
     company,
-    since: String(body.since ?? "").trim() || todayStr(),
+    since: String(body.since ?? "").trim() || (await localTodayStr()),
     scope: String(body.scope ?? "").trim() || "company",
     exemptUntil,
     reason,
