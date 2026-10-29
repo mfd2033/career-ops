@@ -210,7 +210,9 @@ export function SalaryTargetSettings() {
             </div>
           </label>
           {error && <p className="mt-3 text-xs text-red-500">{error}</p>}
-          <div className="mt-4 flex flex-wrap items-center gap-2.5 pt-1">
+          {/* mt-auto：同行卡片被 grid 等高拉伸时（左侧求职意向更高），保存按钮贴卡底，
+              不在按钮下方留一大块空白。 */}
+          <div className="mt-auto flex flex-wrap items-center gap-2.5 pt-4">
             <button
               type="button"
               onClick={save}
