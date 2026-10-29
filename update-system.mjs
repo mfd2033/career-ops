@@ -220,6 +220,10 @@ const SYSTEM_PATHS = [
   'skill-extract.mjs',
   'intake.mjs',
   'stats.mjs',
+  // stats.mjs imports it for the status-transition ledger (data/status-log.tsv).
+  // Declared fork-local instead, an `apply` would ship the importer without the
+  // import and every install would throw ERR_MODULE_NOT_FOUND.
+  'status-log.mjs',
   'detect-reposts.mjs',
   'rank-pipeline.mjs',
   'discover-ats.mjs',

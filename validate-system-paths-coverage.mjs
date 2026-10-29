@@ -16,7 +16,7 @@
 
 import { execFileSync } from 'child_process';
 import { readFileSync, existsSync } from 'fs';
-import { dirname, join } from 'path';
+import { dirname, join, posix } from 'path';
 import { fileURLToPath } from 'url';
 import { extractArrayFromSource, localUserPaths, LOCAL_PATHS_FILE } from './update-system.mjs';
 
@@ -87,16 +87,72 @@ const RECONCILED_NOT_CHECKED_OUT = ['.gitignore'];
 // part of that isolation contract, not a coverage gap.
 const EXCLUDE_PREFIXES = ['web/'];
 
+function coveredBy(file, paths) {
+  return paths.some((path) =>
+    path.endsWith('/') ? file.startsWith(path) : file === path,
+  );
+}
+
 function covered(file) {
   // If explicitly excluded, it is covered
   if (EXCLUDES.includes(file)) return true;
   if (RECONCILED_NOT_CHECKED_OUT.includes(file)) return true;
   if (EXCLUDE_PREFIXES.some((p) => file.startsWith(p))) return true;
 
-  return ALL_PATHS.some((path) =>
-    path.endsWith('/') ? file.startsWith(path) : file === path,
-  );
+  return coveredBy(file, ALL_PATHS);
 }
+
+// A fork-local file (config/local-paths.txt) is declared "never updated". A
+// SYSTEM file importing one means the system layer DEPENDS on something `apply`
+// will never ship: the importer arrives, the import does not, and every install
+// throws ERR_MODULE_NOT_FOUND. status-log.mjs shipped exactly this way — a repo
+// script imported by stats.mjs, yet parked on a fork-local declaration, so the
+// coverage check above stayed green while the dependency was broken for anyone
+// who ran `apply`. Declaring a system file fork-local to silence that check is
+// the move this guard exists to reject.
+const SCRIPT_RE = /\.(?:mjs|cjs|js|jsx|ts|tsx|mts|cts)$/;
+const IMPORT_SPEC_RE = /(?:from\s*|import\s*\(\s*|require\s*\(\s*)(['"])([^'"]+)\1/g;
+
+/**
+ * Which system files import a fork-local file.
+ *
+ * Pure and injectable so `--self-test` can pin the behaviour instead of relying
+ * on today's tree: `readFile` returns the file's source, or '' when unreadable.
+ * Only relative specifiers are resolved (a package import can never name a repo
+ * file), and directory declarations match by prefix, same as `covered`.
+ *
+ * @param {{systemFiles: string[], localPaths: string[], readFile: (rel: string) => string}} input
+ * @returns {{importer: string, imported: string}[]}
+ */
+function layerLeaks({ systemFiles, localPaths, readFile }) {
+  const locals = localPaths.map((p) => p.replace(/\\/g, '/'));
+  const isLocal = (rel) => locals.some((p) => (p.endsWith('/') ? rel.startsWith(p) : rel === p));
+  const leaks = [];
+  for (const file of systemFiles) {
+    const source = readFile(file);
+    if (!source) continue;
+    for (const match of source.matchAll(IMPORT_SPEC_RE)) {
+      const spec = match[2];
+      if (!spec.startsWith('.')) continue;
+      const imported = posix.normalize(posix.join(posix.dirname(file), spec));
+      if (isLocal(imported)) leaks.push({ importer: file, imported });
+    }
+  }
+  return leaks;
+}
+
+/**
+ * Drop the layer leaks a baseline already owns.
+ *
+ * @param {{importer: string, imported: string}[]} leaks
+ * @param {Set<string>} baseline - keys of the form `importer -> imported`.
+ * @returns {{importer: string, imported: string}[]} Leaks the baseline does not name.
+ */
+function unbaselinedLeaks(leaks, baseline) {
+  return leaks.filter((leak) => !baseline.has(leakKey(leak)));
+}
+
+const leakKey = (leak) => `${leak.importer} -> ${leak.imported}`;
 
 if (process.argv.includes('--self-test')) {
   console.log('Running validate-system-paths-coverage.mjs self-tests...');
@@ -129,6 +185,45 @@ if (process.argv.includes('--self-test')) {
 
   // Test unrelated file
   assert(covered('untracked-orphan-file-xyz.js') === false, 'untracked-orphan-file-xyz.js must NOT be covered');
+
+  // Test the layer-leak guard: a system file importing a fork-local file is a
+  // leak; a package import, a system-to-system import and a sibling that merely
+  // shares a prefix are not. Stubbing readFile keeps the assertions true no
+  // matter what today's tree happens to contain.
+  const leakSources = {
+    'stats.mjs': "import { x } from './status-log.mjs';",
+    'clean.mjs': "import fs from 'node:fs';\nimport { y } from './helper.mjs';",
+    'prefix.mjs': "import { z } from './lib2/other.mjs';",
+  };
+  const leakRead = (rel) => leakSources[rel] ?? '';
+  const leaks = layerLeaks({
+    systemFiles: Object.keys(leakSources),
+    localPaths: ['status-log.mjs', 'lib2/'],
+    readFile: leakRead,
+  });
+  assert(
+    leaks.length === 2 && leaks.some((l) => l.imported === 'status-log.mjs'),
+    'a system file importing a fork-local file must be reported as a layer leak',
+  );
+  assert(
+    layerLeaks({ systemFiles: ['clean.mjs'], localPaths: ['status-log.mjs'], readFile: leakRead }).length === 0,
+    'package and system-to-system imports must NOT be reported as layer leaks',
+  );
+  assert(
+    layerLeaks({ systemFiles: ['prefix.mjs'], localPaths: ['lib/'], readFile: leakRead }).length === 0,
+    'a sibling directory sharing a prefix must NOT be reported as a layer leak',
+  );
+  // The baseline may suppress known debt but never a new pairing — otherwise the
+  // guard becomes a rubber stamp the moment it has one entry.
+  const baselined = unbaselinedLeaks(leaks, new Set(['stats.mjs -> status-log.mjs']));
+  assert(
+    baselined.length === 1 && baselined[0].imported === 'lib2/other.mjs',
+    'the baseline must suppress only the pairing it names',
+  );
+  assert(
+    unbaselinedLeaks(leaks, new Set(['stats.mjs -> status-log.mjs', 'prefix.mjs -> lib2/other.mjs'])).length === 0,
+    'a fully baselined leak set must produce no failures',
+  );
 
   console.log('ALL SELF-TESTS PASSED');
   process.exit(0);
@@ -180,6 +275,59 @@ if (orphans.length > 0) {
   console.error('or USER_PATHS (if user-owned), then re-run this check.');
   process.exit(1);
 }
+
+// Layer leak: a SYSTEM file importing a fork-local file. Coverage alone cannot
+// see this — every path is claimed, yet the system layer depends on a file
+// `apply` will never ship. status-log.mjs sat exactly here: a repo script
+// imported by stats.mjs, declared fork-local, so this check was green.
+const systemFiles = tracked.filter((f) => SCRIPT_RE.test(f) && coveredBy(f, SYSTEM_PATHS));
+const leaks = layerLeaks({
+  systemFiles,
+  localPaths: LOCAL_PATHS,
+  readFile: (rel) => {
+    try {
+      return readFileSync(join(ROOT, rel), 'utf-8');
+    } catch {
+      return '';
+    }
+  },
+});
+
+// Baseline: layer leaks that already existed when this guard was added. This
+// fork updates by `git merge upstream`, not `apply` (ADR-0022), so these are
+// deliberate — `local/` is fork-only by definition, `lib/zh-jobs.mjs` and
+// `lib/log-checkup.mjs` are this fork's own system files. The list may SHRINK,
+// never grow: a pairing not named here fails the check, which is what stops the
+// next status-log.mjs from hiding behind a fork-local declaration.
+const LAYER_LEAK_BASELINE = new Set([
+  'analyze-patterns.mjs -> lib/log-checkup.mjs',
+  'browser-extract.mjs -> lib/zh-jobs.mjs',
+  'browser-extract.mjs -> bsk-extract.mjs',
+  'scan.mjs -> local/scan-dedup.mjs',
+  'tests/bsk-extract.test.mjs -> bsk-extract.mjs',
+  'tests/bsk-extract.test.mjs -> lib/zh-jobs.mjs',
+  'tests/checkup-ledger.test.mjs -> lib/log-checkup.mjs',
+  'tests/login-check.test.mjs -> lib/login-check.mjs',
+  'tests/zh-collect.test.mjs -> zh-collect.mjs',
+  'tests/zh-salary-parse-parity.test.mjs -> bsk-extract.mjs',
+  'url-key.mjs -> local/dedup-params.mjs',
+]);
+
+const newLeaks = unbaselinedLeaks(leaks, LAYER_LEAK_BASELINE);
+const staleBaseline = [...LAYER_LEAK_BASELINE].filter((key) => !leaks.some((leak) => leakKey(leak) === key));
+
+if (newLeaks.length > 0) {
+  console.error('Layer leak — a SYSTEM file imports a fork-local file:');
+  for (const leak of newLeaks) console.error(`  ${leakKey(leak)}`);
+  console.error('');
+  console.error('`apply` ships the importer but never the import, so every install breaks.');
+  console.error(`Move the imported file into update-system.mjs SYSTEM_PATHS and out of ${LOCAL_PATHS_FILE}.`);
+  process.exit(1);
+}
+
+// Not a failure: a baseline entry that no longer leaks means someone fixed it.
+// Printed so the list gets pruned instead of silently outliving its reasons.
+for (const key of staleBaseline) console.error(`note: baseline entry no longer leaks, prune it: ${key}`);
 
 console.log(`OK: ${tracked.length} tracked files covered by SYSTEM_PATHS or USER_PATHS`);
 process.exit(0);
