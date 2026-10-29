@@ -10,7 +10,7 @@ import { after } from "next/server";
 import { resolveCli, dropCrossEngineModel } from "@/lib/clis";
 import { cliDisplayName } from "@/lib/cli-labels.mjs";
 import { resolveWorkerInvocation } from "@/lib/worker-invocation.mjs";
-import { accumulateTokens, authExpiredHint, checkupArtifactRowCount, checkupArtifactTodayForTracker, makeCheckupHtmlProbe, detectBlacklistGate, failureEvidence, failureLedgerMsg, hasNewCompletedReport, isFatalGenericStderr, persistRunOutcome, PERSISTENCE_GATED_KINDS, withModelFlag } from "@/lib/run-cli-support.mjs";
+import { accumulateTokens, authExpiredHint, blacklistGateLedgerFields, checkupArtifactRowCount, checkupArtifactTodayForTracker, makeCheckupHtmlProbe, detectBlacklistGate, failureEvidence, failureLedgerMsg, hasNewCompletedReport, isFatalGenericStderr, persistRunOutcome, PERSISTENCE_GATED_KINDS, withModelFlag } from "@/lib/run-cli-support.mjs";
 import { spawnHeadlessCli, terminateCli } from "@/lib/spawn-cli.mjs";
 import { careerOpsRoot, readMemory, findReportFile, readInbox, readScanDates, findCheckupTarget, readApplications, rootScript, readMarketModesDir, listMarketModes } from "@/lib/career-ops";
 import { checkupDispatchText } from "@/lib/checkup-request.mjs";
@@ -168,7 +168,7 @@ export async function POST(req: Request) {
   // 的 input 就是号本身；evaluate 的号只有收尾 reconcile 推得出（见
   // finishAfterReconcile），推不出就留空。台账行显式携带它，读取端（ledger-only
   // 卡）不必再靠 URL join / kind 猜。
-  const recordEnd = (status: "done" | "error", msg?: string, reconciledNum?: string) => {
+  const recordEnd = (status: "done" | "error", msg?: string, reconciledNum?: string, blacklistGate?: { company: string }) => {
     if (endRecorded) return;
     endRecorded = true;
     try {
@@ -198,6 +198,10 @@ export async function POST(req: Request) {
         // 800（原 300）：门禁那一句 checkup 文案就 175 字，300 会把 ADR-0034 的证据
         // 段整段截掉——上限不抬，补丁等于没打。
         msg: msg ? String(msg).slice(0, 800) : undefined,
+        // ADR-0084：门禁命中是「按设计停下」，不是失败。台账必须带可判定的结构化
+        // 字段——靠 msg 里的中文散文（「命中黑名单…」）判不出来：黑名单页的每公司
+        // 拦截数就是因为读端找英文 blacklist、写端只写中文而恒为 0。
+        ...blacklistGateLedgerFields(blacklistGate),
         steps: steps.length ? steps : undefined,
       });
     } catch (e) {
@@ -306,8 +310,10 @@ async function runPipeline({
   employer?: string;
   /** Server run-ledger recorder (once per run; passed in from POST scope).
    *  ADR-0089: the third arg is the report number the run resolved to (evaluate's
-   *  is known only after the closing reconcile), recorded on the ledger row. */
-  recordEnd: (status: "done" | "error", msg?: string, reportNum?: string) => void;
+   *  is known only after the closing reconcile), recorded on the ledger row.
+   *  ADR-0084: the fourth is the blacklist gate that stopped the run — written as
+   *  structured fields so the blacklist page can count stops without reading prose. */
+  recordEnd: (status: "done" | "error", msg?: string, reportNum?: string, blacklistGate?: { company: string }) => void;
 }) {
   const today = new Date().toISOString().slice(0, 10);
 
@@ -474,6 +480,9 @@ async function runPipeline({
   // ADR-0089：evaluate 的报告号到收尾 reconcile 才知道（finishAfterReconcile 赋值），
   // 终态发出时随 recordEnd 一起落台账；推不出（并发歧义 / 无报告）保持 undefined。
   let reconciledReportNum: string | undefined;
+  // ADR-0084：命中公司黑名单门禁而停止的公司名。done 那一刻由 recordEnd 读它写成
+  // 结构化台账字段——读取端（黑名单页的每公司拦截数）不靠 msg 里的散文判定。
+  let blacklistGateHit: { company: string } | undefined;
   const send = (obj: { type: string; [key: string]: unknown }) => {
     if (terminal) return;
     if (obj.type === "error") {
@@ -488,7 +497,7 @@ async function runPipeline({
       }
     }
     publish(runId, obj);
-    if (obj.type === "done") recordEnd("done", undefined, reconciledReportNum);
+    if (obj.type === "done") recordEnd("done", undefined, reconciledReportNum, blacklistGateHit);
     else if (obj.type === "error")
       // 证据组装抽成纯函数（ADR-0034 决议 3）：一句话原因 ｜ stderr ｜ 输出尾部。
       recordEnd("error", failureLedgerMsg(String(obj.msg ?? ""), { stderrTail, stdoutTail: failureEvidence(stdoutTail) }));
@@ -932,7 +941,10 @@ async function runPipeline({
         // decision lives in persistRunOutcome so it is assertable: an inline copy
         // here is exactly how checkup drifted out from under this gate and two
         // zero-artifact runs got banked as done (2026-09-16, #73/#131).
-        const outcome = persistRunOutcome({ kind, cleanExit, sawError, emittedText, persisted, timedOut, checkupAlreadyCurrentStar, blacklistGate: !!detectBlacklistGate(stdoutTail) });
+        // 门禁标记只算一次：既喂诚实门（!!gate），也留给台账写 blockedCompany。
+        const gate = detectBlacklistGate(stdoutTail);
+        const outcome = persistRunOutcome({ kind, cleanExit, sawError, emittedText, persisted, timedOut, checkupAlreadyCurrentStar, blacklistGate: !!gate });
+        if (outcome.ok && outcome.blockedByBlacklist && gate) blacklistGateHit = gate;
         if (outcome.ok && kind === "evaluate" && !outcome.blockedByBlacklist) {
           // Archiving the inbox row is route work after the CLI is gone, and it
           // outlives this handler — the `finally` below must not close the run out

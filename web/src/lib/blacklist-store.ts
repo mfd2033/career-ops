@@ -4,6 +4,7 @@ import { pathToFileURL } from "node:url";
 import { execFileSync } from "node:child_process";
 import { careerOpsRoot, readApplications } from "@/lib/career-ops";
 import { atomicWriteWithBackup } from "@/lib/core/safe-write";
+import { foldBlacklistGates } from "@/lib/blacklist-gate.mjs";
 
 // Server-only store for the user's do-not-apply list (data/blacklist.md,
 // ADR-0084). The table parse/serialize/exemption logic is NOT mirrored here —
@@ -42,6 +43,20 @@ export type BlacklistEntry = BlacklistRow & {
 async function loadBlacklistLib(): Promise<any> {
   const p = path.join(careerOpsRoot(), "lib", "blacklist.mjs");
   return import(/* webpackIgnore: true */ pathToFileURL(p).href);
+}
+
+/** Today's calendar day where the user actually is — NOT the UTC day.
+ *
+ *  `new Date().toISOString().slice(0, 10)` answers with tomorrow west of
+ *  Greenwich and a future date east of it, which is the defect class
+ *  lib/local-today.mjs was created to kill (#2765, #2932). This value decides
+ *  whether an `Exempt until` window is open, so getting it wrong shifts the gate
+ *  by a whole day. Loaded from the checkout at runtime for the same reason as
+ *  loadBlacklistLib: one implementation, shared with the CLI side. */
+export async function localTodayStr(): Promise<string> {
+  const p = path.join(careerOpsRoot(), "lib", "local-today.mjs");
+  const mod = await import(/* webpackIgnore: true */ pathToFileURL(p).href);
+  return mod.localToday();
 }
 
 function blacklistPath(): string {
@@ -112,37 +127,17 @@ function scanHistoryCompanyKeys(lib: any): string[] {
   return out;
 }
 
-/** Fold the run ledger (.career-ops-web/runs/index.jsonl) for blacklist-gate
- *  stops. Pre-ADR-0084 the gate wrote no company marker, so per-company counts
- *  only light up once a run's msg carries the [[BLACKLIST-GATE]] marker; the
- *  total counts any evaluate run that stopped on the gate. Missing file → zeros. */
+/** Read the ledger and fold it (see blacklist-gate.mjs for the field contract).
+ *  A missing/unreadable ledger is zeros, not an error — the blacklist page must
+ *  still render on a fresh checkout. */
 function blacklistRunCompanies(lib: any): { blockedKeys: string[]; totalBlocked: number } {
-  const blockedKeys: string[] = [];
-  let totalBlocked = 0;
   let raw = "";
   try {
     raw = fs.readFileSync(path.join(careerOpsRoot(), ".career-ops-web", "runs", "index.jsonl"), "utf8");
   } catch {
-    return { blockedKeys, totalBlocked };
+    return { blockedKeys: [], totalBlocked: 0 };
   }
-  for (const line of raw.split("\n")) {
-    if (!line.trim()) continue;
-    let j: any;
-    try {
-      j = JSON.parse(line);
-    } catch {
-      continue;
-    }
-    const msg = String(j.msg || "");
-    if (j.kind !== "evaluate" || !msg.toLowerCase().includes("blacklist")) continue;
-    totalBlocked++;
-    const m = /\[\[blacklist-gate\]\]\s+company=([^\n\]|]+)/i.exec(msg);
-    if (m) {
-      const k = lib.normalizeCompanySafe(m[1].trim()) as string;
-      if (k) blockedKeys.push(k);
-    }
-  }
-  return { blockedKeys, totalBlocked };
+  return foldBlacklistGates(raw, (value) => (lib.normalizeCompanySafe(value) as string) || "");
 }
 
 /** Snapshot the data layer to the shadow ledger before a write (AGENTS.md

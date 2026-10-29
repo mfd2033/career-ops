@@ -672,6 +672,23 @@ export function detectBlacklistGate(text) {
 }
 
 /**
+ * The ledger fields a blacklist-gate stop must carry.
+ *
+ * The ledger is read by machines (the blacklist page's per-company block count),
+ * so the stop reason has to be a FIELD, not prose in `msg`: the route writes the
+ * explanation in Chinese, and a `done` row has no `msg` at all. Signalling it
+ * only as text is how those counters sat at 0 while the gate worked fine.
+ *
+ * @param {{company?: string} | null | undefined} gate - `detectBlacklistGate` result.
+ * @returns {{blockedByBlacklist?: true, blockedCompany?: string}} Fields to spread into the ledger record.
+ */
+export function blacklistGateLedgerFields(gate) {
+  if (!gate) return {};
+  const company = String(gate.company ?? "").trim();
+  return company ? { blockedByBlacklist: true, blockedCompany: company } : { blockedByBlacklist: true };
+}
+
+/**
  * The evaluate/checkup honesty gate, extracted from route.ts's close handler.
  *
  * It was inline there, which is why it had no test seam and why checkup could
