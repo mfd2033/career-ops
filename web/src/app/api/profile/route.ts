@@ -4,8 +4,8 @@ import * as yaml from "js-yaml";
 import { careerOpsRoot, listMarketModes } from "@/lib/career-ops";
 import { atomicWriteWithBackup } from "@/lib/core/safe-write";
 import { mergeYamlPatch } from "@/lib/core/profile-merge.mjs";
-import { extractArchetypes, patchToProfile } from "@/lib/profile-patch.mjs";
-import { extractDealBreakers, replaceDealBreakersSection } from "@/lib/profile-md-sync.mjs";
+import { extractArchetypes, extractCompensation, patchToProfile } from "@/lib/profile-patch.mjs";
+import { extractDealBreakers, replaceCompTargetsSection, replaceDealBreakersSection } from "@/lib/profile-md-sync.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -27,6 +27,11 @@ type ProfilePatch = {
   roles?: string[];
   compMin?: number;
   compMax?: number;
+  /** 薪资底线 → compensation.minimum（低于此值即 hard_stop）。 */
+  compFloor?: number;
+  /** 薪资书写格式（GET 从磁盘值解析后回传，保存时原样写回）。 */
+  compPrefix?: string;
+  compUnit?: string;
   currency?: string;
   remote?: string;
   /** JD evaluation/exclusion rules (config page). string[] → narrative.deal_breakers. */
@@ -66,6 +71,14 @@ export async function GET() {
   let roles: string[] = [];
   let archetypes: Record<string, unknown>[] = [];
   let marketMode: string | null = null;
+  // 薪资三项（目标下限/上限/底线）+ 书写格式；未设置时为 null，前端显示空而不是 0。
+  let compFields: ReturnType<typeof extractCompensation> = {
+    compMin: null,
+    compMax: null,
+    compFloor: null,
+    compPrefix: "",
+    compUnit: "",
+  };
   if (fs.existsSync(file)) {
     let parsed: unknown;
     try {
@@ -85,6 +98,7 @@ export async function GET() {
       roles = (targets.primary as unknown[]).filter((r): r is string => typeof r === "string");
     }
     archetypes = extractArchetypes(profile);
+    compFields = extractCompensation(profile);
     const language = isObj(profile.language) ? (profile.language as Record<string, unknown>) : {};
     if (typeof language.modes_dir === "string" && language.modes_dir.trim()) {
       marketMode = language.modes_dir.trim();
@@ -105,7 +119,15 @@ export async function GET() {
       dealBreakers = merged;
     }
   }
-  return Response.json({ dealBreakers, locationFlexibility, roles, archetypes, marketMode, marketModes: listMarketModes() });
+  return Response.json({
+    dealBreakers,
+    locationFlexibility,
+    roles,
+    archetypes,
+    marketMode,
+    marketModes: listMarketModes(),
+    ...compFields,
+  });
 }
 
 export async function POST(req: Request) {
@@ -192,6 +214,34 @@ export async function POST(req: Request) {
       try {
         const md = fs.readFileSync(profileMd, "utf8");
         const { markdown, found } = replaceDealBreakersSection(md, narrative.deal_breakers as string[]);
+        if (found) atomicWriteWithBackup(profileMd, markdown);
+      } catch (e) {
+        return Response.json(
+          {
+            error: `profile.yml saved, but could not sync modes/_profile.md: ${e instanceof Error ? e.message : "write failed"}`,
+          },
+          { status: 500 },
+        );
+      }
+    }
+  }
+
+  // 薪资三项同样镜像到 modes/_profile.md 的「## Your Comp Targets」（评估时两个文件
+  // 同时进上下文，数字不一致会让 agent 按旧底线判 hard_stop）。只在该补丁真的带了
+  // 薪资字段时同步，且只重写这一段——谈判话术等其他内容逐字节保留。
+  const compPatch = isObj(proposed.compensation) ? (proposed.compensation as Record<string, unknown>) : {};
+  if (typeof compPatch.target_range === "string" || typeof compPatch.minimum === "string") {
+    const profileMd = path.join(root, "modes", "_profile.md");
+    if (fs.existsSync(profileMd)) {
+      try {
+        const md = fs.readFileSync(profileMd, "utf8");
+        const { markdown, found } = replaceCompTargetsSection(md, {
+          min: patch.compMin,
+          max: patch.compMax,
+          floor: patch.compFloor,
+          prefix: patch.compPrefix,
+          unit: patch.compUnit,
+        });
         if (found) atomicWriteWithBackup(profileMd, markdown);
       } catch (e) {
         return Response.json(

@@ -12,7 +12,11 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { patchToProfile } from "../../src/lib/profile-patch.mjs";
+import {
+  extractCompensation,
+  patchToProfile,
+  splitCompRange,
+} from "../../src/lib/profile-patch.mjs";
 
 // ── the two JD rules this feature exposes ────────────────────────────────────
 
@@ -109,4 +113,88 @@ test("marketMode coexists with the JD rules in one patch", () => {
   const out = patchToProfile({ dealBreakers: ["不做纯外包"], marketMode: "modes/zh" });
   assert.deepEqual(out.narrative, { deal_breakers: ["不做纯外包"] });
   assert.deepEqual(out.language, { modes_dir: "modes/zh" });
+});
+
+// ── 薪资三项（目标下限/上限/底线）→ compensation ──────────────────────────
+
+test("salary: floor maps to compensation.minimum and the range keeps its format", () => {
+  const out = patchToProfile({ compMin: 30, compMax: 35, compFloor: 22, compUnit: "K" });
+  assert.deepEqual(out, { compensation: { target_range: "30K-35K", minimum: "22K" } });
+});
+
+test("salary: a currency prefix and unit survive the round-trip", () => {
+  const out = patchToProfile({ compMin: 150, compMax: 200, compFloor: 120, compPrefix: "$", compUnit: "K" });
+  assert.deepEqual(out, { compensation: { target_range: "$150K-$200K", minimum: "$120K" } });
+});
+
+test("salary: a legacy caller sending no format still writes the bare range", () => {
+  // assistant setProfile sends 70000/95000 — must not invent a unit.
+  const out = patchToProfile({ compMin: 70000, compMax: 95000 });
+  assert.deepEqual(out, { compensation: { target_range: "70000-95000" } });
+});
+
+test("salary: a lone bound never writes a half range", () => {
+  assert.deepEqual(patchToProfile({ compMin: 25 }), {});
+  assert.deepEqual(patchToProfile({ compMax: 30 }), {});
+});
+
+test("salary: numeric strings are accepted, blank strings are not zero", () => {
+  const out = patchToProfile({ compMin: "25", compMax: "30", compFloor: "" });
+  assert.deepEqual(out, { compensation: { target_range: "25-30" } });
+});
+
+test("splitCompRange parses the shipped formats and refuses free text", () => {
+  assert.deepEqual(splitCompRange("25K-30K"), { min: 25, max: 30, prefix: "", unit: "K" });
+  assert.deepEqual(splitCompRange("25\u201330K"), { min: 25, max: 30, prefix: "", unit: "K" });
+  assert.deepEqual(splitCompRange("$150K-200K"), { min: 150, max: 200, prefix: "$", unit: "K" });
+  assert.deepEqual(splitCompRange("30万-40万"), { min: 30, max: 40, prefix: "", unit: "万" });
+  assert.equal(splitCompRange("面议"), null);
+  assert.equal(splitCompRange("25K"), null);
+  assert.equal(splitCompRange(""), null);
+});
+
+test("extractCompensation prefills the three fields from a real profile block", () => {
+  const profile = {
+    compensation: { target_range: "25K-30K", currency: "CNY", minimum: "20K" },
+  };
+  assert.deepEqual(extractCompensation(profile), {
+    compMin: 25,
+    compMax: 30,
+    compFloor: 20,
+    compPrefix: "",
+    compUnit: "K",
+  });
+});
+
+test("extractCompensation reports unset values as null, never 0", () => {
+  assert.deepEqual(extractCompensation({}), {
+    compMin: null,
+    compMax: null,
+    compFloor: null,
+    compPrefix: "",
+    compUnit: "",
+  });
+  // 自由文本区间解析不出上下限——如实留空，不猜一个数字。
+  assert.deepEqual(extractCompensation({ compensation: { target_range: "面议" } }), {
+    compMin: null,
+    compMax: null,
+    compFloor: null,
+    compPrefix: "",
+    compUnit: "",
+  });
+});
+
+test("salary patch coexists with the other config cards' fields", () => {
+  const out = patchToProfile({
+    compMin: 30,
+    compMax: 35,
+    compFloor: 22,
+    compUnit: "K",
+    locationFlexibility: "郑州本地优先",
+  });
+  assert.deepEqual(out.compensation, {
+    target_range: "30K-35K",
+    minimum: "22K",
+    location_flexibility: "郑州本地优先",
+  });
 });

@@ -13,7 +13,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { extractDealBreakers, replaceDealBreakersSection } from "../../src/lib/profile-md-sync.mjs";
+import { extractDealBreakers, replaceCompTargetsSection, replaceDealBreakersSection } from "../../src/lib/profile-md-sync.mjs";
 
 const SAMPLE = `# User Profile Context -- career-ops
 
@@ -112,4 +112,78 @@ test("replaceDealBreakersSection is tolerant of CRLF input", () => {
   const { markdown, found } = replaceDealBreakersSection(crlf, ["新规则"]);
   assert.equal(found, true);
   assert.deepEqual(extractDealBreakers(markdown), ["新规则"]);
+});
+
+// ── replaceCompTargetsSection: 薪资三项只动「## Your Comp Targets」 段 ──────
+
+const COMP_SAMPLE = `# User Profile Context -- career-ops
+
+## Your Comp Targets
+
+- 目标薪资：25\u201330K（CNY/月，郑州）
+- 底线：20K（低于 20K 即 hard_stop；与 \`config/profile.yml\` → \`compensation.minimum\` 同值）
+- 触线不算出局：**广告薪资上限 = 20K 只降 Comp 维度分**；只有上限 < 20K 才记 \`hard_stop\`。
+- 低于目标 25\u201330K、但 \u2265 20K 的区间，不因此单独拒投。
+
+## Your Negotiation Scripts
+
+> "我的期望薪资区间是 25\u201330K，结构上可以谈。"
+`;
+
+test("replaceCompTargetsSection rewrites both anchor lines and keeps their notes", () => {
+  const { markdown, found } = replaceCompTargetsSection(COMP_SAMPLE, { min: 30, max: 35, floor: 22, unit: "K" });
+  assert.equal(found, true);
+  // 原文是「25–30K」（只在末尾带 K），改写后也只在末尾带 K——不替用户改书写习惯
+  assert.ok(markdown.includes("- 目标薪资：30–35K（CNY/月，郑州）"), markdown);
+  assert.ok(markdown.includes("- 底线：22K（低于 22K 即 hard_stop"), markdown);
+});
+
+test("replaceCompTargetsSection keeps the rest of the section numerically consistent", () => {
+  const { markdown } = replaceCompTargetsSection(COMP_SAMPLE, { min: 30, max: 35, floor: 22, unit: "K" });
+  // 触线规则与「低于目标」行里的旧数字跟着换，不留两个互相矛盾的底线
+  assert.ok(markdown.includes("广告薪资上限 = 22K"), markdown);
+  assert.ok(markdown.includes("只有上限 < 22K 才记"), markdown);
+  assert.ok(markdown.includes("低于目标 30–35K、但 ≥ 22K 的区间"), markdown);
+  assert.ok(!markdown.includes("20K"));
+});
+
+test("replaceCompTargetsSection never touches content outside the section", () => {
+  const { markdown } = replaceCompTargetsSection(COMP_SAMPLE, { min: 30, max: 35, floor: 22, unit: "K" });
+  assert.ok(markdown.startsWith("# User Profile Context -- career-ops"));
+  // 谈判话术在段外，保留用户原话（含旧数字）
+  assert.ok(markdown.includes('"我的期望薪资区间是 25\u201330K，结构上可以谈。"'), markdown);
+});
+
+test("replaceCompTargetsSection falls back to the existing format when none is given", () => {
+  // 不带 unit 的调用方（assistant setProfile）不能把 25–30K 写成 25–30
+  const { markdown } = replaceCompTargetsSection(COMP_SAMPLE, { min: 30, max: 35, floor: 22 });
+  assert.ok(markdown.includes("- 目标薪资：30–35K"), markdown);
+  assert.ok(markdown.includes("- 底线：22K"), markdown);
+});
+
+test("replaceCompTargetsSection keeps a currency prefix and both-sided unit", () => {
+  const md = `## Your Comp Targets\n\n- 目标薪资：$150K-200K（USD/月）\n- 底线：$120K（walk-away）\n`;
+  const { markdown } = replaceCompTargetsSection(md, { min: 160, max: 210, floor: 130 });
+  assert.ok(markdown.includes("- 目标薪资：$160K-210K（USD/月）"), markdown);
+  assert.ok(markdown.includes("- 底线：$130K（walk-away）"), markdown);
+});
+
+test("replaceCompTargetsSection writes only the fields it was given", () => {
+  const { markdown } = replaceCompTargetsSection(COMP_SAMPLE, { floor: 22 });
+  assert.ok(markdown.includes("- 目标薪资：25\u201330K"), "区间未提交时不该被改写");
+  assert.ok(markdown.includes("- 底线：22K"), markdown);
+});
+
+test("replaceCompTargetsSection returns found:false when the section is absent", () => {
+  const md = "# Only a header\n\n- 目标薪资：25–30K";
+  const { markdown, found } = replaceCompTargetsSection(md, { min: 30, max: 35, floor: 22 });
+  assert.equal(found, false);
+  assert.equal(markdown, md);
+});
+
+test("replaceCompTargetsSection is tolerant of CRLF input", () => {
+  const crlf = COMP_SAMPLE.replace(/\n/g, "\r\n");
+  const { markdown, found } = replaceCompTargetsSection(crlf, { min: 30, max: 35, floor: 22, unit: "K" });
+  assert.equal(found, true);
+  assert.ok(markdown.includes("- 目标薪资：30–35K"), markdown);
 });

@@ -9,6 +9,12 @@
  *   dealBreakers        → narrative.deal_breakers              (string[])
  *   locationFlexibility → compensation.location_flexibility     (string)
  *   marketMode          → language.modes_dir                    (string; "root" = 清空)
+ *   compMin/compMax     → compensation.target_range             (string)
+ *   compFloor           → compensation.minimum                   (string)
+ *
+ * 薪资三项（目标下限/上限/底线）沿用磁盘上已有的书写格式：`compPrefix`/`compUnit`
+ * 由 GET 从现有 target_range / minimum 解析后回传，保存时原样带回，所以
+ * "25K-30K" 不会被写回成 "25-30"，"$150K-200K" 也不会丢掉 `$` 与 `K`。
  *
  * marketMode 的三态：不传 = 不动；传 "root" 或空串 = 清空（回到通用模式）；
  * 传 `modes/<lang>` = 切到该模式集。清空用 **null** 表达，由 api/profile/route.ts
@@ -32,7 +38,8 @@
  *
  * @param {{
  *   name?: string; email?: string; location?: string; roles?: string[];
- *   compMin?: number; compMax?: number; currency?: string; remote?: string;
+ *   compMin?: number; compMax?: number; compFloor?: number;
+ *   compPrefix?: string; compUnit?: string; currency?: string; remote?: string;
  *   dealBreakers?: string[]; locationFlexibility?: string; marketMode?: string;
  *   archetypes?: (string | {name: string; level?: string; fit?: string})[];
  * }} patch
@@ -59,7 +66,14 @@ export function patchToProfile(patch, existingArchetypes = []) {
   if (Object.keys(target).length) out.target_roles = target;
 
   const comp = {};
-  if (patch.compMin && patch.compMax) comp.target_range = `${patch.compMin}-${patch.compMax}`;
+  const min = toNumberOrNull(patch.compMin);
+  const max = toNumberOrNull(patch.compMax);
+  const floor = toNumberOrNull(patch.compFloor);
+  const prefix = typeof patch.compPrefix === "string" ? patch.compPrefix.trim() : "";
+  const unit = typeof patch.compUnit === "string" ? patch.compUnit.trim() : "";
+  // 上下限必须成对写入 target_range：只有一端时宁可不写，也不留半截区间。
+  if (min !== null && max !== null) comp.target_range = formatCompRange(min, max, prefix, unit);
+  if (floor !== null) comp.minimum = formatCompValue(floor, prefix, unit);
   if (patch.currency) comp.currency = patch.currency;
   if (patch.remote) comp.location_flexibility = patch.remote;
   if (patch.locationFlexibility) comp.location_flexibility = patch.locationFlexibility;
@@ -79,6 +93,81 @@ export function patchToProfile(patch, existingArchetypes = []) {
   }
 
   return out;
+}
+
+/** 数字或数字字符串 → 有限数；空串/null/NaN 一律 null（`Number("")` 是 0，必须先挡掉）。 */
+function toNumberOrNull(value) {
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value !== "string") return null;
+  const s = value.trim();
+  if (s === "") return null;
+  const n = Number(s);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** 单值书写形态：可带货币前缀与单位后缀（"$150K" → prefix `$`, unit `K`）。 */
+function parseCompNumber(raw) {
+  const s = String(raw ?? "").trim();
+  if (s === "") return null;
+  const m = /^(\D*?)(\d+(?:\.\d+)?)(.*)$/.exec(s);
+  if (!m) return null;
+  const num = Number(m[2]);
+  if (!Number.isFinite(num)) return null;
+  return { prefix: m[1].trim(), num, suffix: m[3].trim() };
+}
+
+/** 区间分隔符：半角/全角连字符、破折号、波浪号，以及「至/到/to」。 */
+const COMP_RANGE_SEP = /\s*(?:[-\u2013\u2014\uFF5E~]|\u81F3|\u5230|to)\s*/i;
+
+/**
+ * 把 `compensation.target_range` 拆成上下限与书写格式（"25K-30K" / "$150K-200K" /
+ * "30万-40万"）。解析不出来（自由文本、单值）时返回 null——调用方如实显示“未设置”，
+ * 绝不猜一个数字出来。
+ *
+ * @param {unknown} raw
+ * @returns {{ min: number; max: number; prefix: string; unit: string } | null}
+ */
+export function splitCompRange(raw) {
+  const s = String(raw ?? "").trim();
+  if (s === "") return null;
+  const parts = s.split(COMP_RANGE_SEP).filter((p) => p.trim() !== "");
+  if (parts.length !== 2) return null;
+  const lo = parseCompNumber(parts[0]);
+  const hi = parseCompNumber(parts[1]);
+  if (!lo || !hi) return null;
+  return { min: lo.num, max: hi.num, prefix: lo.prefix, unit: lo.suffix || hi.suffix };
+}
+
+/**
+ * 读取 config/profile.yml 的 compensation 三项，供配置页回填。每一端都可能缺
+ * （未设置 → null），格式字段（prefix/unit）用于保存时原样写回。
+ *
+ * @param {unknown} profile 已解析的 profile.yml（或任何东西）
+ * @returns {{ compMin: number|null; compMax: number|null; compFloor: number|null; compPrefix: string; compUnit: string }}
+ */
+export function extractCompensation(profile) {
+  const root = profile && typeof profile === "object" ? profile : {};
+  const raw = root.compensation;
+  const comp = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+  const range = splitCompRange(comp.target_range);
+  const floor = parseCompNumber(comp.minimum);
+  return {
+    compMin: range ? range.min : null,
+    compMax: range ? range.max : null,
+    compFloor: floor ? floor.num : null,
+    compPrefix: range?.prefix || floor?.prefix || "",
+    compUnit: range?.unit || floor?.suffix || "",
+  };
+}
+
+/** 区间书写：`25K-30K`；无前后缀时退化为 `25-30`（与旧行为一致）。 */
+export function formatCompRange(min, max, prefix = "", unit = "") {
+  return `${prefix}${min}${unit}-${prefix}${max}${unit}`;
+}
+
+/** 单值书写：`20K`。 */
+export function formatCompValue(value, prefix = "", unit = "") {
+  return `${prefix}${value}${unit}`;
 }
 
 /**

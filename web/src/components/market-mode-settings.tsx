@@ -107,8 +107,8 @@ export function MarketModeSettings() {
       ) : (
         <>
           {/* 跨整行时不要把 <select> 拉成 760px 宽的横条输入框（与 config-form 的
-              容器查询断点对齐）。 */}
-          <label className="mt-3 block @2xl:max-w-[420px] @5xl:max-w-none">
+              容器查询断点对齐）；跨满整行时再封顶到 520px。 */}
+          <label className="mt-3 block @2xl:max-w-[420px] @5xl:max-w-[520px]">
             <span className="block text-sm font-medium text-foreground">{t("config.marketModeLabel")}</span>
             <select
               value={value}
