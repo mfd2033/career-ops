@@ -944,19 +944,17 @@ export function ConfigForm() {
 
         {/* ④ 定向规则（▣ 卡片内保存）：求职意向 + 薪资目标 + JD 评估规则 + 评估模式 */}
         <Section id="target" title={t("config.navTarget")} desc={t("config.secTargetDesc")}>
-          {/* 四张卡的宽度需求不同：前三张是表单，第四张只有一个下拉。列数必须跟着
-             内容区的实际宽度走，不能用视口断点——1100px 以下侧栏隐藏、以上侧栏占
-              240px，同一个视口断点对应两种完全不同的内容宽。
-              容器查询：<672px 一列（全宽竖排）；672–1023px 两列（2×2，不留孤行）；
-              ≥1024px 三列（前三张一行），评估模式卡单独一行跨满。 */}
+          {/* 四张卡固定两两并排：求职意向｜薪资目标，JD 评估规则｜评估模式。
+              JD 评估规则与评估模式都直接决定评估怎么跑，并排便于对照着改。
+              列数必须跟着内容区的实际宽度走，不能用视口断点——1100px 以下侧栏隐藏、
+              以上侧栏占 240px，同一个视口断点对应两种完全不同的内容宽。
+              容器查询：<672px 一列（全宽竖排）；≥672px 两列（2×2，不留孤行）。 */}
           <div className="@container">
-            <div className="grid gap-4 @2xl:grid-cols-2 @5xl:grid-cols-3">
+            <div className="grid gap-4 @2xl:grid-cols-2">
               <JobTargetSettings />
               <SalaryTargetSettings />
               <JdRulesSettings />
-              <div className="@5xl:col-span-3">
-                <MarketModeSettings />
-              </div>
+              <MarketModeSettings />
             </div>
           </div>
         </Section>
