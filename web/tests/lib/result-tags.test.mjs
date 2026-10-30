@@ -157,7 +157,7 @@ test("结果区把标签条挂在分组 tab 与卡片之间，渲染行读同一
   assert.match(src, /import \{ countOfferTags, filterByTags, withSelectedCounts, withTags \} from "@\/lib\/result-tags\.mjs"/, "派生必须来自共享模块");
   assert.match(src, /<TagBar counts=\{tagCounts\} selected=\{tags\}/, "标签条渲染");
   assert.match(src, /const tagScope = useMemo\(\(\) => visibleOffers\(remaining, tab, q\), \[remaining, tab, q\]\)/, "计数基底 = 通过其余条件的行集");
-  assert.match(src, /const view = useMemo\(\(\) => \{ const list = filterByTags\(salaryScope, tags\)/, "渲染行 = 同一基底再过标签（薪资下限上线后基底链为 tagScope → salaryScope → view，源头仍是 tagScope）");
+  assert.match(src, /const view = useMemo\(\(\) => filterByTags\(salaryScope, tags\), \[salaryScope, tags\]\)/, "渲染行 = 同一基底再过标签（薪资下限上线后基底链为 tagScope → salaryScope → view，源头仍是 tagScope）");
   // tab 徽标仍看全集（与搜索框同一分层），标签只在行上做窄化。
   assert.match(src, /for \(const o of remaining\) c\[resultTabOf\(o\)\] \+= 1/, "tab 徽标不被标签收窄");
 });

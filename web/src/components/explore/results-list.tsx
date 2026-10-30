@@ -110,13 +110,12 @@ export function ResultsList({ offers, tagVocab }: { offers: EnrichedOffer[]; tag
   // null = 无；每次点击都换新数组引用——GatePanel 按引用消费，重复点击由
   // mergeDenyWords 去重兑底，不会落进两条同名 chip。
   const [preadd, setPreadd] = useState<string[] | null>(null);
-  const [sort, setSort] = useState<"fresh" | "company">("fresh");
   const [q, setQ] = useState("");
-  // 薪资下限（月薪 K）：展示层过滤，纯视图状态，与 q/sort 同类，不进 URL、不跨搜索保留。
+  // 薪资下限（月薪 K）：展示层过滤，纯视图状态，与 q 同类，不进 URL、不跨搜索保留。
   const [salaryMin, setSalaryMin] = useState<number | null>(null);
   const [tab, setTab] = useState<ResultTab>(DEFAULT_TAB);
   // 选中的标签（ADR-0068 决议 3 的探索页版本）：chip 之间 OR，与 tab / 搜索框 AND。
-  // 纯视图状态，与 q/sort 同类，不进 URL、不跨搜索保留（见下方结果集重置）。
+  // 纯视图状态，与 q 同类，不进 URL、不跨搜索保留（见下方结果集重置）。
   const [tags, setTags] = useState<Set<string>>(() => new Set());
   // 被用户显式移除的结果 URL（点「移除所选」）。只影响显示、不写任何数据；集合由
   // provider 持有并持久化到 localStorage，刷新与下一次搜索都保持隐藏，直到点「恢复已移除」。
@@ -179,12 +178,7 @@ export function ResultsList({ offers, tagVocab }: { offers: EnrichedOffer[]; tag
   // 选中项补进计数集：切 tab / 改搜索词后 chip 仍可见、可取消，不会留下看不见的选中态。
   const tagCounts = useMemo(() => withSelectedCounts(countOfferTags(salaryScope), tags), [salaryScope, tags]);
 
-  const view = useMemo(() => {
-    const list = filterByTags(salaryScope, tags);
-    return [...list].sort((a, b) =>
-      sort === "fresh" ? (b.postedAt || "").localeCompare(a.postedAt || "") : a.company.localeCompare(b.company),
-    );
-  }, [salaryScope, tags, sort]);
+  const view = useMemo(() => filterByTags(salaryScope, tags), [salaryScope, tags]);
 
   // ADR-0021 确认入管：勾选集 + 「加入管道 (N)」。默认全选「本次新采」的可加入项
   // （offers 引用变化视为一次新结果集）；恢复出来的旧发现（source=explore-restore）
@@ -311,18 +305,6 @@ export function ResultsList({ offers, tagVocab }: { offers: EnrichedOffer[]; tag
               className="no-number-spin w-16 bg-transparent pr-5 text-[13px] outline-none placeholder:text-faint"
             />
             <InputClearButton show={salaryMin != null} onClear={() => setSalaryMin(null)} label={t("explore.filter.clearSalaryMin")} className="right-1" />
-          </div>
-          <div className="inline-flex rounded-lg border border-border bg-surface/40 p-0.5 text-xs">
-            {(["fresh", "company"] as const).map((s) => (
-              <button
-                key={s}
-                type="button"
-                onClick={() => setSort(s)}
-                className={cn("rounded-md px-2.5 py-1 font-medium capitalize transition-colors", sort === s ? "bg-brand-soft text-brand" : "text-muted hover:text-foreground")}
-              >
-                {s === "fresh" ? t("explore.results.sortFresh") : t("explore.results.sortCompany")}
-              </button>
-            ))}
           </div>
           {removed.size > 0 && (
             <button

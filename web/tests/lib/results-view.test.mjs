@@ -256,7 +256,7 @@ test("the toolbar removes the selected rows without leaking into the filter boun
   );
   assert.match(
     src,
-    /const view = useMemo\(\(\) => \{ const list = filterByTags\(salaryScope, tags\)/,
+    /const view = useMemo\(\(\) => filterByTags\(salaryScope, tags\), \[salaryScope, tags\]\)/,
     "the rendered rows read that same narrowed set (tab + keyword + salary), then the tag filter",
   );
   assert.match(src, /const counts = useMemo\(\(\) => \{ const c: Record<ResultTab, number> = \{ all: remaining\.length/, "so do the tab badges");
