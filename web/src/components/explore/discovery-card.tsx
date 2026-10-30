@@ -291,8 +291,6 @@ export function DiscoveryRow({
           {offer.why && <span className="truncate text-brand/80">{offer.why}</span>}
         </div>
       </td>
-      <td className="max-w-[160px] truncate px-3 py-2 text-muted">{offer.company || "—"}</td>
-      <td className="max-w-[120px] truncate px-3 py-2 text-faint">{offer.location || "—"}</td>
       <td className="px-3 py-2">
         {/* 浏览器(BSK)来源无展示价值，隐藏；保留 ATS 来源标识（与卡片同一口径） */}
         {offer.ats !== "browser" ? (
@@ -353,16 +351,6 @@ export function DiscoveryRow({
               </button>
             </>
           )}
-          <a
-            href={offer.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            title={t("explore.card.openPosting")}
-            aria-label={t("explore.card.openPosting")}
-            className="inline-flex items-center justify-center rounded p-1 text-faint transition-colors hover:text-foreground"
-          >
-            <ExternalLink className="size-4" />
-          </a>
           {/* 单行移除：复用批量「移除所选」的显示层机制（removeOffers → removed 集合），
               只隐去这一行，不写 pipeline.md。表格行密度高，× 常显（不玩卡片那套
               悬停浮现），否则窄屏/触屏上几乎点不到。 */}

@@ -192,7 +192,7 @@ test("the results render as a table with a header select-all over the same visib
     "the header select-all promises the visible, selectable count (same regression guard as the toolbar button it replaces)",
   );
   const i18n = read(I18N);
-  for (const key of ["colTitle", "colCompany", "colLocation", "colSource", "colSalary", "colActions"]) {
+  for (const key of ["colTitle", "colSource", "colSalary", "colActions"]) {
     const hits = (i18n.match(new RegExp(`"explore\\.results\\.${key}":`, "g")) ?? []).length;
     assert.equal(hits, 2, `explore.results.${key} must exist in both locales`);
   }

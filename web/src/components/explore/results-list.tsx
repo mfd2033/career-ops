@@ -456,7 +456,7 @@ export function ResultsList({ offers, tagVocab }: { offers: EnrichedOffer[]; tag
           （见 DiscoveryRow 注释）；表头全选框的操作集合是 visibleAddable（同批量条）。
           窄屏横向滚动（min-w），不隐藏列。 */}
       <div className="overflow-x-auto rounded-xl border border-border">
-        <table className="w-full min-w-[760px] text-left text-[13px]">
+        <table className="w-full min-w-[560px] text-left text-[13px]">
           <thead>
             <tr className="border-b border-border bg-surface/40 text-[11px] font-medium uppercase tracking-wide text-muted">
               <th scope="col" className="w-10 px-3 py-2">
@@ -470,8 +470,6 @@ export function ResultsList({ offers, tagVocab }: { offers: EnrichedOffer[]; tag
                 />
               </th>
               <th scope="col" className="px-3 py-2">{t("explore.results.colTitle")}</th>
-              <th scope="col" className="px-3 py-2">{t("explore.results.colCompany")}</th>
-              <th scope="col" className="px-3 py-2">{t("explore.results.colLocation")}</th>
               <th scope="col" className="px-3 py-2">{t("explore.results.colSource")}</th>
               <th scope="col" className="px-3 py-2">{t("explore.results.colSalary")}</th>
               <th scope="col" className="px-3 py-2 text-right">{t("explore.results.colActions")}</th>
