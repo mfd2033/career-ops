@@ -7,6 +7,7 @@ import { buildTitleFilterExplained } from "@/lib/core/title-keywords.mjs";
 import { mergeDenyWords } from "@/lib/deny-words.mjs";
 import type { DiscoveredOffer } from "@/lib/explore";
 import { useI18n } from "@/lib/i18n/context";
+import { cn } from "@/lib/cn";
 
 // 采集门的「规则牌」（gate-visibility 工单 01）现在也是**改词表的地方**（工单 03）。
 //
@@ -39,11 +40,14 @@ const isDirty = (draft: Words, saved: Words) => seedKey(draft.positive, draft.ne
 function WordGroup({
   label,
   words,
+  highlight,
   onAdd,
   onRemove,
 }: {
   label: string;
   words: string[];
+  /** 要高亮的词（小写规范化）：「拉黑所选」刚落进草稿的新词，让用户一眼看到多出来的是哪几个。 */
+  highlight?: Set<string>;
   onAdd: (w: string) => void;
   onRemove: (w: string) => void;
 }) {
@@ -61,20 +65,30 @@ function WordGroup({
         {label} <span className="tabular-nums text-faint">{words.length}</span>
       </p>
       <div className="mt-1 flex flex-wrap items-center gap-1">
-        {words.map((w, i) => (
+        {words.map((w, i) => {
           // key 带序号：词表里真有重复词（portals.yml 的 negative 里「销售」出现两次）。
-          <span key={`${i}-${w}`} className="inline-flex items-center gap-1 rounded-md border border-border bg-surface/50 px-1.5 py-0.5 text-[11px] text-foreground">
-            {w}
-            <button
-              type="button"
-              onClick={() => onRemove(w)}
-              aria-label={t("explore.results.gateRemove", { w })}
-              className="text-faint transition-colors hover:text-foreground"
+          // 高亮色与顶部带入提示同一家族（amber）：新词从提示一路亮到 chip，来源一眼可循。
+          const hot = highlight?.has(w.trim().toLowerCase()) ?? false;
+          return (
+            <span
+              key={`${i}-${w}`}
+              className={cn(
+                "inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px]",
+                hot ? "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400" : "border-border bg-surface/50 text-foreground",
+              )}
             >
-              <X className="size-3" />
-            </button>
-          </span>
-        ))}
+              {w}
+              <button
+                type="button"
+                onClick={() => onRemove(w)}
+                aria-label={t("explore.results.gateRemove", { w })}
+                className="text-faint transition-colors hover:text-foreground"
+              >
+                <X className="size-3" />
+              </button>
+            </span>
+          );
+        })}
         {words.length === 0 && <span className="text-[11px] text-faint">{t("explore.results.gateNone")}</span>}
         <span className="inline-flex items-center gap-1 rounded-md border border-dashed border-border px-1.5 py-0.5">
           <input
@@ -146,10 +160,15 @@ export function GatePanel({
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState("");
-  // 「拉黑所选」带入了几个词（0 = 无）——弹窗里的一行提示，告诉用户多出来的
-  // chip 是哪来的；随保存/放弃/手动编辑消失，不跨动作残留。
-  const [preadded, setPreadded] = useState(0);
+  // 「拉黑所选」带入的黑名单新词（小写规范化，多次点击累计）——这些 chip 在下方高亮、
+  // 顶部提示按同一口径计数；随保存/放弃/手动编辑清空，不跨动作残留。
+  const [preaddedWords, setPreaddedWords] = useState<string[]>([]);
   const seeded = useRef(seedKey(positive, negative));
+  // preadd 并入时要知道「草稿里原本有什么」，但 effect 不能依赖 draft（否则 setDraft
+  // 换了新数组引用会再触发本 effect，mergeDenyWords 每次都返回新数组就成了死循环）——
+  // 用 ref 读最近一次渲染的草稿即可。
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
 
   // 词表本身变了（保存成功、或播种/分享链接带来了新表）→ 重新播种草稿。
   // 内容比对而不是引用比对：`filters` 每次 setFilters 都是新对象，按引用重播会在用户
@@ -174,10 +193,16 @@ export function GatePanel({
   // 「拉黑所选」把候选词并进草稿黑名单（引用一变即并入；null/空数组不动）。并进
   // 的是 draft 而不是已存表——保存仍然只发生在弹窗里（与词表编辑同一条回路），
   // 试算随之更新，用户保存前就能看到「会多毙几条」。
+  // 真正新落的词（草稿里原本没有的）进高亮集合：重复点击带同一批词、或词已在
+  // 草稿里时不再点亮。新词以琥珀色高亮，与顶部带入提示一一对应。
   useEffect(() => {
     if (!preaddNegative || preaddNegative.length === 0) return;
+    const before = draftRef.current.negative;
     setDraft((d) => ({ ...d, negative: mergeDenyWords(d.negative, preaddNegative) }));
-    setPreadded(preaddNegative.length);
+    const fresh = preaddNegative
+      .map((w) => String(w).trim())
+      .filter((w) => w && !before.some((k) => k.trim().toLowerCase() === w.toLowerCase()));
+    if (fresh.length > 0) setPreaddedWords((prev) => [...new Set([...prev, ...fresh.map((w) => w.toLowerCase())])]);
   }, [preaddNegative]);
 
   // 试算：与门控同一个编译结果（不是同一「规则的重写」，是同一份实现），判的是屏上
@@ -201,7 +226,7 @@ export function GatePanel({
   const edit = (side: keyof Words, w: string, remove = false) => {
     setSaved(false);
     setError("");
-    setPreadded(0);
+    setPreaddedWords([]);
     setDraft((d) => ({ ...d, [side]: remove ? removeOne(d[side], w) : addOne(d[side], w) }));
   };
 
@@ -218,7 +243,7 @@ export function GatePanel({
       const j = (await r.json().catch(() => ({}))) as { error?: string };
       if (!r.ok) throw new Error(j?.error || `HTTP ${r.status}`);
       setSaved(true);
-      setPreadded(0);
+      setPreaddedWords([]);
       onSaved(draft.positive, draft.negative);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -254,13 +279,19 @@ export function GatePanel({
             <div className="mt-3 space-y-3">
               {/* 检索词与词表的分工（原牌面常驻注）：进弹窗后它仍是读懂试算的前提。 */}
               <p className="text-[11px] leading-relaxed text-faint">{t("explore.results.gateQueryNote")}</p>
-              {preadded > 0 && (
+              {preaddedWords.length > 0 && (
                 <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-[11px] text-amber-700 dark:text-amber-400">
-                  {t("explore.results.gatePreadded", { n: preadded })}
+                  {t("explore.results.gatePreadded", { n: preaddedWords.length })}
                 </p>
               )}
               <WordGroup label={t("explore.results.gatePositiveGroup")} words={draft.positive} onAdd={(w) => edit("positive", w)} onRemove={(w) => edit("positive", w, true)} />
-              <WordGroup label={t("explore.results.gateNegativeGroup")} words={draft.negative} onAdd={(w) => edit("negative", w)} onRemove={(w) => edit("negative", w, true)} />
+              <WordGroup
+                label={t("explore.results.gateNegativeGroup")}
+                words={draft.negative}
+                highlight={new Set(preaddedWords)}
+                onAdd={(w) => edit("negative", w)}
+                onRemove={(w) => edit("negative", w, true)}
+              />
 
               <div className="rounded-lg border border-border bg-surface/40 px-2 py-1.5 text-[11px]">
                 <p className="text-foreground">{t("explore.results.gateTrial", { rescue: trial.rescue.length, drop: trial.drop.length })}</p>
@@ -291,7 +322,7 @@ export function GatePanel({
                   onClick={() => {
                     setSaved(false);
                     setError("");
-                    setPreadded(0);
+                    setPreaddedWords([]);
                     setDraft({ positive: [...positive], negative: [...negative] });
                   }}
                   disabled={!dirty || saving}

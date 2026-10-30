@@ -115,6 +115,11 @@ test("「拉黑所选」feeds candidate deny words into the panel's DRAFT, never
   assert.match(panel, /preaddNegative\?: string\[\] \| null/, "the panel accepts the blacklist-selected candidates");
   assert.match(panel, /mergeDenyWords\(d\.negative, preaddNegative\)/, "the preadd must land in the draft's negative side — saving stays the panel's one write path (the route test above pins that)");
   assert.match(panel, /if \(!preaddNegative \|\| preaddNegative\.length === 0\) return;/, "null/empty must be a no-op: mounting the page with no blacklist request must not touch the draft");
+  // 新词必须在黑名单里可辨认：只亮真正落进草稿的词（已在表里的不闪，重复点拉黑也不
+  // 重闪），且高亮与带入提示同一条生命周期——保存/放弃/手动编辑即清，不跨动作残留。
+  assert.match(panel, /setPreaddedWords/, "the panel must remember which words the preadd just landed, so their chips can be highlighted");
+  assert.match(panel, /!before\.some\(\(k\) => k\.trim\(\)\.toLowerCase\(\) === w\.toLowerCase\(\)\)/, "only words NOT already in the draft count as new — re-blacklisting the same selection must not re-light existing chips");
+  assert.match(panel, /highlight=\{new Set\(preaddedWords\)\}/, "the highlight must reach the negative group's chips, not just the banner");
   const list = flat(LIST);
   assert.match(list, /suggestDenyWords\(selectedOffers\)/, "results-list derives the candidates from the selected rows' titles");
   assert.match(list, /preaddNegative=\{preadd\}/, "…and passes them down to the panel");
