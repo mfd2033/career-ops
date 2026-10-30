@@ -292,14 +292,6 @@ export function DiscoveryRow({
         </div>
       </td>
       <td className="px-3 py-2">
-        {/* 浏览器(BSK)来源无展示价值，隐藏；保留 ATS 来源标识（与卡片同一口径） */}
-        {offer.ats !== "browser" ? (
-          <span className="whitespace-nowrap rounded border border-border px-1.5 py-0.5 text-[11px] font-medium text-muted">{ATS_LABEL[offer.ats as AtsSource] ?? offer.ats}</span>
-        ) : (
-          <span className="text-faint">—</span>
-        )}
-      </td>
-      <td className="px-3 py-2">
         {/* 薪资原文直出；解析不出月薪 → 并列「薪资未知」（与卡片同一口径，不是二选一） */}
         {offer.salaryText ? (
           <span className="inline-flex items-center gap-1 whitespace-nowrap rounded border border-emerald-500/25 bg-emerald-500/10 px-1.5 py-0.5 text-[11px] font-medium text-emerald-600 dark:text-emerald-300">
@@ -309,6 +301,14 @@ export function DiscoveryRow({
           <span className="inline-flex items-center gap-1 whitespace-nowrap rounded border border-border px-1.5 py-0.5 text-[11px] font-medium text-faint" title={t("explore.card.salaryUnknownTitle")}>
             <Coins className="size-3" /> {t("explore.card.salaryUnknown")}
           </span>
+        ) : (
+          <span className="text-faint">—</span>
+        )}
+      </td>
+      <td className="px-3 py-2">
+        {/* 浏览器(BSK)来源无展示价值，隐藏；保留 ATS 来源标识（与卡片同一口径） */}
+        {offer.ats !== "browser" ? (
+          <span className="whitespace-nowrap rounded border border-border px-1.5 py-0.5 text-[11px] font-medium text-muted">{ATS_LABEL[offer.ats as AtsSource] ?? offer.ats}</span>
         ) : (
           <span className="text-faint">—</span>
         )}

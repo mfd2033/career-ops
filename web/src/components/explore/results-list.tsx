@@ -452,8 +452,8 @@ export function ResultsList({ offers, tagVocab }: { offers: EnrichedOffer[]; tag
                 />
               </th>
               <th scope="col" className="px-3 py-2">{t("explore.results.colTitle")}</th>
-              <th scope="col" className="px-3 py-2">{t("explore.results.colSource")}</th>
               <th scope="col" className="px-3 py-2">{t("explore.results.colSalary")}</th>
+              <th scope="col" className="px-3 py-2">{t("explore.results.colSource")}</th>
               <th scope="col" className="px-3 py-2 text-right">{t("explore.results.colActions")}</th>
             </tr>
           </thead>
