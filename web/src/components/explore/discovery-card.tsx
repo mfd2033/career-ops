@@ -36,26 +36,12 @@ function Logo({ company }: { company: string }) {
   );
 }
 
-// What a running worker is doing on this exact posting → the live CTA label.
-// ADR-0021: 结果区可勾选（selectable/selected/onToggleSelect 由 ResultsList 传入，
-// 组成「加入管道 (N)」的批量确认）；不传即无勾选框（旧调用方不受影响）。
-export function DiscoveryCard({
-  offer,
-  inPipeline,
-  evaluatedN,
-  selectable,
-  selected,
-  onToggleSelect,
-}: {
-  offer: DiscoveredOffer;
-  inPipeline: boolean;
-  evaluatedN?: string;
-  selectable?: boolean;
-  selected?: boolean;
-  onToggleSelect?: () => void;
-}) {
+// 卡片与表格行共用的单岗位动作状态：全局 worker 感知 + 入管/评估动作 + 薪资未知打标。
+// 勾选（selectable/selected/onToggleSelect）不在这里——它归批量确认管（ADR-0021，
+// 由 ResultsList 传入，组成「加入管道 (N)」）。
+function useOfferActions(offer: DiscoveredOffer, inPipeline: boolean) {
   const { t } = useI18n();
-  const { added, adding, addToPipeline, removeOffers } = useExplore();
+  const { added, adding, addToPipeline } = useExplore();
   const { jobs, startJob } = useJobs();
   const WORKER_LABEL: Record<string, string> = {
     evaluate: t("explore.card.evaluating"),
@@ -76,13 +62,10 @@ export function DiscoveryCard({
 
   const isAdded = added.has(offer.url) || inPipeline || working || doneEval;
   const isAdding = adding.has(offer.url);
-  const unverified = offer.verification === "unconfirmed";
-  const fresh = freshness(offer.postedAt) || offer.postedHint || "";
-  // 薪资未知（工单 03）：浏览器采集的卡片没带薪资文本、或文本解析不出月薪时打标。
-  // 判定与门控开关无关——门控关闭只是「不过滤」，不改变展示口径（工单 03「无薪资/
-  // 解析失败展示「薪资未知」标记」；CONTEXT.md「展示时打标提示」）。offer.salaryUnknown
+  // 薪资未知（工单 03）：浏览器采集的行没带薪资文本、或文本解析不出月薪时打标。
+  // 判定与门控开关无关——门控关闭只是「不过滤」，不改变展示口径。offer.salaryUnknown
   // 是落库侧的门控打标（pipeline.md note 用），不能替代这里的判定：没有填薪资下限时
-  // 它一律不置位。只作用于浏览器卡片——AI 搜索的 offer 压根不带薪资字段，不该被误标。
+  // 它一律不置位。只作用于浏览器行——AI 搜索的 offer 压根不带薪资字段，不该被误标。
   // 浏览器 ats 有两种形态：实时探索写 "browser"，持久化的见过台账（whats-new）里 ats
   // 取自 portal 列 = "browser-{平台}"，故用前缀匹配同时覆盖两者。
   const salaryUnknown = offer.ats.startsWith("browser") && isSalaryUnknown(offer);
@@ -91,6 +74,33 @@ export function DiscoveryCard({
     addToPipeline([offer]); // evaluating implies it's in the pipeline — record it
     startJob({ title: `${t("explore.card.evaluatePrefix")} ${offer.company}`, subtitle: offer.title, kind: "evaluate", input: offer.url, page: "/explore" });
   };
+
+  return { job, isAdded, isAdding, working, doneEval, statusLabel, salaryUnknown, evaluate, addOne: () => addToPipeline([offer]) };
+}
+
+// What a running worker is doing on this exact posting → the live CTA label.
+// ADR-0021: 结果区可勾选（selectable/selected/onToggleSelect 由 ResultsList 传入，
+// 组成「加入管道 (N)」的批量确认）；不传即无勾选框（旧调用方不受影响）。
+export function DiscoveryCard({
+  offer,
+  inPipeline,
+  evaluatedN,
+  selectable,
+  selected,
+  onToggleSelect,
+}: {
+  offer: DiscoveredOffer;
+  inPipeline: boolean;
+  evaluatedN?: string;
+  selectable?: boolean;
+  selected?: boolean;
+  onToggleSelect?: () => void;
+}) {
+  const { t } = useI18n();
+  const { removeOffers } = useExplore();
+  const { job, isAdded, isAdding, working, doneEval, statusLabel, salaryUnknown, evaluate, addOne } = useOfferActions(offer, inPipeline);
+  const unverified = offer.verification === "unconfirmed";
+  const fresh = freshness(offer.postedAt) || offer.postedHint || "";
 
   return (
     <div className="co-rise group flex min-w-0 flex-col gap-2.5 rounded-xl border border-border bg-surface/40 p-3.5 text-left transition-all hover:-translate-y-0.5 hover:border-brand/30 hover:shadow-sm">
@@ -198,7 +208,7 @@ export function DiscoveryCard({
             <button
               type="button"
               disabled={isAdded || isAdding}
-              onClick={() => addToPipeline([offer])}
+              onClick={addOne}
               className={cn(
                 "inline-flex flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-md px-2.5 py-2 text-xs font-medium transition-colors max-sm:min-h-[44px]",
                 isAdded ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" : "bg-surface-hover text-foreground hover:bg-brand-soft hover:text-brand",
@@ -219,5 +229,153 @@ export function DiscoveryCard({
         )}
       </div>
     </div>
+  );
+}
+
+// 结果表格行（列头表格版，与 DiscoveryCard 同一数据面）：结果区从卡片网格换成
+// 带列头的表格后，每行的勾选 / 入管 / 评估 / 移除 / 外链能力一概不缩水——动作
+// 状态与卡片共用 useOfferActions，只是排版更紧凑（单行主信息 + 次行徽标）。
+export function DiscoveryRow({
+  offer,
+  inPipeline,
+  evaluatedN,
+  selectable,
+  selected,
+  onToggleSelect,
+}: {
+  offer: DiscoveredOffer;
+  inPipeline: boolean;
+  evaluatedN?: string;
+  selectable?: boolean;
+  selected?: boolean;
+  onToggleSelect?: () => void;
+}) {
+  const { t } = useI18n();
+  const { removeOffers } = useExplore();
+  const { job, isAdded, isAdding, working, doneEval, statusLabel, salaryUnknown, evaluate, addOne } = useOfferActions(offer, inPipeline);
+  const unverified = offer.verification === "unconfirmed";
+  const fresh = freshness(offer.postedAt) || offer.postedHint || "";
+
+  return (
+    <tr className="group transition-colors hover:bg-surface-hover/40">
+      <td className="px-3 py-2 align-middle">
+        {onToggleSelect && (
+          <input
+            type="checkbox"
+            checked={!!selected}
+            onChange={onToggleSelect}
+            disabled={!selectable}
+            aria-label={t("explore.results.selectAria", { title: offer.title })}
+            className="size-4 shrink-0 accent-brand"
+          />
+        )}
+      </td>
+      <td className="max-w-[340px] px-3 py-2">
+        <a href={offer.url} target="_blank" rel="noopener noreferrer" className="block min-w-0">
+          <span className={`${instrumentSerif.className} block truncate text-[15px] leading-tight text-foreground transition-colors group-hover:text-brand`}>
+            {offer.title}
+          </span>
+        </a>
+        <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-faint">
+          {fresh && <span>{fresh}</span>}
+          {unverified && (
+            <span className="inline-flex items-center gap-1 rounded border border-amber-500/25 bg-amber-500/10 px-1.5 py-0.5 font-medium text-amber-600 dark:text-amber-300" title={t("explore.card.unverifiedTitle")}>
+              <ShieldQuestion className="size-3" /> {t("explore.card.unverified")}
+            </span>
+          )}
+          {offer.matchedKeyword && (
+            <span title={t("explore.card.keywordTitle")}>
+              · matched <span className="text-brand/80">{offer.matchedKeyword}</span>
+            </span>
+          )}
+          {offer.why && <span className="truncate text-brand/80">{offer.why}</span>}
+        </div>
+      </td>
+      <td className="max-w-[160px] truncate px-3 py-2 text-muted">{offer.company || "—"}</td>
+      <td className="max-w-[120px] truncate px-3 py-2 text-faint">{offer.location || "—"}</td>
+      <td className="px-3 py-2">
+        {/* 浏览器(BSK)来源无展示价值，隐藏；保留 ATS 来源标识（与卡片同一口径） */}
+        {offer.ats !== "browser" ? (
+          <span className="whitespace-nowrap rounded border border-border px-1.5 py-0.5 text-[11px] font-medium text-muted">{ATS_LABEL[offer.ats as AtsSource] ?? offer.ats}</span>
+        ) : (
+          <span className="text-faint">—</span>
+        )}
+      </td>
+      <td className="px-3 py-2">
+        {/* 薪资原文直出；解析不出月薪 → 并列「薪资未知」（与卡片同一口径，不是二选一） */}
+        {offer.salaryText ? (
+          <span className="inline-flex items-center gap-1 whitespace-nowrap rounded border border-emerald-500/25 bg-emerald-500/10 px-1.5 py-0.5 text-[11px] font-medium text-emerald-600 dark:text-emerald-300">
+            <Coins className="size-3" /> {offer.salaryText}
+          </span>
+        ) : salaryUnknown ? (
+          <span className="inline-flex items-center gap-1 whitespace-nowrap rounded border border-border px-1.5 py-0.5 text-[11px] font-medium text-faint" title={t("explore.card.salaryUnknownTitle")}>
+            <Coins className="size-3" /> {t("explore.card.salaryUnknown")}
+          </span>
+        ) : (
+          <span className="text-faint">—</span>
+        )}
+      </td>
+      <td className="px-3 py-2">
+        <div className="flex items-center justify-end gap-1.5">
+          {evaluatedN || doneEval ? (
+            <a
+              href={evaluatedN ? `/pipeline/${evaluatedN}` : job ? `/jobs/${job.id}` : "/pipeline"}
+              className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-md bg-brand-soft px-2.5 py-1.5 text-xs font-medium text-brand"
+            >
+              <Check className="size-3.5" /> {t("explore.card.evaluatedView")}
+            </a>
+          ) : working ? (
+            <span className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-md border border-brand/30 bg-brand-soft/60 px-2.5 py-1.5 text-xs font-medium text-brand">
+              <Loader2 className="size-3.5 animate-spin" />
+              {statusLabel}
+            </span>
+          ) : (
+            <>
+              <button
+                type="button"
+                disabled={isAdded || isAdding}
+                onClick={addOne}
+                className={cn(
+                  "inline-flex items-center gap-1 whitespace-nowrap rounded-md px-2 py-1.5 text-xs font-medium transition-colors",
+                  isAdded ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" : "bg-surface-hover text-foreground hover:bg-brand-soft hover:text-brand",
+                )}
+              >
+                {isAdding ? <Loader2 className="size-3.5 animate-spin" /> : isAdded ? <Check className="size-3.5" /> : <Plus className="size-3.5" />}
+                {isAdded ? t("explore.card.inPipelineLabel") : t("explore.card.addToPipeline")}
+              </button>
+              <button
+                type="button"
+                onClick={evaluate}
+                title={unverified ? t("explore.card.evaluateTitleUnverified") : t("explore.card.evaluateTitle")}
+                className="inline-flex items-center gap-1 whitespace-nowrap rounded-md border border-brand/30 px-2 py-1.5 text-xs font-medium text-brand transition-colors hover:bg-brand-soft"
+              >
+                {t("explore.card.evaluate")}
+              </button>
+            </>
+          )}
+          <a
+            href={offer.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            title={t("explore.card.openPosting")}
+            aria-label={t("explore.card.openPosting")}
+            className="inline-flex items-center justify-center rounded p-1 text-faint transition-colors hover:text-foreground"
+          >
+            <ExternalLink className="size-4" />
+          </a>
+          {/* 单行移除：复用批量「移除所选」的显示层机制（removeOffers → removed 集合），
+              只隐去这一行，不写 pipeline.md——与卡片上的 × 同一套语义。 */}
+          <button
+            type="button"
+            onClick={() => removeOffers([offer.url])}
+            title={t("explore.card.dismissTitle")}
+            aria-label={t("explore.card.dismiss")}
+            className="inline-flex items-center justify-center rounded p-1 text-faint opacity-0 transition-all hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
+          >
+            <X className="size-4" />
+          </button>
+        </div>
+      </td>
+    </tr>
   );
 }

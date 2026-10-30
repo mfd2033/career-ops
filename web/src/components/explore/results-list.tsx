@@ -5,7 +5,7 @@ import { Search, Plus, ChevronRight, Coins, Ban } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { BROWSER_LABEL, type BrowserSource, type DiscoveredOffer } from "@/lib/explore";
 import { CostBadge } from "@/components/cost/cost-badge";
-import { DiscoveryCard } from "./discovery-card";
+import { DiscoveryRow } from "./discovery-card";
 import { GatePanel } from "./gate-panel";
 import { InputClearButton } from "@/components/input-clear-button";
 import { useExplore } from "./explore-provider";
@@ -215,6 +215,15 @@ export function ResultsList({ offers, tagVocab }: { offers: EnrichedOffer[]; tag
   const visibleAddable = useMemo(() => view.filter((o) => isSelectable(o, added)), [view, added]);
   const selectedAddable = visibleAddable.filter((o) => selected.has(o.url));
   const allAddableSelected = visibleAddable.length > 0 && selectedAddable.length === visibleAddable.length;
+  // 表头全选框：勾选/半选态只跟踪可见可加入行——「全选」承诺的是屏幕上的那批
+  // （与批量条同一可见集合，见 results-view.mjs / ADR-0021；管道页表头同款）。
+  const selectAllRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    const el = selectAllRef.current;
+    if (!el) return;
+    el.checked = visibleAddable.length > 0 && selectedAddable.length === visibleAddable.length;
+    el.indeterminate = selectedAddable.length > 0 && selectedAddable.length < visibleAddable.length;
+  }, [visibleAddable, selectedAddable]);
   // 全选/清除都只动可见的那批：清除只清屏幕上的勾，屏幕外的勾选留到它重新可见时再处置，
   // 而不是在这里被无声抹掉。
   const toggleAll = () =>
@@ -336,17 +345,10 @@ export function ResultsList({ offers, tagVocab }: { offers: EnrichedOffer[]; tag
               {restoring ? t("explore.results.restoring") : t("explore.results.restoreSeen")}
             </button>
           )}
-          {visibleAddable.length > 0 && (
-            <button
-              type="button"
-              onClick={toggleAll}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface/40 px-2.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-brand-soft hover:text-brand"
-            >
-              {allAddableSelected ? t("explore.results.clearSelection") : t("explore.results.selectAll", { n: visibleAddable.length })}
-            </button>
-          )}
+          {/* 全选入口已内嵌到表头全选框（勾选/半选态随可见可加入行联动），
+              工具栏不再重复放一颗全选按钮。 */}
           {/* 移除所选：把勾选的行从结果区隐去（纯展示，刷新后仍保持；重新搜索即恢复）。
-              排在「清除选择」右侧、主按钮「加入管道」左侧——次级动作不抢主 CTA 的位置。 */}
+              排在主按钮「加入管道」左侧——次级动作不抢主 CTA 的位置。 */}
           {selected.size > 0 && (
             <button
               type="button"
@@ -450,18 +452,45 @@ export function ResultsList({ offers, tagVocab }: { offers: EnrichedOffer[]; tag
         />
       )}
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
-        {view.map((o) => (
-          <DiscoveryCard
-            key={o.url}
-            offer={o}
-            inPipeline={o.inPipeline}
-            evaluatedN={o.evaluatedN}
-            selectable={isSelectable(o, added)}
-            selected={selected.has(o.url)}
-            onToggleSelect={() => toggleSelect(o.url)}
-          />
-        ))}
+      {/* 结果表格：带列头 + 表头全选框。勾选/入管/评估/移除/外链与原卡片一一对应
+          （见 DiscoveryRow 注释）；表头全选框的操作集合是 visibleAddable（同批量条）。
+          窄屏横向滚动（min-w），不隐藏列。 */}
+      <div className="overflow-x-auto rounded-xl border border-border">
+        <table className="w-full min-w-[760px] text-left text-[13px]">
+          <thead>
+            <tr className="border-b border-border bg-surface/40 text-[11px] font-medium uppercase tracking-wide text-muted">
+              <th scope="col" className="w-10 px-3 py-2">
+                <input
+                  ref={selectAllRef}
+                  type="checkbox"
+                  onChange={toggleAll}
+                  disabled={visibleAddable.length === 0}
+                  aria-label={allAddableSelected ? t("explore.results.clearSelection") : t("explore.results.selectAll", { n: visibleAddable.length })}
+                  className="size-4 accent-brand"
+                />
+              </th>
+              <th scope="col" className="px-3 py-2">{t("explore.results.colTitle")}</th>
+              <th scope="col" className="px-3 py-2">{t("explore.results.colCompany")}</th>
+              <th scope="col" className="px-3 py-2">{t("explore.results.colLocation")}</th>
+              <th scope="col" className="px-3 py-2">{t("explore.results.colSource")}</th>
+              <th scope="col" className="px-3 py-2">{t("explore.results.colSalary")}</th>
+              <th scope="col" className="px-3 py-2 text-right">{t("explore.results.colActions")}</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {view.map((o) => (
+              <DiscoveryRow
+                key={o.url}
+                offer={o}
+                inPipeline={o.inPipeline}
+                evaluatedN={o.evaluatedN}
+                selectable={isSelectable(o, added)}
+                selected={selected.has(o.url)}
+                onToggleSelect={() => toggleSelect(o.url)}
+              />
+            ))}
+          </tbody>
+        </table>
       </div>
 
       {view.length === 0 && (

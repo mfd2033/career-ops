@@ -178,6 +178,26 @@ test("the bar counts, ticks and confirms the visible derivation — not a second
   );
 });
 
+test("the results render as a table with a header select-all over the same visible derivation", () => {
+  const src = flat(LIST);
+  assert.match(src, /<DiscoveryRow/, "rows render as table rows (DiscoveryRow), not cards");
+  assert.match(
+    src,
+    /el\.indeterminate = selectedAddable\.length > 0 && selectedAddable\.length < visibleAddable\.length/,
+    "the header checkbox shows the partial state over the same visible set",
+  );
+  assert.match(
+    src,
+    /aria-label=\{allAddableSelected \? t\("explore\.results\.clearSelection"\) : t\("explore\.results\.selectAll", \{ n: visibleAddable\.length \}\)\}/,
+    "the header select-all promises the visible, selectable count (same regression guard as the toolbar button it replaces)",
+  );
+  const i18n = read(I18N);
+  for (const key of ["colTitle", "colCompany", "colLocation", "colSource", "colSalary", "colActions"]) {
+    const hits = (i18n.match(new RegExp(`"explore\\.results\\.${key}":`, "g")) ?? []).length;
+    assert.equal(hits, 2, `explore.results.${key} must exist in both locales`);
+  }
+});
+
 test("the tab counts still look at the whole result set (a deliberate contrast, not an oversight)", () => {
   const src = read(LIST);
   const start = src.indexOf("const counts = useMemo(");
