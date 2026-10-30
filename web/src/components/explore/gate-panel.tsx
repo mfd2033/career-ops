@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronRight, Plus, RotateCcw, ShieldCheck, X } from "lucide-react";
-import { cn } from "@/lib/cn";
+import { Plus, RotateCcw, ShieldCheck, X } from "lucide-react";
+
 import { buildTitleFilterExplained } from "@/lib/core/title-keywords.mjs";
 import type { DiscoveredOffer } from "@/lib/explore";
 import { useI18n } from "@/lib/i18n/context";
@@ -22,7 +22,7 @@ import { useI18n } from "@/lib/i18n/context";
 //   2. 写回**不丢注释**：portals.yml 的注释是词表的理由（哪类词刻意不加、为什么），
 //      丢了就再也回不来。所以走文本级拼接（lib/core/portals-merge.mjs），不走 yaml 往返。
 //   3. 保存**不重扫**：词表在下一次扫描生效，本次结果不动——否则用户会以为删个词就把
-//      已经看到的岗位撤回了。所以折叠面板也不丢编辑（草稿留在状态里，牌面挂「未保存」）。
+//      已经看到的岗位撤回了。所以弹窗关了也不丢编辑（草稿留在状态里，牌面挂「未保存」）。
 
 type Words = { positive: string[]; negative: string[] };
 
@@ -104,11 +104,18 @@ function WordGroup({
 }
 
 /**
- * The collection gate's rule card + word-list editor.
+ * The collection gate's word-list editor, rendered as a modal.
+ *
+ * 常驻摘要牌已撤（用户决定 2026-10-30）：牌面信息并入弹窗，入口只剩工具栏
+ * 「加入管道」右侧的「配置」按钮。组件本身始终挂载（isBsk 时）——草稿活在
+ * 状态里，弹窗关了编辑不丢；「未保存」徽标改由 onDirtyChange 上报给工具栏，
+ * 挂在「配置」按钮上（入口在哪，徽标在哪）。
  *
  * @param positive/negative the word list AS SAVED (from the seeded filters) — the draft's baseline
  * @param kept the survivors on screen; `folded` the rejects (each carrying its `gateReason`)
- * @param onSaved lifts the new list back into the provider's filters, so the card and a shared link keep describing the file that now exists
+ * @param onSaved lifts the new list back into the provider's filters, so the trial and a shared link keep describing the file that now exists
+ * @param open/onOpenChange 弹窗开关由 ResultsList 持有——触发按钮在工具栏，与弹窗分居两处
+ * @param onDirtyChange 把「有未保存改动」上报给父组件，挂在「配置」按钮上
  */
 export function GatePanel({
   positive,
@@ -116,15 +123,20 @@ export function GatePanel({
   kept,
   folded,
   onSaved,
+  open,
+  onOpenChange,
+  onDirtyChange,
 }: {
   positive: string[];
   negative: string[];
   kept: DiscoveredOffer[];
   folded: DiscoveredOffer[];
   onSaved: (positive: string[], negative: string[]) => void;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onDirtyChange?: (dirty: boolean) => void;
 }) {
   const { t } = useI18n();
-  const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<Words>(() => ({ positive: [...positive], negative: [...negative] }));
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -141,6 +153,16 @@ export function GatePanel({
     setDraft({ positive: [...positive], negative: [...negative] });
   }, [positive, negative]);
 
+  // Esc 关闭弹窗——与点遮罩同级的低承诺退出；草稿留在状态里，关了再开编辑还在。
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onOpenChange(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onOpenChange]);
+
   // 试算：与门控同一个编译结果（不是同一「规则的重写」，是同一份实现），判的是屏上
   // 这批结果——kept 里会被新表毙掉的，与被毙里会被新表放行的。
   const trial = useMemo(() => {
@@ -152,7 +174,12 @@ export function GatePanel({
   }, [draft, kept, folded]);
 
   const dirty = isDirty(draft, { positive, negative });
-  const configured = draft.positive.length > 0 || draft.negative.length > 0;
+
+  // 「未保存」徽标改挂在工具栏「配置」按钮上：牌面撤掉后，弹窗关着时唯一的
+  // 「编辑还挂著」信号在入口处，用户不会忘记回来保存或放弃。
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
 
   const edit = (side: keyof Words, w: string, remove = false) => {
     setSaved(false);
@@ -182,74 +209,79 @@ export function GatePanel({
   };
 
   return (
-    <div className="rounded-xl border border-border bg-surface/30">
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        aria-expanded={open}
-        className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium text-muted transition-colors hover:text-foreground"
-      >
-        <ShieldCheck className="size-3.5 shrink-0" />
-        <span>
-          {configured
-            ? t("explore.results.gateSummary", { p: draft.positive.length, n: draft.negative.length, f: folded.length })
-            : t("explore.results.gateUnset")}
-        </span>
-        {/* 折叠起来也不丢编辑：草稿留在状态里，这里只是把「有未保存改动」说出来。 */}
-        {dirty && <span className="rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-amber-600 dark:text-amber-400">{t("explore.results.gateUnsaved")}</span>}
-        <ChevronRight className={cn("ml-auto size-3.5 shrink-0 transition-transform", open && "rotate-90")} />
-      </button>
-
+    <>
       {open && (
-        <div className="space-y-3 border-t border-border px-3 py-2">
-          <WordGroup label={t("explore.results.gatePositiveGroup")} words={draft.positive} onAdd={(w) => edit("positive", w)} onRemove={(w) => edit("positive", w, true)} />
-          <WordGroup label={t("explore.results.gateNegativeGroup")} words={draft.negative} onAdd={(w) => edit("negative", w)} onRemove={(w) => edit("negative", w, true)} />
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) onOpenChange(false);
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={t("explore.results.gateModalTitle")}
+            className="max-h-[calc(100dvh-2rem)] w-full max-w-lg overflow-y-auto rounded-2xl border border-border bg-surface p-5 shadow-xl"
+          >
+            <div className="flex items-start justify-between gap-4">
+              <h2 className="flex items-center gap-2 font-display text-lg">
+                <ShieldCheck className="size-4 text-muted" /> {t("explore.results.gateModalTitle")}
+              </h2>
+              <button type="button" onClick={() => onOpenChange(false)} aria-label={t("explore.results.gateClose")} className="rounded p-1 text-faint transition hover:text-foreground">
+                <X className="size-4" />
+              </button>
+            </div>
 
-          <div className="rounded-lg border border-border bg-surface/40 px-2 py-1.5 text-[11px]">
-            <p className="text-foreground">{t("explore.results.gateTrial", { rescue: trial.rescue.length, drop: trial.drop.length })}</p>
-            {trial.rescue.length > 0 && (
-              <p className="mt-0.5 text-faint">
-                {t("explore.results.gateTrialRescue")}：{preview(trial.rescue, (n) => t("explore.results.filteredMore", { n }))}
-              </p>
-            )}
-            {trial.drop.length > 0 && (
-              <p className="mt-0.5 text-faint">
-                {t("explore.results.gateTrialDrop")}：{preview(trial.drop, (n) => t("explore.results.filteredMore", { n }))}
-              </p>
-            )}
-            <p className="mt-1 text-[10px] leading-relaxed text-faint">{t("explore.results.gateTrialNote")}</p>
-          </div>
+            <div className="mt-3 space-y-3">
+              {/* 检索词与词表的分工（原牌面常驻注）：进弹窗后它仍是读懂试算的前提。 */}
+              <p className="text-[11px] leading-relaxed text-faint">{t("explore.results.gateQueryNote")}</p>
+              <WordGroup label={t("explore.results.gatePositiveGroup")} words={draft.positive} onAdd={(w) => edit("positive", w)} onRemove={(w) => edit("positive", w, true)} />
+              <WordGroup label={t("explore.results.gateNegativeGroup")} words={draft.negative} onAdd={(w) => edit("negative", w)} onRemove={(w) => edit("negative", w, true)} />
 
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={() => void save()}
-              disabled={!dirty || saving}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-xs font-semibold text-brand-foreground shadow-sm transition-all hover:brightness-110 disabled:opacity-50"
-            >
-              <ShieldCheck className="size-3.5" /> {saving ? t("explore.results.gateSaving") : t("explore.results.gateSave")}
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setSaved(false);
-                setError("");
-                setDraft({ positive: [...positive], negative: [...negative] });
-              }}
-              disabled={!dirty || saving}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface/40 px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-brand-soft hover:text-brand disabled:opacity-50"
-            >
-              <RotateCcw className="size-3.5" /> {t("explore.results.gateDiscard")}
-            </button>
-            {saved && <span className="text-[11px] text-emerald-600 dark:text-emerald-400">{t("explore.results.gateSaved")}</span>}
-            {error && <span className="text-[11px] text-amber-600 dark:text-amber-400">{t("explore.results.gateSaveFailed", { msg: error })}</span>}
+              <div className="rounded-lg border border-border bg-surface/40 px-2 py-1.5 text-[11px]">
+                <p className="text-foreground">{t("explore.results.gateTrial", { rescue: trial.rescue.length, drop: trial.drop.length })}</p>
+                {trial.rescue.length > 0 && (
+                  <p className="mt-0.5 text-faint">
+                    {t("explore.results.gateTrialRescue")}：{preview(trial.rescue, (n) => t("explore.results.filteredMore", { n }))}
+                  </p>
+                )}
+                {trial.drop.length > 0 && (
+                  <p className="mt-0.5 text-faint">
+                    {t("explore.results.gateTrialDrop")}：{preview(trial.drop, (n) => t("explore.results.filteredMore", { n }))}
+                  </p>
+                )}
+                <p className="mt-1 text-[10px] leading-relaxed text-faint">{t("explore.results.gateTrialNote")}</p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => void save()}
+                  disabled={!dirty || saving}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-xs font-semibold text-brand-foreground shadow-sm transition-all hover:brightness-110 disabled:opacity-50"
+                >
+                  <ShieldCheck className="size-3.5" /> {saving ? t("explore.results.gateSaving") : t("explore.results.gateSave")}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSaved(false);
+                    setError("");
+                    setDraft({ positive: [...positive], negative: [...negative] });
+                  }}
+                  disabled={!dirty || saving}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface/40 px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-brand-soft hover:text-brand disabled:opacity-50"
+                >
+                  <RotateCcw className="size-3.5" /> {t("explore.results.gateDiscard")}
+                </button>
+                {saved && <span className="text-[11px] text-emerald-600 dark:text-emerald-400">{t("explore.results.gateSaved")}</span>}
+                {error && <span className="text-[11px] text-amber-600 dark:text-amber-400">{t("explore.results.gateSaveFailed", { msg: error })}</span>}
+              </div>
+            </div>
           </div>
         </div>
       )}
-
-      {/* 这行常驻（不在折叠里）：误解发生在看卡片的时候，答案不该藏在展开之后。 */}
-      <p className="px-3 pb-2 text-[11px] leading-relaxed text-faint">{t("explore.results.gateQueryNote")}</p>
-    </div>
+    </>
   );
 }
 

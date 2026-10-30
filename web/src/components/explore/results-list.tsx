@@ -100,6 +100,11 @@ export function ResultsList({ offers, tagVocab }: { offers: EnrichedOffer[]; tag
   // 采集门跑在 browser 路径上（bsk 服务端 / 扩展页侧两条 driver），与 explorer-view 的
   // isBsk 同构。ATS 扫描也被标题门筛，但页面拿不到它的被毙条数——见 GateCard 注释。
   const isBsk = mode === "browser" || (!isAi && scanSource === "bsk");
+  // 标题门配置弹窗的开关（工单 03 交互改弹窗）：触发按钮在工具栏，GatePanel 只渲染弹窗；
+  // 组件本身始终挂载，草稿留在它的状态里，关了再开编辑不丢。gateDirty 是 GatePanel
+  // 上报的「有未保存改动」，徽标挂在「配置」按钮上（入口在哪，徽标在哪）。
+  const [gateOpen, setGateOpen] = useState(false);
+  const [gateDirty, setGateDirty] = useState(false);
   const [sort, setSort] = useState<"fresh" | "company">("fresh");
   const [q, setQ] = useState("");
   const [tab, setTab] = useState<ResultTab>(DEFAULT_TAB);
@@ -316,6 +321,20 @@ export function ResultsList({ offers, tagVocab }: { offers: EnrichedOffer[]; tag
               <Plus className="size-3.5" /> {t("explore.results.addSelected", { n: selectedAddable.length })}
             </button>
           )}
+          {/* 标题门配置：主 CTA「加入管道」右侧的次级入口，点击打开配置弹窗。
+              仅 browser 路径有标题门（与下方 GatePanel 的挂载条件同构）；加不加管道不影响
+              它的可用性——改词表正是为了下一次扫描不再误杀，跟本批勾选无关。
+              弹窗关着但有未保存编辑时，徽标提醒回来保存或放弃。 */}
+          {isBsk && (
+            <button
+              type="button"
+              onClick={() => setGateOpen(true)}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface/40 px-2.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-brand-soft hover:text-brand"
+            >
+              {t("explore.results.gateConfigure")}
+              {gateDirty && <span className="rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-amber-600 dark:text-amber-400">{t("explore.results.gateUnsaved")}</span>}
+            </button>
+          )}
         </div>
       </div>
 
@@ -353,10 +372,11 @@ export function ResultsList({ offers, tagVocab }: { offers: EnrichedOffer[]; tag
         onClear={() => setTags(new Set())}
       />
 
-      {/* 规则牌排在卡片之前：那个「为什么这条在这儿」的疑惑就是在看卡片时产生的。
-          它同时是改词表的地方（工单 03）——误杀当场就能改、当场看到试算，而不是关掉页面
-          去手改 portals.yml 再重扫；后者正是这一轮之前没人动词表的原因。
-          只在 browser 路径显示：ATS CLI 扫描同样过标题门，但被毙条数只活在它自己的
+      {/* GatePanel 只渲染配置弹窗（原常驻规则牌已撤，牌面信息并入弹窗；用户决定
+          2026-10-30）。改词表（工单 03）走工具栏「加入管道」右侧的「配置」按钮——误杀
+          当场就能改、当场看到试算，而不是关掉页面去手改 portals.yml 再重扫；后者正是
+          这一轮之前没人动词表的原因。
+          只在 browser 路径挂载：ATS CLI 扫描同样过标题门，但被毙条数只活在它自己的
           scan-runs.tsv 里，页面侧拿不到——显示 0 是假话，比不显示更糟。 */}
       {isBsk && (
         <GatePanel
@@ -365,6 +385,9 @@ export function ResultsList({ offers, tagVocab }: { offers: EnrichedOffer[]; tag
           kept={offers}
           folded={folded}
           onSaved={(p, n) => setFilters({ ...filters, positive: p, negative: n })}
+          open={gateOpen}
+          onOpenChange={setGateOpen}
+          onDirtyChange={setGateDirty}
         />
       )}
 

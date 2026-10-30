@@ -89,15 +89,18 @@ test("saving writes the file and does not re-scan", () => {
   assert.match(body, /method: "POST"/, "and there must be exactly one write path");
 });
 
-test("an unsaved edit is never thrown away by collapsing or by an unrelated filter change", () => {
+test("an unsaved edit is never thrown away by closing the modal or by an unrelated filter change", () => {
   const body = panelBody();
   assert.match(body, /const \[draft, setDraft\] = useState<Words>\(\(\) => \(\{ positive: \[\.\.\.positive\], negative: \[\.\.\.negative\] \}\)\)/, "the draft must live in component state, not be derived from props");
   assert.match(body, /const dirty = isDirty\(draft, \{ positive, negative \}\)/, "dirtiness is content, not identity");
   assert.match(body, /if \(next === seeded\.current\) return;/, "the reseed must compare CONTENT — `filters` is a fresh object on every setFilters, so an identity check would wipe in-progress edits whenever the user touched an unrelated condition");
-  // The dirty badge sits on the header button, i.e. covered and readable while collapsed.
-  const openIdx = body.indexOf("{open && (");
-  const badgeIdx = body.indexOf("gateUnsaved");
-  assert.ok(openIdx >= 0 && badgeIdx > 0 && badgeIdx < openIdx, "the 「未保存」 badge must render outside the expandable block: collapsed is exactly when the user needs to know the edits are still parked");
+  // The card is gone; the dirty badge lives on the toolbar 「配置」 button (the modal's only
+  // entry), reported up via onDirtyChange — closed is exactly when the user needs to know
+  // the edits are still parked.
+  assert.match(body, /onDirtyChange\?\.\(dirty\)/, "the panel must report dirtiness up, so the badge can sit on the entry button while the modal is closed");
+  const list = flat(LIST);
+  assert.match(list, /t\("explore\.results\.gateUnsaved"\)/, "the 「未保存」 badge must render on the toolbar button — outside the modal, visible while it is closed");
+  assert.ok(!panelBody().includes("gateUnsaved"), "the badge must not be inside the modal body, where it would only be readable after reopening");
 });
 
 test("a removal is a real removal, and adding a duplicate is a no-op", () => {
