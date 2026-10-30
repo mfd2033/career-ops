@@ -172,8 +172,23 @@ test("omitRemoved drops exactly the dismissed URLs and keeps the rest in order",
 
 test("the toolbar removes the selected rows without leaking into the filter boundary", () => {
   const src = flat(LIST);
-  assert.match(src, /const remaining = useMemo\(\(\) => omitRemoved\(offers, removed\), \[offers, removed\]\)/, "removal is derived from offers, ahead of the tab/keyword narrowing");
-  assert.match(src, /const view = useMemo\(\(\) => \{ const list = visibleOffers\(remaining, tab, q\)/, "the rendered rows read the same narrowed set");
+  // 移除与打标建在同一步：被移除的行既不该被徽标算进数字，也不该进标签条。
+  assert.match(
+    src,
+    /const remaining = useMemo\( \(\) => withTags\(omitRemoved\(offers, removed\), tagVocab\?\.vocab, tagVocab\?\.exclude\)/,
+    "removal + row tags are derived from offers, ahead of the tab/keyword narrowing",
+  );
+  // 标签条插在「tab + 搜索框」之后、「渲染行」之前：计数基底与渲染行必须同源。
+  assert.match(
+    src,
+    /const tagScope = useMemo\(\(\) => visibleOffers\(remaining, tab, q\), \[remaining, tab, q\]\)/,
+    "标签的计数基底 = 通过其余条件的行集（否则 chip 数字与点击结果不一致）",
+  );
+  assert.match(
+    src,
+    /const view = useMemo\(\(\) => \{ const list = filterByTags\(tagScope, tags\)/,
+    "the rendered rows read that same narrowed set, then the tag filter",
+  );
   assert.match(src, /const counts = useMemo\(\(\) => \{ const c: Record<ResultTab, number> = \{ all: remaining\.length/, "so do the tab badges");
   assert.match(src, /onClick=\{removeSelected\}/, "the button fires the removal");
   assert.match(src, /removeOffers\(\[\.\.\.selected\]\)/, "it dismisses exactly the current selection");

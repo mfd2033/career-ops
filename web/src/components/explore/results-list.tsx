@@ -10,9 +10,14 @@ import { GatePanel } from "./gate-panel";
 import { InputClearButton } from "@/components/input-clear-button";
 import { useExplore } from "./explore-provider";
 import { isSelectable, omitRemoved, resultTabOf, visibleOffers } from "@/lib/results-view.mjs";
+import { countOfferTags, filterByTags, withSelectedCounts, withTags } from "@/lib/result-tags.mjs";
+import { TagBar } from "./tag-bar";
 import { useI18n } from "@/lib/i18n/context";
 
 export type EnrichedOffer = DiscoveredOffer & { inPipeline: boolean; evaluatedN?: string };
+
+/** 标签词表（服务端装配、客户端匹配）：收件箱关键词条同一三源词表 + 用户增量/抑制。 */
+export type TagVocab = { vocab: string[]; exclude: string[] };
 
 // 结果分组 tab（管道页同款）。四组互斥且完整覆盖：evaluated ⊆ inPipeline，
 // 因此 新增/管道/已评估 正好平分全部结果，「全部」为兜底。
@@ -89,7 +94,7 @@ function FilteredFold({ offers }: { offers: DiscoveredOffer[] }) {
   );
 }
 
-export function ResultsList({ offers }: { offers: EnrichedOffer[] }) {
+export function ResultsList({ offers, tagVocab }: { offers: EnrichedOffer[]; tagVocab?: TagVocab }) {
   const { companiesScanned, partial, addToPipeline, added, removed, removeOffers, restoreRemoved, mode, restoreSeen, restoring, folded, filters, setFilters, scanSource } = useExplore();
   const isAi = mode === "ai";
   // 采集门跑在 browser 路径上（bsk 服务端 / 扩展页侧两条 driver），与 explorer-view 的
@@ -98,6 +103,9 @@ export function ResultsList({ offers }: { offers: EnrichedOffer[] }) {
   const [sort, setSort] = useState<"fresh" | "company">("fresh");
   const [q, setQ] = useState("");
   const [tab, setTab] = useState<ResultTab>(DEFAULT_TAB);
+  // 选中的标签（ADR-0068 决议 3 的探索页版本）：chip 之间 OR，与 tab / 搜索框 AND。
+  // 纯视图状态，与 q/sort 同类，不进 URL、不跨搜索保留（见下方结果集重置）。
+  const [tags, setTags] = useState<Set<string>>(() => new Set());
   // 被用户显式移除的结果 URL（点「移除所选」）。只影响显示、不写任何数据；集合由
   // provider 持有并持久化到 localStorage，刷新与下一次搜索都保持隐藏，直到点「恢复已移除」。
   const { t } = useI18n();
@@ -130,7 +138,17 @@ export function ResultsList({ offers }: { offers: EnrichedOffer[] }) {
   // 结果集去掉用户已移除的行。计数、视图、可加入项都建在 remaining 上：被移除的行
   // 既不在屏幕上、也不该再被徽标算进数字（否则又回到「数字比行多」的老毛病；对照本
   // 文件顶部注释里记录的那条回归）。
-  const remaining = useMemo(() => omitRemoved(offers, removed), [offers, removed]);
+  // 同时逐行挂上标签（零 token 词典匹配：词表 × 职位名/公司/地点）：标签是行的一个只读
+  // 属性，跟行一起窄化，所以建在这一步——不另开一条结果集副本。词表为空（裸 checkout）
+  // 时每行 tags 为空，标签条整条隐藏、过滤恒放行。
+  const remaining = useMemo(
+    () => withTags(omitRemoved(offers, removed), tagVocab?.vocab, tagVocab?.exclude),
+    [offers, removed, tagVocab?.vocab, tagVocab?.exclude],
+  );
+
+  // 「其余条件放行」的行集：标签的计数基底就是它（ADR-0068 决议 4 修订）——chip 上的
+  // 数字必须等于点它之后的匹配条数，否则会出现「计数 1、点击 0 结果」的死 chip。
+  const tagScope = useMemo(() => visibleOffers(remaining, tab, q), [remaining, tab, q]);
 
   // 各 tab 计数基于完整结果集（与管道页一致：tab 计数看全集，搜索只过滤行）。全集指
   // 去掉已移除行之后的集合——移除是用户显式处置，不是搜索词收窄。
@@ -140,12 +158,15 @@ export function ResultsList({ offers }: { offers: EnrichedOffer[] }) {
     return c;
   }, [remaining]);
 
+  // 选中项补进计数集：切 tab / 改搜索词后 chip 仍可见、可取消，不会留下看不见的选中态。
+  const tagCounts = useMemo(() => withSelectedCounts(countOfferTags(tagScope), tags), [tagScope, tags]);
+
   const view = useMemo(() => {
-    const list = visibleOffers(remaining, tab, q);
+    const list = filterByTags(tagScope, tags);
     return [...list].sort((a, b) =>
       sort === "fresh" ? (b.postedAt || "").localeCompare(a.postedAt || "") : a.company.localeCompare(b.company),
     );
-  }, [remaining, q, sort, tab]);
+  }, [tagScope, tags, sort]);
 
   // ADR-0021 确认入管：勾选集 + 「加入管道 (N)」。默认全选「本次新采」的可加入项
   // （offers 引用变化视为一次新结果集）；恢复出来的旧发现（source=explore-restore）
@@ -157,6 +178,10 @@ export function ResultsList({ offers }: { offers: EnrichedOffer[] }) {
     if (lastOffersRef.current === offers) return; // 只在结果集变化时重置默认勾选
     lastOffersRef.current = offers;
     setSelected(new Set(addable.filter((o) => o.source !== "explore-restore").map((o) => o.url)));
+    // 新一次发现＝新结果集：上一轮的标签在本轮多半是死词，留着只会把页面锁在
+    // 「0 结果」。与收件箱的死词自动剪枝同一动机，这里直接清空（结果集没有
+    // 可撤销的 hidden 语义）。
+    setTags(new Set());
   }, [offers, added, addable]);
   const toggleSelect = (url: string) =>
     setSelected((s) => {
@@ -311,6 +336,23 @@ export function ResultsList({ offers }: { offers: EnrichedOffer[] }) {
         ))}
       </div>
 
+      {/* 标签条 —— 收件箱关键词条的同款交互（ADR-0068 决议 3/4）：点 chip 即过滤，
+          chip 之间 OR，与上面的 tab / 搜索框 AND。无可用标签（词表为空或零命中）时
+          组件自返 null，不占一行空白。 */}
+      <TagBar
+        counts={tagCounts}
+        selected={tags}
+        onToggle={(tag) =>
+          setTags((s) => {
+            const next = new Set(s);
+            if (next.has(tag)) next.delete(tag);
+            else next.add(tag);
+            return next;
+          })
+        }
+        onClear={() => setTags(new Set())}
+      />
+
       {/* 规则牌排在卡片之前：那个「为什么这条在这儿」的疑惑就是在看卡片时产生的。
           它同时是改词表的地方（工单 03）——误杀当场就能改、当场看到试算，而不是关掉页面
           去手改 portals.yml 再重扫；后者正是这一轮之前没人动词表的原因。
@@ -341,7 +383,13 @@ export function ResultsList({ offers }: { offers: EnrichedOffer[] }) {
       </div>
 
       {view.length === 0 && (
-        <p className="py-10 text-center text-sm text-faint">{q.trim() ? t("explore.results.noMatch", { q }) : t("explore.results.tabEmpty")}</p>
+        <p className="py-10 text-center text-sm text-faint">
+          {tags.size > 0
+            ? t("explore.results.noTagMatch", { tags: [...tags].join("、") })
+            : q.trim()
+              ? t("explore.results.noMatch", { q })
+              : t("explore.results.tabEmpty")}
+        </p>
       )}
 
       {/* 被采集门毙掉的岗位（ADR-0029 决议 4）：只读折叠区，回答「是不是误杀了我要的岗」。

@@ -17,7 +17,7 @@ import { DiscoveringState } from "./discovering-state";
 import { AiHuntView } from "./ai-hunt-view";
 import { ExploreModeToggle } from "./explore-mode-toggle";
 import { AiSearchBox } from "./ai-search-box";
-import { ResultsList, type EnrichedOffer } from "./results-list";
+import { ResultsList, type EnrichedOffer, type TagVocab } from "./results-list";
 import { useExplore } from "./explore-provider";
 import { useI18n } from "@/lib/i18n/context";
 import { cliDisplayName } from "@/lib/cli-labels.mjs";
@@ -30,11 +30,15 @@ export function ExplorerView({
   inboxSnapshot,
   appsSnapshot,
   rootExists,
+  tagVocab,
 }: {
   seed: { filters: ExploreFilters; seededFrom: string[] };
   inboxSnapshot: InboxJob[];
   appsSnapshot: Application[];
   rootExists: boolean;
+  /** 标签词表（服务端已装配）：结果卡片标签 = 词表对职位名/公司/地点的词典匹配。
+   *  与收件箱关键词条同一份词表（ADR-0068 决议 2），不接受客户端自编词条。 */
+  tagVocab?: TagVocab;
 }) {
   const { filters, setFilters, initFilters, phase, running, offers, discover, discoverBrowser, loadFresh, status, error, scannerMissing, mode, setMode, scanSource, setScanSource, enabledSources, aiIntent, setAiIntent, discoverAI, companiesScanned, companiesAvailable, capHit, droppedNoDate, partial } = useExplore();
   const { t } = useI18n();
@@ -207,7 +211,7 @@ export function ExplorerView({
               cliName={cli.name}
               onRunScan={() => setMode("scan")}
             />
-            {phase === "results" && <ResultsList offers={enriched} />}
+            {phase === "results" && <ResultsList offers={enriched} tagVocab={tagVocab} />}
             {phase === "empty-loose" && (
               <EmptyState
                 tone="loose"
@@ -247,7 +251,7 @@ export function ExplorerView({
               </div>
             )}
 
-            {isResults && <ResultsList offers={enriched} />}
+            {isResults && <ResultsList offers={enriched} tagVocab={tagVocab} />}
             {phase === "empty-loose" && (
               <EmptyState
                 tone="loose"
@@ -308,7 +312,7 @@ export function ExplorerView({
           {isResults && capHit && (
             <CappedBanner companiesScanned={companiesScanned} companiesAvailable={companiesAvailable} onRefine={() => setRefineOpen(true)} />
           )}
-          {isResults && <ResultsList offers={enriched} />}
+          {isResults && <ResultsList offers={enriched} tagVocab={tagVocab} />}
 
           {phase === "empty-current" && (
             <EmptyState

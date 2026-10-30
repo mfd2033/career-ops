@@ -564,14 +564,18 @@ function readReportVia(app: Application): string {
   return readReportFacts([app]).get(app.n)?.via ?? "";
 }
 
-/** 关键词装配上下文（ADR-0068）：运行时三源并集词表 + 用户增量/抑制 + jds 归档正文。
- *  每个管道页请求装配一次（纯函数在 inbox-keywords.mjs，这里只负责读盘）。 */
-type KeywordContext = { vocab: string[]; exclude: string[]; jdsBodies: Map<string, string> };
-
-const yamlStrList = (v: unknown): string[] =>
-  Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
-
-function readKeywordContext(): KeywordContext {
+/**
+ * 词表来源（ADR-0068 决议 2 的运行时三源 + 用户增量/抑制）：
+ * 1. portals.yml `title_filter.positive`；
+ * 2. cv.md Skills 节技能词；
+ * 3. skill-extract.mjs 的 SKILL_TOKENS（源码文本解析，格式变更由
+ *    inbox-keywords.test.mjs 的用例先红报信）；
+ * 4. config/keywords.yml 的增量与 `exclude:` 抑制（可不存在）。
+ *
+ * 单独抽出是因为收件箱关键词条与探索页结果标签必须用同一份词表：「什么算一个
+ * 关键词」只能有一个口径，否则同一条岗位在两个页面会被标成不同的词。
+ */
+function readVocabSources(): { vocab: string[]; exclude: string[] } {
   // 词源 1：portals.yml title_filter.positive（扫描配置里的职位词表）
   let portalsPositive: string[] = [];
   try {
@@ -580,8 +584,7 @@ function readKeywordContext(): KeywordContext {
   } catch {
     /* portals 坏了：少一个词源，不阻塞页面 */
   }
-  // 词源 2/3：cv.md Skills 节 + skill-extract.mjs 的 SKILL_TOKENS（源码文本解析，
-  // 格式变更由 inbox-keywords.test.mjs 的用例先红报信）
+  // 词源 2/3：cv.md Skills 节 + skill-extract.mjs 的 SKILL_TOKENS
   const cvSkills = cvSkillsFromMd(read("cv.md") ?? "");
   const skillTokens = parseSkillTokens(read("skill-extract.mjs") ?? "");
   // 用户增量层：config/keywords.yml 可不存在；坏了也只当没有增量
@@ -597,7 +600,28 @@ function readKeywordContext(): KeywordContext {
       /* ignore */
     }
   }
-  const vocab = buildVocab({ portalsPositive, cvSkills, skillTokens, userKeywords });
+  return { vocab: buildVocab({ portalsPositive, cvSkills, skillTokens, userKeywords }), exclude };
+}
+
+/**
+ * 探索页结果标签的词典（下发给客户端做零 token 词典匹配）。
+ *
+ * 只给词表 + 抑制词，不带宽 jds 归档正文：探索结果都是「刚发现、还没归档」的
+ * 岗位，没有可关联的归档；也不会去读报告词节（它们评估后才会出现）。
+ */
+export function readTagVocab(): { vocab: string[]; exclude: string[] } {
+  return readVocabSources();
+}
+
+/** 关键词装配上下文（ADR-0068）：运行时三源并集词表 + 用户增量/抑制 + jds 归档正文。
+ *  每个管道页请求装配一次（纯函数在 inbox-keywords.mjs，这里只负责读盘）。 */
+type KeywordContext = { vocab: string[]; exclude: string[]; jdsBodies: Map<string, string> };
+
+const yamlStrList = (v: unknown): string[] =>
+  Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+
+function readKeywordContext(): KeywordContext {
+  const { vocab, exclude } = readVocabSources();
   // jds 归档关联：按 frontmatter `url:` 的归一键存正文（不重建 apify 的文件名 hash，
   // 两边归一化口径不同会漂）。正文 < 50 字的空壳归档不参匹配（防噪声）。
   const jdsBodies = new Map<string, string>();

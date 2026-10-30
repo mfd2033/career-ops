@@ -269,6 +269,13 @@ export const en: Dict = {
   "explore.results.filteredReasonNegative": "killed by {words}",
   "explore.results.filteredReasonNoPositive": "matched no allow word",
   "explore.results.filteredMore": "+{n} more",
+  // ADR-0068 交互搬到探索页：标签条（零 token，服务端词表 + 客户端词匹配）。
+  "explore.results.tagsAria": "Tag filter (free)",
+  "explore.results.tagChipTitle": "Filter results by {tag} ({n} roles)",
+  "explore.results.tagExpand": "Show all +{n}",
+  "explore.results.tagCollapse": "Collapse",
+  "explore.results.tagsClear": "Clear tags ({n})",
+  "explore.results.noTagMatch": "No results carry those tags: {tags}.",
 
   // ── Provider status / error strings ──
   "explore.err.scannerUnavailable": "The scanner isn't available.",
@@ -548,6 +555,13 @@ export const zh: Dict = {
   "explore.results.filteredReasonNegative": "被「{words}」毙掉",
   "explore.results.filteredReasonNoPositive": "未命中任何白名单词",
   "explore.results.filteredMore": "另有 {n} 条",
+  // 标签条（ADR-0068 交互搬到探索页）。
+  "explore.results.tagsAria": "标签筛选（免费）",
+  "explore.results.tagChipTitle": "按 {tag} 筛选结果（{n} 条）",
+  "explore.results.tagExpand": "展开全部 +{n} 枚",
+  "explore.results.tagCollapse": "收起",
+  "explore.results.tagsClear": "清除标签（{n}）",
+  "explore.results.noTagMatch": "没有结果带有这些标签：{tags}。",
 
   // ── Provider 状态 / 错误字符串 ──
   "explore.err.scannerUnavailable": "扫描器不可用。",
