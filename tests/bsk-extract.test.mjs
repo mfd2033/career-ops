@@ -24,7 +24,7 @@ import { tmpdir } from 'node:os';
 
 import { pass, fail, ROOT } from './helpers.mjs';
 import { pickExtractor } from '../browser-extract.mjs';
-import { extractWithBsk, parseSessionId, zhListingAnchors, listingWithCities, extractCityFromText, extractSalaryFromText, shouldReloadListing, execWithHardTimeout } from '../bsk-extract.mjs';
+import { extractWithBsk, parseSessionId, zhListingAnchors, listingWithCities, extractCityFromText, extractSalaryFromText, shouldReloadListing, isObservationRefusal, execWithHardTimeout } from '../bsk-extract.mjs';
 import { isZhJobDetailUrl } from '../lib/zh-jobs.mjs';
 
 const NODE = process.execPath;
@@ -308,6 +308,28 @@ for (const [desc, args, expected] of reloadCases) {
     pass(`shouldReloadListing(${desc}) -> ${expected}`);
   } else {
     fail(`shouldReloadListing(${desc}) -> ${got}, expected ${expected}`);
+  }
+}
+
+// ── S9b: isObservationRefusal (cooperate-protocol re-sync retry gate) ─────
+// bsk 0.4 refuses a shared-tab action whose tab moved between `cooperate sync`
+// and dispatch. That is the NORMAL first read after `navigate` on a churning
+// SPA, so readDomViaBsk re-syncs and re-fires — but ONLY for this one refusal;
+// a dead daemon or a missing CLI must still surface immediately.
+const refusalCases = [
+  // [desc, message, expected]
+  ['sync/dispatch wording', 'bsk evaluate ... failed: error: shared page control or observation changed', true],
+  ['observation wording (sync-side)', 'error: The observed page or control state changed; synchronize', true],
+  ['daemon offline -> NOT retried', 'bsk daemon not reachable — start browser-skill (`bsk status`) and re-run', false],
+  ['missing CLI -> NOT retried', 'bsk CLI not found on PATH (install browser-skill, or check `bsk status`)', false],
+  ['empty message -> NOT retried', '', false],
+];
+for (const [desc, message, expected] of refusalCases) {
+  const got = isObservationRefusal(message ? new Error(message) : undefined);
+  if (got === expected) {
+    pass(`isObservationRefusal(${desc}) -> ${expected}`);
+  } else {
+    fail(`isObservationRefusal(${desc}) -> ${got}, expected ${expected}`);
   }
 }
 

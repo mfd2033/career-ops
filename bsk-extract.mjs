@@ -37,6 +37,9 @@ const DEFAULT_TIMEOUT_MS = 30_000;
 const NAVIGATE_TIMEOUT_MS = 45_000;
 const CAPTCHA_HELP_TIMEOUT_MS = 3 * 60_000; // user needs a moment to solve the slider
 const DAEMON_PROBE_TIMEOUT_MS = 10_000; // `bsk status` is a local ping, not a fetch
+const COOPERATE_SYNC_TIMEOUT_MS = 20_000; // local sync; slowness means a stuck daemon
+// Fast re-sync attempts before handing the refusal back to the DOM poller.
+const COOPERATE_RETRIES = 3;
 
 /**
  * Find the first known Chinese city name inside a job-card text blob (方案1:
@@ -382,16 +385,20 @@ export async function extractWithBsk({ url, mode = 'jd', max = 200, maxChars = 1
     // A captcha/login wall surfaced instead of the job body: hand the page to
     // the user for a manual solve, then re-read. At most one help round.
     if (mode === 'jd' && looksLikeCaptchaWall(raw)) {
-      await runBsk(
-        [
-          'request-help',
-          '--session', sessionId,
-          '--title', '需要人工过验证',
-          '--prompt', '站点弹出了验证码或登录墙。请完成验证（如滑动滑块/点击验证按钮），完成后点击页面上的 Done。我会自动继续抓取职位内容。',
-          '--timeout', `${Math.round(CAPTCHA_HELP_TIMEOUT_MS / 1000)}s`,
-        ],
-        CAPTCHA_HELP_TIMEOUT_MS + 20_000,
-      );
+      // request-help is a shared-tab action in the cooperate protocol too. Best
+      // effort: when the sync is unavailable (old bsk) or yields no context (a
+      // human already holds the tab) the plain call is still the right move —
+      // asking for help must never be blocked by its own authorization step.
+      const sync = await syncActionContext(sessionId);
+      const helpArgs = [
+        'request-help',
+        '--session', sessionId,
+        '--title', '需要人工过验证',
+        '--prompt', '站点弹出了验证码或登录墙。请完成验证（如滑动滑块/点击验证按钮），完成后点击页面上的 Done。我会自动继续抓取职位内容。',
+        '--timeout', `${Math.round(CAPTCHA_HELP_TIMEOUT_MS / 1000)}s`,
+      ];
+      if (sync.contextId) helpArgs.push('--context', sync.contextId);
+      await runBsk(helpArgs, CAPTCHA_HELP_TIMEOUT_MS + 20_000);
       const rawAfter = await readDomReadyViaBsk(sessionId, mode, url);
       return mode === 'listing'
         ? listingWithCities(rawAfter, rawAfter.url || url, max)
@@ -412,20 +419,98 @@ export async function extractWithBsk({ url, mode = 'jd', max = 200, maxChars = 1
   }
 }
 
+/**
+ * Ask the daemon to authorize the NEXT shared-tab action.
+ *
+ * bsk 0.4 (protocol 1.7) introduced the cooperate protocol: every action that
+ * touches the borrowed tab — `evaluate`, `request-help` — is REFUSED with
+ * "shared page control or observation changed … this action requires the
+ * context returned by the latest cooperate sync". Navigation and session
+ * lifecycle are not affected. The contract is one-shot — "each context
+ * authorizes one action; sync after it" — so this must run immediately before
+ * EVERY action, never once per session.
+ *
+ * Best effort on purpose, as a discriminated result rather than a throw:
+ *   • `supported: false` — the command failed. Older bsk (0.2.x, protocol 1.1)
+ *     has no `cooperate` subcommand at all and the plain call still works
+ *     there, so the caller must fall back to the legacy argument list instead
+ *     of failing the read.
+ *   • `supported: true, contextId: ''` — a successful sync with NO context.
+ *     That means a HUMAN is holding the tab (`request-help` overlay, or they
+ *     grabbed it): nothing is authorized, and firing anyway would fail. The
+ *     caller retries rather than guessing.
+ *
+ * @param {string} sessionId
+ * @returns {Promise<{ supported: boolean, contextId: string }>}
+ */
+async function syncActionContext(sessionId) {
+  try {
+    const { stdout } = await runBsk(
+      ['cooperate', 'sync', '--session', sessionId, '--json', '--settle'],
+      COOPERATE_SYNC_TIMEOUT_MS,
+    );
+    const parsed = JSON.parse(String(stdout ?? ''));
+    const id = parsed?.context_id;
+    return { supported: true, contextId: typeof id === 'string' ? id.trim() : '' };
+  } catch (err) {
+    // A vanished CLI is terminal — degrading to the legacy call would only
+    // replace the honest `bsk_missing` with a confusing `bsk_command_failed`.
+    if (err?.code === 'bsk_missing') throw err;
+    return { supported: false, contextId: '' };
+  }
+}
+
+/**
+ * Did this failure come from the cooperate guard rather than from the page?
+ * The guard fires when the tab moved between `cooperate sync` and the action
+ * dispatch — on a board whose SPA is still landing rows, that is the NORMAL
+ * first read right after `navigate`, not a broken page: re-syncing and firing
+ * again succeeds. bsk words it two ways depending on where it trips, so match
+ * both. Pure — exported for tests.
+ */
+export function isObservationRefusal(err) {
+  const m = String(err?.message ?? '');
+  return (
+    m.includes('shared page control or observation changed') ||
+    m.includes('The observed page or control state changed')
+  );
+}
+
 /** readDomViaBsk: run the DOM reader in the page via bsk evaluate. */
 async function readDomViaBsk(sessionId) {
-  const { stdout } = await runBsk(['evaluate', READ_DOM_JS, '--session', sessionId], 20_000);
-  const s = String(stdout ?? '');
-  // bsk evaluate occasionally returns an EMPTY stdout for a multi-line script
-  // (a daemon/page hiccup, observed on liepin) even though the page is fine —
-  // that is transient, so signal the poller to retry rather than fail the read.
-  if (!s.trim()) return null;
-  try {
-    return JSON.parse(s);
-  } catch {
-    const e = new Error(`bsk evaluate returned non-JSON: ${s.slice(0, 200)}`);
-    e.code = 'extract_failed';
-    throw e;
+  for (let attempt = 1; ; attempt++) {
+    const sync = await syncActionContext(sessionId);
+    // No context while the protocol is supported ⇒ a human holds the tab. Same
+    // signal as an empty stdout below: let the poller wait and re-sync.
+    if (sync.supported && !sync.contextId) return null;
+    const args = ['evaluate', READ_DOM_JS, '--session', sessionId];
+    if (sync.contextId) args.push('--context', sync.contextId);
+    let stdout;
+    try {
+      ({ stdout } = await runBsk(args, 20_000));
+    } catch (err) {
+      if (attempt < COOPERATE_RETRIES && isObservationRefusal(err)) continue;
+      if (isObservationRefusal(err)) {
+        const e = new Error(
+          `bsk refused the DOM read ${attempt}× — the page kept changing between cooperate sync and evaluate (a churning SPA or an anti-bot loop): ${err.message}`,
+        );
+        e.code = 'extract_failed';
+        throw e;
+      }
+      throw err;
+    }
+    const s = String(stdout ?? '');
+    // bsk evaluate occasionally returns an EMPTY stdout for a multi-line script
+    // (a daemon/page hiccup, observed on liepin) even though the page is fine —
+    // that is transient, so signal the poller to retry rather than fail the read.
+    if (!s.trim()) return null;
+    try {
+      return JSON.parse(s);
+    } catch {
+      const e = new Error(`bsk evaluate returned non-JSON: ${s.slice(0, 200)}`);
+      e.code = 'extract_failed';
+      throw e;
+    }
   }
 }
 
@@ -516,6 +601,7 @@ async function pollReadableDom(sessionId, mode) {
   const deadline = Date.now() + DOM_READY_TIMEOUT_MS;
   let raw = null;
   let prev = -1;
+  let lastRetryable = null;
   while (Date.now() <= deadline) {
     let next;
     try {
@@ -524,6 +610,7 @@ async function pollReadableDom(sessionId, mode) {
       // Non-JSON evaluate output can also be transient (same daemon hiccup):
       // retry within the window instead of failing the whole extraction.
       if (e.code === 'extract_failed') {
+        lastRetryable = e;
         await new Promise((r) => setTimeout(r, DOM_READY_POLL_MS));
         continue;
       }
@@ -550,7 +637,11 @@ async function pollReadableDom(sessionId, mode) {
   // surface the failure explicitly rather than hand a null up to callers
   // that would crash on `raw.url`.
   if (!raw) {
-    const e = new Error('bsk evaluate never returned a readable DOM (every attempt was empty or non-JSON)');
+    const e = new Error(
+      `bsk evaluate never returned a readable DOM (every attempt was empty, non-JSON or refused)${
+        lastRetryable ? ` — last: ${lastRetryable.message}` : ''
+      }`,
+    );
     e.code = 'extract_failed';
     throw e;
   }
