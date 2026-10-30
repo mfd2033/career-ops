@@ -13,7 +13,7 @@
   - 它是下方第 0/1/2/3 步编排的**可执行版本**；**本文件仍是权威描述**——语义有分歧以本文件为准，改任一侧时两边一起改。
   - 脚本住 gitignored 的 `local/`（ADR-0022 的 fork-local 层）：不进仓库、不与上游 merge 冲突。
   - 为什么是 Node 而不是 PowerShell 脚本：本编排要求「命令必须与所在 shell 匹配」，而本机 shell 会在 PowerShell 与 cmd 之间回落。脚本用 `child_process` + `shell: false` 直传 argv，绕开引号与插值整类问题。
-  - 开关：`--no-start`（只打包不启动）/ `--keep-next`（不删 `web/.next`，也就不碰 dev server）/ `--keep-runtime`（保留旧 runtime 目录）/ `--dev-port N`（默认 3100）/ `--fresh-winres`（仅 `--shell=go` 回滚路径有意义）。`--help` 打印同一份清单。
+  - 开关：`--no-start`（只打包不启动）/ `--keep-next`（不删 `web/.next`，也就不碰 dev server）/ `--keep-runtime`（保留旧 runtime 目录）/ `--dev-port N`（默认 3101，与 AGENTS.md 的 dev-web 约定一致）/ `--fresh-winres`（仅 `--shell=go` 回滚路径有意义）。`--help` 打印同一份清单。
   - 它替你兜住的四件事：① 停旧壳（含只杀 `career-tray/` 下的 `electron.exe`，不误伤别的 Electron 应用）；② 清 `.next` 前先停 dev server；③ 打包后**结构自检**（`version.json` 的 cacheVersion 与 `build-info.json` 一致、locales 恰好 2 个、`default_app.asar` 已删）；④ 启动后按 `/api/version` 四判据自证，再清旧 runtime 目录。
 
 - **执行约定（工具 / 位置 / 超时）**
