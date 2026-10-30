@@ -364,13 +364,14 @@ export function DiscoveryRow({
             <ExternalLink className="size-4" />
           </a>
           {/* 单行移除：复用批量「移除所选」的显示层机制（removeOffers → removed 集合），
-              只隐去这一行，不写 pipeline.md——与卡片上的 × 同一套语义。 */}
+              只隐去这一行，不写 pipeline.md。表格行密度高，× 常显（不玩卡片那套
+              悬停浮现），否则窄屏/触屏上几乎点不到。 */}
           <button
             type="button"
             onClick={() => removeOffers([offer.url])}
             title={t("explore.card.dismissTitle")}
             aria-label={t("explore.card.dismiss")}
-            className="inline-flex items-center justify-center rounded p-1 text-faint opacity-0 transition-all hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
+            className="inline-flex items-center justify-center rounded p-1 text-faint transition-colors hover:text-foreground"
           >
             <X className="size-4" />
           </button>
