@@ -1,4 +1,4 @@
-# career-ops 托盘壳（Electron）打包编排
+﻿# career-ops 托盘壳（Electron）打包编排
 
 <!-- 独立文档：不自动加载进每会话上下文，打包时才按需 Read。
      下方是完整编排；`modes/_custom.md` 只保留一短索引（关键常量）。
@@ -14,7 +14,7 @@
   - 脚本住 gitignored 的 `local/`（ADR-0022 的 fork-local 层）：不进仓库、不与上游 merge 冲突。
   - 为什么是 Node 而不是 PowerShell 脚本：本编排要求「命令必须与所在 shell 匹配」，而本机 shell 会在 PowerShell 与 cmd 之间回落。脚本用 `child_process` + `shell: false` 直传 argv，绕开引号与插值整类问题。
   - 开关：`--no-start`（只打包不启动）/ `--keep-next`（不删 `web/.next`，也就不碰 dev server）/ `--keep-runtime`（保留旧 runtime 目录）/ `--dev-port N`（默认 3101，与 AGENTS.md 的 dev-web 约定一致）/ `--fresh-winres`（仅 `--shell=go` 回滚路径有意义）。`--help` 打印同一份清单。
-  - 它替你兜住的四件事：① 停旧壳（含只杀 `career-tray/` 下的 `electron.exe`，不误伤别的 Electron 应用）；② 清 `.next` 前先停 dev server；③ 打包后**结构自检**（`version.json` 的 cacheVersion 与 `build-info.json` 一致、locales 恰好 2 个、`default_app.asar` 已删）；④ 启动后按 `/api/version` 四判据自证，再清旧 runtime 目录。
+  - 它替你兜住的四件事：① 停旧壳（含只杀 `career-tray/` 下的 `electron.exe`，不误伤别的 Electron 应用）；② 清 `.next` 前先停 dev server（**按命令行识别**：`dev-web.mjs` 或 `next dev` + 本仓路径，任何端口都命中；`--dev-port` 只是命令行特征都不匹配时的附加兜底——按端口找人靠不住，端口一换就落空，2026-09-25 与 2026-10-30 两次 ENOTEMPTY 都是这么来的）；③ 打包后**结构自检**（`version.json` 的 cacheVersion 与 `build-info.json` 一致、locales 恰好 2 个、`default_app.asar` 已删）；④ 启动后按 `/api/version` 四判据自证，再清旧 runtime 目录。
 
 - **执行约定（工具 / 位置 / 超时）**
   - **工具**：首选 Windows PowerShell。PowerShell 失效（退出码 1 且无输出，或退出码 0 但拿不到 stdout）时整体转 Git Bash 调同等命令（`tasklist` / `netstat -ano` / `taskkill`）。
@@ -34,7 +34,7 @@
     - 另有一个 `electron.exe`（开发态 `npm run tray`）时：只杀 **exe 路径在 `career-tray/` 下**的那些。脚本用 CIM 查 `ExecutablePath` 过滤后按 PID 杀；CIM 不可用就跳过，交给端口兜底。
     - 端口兜底：`Get-NetTCPConnection -LocalPort 3000 -State Listen` 取 PID → `taskkill /F /PID <pid>`，确认无 Listen 记录再继续。
   - 0.3 **为什么必须先停**：`build-dashboard-ui.mjs` 第 5c 步会先 `rmSync` 再重建 `.dashboard-runtime\v{cacheVersion}\`。重打同版本时 cacheVersion 相同 → 旧实例正在用的 runtime 目录被直接删：Windows 下文件被占用 → 脚本抛错；未抛错则旧实例静默失效。
-  - 0.4 **环境清理**：`web/node_modules` 缺失才 `npm install`（registry 已指 npmmirror）；`Remove-Item web\.next -Recurse -Force`（若 `next dev` 在跑先停掉）。冷删可能要 2 分钟以上。
+  - 0.4 **环境清理**：`web/node_modules` 缺失才 `npm install`（registry 已指 npmmirror）；先按命令行停掉本仓 dev server（见上一条 ②），再删 `web/.next`（删不掉时脚本会报占用并给下一步，不再裸抛 ENOTEMPTY）。冷删可能要 2 分钟以上。
 
 - **第 1 步 打包（一步到位）**
   - 1.1 **主命令**：`node dashboard-ui/build-dashboard-ui.mjs`（默认 `--shell=electron`）
