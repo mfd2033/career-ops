@@ -21,7 +21,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { isSelectable, inResultTab, omitRemoved, resultTabOf, visibleOffers, evaluatedNoFor } from "../../src/lib/results-view.mjs";
+import { isSelectable, inResultTab, omitRemoved, resultTabOf, visibleOffers, evaluatedNoFor, filterBySalaryMin } from "../../src/lib/results-view.mjs";
 import { normalizeTextKey } from "../../src/lib/core/normalize-text-key.mjs";
 
 const norm = (s) => normalizeTextKey(s, " ");
@@ -104,13 +104,53 @@ test("a row already in the pipeline, already evaluated, or confirmed this sessio
   assert.equal(isSelectable(mk("https://x/1", "A", "甲"), new Set(["https://x/1"])), false, "confirmed earlier in this session");
 });
 
+// ── 1b. the salary-floor display filter（收件箱 facet 同款语义）────────────────
+
+const paid = (url, salaryText, source = "browser-zhipin") => mk(url, "A", "甲", { salaryText, source });
+
+test("the salary filter keeps only rows whose band lower bound reaches the floor", () => {
+  const rows = [
+    paid("https://x/1", "20-35K·14薪"), // min 20 ≥ 20 → keep
+    paid("https://x/2", "15-25K·14薪"), // overlap but min 15 < 20 → drop
+    paid("https://x/3", "30-50K"), // → keep
+    paid("https://x/4", "面议"), // unknown → drop
+    paid("https://x/5", "200-400元/天"), // non-monthly → unknown → drop
+    mk("https://x/6", "A", "甲"), // no salaryText (ATS scan row) → drop
+  ];
+  assert.deepEqual(filterBySalaryMin(rows, 20).map((o) => o.url), ["https://x/1", "https://x/3"]);
+});
+
+// 与采集门的对照：同一行、同一门限，门放行（区间重叠 + 未知放行），展示层过滤毙掉——
+// 两者语义刻意不同，钉住边界防止将来「统一」成其中一种。
+test("the display filter is stricter than the collection gate on the same row", () => {
+  const overlap = paid("https://x/1", "15-25K·14薪");
+  assert.equal(filterBySalaryMin([overlap], 20).length, 0, "display: strict lower bound");
+  const unknown = paid("https://x/2", "面议");
+  assert.equal(filterBySalaryMin([unknown], 20).length, 0, "display: unknown dropped");
+});
+
+test("the salary filter off / cleared passes everything through", () => {
+  assert.equal(filterBySalaryMin(offers, null).length, 5, "null = off");
+  assert.equal(filterBySalaryMin(offers, 0).length, 5, "0 = off");
+  assert.equal(filterBySalaryMin(offers, undefined).length, 5, "undefined = off");
+});
+
+// 猎聘裸 万 = 年薪：30-50万/年 → 月薪 25K-41.7K（÷12 后万→K ×10）；智联裸 万 = 月薪。
+test("the parse follows the per-board monthly-K conversion", () => {
+  const liepin = paid("https://x/1", "30-50万", "browser-liepin"); // 年薪 30-50 万 → 月薪 25-41.7K
+  assert.equal(filterBySalaryMin([liepin], 30).length, 0, "annual 万 on liepin: monthly min 25K < 30K → drop");
+  assert.equal(filterBySalaryMin([liepin], 25).length, 1, "…and 25K floor holds at the band's monthly min");
+  const zhaopin = paid("https://x/2", "2-3万", "browser-zhaopin"); // 月薪 2-3 万 → 20-30K
+  assert.equal(filterBySalaryMin([zhaopin], 20).length, 1, "monthly 万 on zhaopin: 20K floor holds");
+});
+
 // ── 2. the wiring ────────────────────────────────────────────────────────────
 
 test("the bar counts, ticks and confirms the visible derivation — not a second copy", () => {
   const src = flat(LIST);
   assert.match(
     src,
-    /import \{ isSelectable, omitRemoved, resultTabOf, visibleOffers \} from "@\/lib\/results-view\.mjs"/,
+    /import \{ isSelectable, omitRemoved, resultTabOf, visibleOffers, filterBySalaryMin \} from "@\/lib\/results-view\.mjs"/,
     "the derivation must come from the shared module",
   );
   assert.match(
@@ -186,8 +226,18 @@ test("the toolbar removes the selected rows without leaking into the filter boun
   );
   assert.match(
     src,
-    /const view = useMemo\(\(\) => \{ const list = filterByTags\(tagScope, tags\)/,
-    "the rendered rows read that same narrowed set, then the tag filter",
+    /const salaryScope = useMemo\(\(\) => filterBySalaryMin\(tagScope, salaryMin\), \[tagScope, salaryMin\]\)/,
+    "薪资过滤插在 tagScope 之后自成一层，标签 chip 计数基底随之收窄",
+  );
+  assert.match(
+    src,
+    /const tagCounts = useMemo\(\(\) => withSelectedCounts\(countOfferTags\(salaryScope\), tags\), \[salaryScope, tags\]\)/,
+    "chip 数字必须等于点它之后的匹配条数——计数基底也过薪资过滤",
+  );
+  assert.match(
+    src,
+    /const view = useMemo\(\(\) => \{ const list = filterByTags\(salaryScope, tags\)/,
+    "the rendered rows read that same narrowed set (tab + keyword + salary), then the tag filter",
   );
   assert.match(src, /const counts = useMemo\(\(\) => \{ const c: Record<ResultTab, number> = \{ all: remaining\.length/, "so do the tab badges");
   assert.match(src, /onClick=\{removeSelected\}/, "the button fires the removal");
@@ -199,6 +249,14 @@ test("the remove button is labelled in both locales", () => {
   const src = read(I18N);
   const hits = (src.match(/"explore\.results\.removeSelected":/g) ?? []).length;
   assert.equal(hits, 2, "explore.results.removeSelected must exist in both locales");
+});
+
+test("the salary filter is labelled in both locales", () => {
+  const src = read(I18N);
+  for (const key of ["explore.results.salaryMinPlaceholder", "explore.results.salaryMinTitle", "explore.results.noSalaryMatch"]) {
+    const hits = (src.match(new RegExp(`"${key}":`, "g")) ?? []).length;
+    assert.equal(hits, 2, `${key} must exist in both locales`);
+  }
 });
 
 // ── 4. 已评估判定：空公司键不是通配符 ──────────────────────────────────────────

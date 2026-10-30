@@ -15,6 +15,7 @@
 
 import { matchesReportNo } from "./report-no-search.mjs";
 import { normalizeUrl } from "./core/url-key.mjs";
+import { parseSalaryText } from "./browser-search.mjs";
 
 /**
  * Which result tab an enriched offer belongs to.
@@ -143,4 +144,30 @@ export function visibleOffers(offers, tab, query) {
       o.company.toLowerCase().includes(needle) ||
       matchesReportNo(query, o.evaluatedN),
   );
+}
+
+/**
+ * The salary-floor DISPLAY filter (收件箱 facet 的姊妹过滤): keep a row when its
+ * salary range's LOWER bound reaches the floor — strict, NOT the collection
+ * gate's range-overlap. The gate answers 「谁可能给得到」 and keeps a 15-25K
+ * posting when asked for 20 (never silently dropped on a technicality); a
+ * display filter answers 「谁确实给得到」 — a row surviving a ≥20K filter while
+ * its band starts at 15 would read as a bug on screen. Rows whose salary text
+ * yields no monthly value are dropped too (no data, no way to confirm the
+ * floor — same stance as the inbox facet), unlike the gate which keeps + tags
+ * them. floor falsy/0 → off, everything passes. Pure — exported for tests.
+ *
+ * @param {Array<{salaryText?: string, source?: string}>} offers
+ * @param {number | null} [salaryMinK] monthly floor in K (e.g. 20 = ≥20K/月)
+ * @returns {Array<*>} the same offer objects, in input order.
+ */
+export function filterBySalaryMin(offers, salaryMinK) {
+  const floor = Number(salaryMinK) || 0;
+  if (floor <= 0) return offers;
+  return offers.filter((o) => {
+    // 解析口径复用采集门的 parseSalaryText（分板月薪折算），只是判定端更严。
+    const source = String(o.source ?? "").replace(/^browser-/, "");
+    const parsed = parseSalaryText(o.salaryText, source);
+    return parsed !== null && parsed.minK >= floor;
+  });
 }

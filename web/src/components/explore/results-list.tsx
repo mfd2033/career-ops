@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Search, Plus, ChevronRight } from "lucide-react";
+import { Search, Plus, ChevronRight, Coins } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { BROWSER_LABEL, type BrowserSource, type DiscoveredOffer } from "@/lib/explore";
 import { CostBadge } from "@/components/cost/cost-badge";
@@ -9,7 +9,7 @@ import { DiscoveryCard } from "./discovery-card";
 import { GatePanel } from "./gate-panel";
 import { InputClearButton } from "@/components/input-clear-button";
 import { useExplore } from "./explore-provider";
-import { isSelectable, omitRemoved, resultTabOf, visibleOffers } from "@/lib/results-view.mjs";
+import { isSelectable, omitRemoved, resultTabOf, visibleOffers, filterBySalaryMin } from "@/lib/results-view.mjs";
 import { countOfferTags, filterByTags, withSelectedCounts, withTags } from "@/lib/result-tags.mjs";
 import { TagBar } from "./tag-bar";
 import { useI18n } from "@/lib/i18n/context";
@@ -107,6 +107,8 @@ export function ResultsList({ offers, tagVocab }: { offers: EnrichedOffer[]; tag
   const [gateDirty, setGateDirty] = useState(false);
   const [sort, setSort] = useState<"fresh" | "company">("fresh");
   const [q, setQ] = useState("");
+  // 薪资下限（月薪 K）：展示层过滤，纯视图状态，与 q/sort 同类，不进 URL、不跨搜索保留。
+  const [salaryMin, setSalaryMin] = useState<number | null>(null);
   const [tab, setTab] = useState<ResultTab>(DEFAULT_TAB);
   // 选中的标签（ADR-0068 决议 3 的探索页版本）：chip 之间 OR，与 tab / 搜索框 AND。
   // 纯视图状态，与 q/sort 同类，不进 URL、不跨搜索保留（见下方结果集重置）。
@@ -155,6 +157,12 @@ export function ResultsList({ offers, tagVocab }: { offers: EnrichedOffer[]; tag
   // 数字必须等于点它之后的匹配条数，否则会出现「计数 1、点击 0 结果」的死 chip。
   const tagScope = useMemo(() => visibleOffers(remaining, tab, q), [remaining, tab, q]);
 
+  // 薪资下限过滤（收件箱 facet 同款）：挂在 tagScope 之后，标签 chip 的计数基底随
+  // 之收窄——chip 数字必须等于点它之后的匹配条数（ADR-0068 决议 4 的死 chip 禁令
+  // 同样约束这道过滤）。语义与采集门不同：门管「别误删」（区间重叠、未知放行），
+  // 这里管「确实给得到」（严格下限、未知隐藏），见 filterBySalaryMin 注释。
+  const salaryScope = useMemo(() => filterBySalaryMin(tagScope, salaryMin), [tagScope, salaryMin]);
+
   // 各 tab 计数基于完整结果集（与管道页一致：tab 计数看全集，搜索只过滤行）。全集指
   // 去掉已移除行之后的集合——移除是用户显式处置，不是搜索词收窄。
   const counts = useMemo(() => {
@@ -164,14 +172,14 @@ export function ResultsList({ offers, tagVocab }: { offers: EnrichedOffer[]; tag
   }, [remaining]);
 
   // 选中项补进计数集：切 tab / 改搜索词后 chip 仍可见、可取消，不会留下看不见的选中态。
-  const tagCounts = useMemo(() => withSelectedCounts(countOfferTags(tagScope), tags), [tagScope, tags]);
+  const tagCounts = useMemo(() => withSelectedCounts(countOfferTags(salaryScope), tags), [salaryScope, tags]);
 
   const view = useMemo(() => {
-    const list = filterByTags(tagScope, tags);
+    const list = filterByTags(salaryScope, tags);
     return [...list].sort((a, b) =>
       sort === "fresh" ? (b.postedAt || "").localeCompare(a.postedAt || "") : a.company.localeCompare(b.company),
     );
-  }, [tagScope, tags, sort]);
+  }, [salaryScope, tags, sort]);
 
   // ADR-0021 确认入管：勾选集 + 「加入管道 (N)」。默认全选「本次新采」的可加入项
   // （offers 引用变化视为一次新结果集）；恢复出来的旧发现（source=explore-restore）
@@ -257,6 +265,27 @@ export function ResultsList({ offers, tagVocab }: { offers: EnrichedOffer[]; tag
               className="w-32 bg-transparent pr-6 text-[13px] outline-none placeholder:text-faint"
             />
             <InputClearButton show={q.length > 0} onClear={() => setQ("")} label={t("explore.results.clearFilter")} className="right-1" />
+          </div>
+          {/* 薪资下限（月薪 K）——搜索框右侧的展示层过滤：解析口径复用 parseSalaryText
+              （分板折算），判定端取严格下限、无薪资行隐藏（与采集门的区间重叠/未知放行
+              口径不同）。空 = 不过滤。 */}
+          <div className="relative flex items-center gap-1.5 rounded-lg border border-border bg-surface/40 px-2.5 py-1.5">
+            <Coins className="size-3.5 text-faint" />
+            <input
+              type="number"
+              min={1}
+              step={0.5}
+              value={salaryMin ?? ""}
+              onChange={(e) => {
+                const n = Number(e.target.value);
+                setSalaryMin(Number.isFinite(n) && n > 0 ? n : null);
+              }}
+              placeholder={t("explore.results.salaryMinPlaceholder")}
+              title={t("explore.results.salaryMinTitle")}
+              aria-label={t("explore.results.salaryMinTitle")}
+              className="no-number-spin w-16 bg-transparent pr-5 text-[13px] outline-none placeholder:text-faint"
+            />
+            <InputClearButton show={salaryMin != null} onClear={() => setSalaryMin(null)} label={t("explore.filter.clearSalaryMin")} className="right-1" />
           </div>
           <div className="inline-flex rounded-lg border border-border bg-surface/40 p-0.5 text-xs">
             {(["fresh", "company"] as const).map((s) => (
@@ -409,9 +438,11 @@ export function ResultsList({ offers, tagVocab }: { offers: EnrichedOffer[]; tag
         <p className="py-10 text-center text-sm text-faint">
           {tags.size > 0
             ? t("explore.results.noTagMatch", { tags: [...tags].join("、") })
-            : q.trim()
-              ? t("explore.results.noMatch", { q })
-              : t("explore.results.tabEmpty")}
+            : salaryMin
+              ? t("explore.results.noSalaryMatch", { n: salaryMin })
+              : q.trim()
+                ? t("explore.results.noMatch", { q })
+                : t("explore.results.tabEmpty")}
         </p>
       )}
 
