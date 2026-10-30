@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Search, Plus, ChevronRight, Coins } from "lucide-react";
+import { Search, Plus, ChevronRight, Coins, Ban } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { BROWSER_LABEL, type BrowserSource, type DiscoveredOffer } from "@/lib/explore";
 import { CostBadge } from "@/components/cost/cost-badge";
@@ -10,6 +10,7 @@ import { GatePanel } from "./gate-panel";
 import { InputClearButton } from "@/components/input-clear-button";
 import { useExplore } from "./explore-provider";
 import { isSelectable, omitRemoved, resultTabOf, visibleOffers, filterBySalaryMin } from "@/lib/results-view.mjs";
+import { suggestDenyWords } from "@/lib/deny-words.mjs";
 import { countOfferTags, filterByTags, withSelectedCounts, withTags } from "@/lib/result-tags.mjs";
 import { TagBar } from "./tag-bar";
 import { useI18n } from "@/lib/i18n/context";
@@ -105,6 +106,10 @@ export function ResultsList({ offers, tagVocab }: { offers: EnrichedOffer[]; tag
   // 上报的「有未保存改动」，徽标挂在「配置」按钮上（入口在哪，徽标在哪）。
   const [gateOpen, setGateOpen] = useState(false);
   const [gateDirty, setGateDirty] = useState(false);
+  // 「拉黑所选」带入 GatePanel 的黑名单候选词（deny-words.mjs 从勾选行标题推导）。
+  // null = 无；每次点击都换新数组引用——GatePanel 按引用消费，重复点击由
+  // mergeDenyWords 去重兑底，不会落进两条同名 chip。
+  const [preadd, setPreadd] = useState<string[] | null>(null);
   const [sort, setSort] = useState<"fresh" | "company">("fresh");
   const [q, setQ] = useState("");
   // 薪资下限（月薪 K）：展示层过滤，纯视图状态，与 q/sort 同类，不进 URL、不跨搜索保留。
@@ -239,6 +244,17 @@ export function ResultsList({ offers, tagVocab }: { offers: EnrichedOffer[]; tag
     setSelected(new Set());
   };
 
+  // 勾选中的行（不限 addable——「不适合」与「能不能入管」无关）。
+  const selectedOffers = useMemo(() => remaining.filter((o) => selected.has(o.url)), [remaining, selected]);
+  // 拉黑所选：把勾选行标题里的特征词作为黑名单候选带进标题门弹窗。并入的是
+  // GatePanel 的草稿而非已存表——保存仍只发生在弹窗里，试算让用户先看到「会多毙
+  // 几条」再决定；词表在下一次扫描生效（与手动改词表同一套语义，保存不重扫）。
+  // 仅 browser 路径：标题门（及其配置弹窗）只挂载在这里，见下方 GatePanel 注释。
+  const blacklistSelected = () => {
+    setPreadd(suggestDenyWords(selectedOffers));
+    setGateOpen(true);
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-3">
@@ -340,6 +356,19 @@ export function ResultsList({ offers, tagVocab }: { offers: EnrichedOffer[]; tag
               {t("explore.results.removeSelected", { n: selected.size })}
             </button>
           )}
+          {/* 拉黑所选：勾选行标题里的特征词 → 标题门黑名单草稿（打开弹窗，试算先行）。
+              与「移除所选」互为补充：那只隐藏本次显示，这个让下一次扫描起不再搜到
+              类似岗位。仅 browser 路径（与标题门同在）。 */}
+          {selected.size > 0 && isBsk && (
+            <button
+              type="button"
+              onClick={blacklistSelected}
+              title={t("explore.results.blacklistTitle")}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface/40 px-2.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-brand-soft hover:text-brand"
+            >
+              <Ban className="size-3.5" /> {t("explore.results.blacklistSelected", { n: selected.size })}
+            </button>
+          )}
           {visibleAddable.length > 0 && (
             <button
               type="button"
@@ -417,6 +446,7 @@ export function ResultsList({ offers, tagVocab }: { offers: EnrichedOffer[]; tag
           open={gateOpen}
           onOpenChange={setGateOpen}
           onDirtyChange={setGateDirty}
+          preaddNegative={preadd}
         />
       )}
 

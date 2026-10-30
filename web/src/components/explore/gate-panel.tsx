@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Plus, RotateCcw, ShieldCheck, X } from "lucide-react";
 
 import { buildTitleFilterExplained } from "@/lib/core/title-keywords.mjs";
+import { mergeDenyWords } from "@/lib/deny-words.mjs";
 import type { DiscoveredOffer } from "@/lib/explore";
 import { useI18n } from "@/lib/i18n/context";
 
@@ -126,6 +127,7 @@ export function GatePanel({
   open,
   onOpenChange,
   onDirtyChange,
+  preaddNegative,
 }: {
   positive: string[];
   negative: string[];
@@ -135,12 +137,18 @@ export function GatePanel({
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onDirtyChange?: (dirty: boolean) => void;
+  /** 「拉黑所选」带入的黑名单候选词（results-list 推导）：数组引用一变就并入草稿
+   *  的黑名单一侧——每点一次按钮都是新数组，重复词由 mergeDenyWords 去重兑底。 */
+  preaddNegative?: string[] | null;
 }) {
   const { t } = useI18n();
   const [draft, setDraft] = useState<Words>(() => ({ positive: [...positive], negative: [...negative] }));
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState("");
+  // 「拉黑所选」带入了几个词（0 = 无）——弹窗里的一行提示，告诉用户多出来的
+  // chip 是哪来的；随保存/放弃/手动编辑消失，不跨动作残留。
+  const [preadded, setPreadded] = useState(0);
   const seeded = useRef(seedKey(positive, negative));
 
   // 词表本身变了（保存成功、或播种/分享链接带来了新表）→ 重新播种草稿。
@@ -163,6 +171,15 @@ export function GatePanel({
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onOpenChange]);
 
+  // 「拉黑所选」把候选词并进草稿黑名单（引用一变即并入；null/空数组不动）。并进
+  // 的是 draft 而不是已存表——保存仍然只发生在弹窗里（与词表编辑同一条回路），
+  // 试算随之更新，用户保存前就能看到「会多毙几条」。
+  useEffect(() => {
+    if (!preaddNegative || preaddNegative.length === 0) return;
+    setDraft((d) => ({ ...d, negative: mergeDenyWords(d.negative, preaddNegative) }));
+    setPreadded(preaddNegative.length);
+  }, [preaddNegative]);
+
   // 试算：与门控同一个编译结果（不是同一「规则的重写」，是同一份实现），判的是屏上
   // 这批结果——kept 里会被新表毙掉的，与被毙里会被新表放行的。
   const trial = useMemo(() => {
@@ -184,6 +201,7 @@ export function GatePanel({
   const edit = (side: keyof Words, w: string, remove = false) => {
     setSaved(false);
     setError("");
+    setPreadded(0);
     setDraft((d) => ({ ...d, [side]: remove ? removeOne(d[side], w) : addOne(d[side], w) }));
   };
 
@@ -200,6 +218,7 @@ export function GatePanel({
       const j = (await r.json().catch(() => ({}))) as { error?: string };
       if (!r.ok) throw new Error(j?.error || `HTTP ${r.status}`);
       setSaved(true);
+      setPreadded(0);
       onSaved(draft.positive, draft.negative);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -235,6 +254,11 @@ export function GatePanel({
             <div className="mt-3 space-y-3">
               {/* 检索词与词表的分工（原牌面常驻注）：进弹窗后它仍是读懂试算的前提。 */}
               <p className="text-[11px] leading-relaxed text-faint">{t("explore.results.gateQueryNote")}</p>
+              {preadded > 0 && (
+                <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-[11px] text-amber-700 dark:text-amber-400">
+                  {t("explore.results.gatePreadded", { n: preadded })}
+                </p>
+              )}
               <WordGroup label={t("explore.results.gatePositiveGroup")} words={draft.positive} onAdd={(w) => edit("positive", w)} onRemove={(w) => edit("positive", w, true)} />
               <WordGroup label={t("explore.results.gateNegativeGroup")} words={draft.negative} onAdd={(w) => edit("negative", w)} onRemove={(w) => edit("negative", w, true)} />
 
@@ -267,6 +291,7 @@ export function GatePanel({
                   onClick={() => {
                     setSaved(false);
                     setError("");
+                    setPreadded(0);
                     setDraft({ positive: [...positive], negative: [...negative] });
                   }}
                   disabled={!dirty || saving}

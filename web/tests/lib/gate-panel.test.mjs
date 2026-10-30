@@ -110,6 +110,25 @@ test("a removal is a real removal, and adding a duplicate is a no-op", () => {
   assert.match(src, /list\.some\(\(k\) => k\.trim\(\)\.toLowerCase\(\) === w\.trim\(\)\.toLowerCase\(\)\) \? list : \[\.\.\.list, w\]/, "adding must fold case and edge space, or the same word lands twice and the file grows a duplicate");
 });
 
+test("「拉黑所选」feeds candidate deny words into the panel's DRAFT, never a second write path", () => {
+  const panel = flat(PANEL);
+  assert.match(panel, /preaddNegative\?: string\[\] \| null/, "the panel accepts the blacklist-selected candidates");
+  assert.match(panel, /mergeDenyWords\(d\.negative, preaddNegative\)/, "the preadd must land in the draft's negative side — saving stays the panel's one write path (the route test above pins that)");
+  assert.match(panel, /if \(!preaddNegative \|\| preaddNegative\.length === 0\) return;/, "null/empty must be a no-op: mounting the page with no blacklist request must not touch the draft");
+  const list = flat(LIST);
+  assert.match(list, /suggestDenyWords\(selectedOffers\)/, "results-list derives the candidates from the selected rows' titles");
+  assert.match(list, /preaddNegative=\{preadd\}/, "…and passes them down to the panel");
+  assert.match(list, /selected\.size > 0 && isBsk &&/, "the entry only shows when rows are selected AND the gate is mounted (browser path) — a dead button on the ATS path would be worse than none");
+  assert.match(list, /t\("explore\.results\.blacklistSelected"/, "the button is labeled");
+  // The panel body must stay free of a second matcher — mergeDenyWords is a list
+  // merge, not a matcher, so its presence is fine; the forbidden list below
+  // re-checks the same three names the first test guards.
+  const body = panelBody();
+  for (const forbidden of ["buildTitleFilter(", "compileKeyword", "compilePositiveKeyword"]) {
+    assert.ok(!body.includes(forbidden), `the preadd must not introduce a second matcher (found "${forbidden}")`);
+  }
+});
+
 test("every reject names the word that killed it, read from the gate's own reason", () => {
   const list = read(LIST);
   assert.match(list, /o\.gateReason\.type === "negative"/, "a negative hit must be named");
@@ -143,6 +162,9 @@ test("the panel is labelled in both locales", () => {
     "explore.results.gateDiscard",
     "explore.results.gateSaved",
     "explore.results.gateSaveFailed",
+    "explore.results.blacklistSelected",
+    "explore.results.blacklistTitle",
+    "explore.results.gatePreadded",
     "explore.results.filteredReasonNegative",
     "explore.results.filteredReasonNoPositive",
     "explore.results.filteredMore",
