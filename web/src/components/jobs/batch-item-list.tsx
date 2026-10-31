@@ -11,6 +11,14 @@ import { formatRunEngine } from "@/lib/cli-labels.mjs";
 import { batchItemDetailHref } from "@/lib/batch-child-ledger.mjs";
 import { BatchItemRetryButton } from "@/components/jobs/batch-item-retry-button";
 
+// 演示/无效域名（RFC 2606 保留域）：历史批量运行里拿这类 URL 试跑过，条目仍在
+// 台账里——降权显示而不隐藏记录（UI 审计 2026-10-31 FAIL #13）。
+const PLACEHOLDER_URL_RE = /^(https?:\/\/)?(www\.)?example\.(com|net|org)(\/|$)/i;
+
+function isPlaceholderUrl(label: string) {
+  return PLACEHOLDER_URL_RE.test(label.trim());
+}
+
 /**
  * 批量逐项的卡片渲染（ADR-0046，升级 ADR-0045 的最小行）：状态图标 + 名称/公司 +
  * 分数/星级 + 完成时刻 + 引擎 + 时长 + 失败/跳过原因。成功且知道父批量 id 的子项
@@ -47,7 +55,15 @@ export function BatchItemList({
               ) : (
                 <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-amber-500" />
               )}
-              <span className={cn("min-w-0 flex-1 truncate text-sm", it.ok ? "font-medium" : "text-muted")} title={it.label}>
+              {/* 演示/无效域名（RFC 2606 保留域，如历史批量试跑的 example.com）：记录不
+                  隐藏，但降权展示不抢注意力（UI 审计 2026-10-31 FAIL #13）。 */}
+              <span
+                className={cn(
+                  "min-w-0 flex-1 truncate text-sm",
+                  isPlaceholderUrl(it.label) ? "italic text-faint" : it.ok ? "font-medium" : "text-muted",
+                )}
+                title={isPlaceholderUrl(it.label) ? `${it.label} · ${t("jobs.placeholderDomain")}` : it.label}
+              >
                 {it.label}
               </span>
               {it.ok && it.score != null && <span className="shrink-0 rounded bg-emerald-500/15 px-1 py-0.5 text-[10px] font-semibold tabular-nums text-emerald-700 dark:text-emerald-400">{it.score}/5</span>}

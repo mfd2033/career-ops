@@ -140,6 +140,23 @@ html {
     animation: none;
   }
   .job-indeterminate::after { animation: none; width: 100%; opacity: 0.35; }
+  /* 全局降级（UI 审计 2026-10-31 WARN 项）：覆盖 animate-spin（Loader2 等）与
+     其余 keyframes / 过渡——上面的具名规则保留是为了把定格态写对（如进度条满宽）。 */
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ── 表格数值列统一口径（UI 审计 2026-10-31 · 统一建议 #4）────────────────
+   可比较的数量/金额/天数/耗时列一律右对齐 + 等宽数字；编号（#）与日期是标识符，
+   保持左对齐。与表单数字输入框（text-right tabular-nums）同一套视觉语言。 */
+.num-col {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
 /* ── Report / CV markdown prose (theme-aware) ───────────────────────────── */

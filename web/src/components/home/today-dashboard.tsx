@@ -191,7 +191,7 @@ export function TodayDashboard({
                 rel="noopener noreferrer"
                 aria-label={`${p.name} — ${t("home.portalOpenNewTab")}`}
                 title={`${p.name} — ${t("home.portalOpenNewTab")}`}
-                className="group flex cursor-pointer items-center justify-center rounded-xl border border-border bg-surface/40 p-1.5 transition-colors hover:border-brand/40 hover:bg-surface/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
+                className="group flex items-center justify-center rounded-xl border border-border bg-surface/40 p-1.5 transition-colors hover:border-brand/40 hover:bg-surface/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
               >
                 {/* hover 只对图标做透明度过渡，不改尺寸/内边距，避免布局偏移。 */}
                 <CompanyLogo name={p.name} src={p.logo} size={56} imgPadding={0} bareTile className="shrink-0 opacity-90 transition-opacity group-hover:opacity-100" />
@@ -211,17 +211,18 @@ export function TodayDashboard({
       </section>
 
       {/* 主体：桌面（md+）2×2 网格——左上「待跟进」、左下「等待你的决定」，右上「投递
-          计划」、右下「本周新匹配」（与「等待你的决定」同排，占其右侧）。第一行按内容
-          高度（两块各自内部滚动封顶，避免长列表把第二行挤没），第二行吃掉剩余纵向空间、
+          计划」、右下「本周新匹配」（与「等待你的决定」同排，占其右侧）。第一行定高
+          （38vh，与原列表封顶同口径）+ 区块内滚动，避免长列表把第二行挤没；两栏行底
+          对齐，不再一边长一边短（UI 审计 2026-10-31 FAIL #15）。第二行吃掉剩余纵向空间、
           内部滚动。窄屏（<md）回退单列堆叠，DOM 顺序即视觉顺序：待跟进 → 等待你的决定
           → 投递计划 → 本周新匹配。 */}
-      <div className="flex min-h-0 shrink flex-col gap-5 md:grid md:grid-cols-2 md:grid-rows-[auto_minmax(0,1fr)]">
+      <div className="flex min-h-0 shrink flex-col gap-5 md:grid md:grid-cols-2 md:grid-rows-[minmax(0,38vh)_minmax(0,1fr)]">
         {/* A. Follow-ups due (demand loop) —— 常显区块，无数据显示「无」（与「投递计划」口径一致）。 */}
-        <Section icon={Bell} title={t("home.followUpsDueTitle")} hint={t("home.followUpsDueHint")} className="min-h-0 md:col-start-1 md:row-start-1">
+        <Section icon={Bell} title={t("home.followUpsDueTitle")} hint={t("home.followUpsDueHint")} className="flex min-h-0 flex-col md:col-start-1 md:row-start-1">
           {followups.length === 0 ? (
             <p className="text-sm text-muted">无</p>
           ) : (
-            <div className="grid max-h-[38vh] gap-2.5 overflow-y-auto overscroll-contain hide-scrollbar">
+            <div className="grid min-h-0 flex-1 gap-2.5 overflow-y-auto overscroll-contain hide-scrollbar">
               {followups.map((f) => (
                 <FollowUpCard key={`${f.num}-${f.company}`} followup={f} onLogged={() => { setOverdue((n) => Math.max(0, n - 1)); refetch(); }} />
               ))}
@@ -245,11 +246,11 @@ export function TodayDashboard({
 
         {/* B2. 投递计划：按 Planned 日期分 今日/明日/未来 子组（遵循用户规则：今明都有都显示，都没有显示「无」）。
             落在网格右上，内容超出时区块内滚动（滚动高度与左列「待跟进」同口径）。 */}
-        <Section icon={CalendarDays} title="投递计划" hint={`${plannedCount} 个待投`} className="min-h-0 md:col-start-2 md:row-start-1">
+        <Section icon={CalendarDays} title="投递计划" hint={`${plannedCount} 个待投`} className="flex min-h-0 flex-col md:col-start-2 md:row-start-1">
           {plannedCount === 0 ? (
             <p className="text-sm text-muted">无</p>
           ) : (
-            <div className="grid max-h-[38vh] gap-4 overflow-y-auto overscroll-contain hide-scrollbar">
+            <div className="grid min-h-0 flex-1 gap-4 overflow-y-auto overscroll-contain hide-scrollbar">
               {plannedGroups.today.length > 0 && (
                 <PlannedGroup label="今日待投" apps={plannedGroups.today} />
               )}

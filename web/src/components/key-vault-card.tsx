@@ -13,6 +13,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { useI18n } from "@/lib/i18n/context";
+import { fieldCls } from "@/components/ui/field-styles";
 
 /** 服务端 vaultView() 的镜像形状（无明文密钥，也不会有）。 */
 type VaultKeyView = {
@@ -300,7 +301,7 @@ export function KeyVaultCard() {
   }
 
   return (
-    <section className="overflow-hidden rounded-[14px] border border-border bg-surface" aria-label={t("config.vaultTitle")}>
+    <section className="overflow-hidden rounded-xl border border-border bg-surface" aria-label={t("config.vaultTitle")}>
       <header className="flex items-baseline justify-between gap-3 px-[18px] pb-3 pt-3.5">
         <span className="text-[13px] font-bold tracking-wide text-foreground">{t("config.vaultTitle")}</span>
         {view.keys.length > 0 && (
@@ -331,7 +332,7 @@ export function KeyVaultCard() {
                   }
                 }}
                 className={cn(
-                  "group relative block w-full cursor-pointer border-t border-border px-[18px] py-3.5 text-left transition-colors",
+                  "group relative block w-full border-t border-border px-[18px] py-3.5 text-left transition-colors",
                   active ? "bg-brand-soft" : "hover:bg-brand/[0.04]",
                   pendingId === k.id && "opacity-60",
                 )}
@@ -350,11 +351,11 @@ export function KeyVaultCard() {
                     <span className="flex flex-wrap items-center gap-2">
                       <span className="text-sm font-semibold text-foreground">{k.name}</span>
                       {active && (
-                        <span className="rounded-full border-[1.5px] border-brand bg-surface px-2 py-px text-[10.5px] font-bold tracking-wider text-brand-text">
+                        <span className="rounded-full border-[1.5px] border-brand bg-surface px-2 py-px text-[10px] font-bold tracking-wider text-brand-text">
                           {t("config.vaultInUse")}
                         </span>
                       )}
-                      <span className="rounded-full border border-border bg-surface px-2 py-px text-[10.5px] font-semibold uppercase tracking-wider text-muted">
+                      <span className="rounded-full border border-border bg-surface px-2 py-px text-[10px] font-semibold uppercase tracking-wider text-muted">
                         {provOf(k.provider).label.replace(/ \(.*\)/, "")}
                       </span>
                     </span>
@@ -602,8 +603,7 @@ export function KeyVaultCard() {
   );
 }
 
-const vaultInput =
-  "w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground outline-none transition-colors placeholder:text-faint focus:border-brand/50 focus-visible:ring-2 focus-visible:ring-brand/40";
+const vaultInput = `w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-faint ${fieldCls}`;
 
 function VaultField({
   label,

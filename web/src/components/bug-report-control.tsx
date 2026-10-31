@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Bug, X, ShieldCheck, ThumbsUp, Search, Loader2 } from "lucide-react";
 import { collect, fingerprint, issueBody, issueUrl, type Diag } from "@/lib/report/report";
+import { fieldCls } from "@/components/ui/field-styles";
 import "@/lib/report/logbuf"; // install the client error ring-buffer (side-effect)
 import { useI18n } from "@/lib/i18n/context";
 
@@ -107,7 +108,7 @@ export function BugReportControl({ compact = false }: { compact?: boolean }) {
               rows={4}
               autoFocus
               placeholder={t("shared.beta.placeholder")}
-              className="w-full resize-none rounded-lg border border-border bg-surface/60 px-3 py-2 text-sm outline-none transition focus:border-brand/50 focus:ring-2 focus:ring-brand/20"
+              className={`w-full resize-none rounded-lg border border-border bg-surface/60 px-3 py-2 text-sm ${fieldCls}`}
             />
             {desc.trim().split(/\s+/).length >= 3 && (
               <button

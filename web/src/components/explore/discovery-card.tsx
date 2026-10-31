@@ -104,7 +104,7 @@ export function DiscoveryCard({
   const fresh = freshness(offer.postedAt) || offer.postedHint || "";
 
   return (
-    <div className="co-rise group flex min-w-0 flex-col gap-2.5 rounded-xl border border-border bg-surface/40 p-3.5 text-left transition-all hover:-translate-y-0.5 hover:border-brand/30 hover:shadow-sm">
+    <div className="co-rise group flex min-w-0 flex-col gap-2.5 rounded-xl border border-border bg-surface/40 p-3.5 text-left transition-[transform,border-color,box-shadow] hover:-translate-y-0.5 hover:border-brand/30 hover:shadow-sm">
       <div className="flex items-start gap-3">
         {onToggleSelect && (
           <input
@@ -141,7 +141,7 @@ export function DiscoveryCard({
           onClick={() => removeOffers([offer.url])}
           title={t("explore.card.dismissTitle")}
           aria-label={t("explore.card.dismiss")}
-          className="-m-1 inline-flex shrink-0 items-center justify-center rounded p-1 text-faint opacity-0 transition-all hover:text-foreground focus-visible:opacity-100 max-sm:min-h-[44px] max-sm:min-w-[44px] max-sm:opacity-100 group-hover:opacity-100"
+          className="-m-1 inline-flex shrink-0 items-center justify-center rounded p-1 text-faint opacity-0 transition-opacity hover:text-foreground focus-visible:opacity-100 max-sm:min-h-[44px] max-sm:min-w-[44px] max-sm:opacity-100 group-hover:opacity-100"
         >
           <X className="size-4" />
         </button>

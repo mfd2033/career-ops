@@ -187,7 +187,7 @@ export function ApplyView() {
             <button
               onClick={a.fill}
               disabled={filling || prefilling}
-              className="inline-flex items-center gap-2 rounded-full bg-brand px-5 py-2.5 text-sm font-medium text-brand-foreground shadow-lg shadow-brand/25 transition-all hover:bg-brand-200 hover:shadow-brand/40 disabled:opacity-50"
+              className="inline-flex items-center gap-2 rounded-full bg-brand px-5 py-2.5 text-sm font-medium text-brand-foreground shadow-lg shadow-brand/25 transition-[background-color,box-shadow] hover:bg-brand-200 hover:shadow-brand/40 disabled:opacity-50"
             >
               {filling ? <Loader2 className="size-4 animate-spin" /> : <ArrowUpRight className="size-4" />}
               {filling ? t("apply.fillingRealForm") : t("apply.fillRealFormReview")}
@@ -468,7 +468,7 @@ function PhaseRail({ phase }: { phase: number }) {
             </div>
             {i < steps.length - 1 && (
               <span className="relative h-px flex-1 overflow-hidden rounded bg-border">
-                <span className={cn("absolute inset-y-0 left-0 bg-brand transition-all duration-700", i < phase ? "w-full" : "w-0")} />
+                <span className={cn("absolute inset-y-0 left-0 bg-brand transition-[width] duration-700", i < phase ? "w-full" : "w-0")} />
               </span>
             )}
           </Fragment>

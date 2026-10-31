@@ -1,10 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Ban, Loader2, Plus, Search, ShieldAlert, ShieldOff, X } from "lucide-react";
+import { Ban, Plus, Search, ShieldAlert, ShieldOff, X } from "lucide-react";
 import { useI18n } from "@/lib/i18n/context";
 import { format } from "@/lib/i18n";
 import { cn } from "@/lib/cn";
+import { fieldCls, fieldWrapCls } from "@/components/ui/field-styles";
+import { EmptyState, ErrorBanner, Loading } from "@/components/ui/status";
 
 type Entry = {
   company: string;
@@ -48,6 +50,9 @@ export function BlacklistView() {
   const exempted = entries.filter((e) => e.exemptActive);
   const evidence = entries.reduce((s, e) => s + e.reports + e.postings, 0);
   const earliest = entries.length ? entries.map((e) => e.since).filter(Boolean).sort()[0] : "—";
+  // 接口错误码不直接上屏：短码映射为界面文案，真正的可读消息（如后端校验提示）原样保留。
+  const errText =
+    err === "error" ? t("blacklist.errorGeneric") : err === "network" ? t("blacklist.errorNetwork") : err;
 
   async function post(method: string, body: unknown, key: string) {
     setBusy(key);
@@ -84,7 +89,7 @@ export function BlacklistView() {
 
       {/* toolbar */}
       <div className="mt-6 flex items-center gap-3">
-        <div className="flex flex-1 items-center gap-2 rounded-full border border-border bg-surface px-4 py-2">
+        <div className={cn("flex flex-1 items-center gap-2 rounded-full border border-border bg-surface px-4 py-2", fieldWrapCls)}>
           <Search className="size-4 text-faint" />
           <input
             value={q}
@@ -105,7 +110,7 @@ export function BlacklistView() {
 
       {formOpen && <AddForm busy={busy === "add"} onAdd={(b) => post("POST", b, "add")} onCancel={() => setFormOpen(false)} />}
 
-      {err && <p className="mt-4 rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-700 dark:text-red-400">{err}</p>}
+      {errText && <ErrorBanner className="mt-4">{errText}</ErrorBanner>}
 
       {exempted.length > 0 && (
         <div className="mt-4 flex items-center gap-2.5 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-2.5 text-sm">
@@ -115,11 +120,11 @@ export function BlacklistView() {
       )}
 
       {loading ? (
-        <div className="mt-10 flex justify-center py-10 text-faint"><Loader2 className="size-5 animate-spin" /></div>
+        <Loading className="mt-10" label={t("blacklist.loading")} />
       ) : entries.length === 0 ? (
-        <Empty big={t("blacklist.empty")} hint={t("blacklist.emptyHint")} />
+        <EmptyState className="mt-6" title={t("blacklist.empty")} hint={t("blacklist.emptyHint")} />
       ) : shown.length === 0 ? (
-        <Empty big={t("blacklist.noMatch")} hint={t("blacklist.noMatchHint")} />
+        <EmptyState className="mt-6" title={t("blacklist.noMatch")} hint={t("blacklist.noMatchHint")} />
       ) : (
         <div className="mt-5 space-y-4">
           {shown.map((e) => (
@@ -127,9 +132,7 @@ export function BlacklistView() {
               key={e.company}
               entry={e}
               busy={busy === e.company}
-              onExempt={() => {
-                const d = window.prompt(t("blacklist.exemptPrompt"), e.exemptUntil || defaultExemptDate());
-                if (d === null) return;
+              onExempt={(d) => {
                 post("PATCH", { company: e.company, exemptUntil: d.trim() }, e.company);
               }}
               onReinstate={() => post("PATCH", { company: e.company, exemptUntil: "" }, e.company)}
@@ -147,15 +150,6 @@ function Stat({ n, l, accent }: { n: string; l: string; accent?: boolean }) {
     <div className="flex items-baseline gap-2">
       <span className={cn("font-display text-2xl leading-none", accent ? "text-brand-text" : "text-foreground")}>{n}</span>
       <span className="text-[11.5px] tracking-wide text-faint">{l}</span>
-    </div>
-  );
-}
-
-function Empty({ big, hint }: { big: string; hint: string }) {
-  return (
-    <div className="mt-6 rounded-xl border border-dashed border-border px-6 py-14 text-center">
-      <div className="font-display text-xl text-foreground">{big}</div>
-      <div className="mx-auto mt-1.5 max-w-md text-sm text-muted">{hint}</div>
     </div>
   );
 }
@@ -215,7 +209,7 @@ function AddForm({ busy, onAdd, onCancel }: { busy: boolean; onAdd: (b: unknown)
   );
 }
 
-const inputCls = "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-brand";
+const inputCls = `w-full rounded-lg border border-border bg-background px-3 py-2 text-sm ${fieldCls}`;
 
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
@@ -228,10 +222,14 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
 }
 
 function Card({ entry, busy, onExempt, onReinstate, onRemove }: {
-  entry: Entry; busy: boolean; onExempt: () => void; onReinstate: () => void; onRemove: () => void;
+  entry: Entry; busy: boolean; onExempt: (date: string) => void; onReinstate: () => void; onRemove: () => void;
 }) {
   const { t } = useI18n();
   const [confirming, setConfirming] = useState(false);
+  // 内嵌豁免编辑器：替代 window.prompt（UI 审计 2026-10-31 FAIL #12）——与全站
+  // 自研弹窗/内嵌确认同一套观感，不再跳出浏览器原生对话框。
+  const [exemptOpen, setExemptOpen] = useState(false);
+  const [exemptDate, setExemptDate] = useState(entry.exemptUntil || defaultExemptDate());
   const expired = !entry.exemptActive && /^\d{4}-\d{2}-\d{2}$/.test(entry.exemptUntil);
   return (
     <article className={cn("rounded-xl border border-border bg-surface p-5 shadow-sm", entry.exemptActive && "border-dashed")}>
@@ -286,8 +284,35 @@ function Card({ entry, busy, onExempt, onReinstate, onRemove }: {
           <button onClick={onReinstate} disabled={busy} className="inline-flex items-center gap-1.5 rounded-full border border-border px-3.5 py-1.5 text-[12.5px] font-semibold text-muted hover:bg-surface-hover disabled:opacity-50">
             <ShieldAlert className="size-3.5" />{t("blacklist.reinstateBtn")}
           </button>
+        ) : exemptOpen ? (
+          <form
+            onSubmit={(ev) => {
+              ev.preventDefault();
+              setExemptOpen(false);
+              onExempt(exemptDate);
+            }}
+            className="flex flex-wrap items-center gap-2"
+          >
+            <label htmlFor={`exempt-${entry.company}`} className="text-[12.5px] text-muted">
+              {t("blacklist.exemptPrompt")}
+            </label>
+            <input
+              id={`exempt-${entry.company}`}
+              type="date"
+              autoFocus
+              value={exemptDate}
+              onChange={(e) => setExemptDate(e.target.value)}
+              className={`rounded-lg border border-border bg-background px-2 py-1 text-[12.5px] ${fieldCls}`}
+            />
+            <button type="submit" disabled={busy} className="rounded-full border border-border px-3.5 py-1.5 text-[12.5px] font-semibold text-muted hover:bg-surface-hover disabled:opacity-50">
+              {t("blacklist.exemptSave")}
+            </button>
+            <button type="button" onClick={() => setExemptOpen(false)} className="rounded-full border border-border px-3.5 py-1.5 text-[12.5px] text-muted hover:bg-surface-hover">
+              {t("blacklist.cancel")}
+            </button>
+          </form>
         ) : (
-          <button onClick={onExempt} disabled={busy} className="inline-flex items-center gap-1.5 rounded-full border border-border px-3.5 py-1.5 text-[12.5px] font-semibold text-muted hover:bg-surface-hover disabled:opacity-50">
+          <button onClick={() => setExemptOpen(true)} disabled={busy} className="inline-flex items-center gap-1.5 rounded-full border border-border px-3.5 py-1.5 text-[12.5px] font-semibold text-muted hover:bg-surface-hover disabled:opacity-50">
             <ShieldOff className="size-3.5" />{t("blacklist.exemptBtn")}
           </button>
         )}

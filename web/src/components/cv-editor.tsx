@@ -6,6 +6,7 @@ import remarkGfm from "remark-gfm";
 import { AlertTriangle, Check, History, Loader2, Upload } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { useI18n } from "@/lib/i18n/context";
+import { fieldCls } from "@/components/ui/field-styles";
 import { Button } from "@/components/ui/button";
 import { CvHistoryDrawer } from "@/components/cv/cv-history-drawer";
 import { readMarkdownCv, type CvImportError } from "@/lib/cv/import";
@@ -155,7 +156,8 @@ export function CvEditor() {
 
   return (
     <div className="mx-auto max-w-6xl px-6 py-8">
-      <div className="flex items-end justify-between gap-4">
+      {/* flex-wrap：窄屏按钮排落到标题下方，标题不再被挤成多行（UI 审计 FAIL #7）。 */}
+      <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="font-display text-2xl tracking-tight text-landing">{t("cv.editor.title")}</h1>
           <p className="mt-1 text-sm text-muted">
@@ -245,11 +247,20 @@ export function CvEditor() {
             }}
             spellCheck={false}
             placeholder={t("cv.editor.placeholder")}
-            className="min-h-[60vh] w-full resize-none rounded-2xl border border-border bg-surface/50 p-4 font-mono text-sm leading-relaxed outline-none transition-colors placeholder:text-faint focus:border-brand/40"
+            className={cn("min-h-[60vh] w-full resize-none rounded-2xl border border-border bg-surface/50 p-4 font-mono text-sm leading-relaxed placeholder:text-faint", fieldCls)}
           />
+          {/* 预览里的 markdown 一级标题降为 h2：页面唯一的 h1 是页头「CV 编辑器」
+              （UI 审计 FAIL #10），候选人姓名不再抢文档大纲层级。 */}
           <article className="report-prose min-h-[60vh] overflow-auto rounded-2xl border border-border bg-surface/30 p-5">
             {content.trim() ? (
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                components={{
+                  h1: (props) => <h2 {...props} />,
+                }}
+              >
+                {content}
+              </ReactMarkdown>
             ) : (
               <p className="text-muted">{t("cv.editor.previewHere")}</p>
             )}

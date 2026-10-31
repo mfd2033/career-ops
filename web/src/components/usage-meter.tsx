@@ -83,7 +83,7 @@ export function UsageMeter() {
               </div>
               <div className="mt-0.5 h-1 w-full overflow-hidden rounded-full bg-surface-hover">
                 <div
-                  className={cn("h-full rounded-full transition-all", tone(pct))}
+                  className={cn("h-full rounded-full transition-[width]", tone(pct))}
                   style={{ width: `${Math.max(pct, 2)}%` }}
                 />
               </div>

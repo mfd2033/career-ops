@@ -146,7 +146,12 @@ export function JobTargetSettings() {
             <span className="mt-0.5 block text-xs text-faint">{t("config.jobTargetArchetypeHint")}</span>
             <div className="mt-1.5 flex flex-col gap-1.5">
               {archetypes.map((row, i) => (
-                <div key={i} className="flex items-center gap-1.5">
+                <div
+                  key={i}
+                  /* flex-wrap：窄容器下 level/select/删除钮换行，行不撑破卡
+                      （config 设置页 390 溢出修复，UI 审计 FAIL #6）。 */
+                  className="flex flex-wrap items-center gap-1.5"
+                >
                   <input
                     value={row.name}
                     onChange={(e) => updateRow(i, { name: e.target.value })}

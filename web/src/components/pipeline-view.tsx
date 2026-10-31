@@ -415,11 +415,18 @@ export function PipelineView({
   // state (its own 跳过 tab). Only offered on the EVALUATED tab, so every target
   // is currently Evaluated → a legal forward terminal transition. Sequential
   // POSTs (not concurrent) so they don't fight over the tracker lock (503); a
-  // confirm guards the blast radius of a terminal, non-undoable bulk write.
+  // self-built confirm dialog guards the blast radius of a terminal, non-undoable
+  // bulk write（window.confirm 已换自研弹窗，UI 审计 2026-10-31 FAIL #12，复用
+  // ADR-0057/0061 的内嵌弹窗模式）。
+  const [skipConfirmOpen, setSkipConfirmOpen] = useState(false);
+  const requestSkip = useCallback(() => {
+    if (selected.size === 0 || skipBusy) return;
+    setSkipConfirmOpen(true);
+  }, [selected.size, skipBusy]);
   const skipSelected = useCallback(async () => {
     if (selected.size === 0 || skipBusy) return;
     const targets = [...selected];
-    if (!window.confirm(t("pipeline.batchSkipConfirm", { count: targets.length }))) return;
+    setSkipConfirmOpen(false);
     setSkipBusy(true);
     try {
       for (const n of targets) {
@@ -593,7 +600,7 @@ export function PipelineView({
                 </button>
                 <button
                   type="button"
-                  onClick={skipSelected}
+                  onClick={requestSkip}
                   disabled={skipBusy || needSelection}
                   className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border px-3 py-1 font-medium text-muted transition-colors hover:border-red-400/50 hover:text-red-400 disabled:cursor-not-allowed disabled:opacity-50 max-sm:min-h-[44px]"
                   title={needSelection ? t("pipeline.batchNeedSelection") : t("pipeline.batchSkipTitle", { count: selected.size })}
@@ -652,7 +659,13 @@ export function PipelineView({
                 {SORT_KEYS.map((k) => (
                   <Fragment key={k}>
                     <th
-                      className="cursor-pointer select-none whitespace-nowrap px-4 py-2.5 font-medium hover:text-foreground"
+                      className={cn(
+                        "cursor-pointer select-none whitespace-nowrap px-4 py-2.5 font-medium hover:text-foreground",
+                        // 数值列（分数/薪资/体检/耗时）右对齐 + 等宽数字，与表单数字输入同一
+                        // 口径（globals.css .num-col，UI 审计统一建议 #4）；编号/日期是标识符，
+                        // 保持左对齐。
+                        (k === "score" || k === "salary" || k === "checkup" || k === "duration") && "num-col",
+                      )}
                       onClick={() => setParams({ sort: k, dir: sort.key === k ? sort.dir * -1 : -1 })}
                     >
                       <span className="inline-flex items-center gap-1">
@@ -726,6 +739,33 @@ export function PipelineView({
         <div className="mt-4 rounded-2xl border border-dashed border-border bg-surface/30 px-6 py-12 text-center">
           <p className="font-display text-lg">{t("pipeline.noMatches")}</p>
           <p className="mx-auto mt-1 max-w-sm text-sm text-muted">{t("pipeline.noMatchesHint")}</p>
+        </div>
+      )}
+      {/* 批量跳过确认弹窗：自研 Dialog 替代 window.confirm（FAIL #12），样式基底同
+          retry-job-button 的 ADR-0061 弹窗。 */}
+      {skipConfirmOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4" role="dialog" aria-modal="true">
+          <div className="w-full max-w-sm rounded-2xl border border-border bg-surface p-5 shadow-xl">
+            <h3 className="font-display text-base">{t("pipeline.batchSkip", { count: selected.size })}</h3>
+            <p className="mt-2 text-sm text-muted">{t("pipeline.batchSkipConfirm", { count: selected.size })}</p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setSkipConfirmOpen(false)}
+                className="rounded-md border border-border px-3 py-1.5 text-xs font-medium text-muted hover:text-foreground"
+              >
+                {t("pipeline.batchSkipCancel")}
+              </button>
+              <button
+                type="button"
+                autoFocus
+                onClick={skipSelected}
+                className="rounded-md bg-brand px-3 py-1.5 text-xs font-medium text-brand-foreground transition-colors hover:bg-brand-200"
+              >
+                {t("pipeline.batchSkipGo")}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
@@ -809,14 +849,14 @@ const TrackerRow = memo(function TrackerRow({
         {/* 职位常带括号后缀（方向/城市），单行截断 + 全文悬停，上限 32rem。 */}
         <div className="max-w-[32rem] truncate" title={row.role}>{row.role}</div>
       </td>
-      <td className="px-4 py-3">
+      <td className="px-4 py-3 num-col">
         {/* 分数只做展示（ADR-0062）。 */}
         <Badge tone={scoreTone(row.score)}>{row.score || "—"}</Badge>
       </td>
       {/* 报告薪资（ADR-0037）：归一化月薪区间，报告字段原文进悬停提示；未披露 →「—」。 */}
       <td
         className={cn(
-          "whitespace-nowrap px-4 py-3 tabular-nums",
+          "whitespace-nowrap px-4 py-3 tabular-nums num-col",
           row.reportSalary?.range ? "text-muted" : "text-faint",
         )}
         title={row.reportSalary?.text || undefined}
@@ -838,7 +878,7 @@ const TrackerRow = memo(function TrackerRow({
       {/* 体检列三态（ADR-0064 修订决议 5）：有记录 → ★；无记录但命中建议 → chip；
           皆无 → 空格（不是「★0」）。 */}
       {checkupStar != null ? (
-        <td className="whitespace-nowrap px-4 py-3 tabular-nums" title={checkupTitleText || undefined}>
+        <td className="whitespace-nowrap px-4 py-3 tabular-nums num-col" title={checkupTitleText || undefined}>
           <Badge tone={checkupTone(checkupStar)}>★{checkupStar.toFixed(1)}</Badge>
         </td>
       ) : showSuggest ? (
@@ -848,7 +888,7 @@ const TrackerRow = memo(function TrackerRow({
       ) : (
         <td className="whitespace-nowrap px-4 py-3" />
       )}
-      <td className="whitespace-nowrap px-4 py-3 text-muted tabular-nums">
+      <td className="whitespace-nowrap px-4 py-3 text-muted tabular-nums num-col">
         {fmtDuration(row.evalDuration ?? null)}
       </td>
       <td className="whitespace-nowrap px-4 py-3 text-muted">
@@ -897,7 +937,7 @@ function InboxEmpty({ count, filtered }: { count: number; filtered: boolean }) {
             <p className="mx-auto mt-2 max-w-sm text-sm text-muted">{t("pipeline.inboxEmptyFind")}</p>
             <Link
               href="/explore?run=1"
-              className="mt-5 inline-flex items-center gap-2 rounded-full bg-brand px-5 py-2.5 text-sm font-medium text-brand-foreground shadow-sm transition-all duration-200 hover:bg-brand-200 hover:-translate-y-0.5 hover:shadow-md"
+              className="mt-5 inline-flex items-center gap-2 rounded-full bg-brand px-5 py-2.5 text-sm font-medium text-brand-foreground shadow-sm transition-[background-color,transform,box-shadow] duration-200 hover:bg-brand-200 hover:-translate-y-0.5 hover:shadow-md"
             >
               <Compass className="size-4" /> {t("pipeline.runFirstScan")} <ArrowRight className="size-4" />
             </Link>

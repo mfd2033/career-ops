@@ -38,7 +38,7 @@ export function AboutPanel() {
   const webVersion = (meta?.version || "").replace(/^web\s+/i, "");
 
   return (
-    <div className="overflow-hidden rounded-[14px] border border-border bg-surface">
+    <div className="overflow-hidden rounded-xl border border-border bg-surface">
       {/* 品牌头：渐变带 + serif 字标 + 渠道徽标（复刻引擎卡的头部语言） */}
       <div className="flex flex-wrap items-center gap-3 border-b border-border bg-gradient-to-b from-brand-soft/80 to-transparent px-5 py-4">
         <CoMark size={38} />

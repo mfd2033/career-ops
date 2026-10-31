@@ -176,7 +176,7 @@ export function StatusPill({
         aria-expanded={open}
         onClick={() => (open ? setOpen(false) : openMenu())}
         className={cn(
-          "inline-flex cursor-pointer items-center gap-1 rounded-md px-1.5 py-0.5 text-xs font-semibold tabular-nums transition-colors",
+          "inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs font-semibold tabular-nums transition-colors",
           "hover:ring-2 hover:ring-brand/30 focus-visible:ring-2 focus-visible:ring-brand/40 focus-visible:outline-none",
           "disabled:cursor-wait disabled:opacity-60",
           tone,

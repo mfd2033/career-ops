@@ -418,6 +418,9 @@ export function ConfigForm() {
 
   return (
     <div className="mx-auto grid max-w-[1320px] gap-10 px-7 pt-9 pb-[140px] max-[1100px]:block max-[1100px]:px-4 min-[1101px]:grid-cols-[150px_minmax(0,1fr)] min-[1101px]:items-start">
+      {/* 页面标题：设置页无大标题区（版式刻意直接进分区），补一个 sr-only h1
+          保住文档大纲——其余 11 页均有唯一 h1（UI 审计 FAIL #9）。 */}
+      <h1 className="sr-only">{t("config.title")}</h1>
       {/* 窄屏：折叠为顶部横向滚动芯片导航 */}
       <nav className="sticky top-0 z-20 -mx-4 mb-4 flex gap-2 overflow-x-auto border-b border-border bg-background/85 px-4 py-2 backdrop-blur max-[1100px]:flex min-[1101px]:hidden">
         {SECTIONS.map((s) => (
@@ -520,11 +523,11 @@ export function ConfigForm() {
                   {/* CLI 引擎卡（复刻原型 engine-card）：顶部渐变回执头（工具名 +
                       版本 + 上次检测 + 重新检测），下方 AI 工具 / 模型 双列选择器。
                       未保存时同一张头把标签改成「本机默认（未保存）」（ADR-0073 决议 2）。 */}
-                  <div className="overflow-hidden rounded-[14px] border border-border bg-surface">
+                  <div className="overflow-hidden rounded-xl border border-border bg-surface">
                     {headerCli && (
                       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-border bg-gradient-to-b from-brand-soft to-transparent px-5 py-3.5">
                         <div className="flex min-w-0 flex-wrap items-baseline gap-2.5">
-                          <span className="text-[10.5px] font-bold uppercase tracking-[0.14em] text-brand">
+                          <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-brand">
                             {t(headerUnsaved ? "config.defaultTool" : "config.currentTool")}
                           </span>
                           <span className="font-display text-[25px] leading-none text-landing">{headerCli.name}</span>
@@ -950,7 +953,11 @@ export function ConfigForm() {
               以上侧栏占 240px，同一个视口断点对应两种完全不同的内容宽。
               容器查询：<672px 一列（全宽竖排）；≥672px 两列（2×2，不留孤行）。 */}
           <div className="@container">
-            <div className="grid gap-4 @2xl:grid-cols-2">
+            {/* grid-cols-1 必须显式声明：缺省的隐式 auto 轨道最小尺寸是子项的
+                min-content，四张设置卡里固定宽控件（原型行的 w-32/w-28 等）会把
+                整列撑到 ~540px，在 390 视口直接溢出被裁（UI 审计 FAIL #6）。
+                grid-cols-1 = minmax(0,1fr)，轨道可收缩，卡随容器宽走。 */}
+            <div className="grid grid-cols-1 gap-4 @2xl:grid-cols-2">
               <JobTargetSettings />
               <SalaryTargetSettings />
               <JdRulesSettings />
@@ -979,7 +986,7 @@ export function ConfigForm() {
           或刚保存成功时显示；待保存数写进按钮文案；点保存后短暂「已保存」再归零。 */}
       <div
         className={cn(
-          "fixed bottom-6 left-1/2 z-30 -translate-x-1/2 transition-all duration-200 max-[640px]:w-[calc(100%-28px)]",
+          "fixed bottom-6 left-1/2 z-30 -translate-x-1/2 transition-[transform,width] duration-200 max-[640px]:w-[calc(100%-28px)]",
           showSaveBar ? "opacity-100" : "invisible translate-y-4 opacity-0",
         )}
       >
@@ -1065,7 +1072,7 @@ function RadioChoice({
           selected && !disabled ? "border-brand" : "border-border",
         )}
       >
-        <span className={cn("size-2 rounded-full bg-brand transition-transform", selected ? "scale-100" : "scale-0")} />
+        <span className={cn("size-2 rounded-full bg-brand transition-opacity", selected ? "opacity-100" : "opacity-0")} />
       </span>
       <span className="min-w-0">
         <span className="block text-[13.5px] font-semibold text-foreground">{title}</span>

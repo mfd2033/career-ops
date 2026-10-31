@@ -98,6 +98,7 @@ export const en: Dict = {
   "jobs.retryAttempt": "Attempt {n}",
   "jobs.retryAttemptSeparator": "—— attempt {n} ——",
   "jobs.retryConfirmTitle": "Retry this batch?",
+  "jobs.placeholderDomain": "Demo-domain entry (invalid URL)",
   "jobs.retryConfirmBody":
     "The whole batch re-runs from scratch ({n} items) — items that already succeeded will run again.",
   "jobs.retryConfirmCancel": "Cancel",
@@ -196,6 +197,7 @@ export const zh: Dict = {
   "jobs.retryAttempt": "第 {n} 次尝试",
   "jobs.retryAttemptSeparator": "—— 第 {n} 次尝试 ——",
   "jobs.retryConfirmTitle": "重试这批任务？",
+  "jobs.placeholderDomain": "演示域名条目（无效 URL）",
   "jobs.retryConfirmBody": "整批将从头重跑（共 {n} 项），已成功项也会重新执行。",
   "jobs.retryConfirmCancel": "取消",
   "jobs.retryConfirmConfirm": "整批重跑",

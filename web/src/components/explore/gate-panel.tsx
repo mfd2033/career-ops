@@ -8,6 +8,7 @@ import { mergeDenyWords } from "@/lib/deny-words.mjs";
 import type { DiscoveredOffer } from "@/lib/explore";
 import { useI18n } from "@/lib/i18n/context";
 import { cn } from "@/lib/cn";
+import { fieldCls } from "@/components/ui/field-styles";
 
 // 采集门的「规则牌」（gate-visibility 工单 01）现在也是**改词表的地方**（工单 03）。
 //
@@ -123,7 +124,7 @@ function WordGroup({
                     }
                   }}
                   aria-label={t("explore.results.gateEdit", { w })}
-                  className="w-20 bg-transparent text-[11px] outline-none"
+                  className={cn("w-20 bg-transparent text-[11px]", fieldCls)}
                 />
               </span>
             );
@@ -164,7 +165,7 @@ function WordGroup({
               }
             }}
             placeholder={t("explore.results.gateAddPlaceholder")}
-            className="w-24 bg-transparent text-[11px] outline-none placeholder:text-faint"
+            className={cn("w-24 bg-transparent text-[11px] placeholder:text-faint", fieldCls)}
           />
           <button
             type="button"
@@ -426,7 +427,7 @@ export function GatePanel({
                 type="button"
                 onClick={() => void save()}
                 disabled={!dirty || saving}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-xs font-semibold text-brand-foreground shadow-sm transition-all hover:brightness-110 disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-xs font-semibold text-brand-foreground shadow-sm transition-[filter] hover:brightness-110 disabled:opacity-50"
               >
                 <ShieldCheck className="size-3.5" /> {saving ? t("explore.results.gateSaving") : t("explore.results.gateSave")}
               </button>

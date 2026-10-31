@@ -15,6 +15,7 @@ import { suggestDenyWords } from "@/lib/deny-words.mjs";
 import { countOfferTags, filterByTags, withSelectedCounts, withTags } from "@/lib/result-tags.mjs";
 import { TagBar } from "./tag-bar";
 import { useI18n } from "@/lib/i18n/context";
+import { fieldWrapCls } from "@/components/ui/field-styles";
 
 export type EnrichedOffer = DiscoveredOffer & { inPipeline: boolean; evaluatedN?: string };
 
@@ -353,8 +354,9 @@ export function ResultsList({ offers, tagVocab }: { offers: EnrichedOffer[]; tag
         </div>
 
         <div className="ml-auto flex items-center gap-2">
-          {/* relative + pr 留白：容纳内嵌 ×（ADR-0059 决议 1/8） */}
-          <div className="relative flex items-center gap-1.5 rounded-lg border border-border bg-surface/40 px-2.5 py-1.5">
+          {/* relative + pr 留白：容纳内嵌 ×（ADR-0059 决议 1/8）；focus-within 焦点环
+              用全站统一令牌（UI 审计 2026-10-31 FAIL #2）。 */}
+          <div className={cn("relative flex items-center gap-1.5 rounded-lg border border-border bg-surface/40 px-2.5 py-1.5", fieldWrapCls)}>
             <Search className="size-3.5 text-faint" />
             <input
               value={q}
@@ -367,7 +369,7 @@ export function ResultsList({ offers, tagVocab }: { offers: EnrichedOffer[]; tag
           {/* 薪资下限（月薪 K）——搜索框右侧的展示层过滤：解析口径复用 parseSalaryText
               （分板折算），判定端取严格下限、无薪资行隐藏（与采集门的区间重叠/未知放行
               口径不同）。空 = 不过滤。 */}
-          <div className="relative flex items-center gap-1.5 rounded-lg border border-border bg-surface/40 px-2.5 py-1.5">
+          <div className={cn("relative flex items-center gap-1.5 rounded-lg border border-border bg-surface/40 px-2.5 py-1.5", fieldWrapCls)}>
             <Coins className="size-3.5 text-faint" />
             <input
               type="number"
@@ -438,7 +440,7 @@ export function ResultsList({ offers, tagVocab }: { offers: EnrichedOffer[]; tag
                 type="button"
                 disabled={selectedAddable.length === 0}
                 onClick={() => void addSelected()}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-xs font-semibold text-brand-foreground shadow-sm transition-all hover:brightness-110 disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-xs font-semibold text-brand-foreground shadow-sm transition-[filter] hover:brightness-110 disabled:opacity-50"
               >
                 <Plus className="size-3.5" /> {t("explore.results.addSelected", { n: selectedAddable.length })}
               </button>
@@ -450,7 +452,7 @@ export function ResultsList({ offers, tagVocab }: { offers: EnrichedOffer[]; tag
                     type="button"
                     onClick={() => void evaluateSelected()}
                     title={t("explore.results.evaluateConfirmTitle", { n: selectedAddable.length })}
-                    className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-xs font-semibold text-brand-foreground shadow-sm transition-all hover:brightness-110"
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-xs font-semibold text-brand-foreground shadow-sm transition-[filter] hover:brightness-110"
                   >
                     <Sparkles className="size-3.5" /> {t("explore.results.evaluateConfirm", { n: selectedAddable.length })}
                   </button>

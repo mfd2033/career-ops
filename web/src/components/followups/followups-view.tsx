@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeft, CalendarClock, ChevronDown, ChevronRight, Loader2, Mail, NotebookPen, Pin, Search, Snowflake, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { fieldCls } from "@/components/ui/field-styles";
 import { CompanyLogo } from "@/components/company-logo";
 import { LogDialog } from "@/components/followups/log-dialog";
 import { NextDateDialog } from "@/components/followups/next-date-dialog";
@@ -386,7 +387,16 @@ export function FollowupsView() {
                  {COLUMNS.map((c) => {
                    const active = sortKey === c.key;
                    return (
-                     <th key={c.key} aria-sort={active ? (dir === 1 ? "ascending" : "descending") : "none"} className="px-2.5 py-2.5 font-medium">
+                     <th
+                       key={c.key}
+                       aria-sort={active ? (dir === 1 ? "ascending" : "descending") : "none"}
+                       className={cn(
+                         "px-2.5 py-2.5 font-medium",
+                         // 数值列（分数/天数/次数/沉默）右对齐 + 等宽数字，与表单数字输入
+                         // 同一口径（globals.css .num-col，UI 审计统一建议 #4）。
+                         (c.key === "score" || c.key === "days" || c.key === "count" || c.key === "silence") && "num-col",
+                       )}
+                     >
                        <button
                          type="button"
                          title={t(`followups.colHint.${c.key}`)}
@@ -590,7 +600,7 @@ function FollowupRow({
           )}
         </td>
         <td className="max-w-56 truncate px-2.5 py-3 text-muted">{e.role}</td>
-        <td className="px-2.5 py-3">
+        <td className="px-2.5 py-3 num-col">
           <Badge tone={scoreTone(e.score)}>{e.score || "—"}</Badge>
         </td>
         <td className="min-w-24 whitespace-nowrap px-2.5 py-3">
@@ -601,8 +611,8 @@ function FollowupRow({
         <td className="px-2.5 py-3">
           <Badge tone={urgencyTone(e.urgency)}>{t(`followups.urgency.${e.urgency}`)}</Badge>
         </td>
-        <td className={cn("px-2.5 py-3 tabular-nums", daysHeatClass(e.daysSinceApplication))}>{e.daysSinceApplication}</td>
-        <td className="whitespace-nowrap px-2.5 py-3">
+        <td className={cn("px-2.5 py-3 tabular-nums num-col", daysHeatClass(e.daysSinceApplication))}>{e.daysSinceApplication}</td>
+        <td className="whitespace-nowrap px-2.5 py-3 num-col">
           {e.daysUntilNext == null ? (
             <span className="text-faint">—</span>
           ) : (
@@ -629,12 +639,12 @@ function FollowupRow({
             </span>
           )}
         </td>
-        <td className="px-2.5 py-3 tabular-nums">{e.followupCount}</td>
-        <td className={cn("px-2.5 py-3 tabular-nums", daysHeatClass(e.daysSinceLastFollowup))}>
+        <td className="px-2.5 py-3 tabular-nums num-col">{e.followupCount}</td>
+        <td className={cn("px-2.5 py-3 tabular-nums num-col", daysHeatClass(e.daysSinceLastFollowup))}>
           {e.daysSinceLastFollowup == null ? <span className="text-faint">—</span> : e.daysSinceLastFollowup}
         </td>
         {/* career-ops-49：沉默天数 + 冻结判定（❄ 仅「已读不回且达阈值」时出现，悬停看全称） */}
-        <td className="px-2.5 py-3">
+        <td className="px-2.5 py-3 num-col">
           {e.silenceDays == null ? (
             <span className="text-faint">—</span>
           ) : e.freezeSuggested ? (
@@ -826,7 +836,7 @@ function FreezeDialog({
           id="freeze-reason"
           value={reason}
           onChange={(ev) => setReason(ev.target.value)}
-          className="mt-1.5 min-h-16 w-full resize-y rounded-xl border border-border bg-background px-3 py-2 text-sm outline-none focus:border-sky-400/50"
+          className={cn("mt-1.5 min-h-16 w-full resize-y rounded-xl border border-border bg-background px-3 py-2 text-sm", fieldCls)}
         />
         <p className="mt-2 text-[11px] text-faint">{t("followups.freezeFineprint")}</p>
         <div className="mt-4 flex justify-end gap-2">
