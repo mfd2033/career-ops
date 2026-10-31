@@ -5,13 +5,12 @@ import { Compass, ChevronDown, RotateCcw, AlertTriangle, Sparkles, Settings, Glo
 import Link from "next/link";
 import { cn } from "@/lib/cn";
 import { instrumentSerif } from "@/lib/fonts";
-import type { Application, InboxJob } from "@/lib/career-ops";
 import { normalizeTextKey } from "@/lib/core/normalize-text-key.mjs";
 import { paramsToFilters, paramsToAi, paramsToBrowser, type ExploreFilters } from "@/lib/explore";
 import { hasMultipleKeywords } from "@/lib/browser-search.mjs";
 import { carriesFilterParams, shouldAutoRunOnHandoff } from "@/lib/explore-params.mjs";
 import { SCAN_SOURCES, readScanSources, type ScanSource } from "@/lib/scan-mode";
-import { evaluatedNoFor } from "@/lib/results-view.mjs";
+import { buildEvaluationIndex, evaluatedNoFromIndex } from "@/lib/results-view.mjs";
 import { FilterBuilder } from "./filter-builder";
 import { DiscoveringState } from "./discovering-state";
 import { AiHuntView } from "./ai-hunt-view";
@@ -25,16 +24,22 @@ import { cliDisplayName } from "@/lib/cli-labels.mjs";
 // Same shape as core normalizeTextKey(s, " ") — never [^a-z0-9] (#2666).
 const norm = (s: string) => normalizeTextKey(s, " ");
 
+/** 结果富化只需要的追踪表列（evaluatedNoFor / buildEvaluationIndex 的入参面）。
+ *  整份 Application 里有 notes/report/score 等一大堆与探索页无关的字段，全量放进
+ *  RSC 载荷会让刷新多下载几百 KB（见 app/explore/page.tsx）。 */
+export type EvaluationRow = { n: string; company: string; role: string; url: string };
+
 export function ExplorerView({
   seed,
-  inboxSnapshot,
+  inboxUrls: inboxUrlList,
   appsSnapshot,
   rootExists,
   tagVocab,
 }: {
   seed: { filters: ExploreFilters; seededFrom: string[] };
-  inboxSnapshot: InboxJob[];
-  appsSnapshot: Application[];
+  /** 已入管岗位的 URL（只要 URL：页面只用来算「在管道里」这个布尔）。 */
+  inboxUrls: string[];
+  appsSnapshot: EvaluationRow[];
   rootExists: boolean;
   /** 标签词表（服务端已装配）：结果卡片标签 = 词表对职位名/公司/地点的词典匹配。
    *  与收件箱关键词条同一份词表（ADR-0068 决议 2），不接受客户端自编词条。 */
@@ -130,17 +135,20 @@ export function ExplorerView({
     }
   }, [seed.filters, initFilters, setMode, setAiIntent, discover, loadFresh]);
 
-  const inboxUrls = useMemo(() => new Set(inboxSnapshot.map((j) => j.url)), [inboxSnapshot]);
+  const inboxUrls = useMemo(() => new Set(inboxUrlList), [inboxUrlList]);
+  // 追踪表的归一索引只建一次（算 743 行，不是 200×743 行）——刷新 200 条结果时
+  // 探针里此前 44% 的 CPU 花在重复 new URL() 上，见 results-view.mjs 的 buildEvaluationIndex。
+  const evalIndex = useMemo(() => buildEvaluationIndex(appsSnapshot, norm), [appsSnapshot]);
   const enriched: EnrichedOffer[] = useMemo(
     () =>
       offers.map((o) => ({
         ...o,
         inPipeline: inboxUrls.has(o.url),
-        // 匹配规则与「空键不是通配符」的来由见 results-view.mjs evaluatedNoFor ——
+        // 匹配规则与「空键不是通配符」的来由见 results-view.mjs ——
         // company="" 的浏览器板卡片曾被追踪表里 company="?" 的行按岗位名误配成已评估。
-        evaluatedN: evaluatedNoFor(o, appsSnapshot, norm),
+        evaluatedN: evaluatedNoFromIndex(o, evalIndex, norm),
       })),
-    [offers, inboxUrls, appsSnapshot],
+    [offers, inboxUrls, evalIndex],
   );
 
   const isAi = mode === "ai";

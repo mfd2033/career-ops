@@ -21,7 +21,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { isSelectable, inResultTab, omitRemoved, resultTabOf, visibleOffers, evaluatedNoFor, filterBySalaryMin } from "../../src/lib/results-view.mjs";
+import { isSelectable, inResultTab, omitRemoved, resultTabOf, visibleOffers, evaluatedNoFor, filterBySalaryMin, buildEvaluationIndex, evaluatedNoFromIndex } from "../../src/lib/results-view.mjs";
 import { normalizeTextKey } from "../../src/lib/core/normalize-text-key.mjs";
 
 const norm = (s) => normalizeTextKey(s, " ");
@@ -327,8 +327,28 @@ test("a real company key still matches on the role overlap", () => {
 
 test("the results view asks the shared derivation, not a private copy", () => {
   const src = flat("components/explore/explorer-view.tsx");
-  assert.match(src, /import \{ evaluatedNoFor \} from "@\/lib\/results-view\.mjs"/, "判定必须来自共享模块");
-  assert.match(src, /evaluatedN: evaluatedNoFor\(o, appsSnapshot, norm\)/, "卡片徽章读同一个判定");
+  assert.match(
+    src,
+    /import \{ buildEvaluationIndex, evaluatedNoFromIndex \} from "@\/lib\/results-view\.mjs"/,
+    "判定必须来自共享模块",
+  );
+  assert.match(src, /const evalIndex = useMemo\(\(\) => buildEvaluationIndex\(appsSnapshot, norm\)/, "追踪表索引在渲染期只建一次");
+  assert.match(src, /evaluatedN: evaluatedNoFromIndex\(o, evalIndex, norm\)/, "卡片徽章读同一个判定");
   // 旧的内联写法（没有空键保护）不许回来
   assert.ok(!/if \(norm\(a\.company\) !== c\) return false/.test(src), "内联的已评估匹配必须删掉，否则空键通配会复发");
+});
+
+// 索引版与逐条版必须同结论：前者只是后者对追踪表那一侧的预计算，两条入口漂移就是
+// 「同一批结果在两条路径上被标成不同的已评估状态」。
+test("the indexed derivation agrees with the per-offer one", () => {
+  const index = buildEvaluationIndex(TRACKER, norm);
+  for (const offer of [
+    { company: "郑州智小游企业管理有限公司", title: "高级产品经理" },
+    { company: "郑州智小游企业管理有限公司", title: "前端工程师" },
+    { company: "?", title: "项目经理" },
+    { company: "", title: "产品经理" },
+    { company: "从未评估过的公司", title: "产品经理" },
+  ]) {
+    assert.equal(evaluatedNoFromIndex(offer, index, norm), evaluatedNoFor(offer, TRACKER, norm), JSON.stringify(offer));
+  }
 });

@@ -1,5 +1,5 @@
 import fs from "node:fs";
-import { ExplorerView } from "@/components/explore/explorer-view";
+import { ExplorerView, type EvaluationRow } from "@/components/explore/explorer-view";
 import { seedExploreFilters } from "@/lib/core/portals";
 import { readInbox, readApplications, readTagVocab, careerOpsRoot } from "@/lib/career-ops";
 import { DEFAULT_FILTERS } from "@/lib/explore";
@@ -29,7 +29,23 @@ export default function ExplorePage() {
   } catch {
     /* 词表不可用：结果区不带标签 */
   }
+  // 客户端只需要两样东西来富化结果集：收件箱的 URL 集合，和追踪表的 n/公司/岗位/URL
+  // （见 ExplorerView 的 enriched memo）。此前整份 Application/InboxJob 都进了 RSC 载荷，
+  // 743 行追踪表的 notes/report/score 等字段把 /explore 的 HTML 顶到 ~460KB——刷新时
+  // 浏览器要先下载、解析这块对页面毫无作用的数据。这里只投影需要的列。
+  let inboxUrls: string[] = [];
+  let appsSnapshot: EvaluationRow[] = [];
+  try {
+    inboxUrls = readInbox().map((j) => j.url);
+  } catch {
+    /* 裸 checkout：空收件箱 */
+  }
+  try {
+    appsSnapshot = readApplications().map(({ n, company, role, url }) => ({ n, company, role, url }));
+  } catch {
+    /* 裸 checkout：空追踪表 */
+  }
   return (
-    <ExplorerView seed={seed} inboxSnapshot={readInbox()} appsSnapshot={readApplications()} rootExists={rootExists} tagVocab={tagVocab} />
+    <ExplorerView seed={seed} inboxUrls={inboxUrls} appsSnapshot={appsSnapshot} rootExists={rootExists} tagVocab={tagVocab} />
   );
 }

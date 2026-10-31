@@ -70,22 +70,70 @@ export function inResultTab(tab, o) {
  * @returns {string|undefined} the matched tracker `#n`, or undefined
  */
 export function evaluatedNoFor(offer, apps, norm) {
+  return evaluatedNoFromIndex(offer, buildEvaluationIndex(apps, norm), norm);
+}
+
+/**
+ * 追踪表的预归一索引：`evaluatedNoFor` 对**每一条 offer** 都重跑一遍 app 列表，
+ * 每次都把全部 URL 与公司名重新归一化 —— 探索页刷新时 200 条结果 × 743 行追踪表
+ * ≈ 15 万次 `new URL()`，实测占去刷新后 3s 里的一半以上 CPU。
+ *
+ * 归一化只取决于追踪表本身，与 offer 无关，所以按结果集算一次即可。这是同一条
+ * 判定口径的预计算形式（含空键不是通配符的守卫），不是第二套规则：
+ * `evaluatedNoFor` 本身就委托到这里，两个入口永不漂移。
+ *
+ * @param {Array<{n?: string, url?: string, company?: string, role?: string}>} apps
+ * @param {(s: string) => string} norm
+ * @returns {{byUrl: Map<string, string>, byCompany: Map<string, Array<{n: string, roleKey: string}>>}}
+ */
+export function buildEvaluationIndex(apps, norm) {
+  const byUrl = new Map();
+  // 公司键 → 该公司下的 [{n, roleKey}]，**保持追踪表原顺序**：原来 find 取的是
+  // 第一条命中的行，改成按公司分桶后桶内顺序不变，取到的仍是同一条。
+  const byCompany = new Map();
+  for (const a of apps || []) {
+    if (!a?.n) continue;
+    const urlKey = normalizeUrl(a.url ?? "");
+    if (urlKey && !byUrl.has(urlKey)) byUrl.set(urlKey, a.n);
+    const c = norm(a.company ?? "");
+    // 空公司键不是通配符（#2666）：公司列本身就是空的浏览器板行永远不进桶。
+    if (!c) continue;
+    const roleKey = norm(a.role ?? "");
+    // 过短的岗位名不参与文本匹配（「项目经理」这类泛词的误配来源）。
+    if (roleKey.length <= 3) continue;
+    const bucket = byCompany.get(c);
+    if (bucket) bucket.push({ n: a.n, roleKey });
+    else byCompany.set(c, [{ n: a.n, roleKey }]);
+  }
+  return { byUrl, byCompany };
+}
+
+/**
+ * `evaluatedNoFor` 的索引版：判定口径逐字相同，只是把追踪表那一侧换成预归一索引。
+ * 结果集富化走这条（见 explorer-view 的 enriched memo）。
+ *
+ * @param {{url?: string, company?: string, title?: string}} offer
+ * @param {ReturnType<typeof buildEvaluationIndex>} index
+ * @param {(s: string) => string} norm
+ * @returns {string|undefined}
+ */
+export function evaluatedNoFromIndex(offer, index, norm) {
+  const { byUrl, byCompany } = index || {};
   // 维度 1：URL 精确匹配。空键永不互等（normalizeUrl 解析失败返回 ""，
-  // 下方相等比较天然落空，不需要额外守卫）。
+  // 查表天然落空，不需要额外守卫）。
   const urlKey = normalizeUrl(offer.url ?? "");
-  if (urlKey) {
-    const byUrl = apps.find((a) => normalizeUrl(a.url ?? "") === urlKey);
-    if (byUrl?.n) return byUrl.n;
+  if (urlKey && byUrl) {
+    const hit = byUrl.get(urlKey);
+    if (hit) return hit;
   }
   // 维度 2：公司+岗位文本兜底（tracker 行没写 URL 的场景）。
   const c = norm(offer.company ?? "");
-  if (!c) return undefined;
+  if (!c || !byCompany) return undefined;
+  const bucket = byCompany.get(c);
+  if (!bucket) return undefined;
   const t = norm(offer.title ?? "");
-  const hit = apps.find((a) => {
-    if (norm(a.company ?? "") !== c) return false;
-    const ar = norm(a.role ?? "");
-    return ar.length > 3 && (t.includes(ar) || ar.includes(t.split(" ").slice(0, 3).join(" ")));
-  });
+  const head = t.split(" ").slice(0, 3).join(" ");
+  const hit = bucket.find((a) => t.includes(a.roleKey) || a.roleKey.includes(head));
   return hit?.n;
 }
 
