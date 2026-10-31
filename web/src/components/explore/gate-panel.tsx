@@ -365,9 +365,10 @@ export function GatePanel({
             role="dialog"
             aria-modal="true"
             aria-label={t("explore.results.gateModalTitle")}
-            className="max-h-[calc(100dvh-2rem)] w-full max-w-lg overflow-y-auto rounded-2xl border border-border bg-surface p-5 shadow-xl"
+            className="flex max-h-[calc(100dvh-2rem)] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-border bg-surface shadow-xl"
           >
-            <div className="flex items-start justify-between gap-4">
+            {/* 标题固定，滚动只在正文里发生：词表再长，用户也始终知道自己在改哪个弹窗。 */}
+            <div className="flex shrink-0 items-start justify-between gap-4 border-b border-border px-5 py-4">
               <h2 className="flex items-center gap-2 font-display text-lg">
                 <ShieldCheck className="size-4 text-muted" /> {t("explore.results.gateModalTitle")}
               </h2>
@@ -376,7 +377,9 @@ export function GatePanel({
               </button>
             </div>
 
-            <div className="mt-3 space-y-3">
+            {/* 唯一的滚动区（min-h-0 让 flex 子项真的能收缩）：纵向滚动条落在弹窗内沿，
+                不再由整页承担；overscroll-contain 免得到底后继续把背后那页一起滚走。 */}
+            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain px-5 py-4">
               {/* 检索词与词表的分工（原牌面常驻注）：进弹窗后它仍是读懂试算的前提。 */}
               <p className="text-[11px] leading-relaxed text-faint">{t("explore.results.gateQueryNote")}</p>
               {preaddedWords.length > 0 && (
@@ -414,27 +417,28 @@ export function GatePanel({
                 )}
                 <p className="mt-1 text-[10px] leading-relaxed text-faint">{t("explore.results.gateTrialNote")}</p>
               </div>
+            </div>
 
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => void save()}
-                  disabled={!dirty || saving}
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-xs font-semibold text-brand-foreground shadow-sm transition-all hover:brightness-110 disabled:opacity-50"
-                >
-                  <ShieldCheck className="size-3.5" /> {saving ? t("explore.results.gateSaving") : t("explore.results.gateSave")}
-                </button>
-                <button
-                  type="button"
-                  onClick={resetDraft}
-                  disabled={!dirty || saving}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface/40 px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-brand-soft hover:text-brand disabled:opacity-50"
-                >
-                  <RotateCcw className="size-3.5" /> {t("explore.results.gateDiscard")}
-                </button>
-                {saved && <span className="text-[11px] text-emerald-600 dark:text-emerald-400">{t("explore.results.gateSaved")}</span>}
-                {error && <span className="text-[11px] text-amber-600 dark:text-amber-400">{t("explore.results.gateSaveFailed", { msg: error })}</span>}
-              </div>
+            {/* 保存固定：翻到词表底部时才看得见的保存按钮，等于逼用户先去滚一遍。 */}
+            <div className="flex shrink-0 flex-wrap items-center gap-2 border-t border-border px-5 py-3">
+              <button
+                type="button"
+                onClick={() => void save()}
+                disabled={!dirty || saving}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-xs font-semibold text-brand-foreground shadow-sm transition-all hover:brightness-110 disabled:opacity-50"
+              >
+                <ShieldCheck className="size-3.5" /> {saving ? t("explore.results.gateSaving") : t("explore.results.gateSave")}
+              </button>
+              <button
+                type="button"
+                onClick={resetDraft}
+                disabled={!dirty || saving}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface/40 px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-brand-soft hover:text-brand disabled:opacity-50"
+              >
+                <RotateCcw className="size-3.5" /> {t("explore.results.gateDiscard")}
+              </button>
+              {saved && <span className="text-[11px] text-emerald-600 dark:text-emerald-400">{t("explore.results.gateSaved")}</span>}
+              {error && <span className="text-[11px] text-amber-600 dark:text-amber-400">{t("explore.results.gateSaveFailed", { msg: error })}</span>}
             </div>
           </div>
         </div>
