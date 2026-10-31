@@ -59,9 +59,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             overflow-y-auto 兵底；收起态改为 overflow-visible，否则溢出裁剪会把
             伸到侧栏右侧的 tooltip 一起裁掉（overflow-y 非 visible 会把 overflow-x
             强制成 auto，建立滚动容器）。收起后内容只有一列图标，本身不需要滚动。 */}
+        {/* z-30：sticky 不带 z-index 时侧栏在定位层里按 DOM 顺序先画，main 里那些
+            绝对定位的装饰层（HeroGlow 的 绝对 inset-0 canvas、可读性蒙层）排在它
+            后面就会盖住伸出侧栏的 tooltip——即使 tooltip 自身 z-50 也无效，因为它
+            被困在侧栏这个层叠上下文里。给侧栏一个正 z-index 把整列抬到 main 的
+            定位层之上；弹窗/控制台等 z-40+ 的固定层仍在其上。 */}
         <aside
           className={cn(
-            "sticky top-0 hidden h-screen shrink-0 flex-col border-r border-border bg-surface/30 [overflow-anchor:none] transition-[width,padding] duration-200 md:flex",
+            "sticky top-0 z-30 hidden h-screen shrink-0 flex-col border-r border-border bg-surface/30 [overflow-anchor:none] transition-[width,padding] duration-200 md:flex",
             collapsed ? "w-16 overflow-visible px-2 py-4" : "w-60 overflow-y-auto p-4",
           )}
         >
