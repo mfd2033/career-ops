@@ -1,10 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { ExternalLink, Plus, Check, Loader2, ShieldQuestion, Sparkles, Coins, X } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { instrumentSerif } from "@/lib/fonts";
 import { ATS_LABEL, isSalaryUnknown, type AtsSource, type DiscoveredOffer } from "@/lib/explore";
+import { isDragGesture, isExemptClickTarget, isTextSelectionActive } from "@/lib/row-click.mjs";
 import { useJobs } from "@/components/jobs/job-store";
 import { useExplore } from "./explore-provider";
 import { useI18n } from "@/lib/i18n/context";
@@ -256,8 +257,32 @@ export function DiscoveryRow({
   const unverified = offer.verification === "unconfirmed";
   const fresh = freshness(offer.postedAt) || offer.postedHint || "";
 
+  // 点行 = 勾选（ADR-0060 的行点击判定沿用，判定全在 row-click.mjs 纯函数里，
+  // 这里只接线）：行内控件命中 a/button/input 一律让路——标题外链、加入管道、
+  // 评估、单行移除都保持自己的语义；拖选复制标语的松手 click 由位移与选区两道闸
+  // 挡住。不可勾选的行（已入管/已评估）与它那颗 disabled 的复选框同语义：点了不动。
+  //
+  // 整行仍用默认箭头，不挂 cursor-pointer：点行是勾选而非跳转，手型只代表链接/导航
+  // （ADR-0062 增补 #2）；行内真链接与复选框各自保留手型。
+  const pointerDownRef = useRef<{ x: number; y: number } | null>(null);
+  const canToggle = !!onToggleSelect && !!selectable;
+  const onRowClick = (e: ReactMouseEvent<HTMLTableRowElement>) => {
+    if (!canToggle) return;
+    if (isExemptClickTarget(e.target as Element)) return;
+    if (isDragGesture(pointerDownRef.current, { x: e.clientX, y: e.clientY })) return;
+    if (isTextSelectionActive(window.getSelection?.())) return;
+    onToggleSelect?.();
+  };
+
   return (
-    <tr className="group transition-colors hover:bg-surface-hover/40">
+    <tr
+      onPointerDown={(e) => {
+        pointerDownRef.current = { x: e.clientX, y: e.clientY };
+      }}
+      onClick={onRowClick}
+      // 选中底色是行点击的可见回报（复选框之外第二个信号）；未选中时保留原有 hover。
+      className={cn("group transition-colors", selected ? "bg-brand-soft/40" : "hover:bg-surface-hover/40")}
+    >
       <td className="px-3 py-2 align-middle">
         {onToggleSelect && (
           <input
@@ -266,7 +291,8 @@ export function DiscoveryRow({
             onChange={onToggleSelect}
             disabled={!selectable}
             aria-label={t("explore.results.selectAria", { title: offer.title })}
-            className="size-4 shrink-0 accent-brand"
+            // 手型显式挂在复选框上（行本身是箭头）：与 tracker 表、收件箱同口径。
+            className="size-4 shrink-0 cursor-pointer accent-brand"
           />
         )}
       </td>

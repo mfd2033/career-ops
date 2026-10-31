@@ -100,3 +100,40 @@ test("收件箱 checkbox 显式保留手型 — 与 tracker 表勾选框对齐",
   assert.match(input, /cursor-pointer/,
     "勾选框是原生控件，必须显式挂手型与 tracker 对齐");
 });
+
+// —— 探索页结果表（DiscoveryRow）沿用同一套行点击判定 ——
+// 判定函数进项目时只锁了收件箱宿主；探索页表格行接的是同一组纯函数，但没有守卫
+// 的话，下次重构「为了省事」把 onClick 摘掉或把 cursor-pointer 挂回 <tr>、把排除
+// 闸删掉，都不会有任何东西变红。
+
+const DISCOVERY_SRC = readFileSync(join(WEB, "src", "components", "explore", "discovery-card.tsx"), "utf8");
+const DISCOVERY_CODE = stripComments(DISCOVERY_SRC);
+
+// DiscoveryRow 切片：从函数声明起，直到行首 checkbox 之前。收件箱测试同口径——
+// 行内控件（标题外链、动作按钮、复选框）的手型不在本规则约束内，不归本切片量。
+function discoveryRowSource() {
+  const start = DISCOVERY_CODE.indexOf("export function DiscoveryRow");
+  assert.ok(start > 0, "discovery-card.tsx 结构变了 — 未找到 DiscoveryRow，本断言需随宿主改写");
+  return DISCOVERY_CODE.slice(start);
+}
+
+const ROW_SRC = discoveryRowSource();
+// 接线区 = 函数声明到行首 checkbox 之前（不含 <input）：三道闸与 <tr> 属性都在这里。
+const ROW_WIRING = ROW_SRC.slice(0, ROW_SRC.indexOf("<input"));
+
+test("探索结果行整行可点切换勾选 — <tr> 接 onClick 且判定走 row-click.mjs 三道闸", () => {
+  assert.match(ROW_WIRING, /onClick=\{onRowClick\}/, "<tr> 必须接行点击，否则只有复选框可点");
+  assert.match(ROW_WIRING, /onPointerDown=/, "缺 pointerdown 坐标，拖拽闸无法判定");
+  // 三道闸齐全：交互控件让路 / 拖拽抑制 / 文本选区抑制。
+  assert.match(ROW_WIRING, /isExemptClickTarget\(/, "行点击必须让路给行内 a/button/input");
+  assert.match(ROW_WIRING, /isDragGesture\(/, "缺拖拽闸 — 行内拖选文字会被当成勾选");
+  assert.match(ROW_WIRING, /isTextSelectionActive\(/, "缺选区闸 — 拖选松手会误切选中");
+});
+
+test("探索结果行不挂 cursor-pointer，行首 checkbox 显式保留手型", () => {
+  assert.ok(!/cursor-pointer/.test(ROW_WIRING),
+    "数据行不该用 cursor-pointer；点行只是勾选，手型留给真链接（ADR-0062 增补 #2）");
+  const input = ROW_SRC.match(/<input[\s\S]*?\/>/)?.[0];
+  assert.ok(input, "未找到 checkbox <input> — 结构变了，本断言需随宿主改写");
+  assert.match(input, /cursor-pointer/, "勾选框是原生控件，必须显式挂手型与 tracker / 收件箱对齐");
+});
