@@ -55,14 +55,14 @@ await page.addInitScript(() => {
 /** 弹窗里琥珀色（= 「拉黑所选」带入）的 chip 数。 */
 const amberChips = () =>
   page.evaluate(() => {
-    const dlg = document.querySelector('[role="dialog"][aria-label="标题门配置"]');
+    const dlg = document.querySelector('[role="dialog"][aria-label="过滤配置"]');
     if (!dlg) return -1;
     return [...dlg.querySelectorAll("span")].filter((s) => String(s.className).includes("border-amber-500/40")).length;
   });
 /** 顶部「已从所选岗位带入 N 个」的读数；横幅不在时返回 0。 */
 const bannerCount = () =>
   page.evaluate(() => {
-    const dlg = document.querySelector('[role="dialog"][aria-label="标题门配置"]');
+    const dlg = document.querySelector('[role="dialog"][aria-label="过滤配置"]');
     if (!dlg) return -1;
     const p = [...dlg.querySelectorAll("p")].find((el) => el.className.includes("border-amber-500/30"));
     const m = p?.textContent?.match(/(\d+)/);
@@ -79,7 +79,7 @@ try {
   await page.getByText("Alpha Beta").first().waitFor({ timeout: 15000 });
 
   await page.getByRole("button", { name: /拉黑/ }).click();
-  await page.locator('[aria-label="标题门配置"]').waitFor({ timeout: 5000 });
+  await page.locator('[aria-label="过滤配置"]').waitFor({ timeout: 5000 });
   await page.waitForTimeout(200);
 
   const before = await amberChips();
@@ -87,7 +87,7 @@ try {
 
   // 删掉第一个高亮词（取它的文本，再用带词名的 aria-label 点 ×，避免选中别的 chip）。
   const firstWord = await page.evaluate(() => {
-    const dlg = document.querySelector('[role="dialog"][aria-label="标题门配置"]');
+    const dlg = document.querySelector('[role="dialog"][aria-label="过滤配置"]');
     const chip = [...dlg.querySelectorAll("span")].find((s) => String(s.className).includes("border-amber-500/40"));
     return chip?.firstChild?.textContent?.trim() ?? "";
   });
