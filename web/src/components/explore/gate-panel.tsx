@@ -161,7 +161,8 @@ export function GatePanel({
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState("");
   // 「拉黑所选」带入的黑名单新词（小写规范化，多次点击累计）——这些 chip 在下方高亮、
-  // 顶部提示按同一口径计数；随保存/放弃/手动编辑清空，不跨动作残留。
+  // 顶部提示按同一口径计数。清空点只有保存 / 放弃 / 重播种：手动删词只摘掉被删的那一个
+  // （见 edit），否则用户删一个词，其余带入词跟着熄、顶部读数一起消失。
   const [preaddedWords, setPreaddedWords] = useState<string[]>([]);
   const seeded = useRef(seedKey(positive, negative));
   // preadd 并入时要知道「草稿里原本有什么」，但 effect 不能依赖 draft（否则 setDraft
@@ -226,8 +227,18 @@ export function GatePanel({
   const edit = (side: keyof Words, w: string, remove = false) => {
     setSaved(false);
     setError("");
-    setPreaddedWords([]);
-    setDraft((d) => ({ ...d, [side]: remove ? removeOne(d[side], w) : addOne(d[side], w) }));
+    const list = remove ? removeOne(draftRef.current[side], w) : addOne(draftRef.current[side], w);
+    setDraft((d) => ({ ...d, [side]: list }));
+    // 高亮跟着词本身走，不跟着「编辑过没有」走：手动删掉一个带入词，只熄灭它自己——
+    // 其余带入词的来源没变，整批熄灭会把顶部「带入 N 个」的提示一起吞掉，读起来像
+    // 「拉黑只带进来一条」。词表里真有重复条目（portals.yml 的 negative 里「销售」
+    // 落过两条），所以只有删到该词彻底不在表里才熄灭，否则删掉一份副本会误伤另一份。
+    if (remove && side === "negative") {
+      const key = w.trim().toLowerCase();
+      if (!list.some((k) => k.trim().toLowerCase() === key)) {
+        setPreaddedWords((prev) => prev.filter((k) => k !== key));
+      }
+    }
   };
 
   const save = async () => {

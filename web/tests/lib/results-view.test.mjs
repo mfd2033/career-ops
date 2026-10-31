@@ -261,8 +261,15 @@ test("the toolbar removes the selected rows without leaking into the filter boun
   );
   assert.match(src, /const counts = useMemo\(\(\) => \{ const c: Record<ResultTab, number> = \{ all: remaining\.length/, "so do the tab badges");
   assert.match(src, /onClick=\{removeSelected\}/, "the button fires the removal");
-  assert.match(src, /removeOffers\(\[\.\.\.selected\]\)/, "it dismisses exactly the current selection");
-  assert.match(src, /t\("explore\.results\.removeSelected", \{ n: selected\.size \}\)/, "and its label states how many rows it will hide");
+  // 处置范围与按钮读数同一集合：「勾选中的可见行」。此前取 selected（全量勾选），按薪资/
+  // 关键词筛掉一半后按钮仍显示总数，点下去还会把屏幕外的行一起隐去。
+  assert.match(
+    src,
+    /const selectedOffers = useMemo\(\(\) => view\.filter\(\(o\) => selected\.has\(o\.url\)\), \[view, selected\]\)/,
+    "the batch acts on the visible selection — the same set the label counts",
+  );
+  assert.match(src, /removeOffers\(selectedOffers\.map\(\(o\) => o\.url\)\)/, "it dismisses exactly the rows on screen, not every ticked URL");
+  assert.match(src, /t\("explore\.results\.removeSelected", \{ n: selectedOffers\.length \}\)/, "and its label states how many rows it will hide");
 });
 
 test("the remove button is labelled in both locales", () => {

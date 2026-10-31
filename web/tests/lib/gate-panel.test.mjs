@@ -123,8 +123,9 @@ test("「拉黑所选」feeds candidate deny words into the panel's DRAFT, never
   const list = flat(LIST);
   assert.match(list, /suggestDenyWords\(selectedOffers\)/, "results-list derives the candidates from the selected rows' titles");
   assert.match(list, /preaddNegative=\{preadd\}/, "…and passes them down to the panel");
-  assert.match(list, /selected\.size > 0 && isBsk &&/, "the entry only shows when rows are selected AND the gate is mounted (browser path) — a dead button on the ATS path would be worse than none");
-  assert.match(list, /t\("explore\.results\.blacklistSelected"/, "the button is labeled");
+  assert.match(list, /\{isBsk && \(/, "the entry is mounted on the browser path only (a dead button on the ATS path would be worse than none)");
+  assert.match(list, /disabled=\{noVisibleSelection\}/, "…and it stays VISIBLE while nothing is selected, disabled instead of unmounted — a toolbar that grows/shrinks buttons as you tick rows moves the primary CTA under the cursor");
+  assert.match(list, /t\("explore\.results\.blacklistSelected", \{ n: selectedOffers\.length \}\)/, "the count must be the visible selection, not the whole one: after a salary/keyword filter, selected.size still holds rows off screen");
   // The panel body must stay free of a second matcher — mergeDenyWords is a list
   // merge, not a matcher, so its presence is fine; the forbidden list below
   // re-checks the same three names the first test guards.
@@ -132,6 +133,38 @@ test("「拉黑所选」feeds candidate deny words into the panel's DRAFT, never
   for (const forbidden of ["buildTitleFilter(", "compileKeyword", "compilePositiveKeyword"]) {
     assert.ok(!body.includes(forbidden), `the preadd must not introduce a second matcher (found "${forbidden}")`);
   }
+});
+
+// 「删一个带入词，其余就不亮了」。仓里没有组件渲染基建（ADR-0072 known gap），所以这条
+// 只能锁形状；真正按 DOM 跑的红/绿复现在 web/tests/debug/explore-blacklist-highlight-
+// removal.mjs（Playwright + 固定快照），修之前观测到 4 个高亮 → 删一个 → 0 个。
+test("deleting one brought-in word re-lights only itself, never the whole batch", () => {
+  const body = panelBody();
+  // 只看 edit 本身：「放弃改动」那个按钮本来就该整批清空（词表回到已存表，带入词一个
+  // 都不该还亮），把它算进来会让这条断言永远不可能绿。
+  const editBody = body.slice(body.indexOf("const edit ="), body.indexOf("const save ="));
+  assert.ok(editBody.length > 0, "could not bound the edit handler");
+  // 任何手动编辑都把高亮集整批清空，正是用户报的这一条：其余带入词、连同顶部「带入 N 个」
+  // 的提示一起消失，读起来像「拉黑只带进来一条」。
+  assert.ok(
+    !/setPreaddedWords\(\[\]\)/.test(editBody),
+    "a manual edit must not blanket-clear the preadd highlight set — drop only the word being removed",
+  );
+  assert.match(
+    editBody,
+    /if \(remove && side === "negative"\)/,
+    "the highlight only ever shrinks on a NEGATIVE removal: the positive group shares the same draft and never carried a preadd highlight",
+  );
+  assert.match(
+    editBody,
+    /setPreaddedWords\(\(prev\) => prev\.filter\(\(k\) => k !== key\)\)/,
+    "…and by dropping that one normalized key, so the other brought-in words stay lit",
+  );
+  assert.match(
+    editBody,
+    /list\.some\(\(k\) => k\.trim\(\)\.toLowerCase\(\) === key\)/,
+    "only unhighlight once the word is REALLY gone: portals.yml repeats a word, and deleting one copy must not darken the other",
+  );
 });
 
 test("every reject names the word that killed it, read from the gate's own reason", () => {
