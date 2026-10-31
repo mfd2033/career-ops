@@ -80,7 +80,10 @@ export async function GET(req: NextRequest) {
     // expires, so the key has to carry both the resolver version and enough of
     // the name to keep two companies apart.
     const companyKey = companyCacheKey(company);
-    if (!companyKey) return new Response("bad company", { status: 400 });
+    // Pure CJK names carry no ASCII to key on (companyCacheKey → null) and no
+    // plausible domain either — a guaranteed miss, not a client error. 404 keeps
+    // the <img onError> monogram fallback and the console free of false 400s.
+    if (!companyKey) return new Response("no logo", { status: 404 });
     key = companyKey;
     candidates = companyDomains(company);
     if (candidates.length === 0) return new Response("no logo", { status: 404 });

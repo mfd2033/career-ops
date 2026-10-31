@@ -67,7 +67,7 @@ export function DecisionCard({ app }: { app: Application }) {
             Today skipped that path and wrote a status with no application. */}
         <a
           href={`/pipeline/${app.n}`}
-          className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-md bg-brand-soft px-2.5 py-1.5 text-xs font-medium text-brand-text transition hover:bg-brand/15 max-sm:min-h-[44px]"
+          className="inline-flex flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-transparent bg-brand-soft px-2.5 py-1.5 text-xs font-medium text-brand-text transition hover:bg-brand/15 max-sm:min-h-[44px]"
         >
           <FileText className="size-3.5" /> {t("home.review")}
         </a>
@@ -75,16 +75,17 @@ export function DecisionCard({ app }: { app: Application }) {
           type="button"
           disabled={!!busy}
           onClick={() => setStatus("SKIP")}
-          className="inline-flex items-center justify-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs font-medium text-muted transition hover:text-foreground disabled:opacity-60 max-sm:min-h-[44px] max-sm:px-4"
+          className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-border px-2.5 py-1.5 text-xs font-medium text-muted transition hover:text-foreground disabled:opacity-60 max-sm:min-h-[44px] max-sm:px-4"
         >
           {busy === "SKIP" ? <Loader2 className="size-3.5 animate-spin" /> : <X className="size-3.5" />} {t("home.skip")}
         </button>
+        {/* border-transparent：与「跳过」的有色边框对齐高度（否则边框珠使三颗按钮差 2px）。 */}
         <button
           type="button"
           disabled={!!busy}
           onClick={() => setStatus("Applied")}
           title={t("home.recordAppliedTitle")}
-          className="inline-flex shrink-0 items-center justify-center gap-1 rounded-md px-2 py-1.5 text-xs font-medium text-faint transition hover:text-foreground disabled:opacity-60 max-sm:min-h-[44px]"
+          className="inline-flex shrink-0 items-center justify-center gap-1 whitespace-nowrap rounded-md border border-transparent px-2 py-1.5 text-xs font-medium text-faint transition hover:text-foreground disabled:opacity-60 max-sm:min-h-[44px]"
         >
           {busy === "Applied" ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
           {t("home.applied")}
