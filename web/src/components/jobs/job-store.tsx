@@ -121,7 +121,7 @@ export type Job = {
   endedAt?: number;
 };
 
-type StartOpts = { title: string; subtitle?: string; kind: string; input: string; page?: string; batchId?: string; urls?: string[]; ns?: string[]; reportNum?: string };
+type StartOpts = { title: string; subtitle?: string; kind: string; input: string; page?: string; batchId?: string; urls?: string[]; ns?: string[]; reportNum?: string; cliId?: string; model?: string };
 
 // /api/runs/history 的台账行形状（服务端 run 账本，终态）。tolerant reader：
 // 旧行可能缺字段（ADR-0043 前无 cliId/model，ADR-0045 前无 items/total）。
@@ -991,7 +991,12 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
       };
       setJobs((js) => [job, ...js]);
       removed.current.delete(id);
-      (async () => dispatchJob(id, opts, await resolveEngineFallback()))();
+      (async () => {
+        // ADR-0093 决议 3：批量失败子项重试沿用父批量的引擎快照（原样再来）；
+        // 缺省（所有既有调用点）才解析当前设置。
+        const engine = opts.cliId ? { cliId: opts.cliId, model: opts.model } : await resolveEngineFallback();
+        dispatchJob(id, opts, engine);
+      })();
       return id;
     },
     [dispatchJob, t],

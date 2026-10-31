@@ -102,6 +102,12 @@ export const en: Dict = {
     "The whole batch re-runs from scratch ({n} items) — items that already succeeded will run again.",
   "jobs.retryConfirmCancel": "Cancel",
   "jobs.retryConfirmConfirm": "Re-run batch",
+  // ADR-0093 单项重试：失败子项按钮、独立工作器标题与在跑提示。
+  "jobs.batchItemRetry": "Retry item",
+  "jobs.batchItemRetryHint":
+    "Re-runs this link as a standalone worker. The failed item stays in this batch's record.",
+  "jobs.batchItemRetryRunning": "Retrying\u2026",
+  "jobs.batchItemRetryTitle": "Retry evaluation",
 };
 
 // Simplified Chinese strings. Every key in en must have a matching key here.
@@ -193,4 +199,9 @@ export const zh: Dict = {
   "jobs.retryConfirmBody": "整批将从头重跑（共 {n} 项），已成功项也会重新执行。",
   "jobs.retryConfirmCancel": "取消",
   "jobs.retryConfirmConfirm": "整批重跑",
+  // ADR-0093 单项重试：与 en 一一对应。
+  "jobs.batchItemRetry": "重试该项",
+  "jobs.batchItemRetryHint": "将该链接作为独立工作器重新评估；本批量里的失败记录原样保留。",
+  "jobs.batchItemRetryRunning": "重试中\u2026",
+  "jobs.batchItemRetryTitle": "重试评估",
 };

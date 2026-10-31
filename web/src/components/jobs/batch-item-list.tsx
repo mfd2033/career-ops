@@ -9,6 +9,7 @@ import { fmtDuration } from "@/lib/format";
 import { fmtStartedAt } from "@/lib/started-at.mjs";
 import { formatRunEngine } from "@/lib/cli-labels.mjs";
 import { batchItemDetailHref } from "@/lib/batch-child-ledger.mjs";
+import { BatchItemRetryButton } from "@/components/jobs/batch-item-retry-button";
 
 /**
  * 批量逐项的卡片渲染（ADR-0046，升级 ADR-0045 的最小行）：状态图标 + 名称/公司 +
@@ -51,6 +52,9 @@ export function BatchItemList({
               </span>
               {it.ok && it.score != null && <span className="shrink-0 rounded bg-emerald-500/15 px-1 py-0.5 text-[10px] font-semibold tabular-nums text-emerald-700 dark:text-emerald-400">{it.score}/5</span>}
               {it.ok && it.star != null && <span className="shrink-0 rounded bg-emerald-500/15 px-1 py-0.5 text-[10px] font-semibold tabular-nums text-emerald-700 dark:text-emerald-400">{"\u2605"}{it.star}/5</span>}
+              {/* ADR-0093：终态失败的 evaluate 子项可单独重跑（独立工作器，父批量
+                  失败记录保留）；成功/跳过/占位项由纯函数拦掉。 */}
+              {!it.ok && !it.skipped && <BatchItemRetryButton item={it} cliId={cliId} model={model} className="mt-0.5" />}
             </div>
             <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 pl-5 text-[11px] tabular-nums text-faint">
               {clock && <span title={t("jobs.endedAt", { time: clock })}>{clock}</span>}
