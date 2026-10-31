@@ -202,6 +202,12 @@ export function ResultsList({ offers, tagVocab }: { offers: EnrichedOffer[]; tag
       else n.add(url);
       return n;
     });
+  // 勾选中的**可见**行（不限 addable——「不适合」与「能不能入管」无关）：作用域取 view
+  // 而不是 remaining。勾选集本身不随筛选收窄（换个搜索词再改回来，勾还在），但工具栏
+  // 上的数字、以及「移除 / 拉黑」这两个批量动作都只能描述屏幕上那批——否则按薪资或
+  // 关键词筛掉一半后，按钮仍显示全部勾选数（屏幕 50 行、按钮 200），点下去还会把看不
+  // 见的行一起处置。与下方 visibleAddable 同一口径。
+  const selectedOffers = useMemo(() => view.filter((o) => selected.has(o.url)), [view, selected]);
   // 批量条只描述屏幕上能确认入管的那批行：计数、全选、确认全部限定在 view 上，而不是
   // 整个结果集。此前计数取 addable（全集）而行取 view，输入关键词后按钮上的数字会比
   // 屏幕上的行多——点下去确认的还包括屏幕外的行（用户报的正是这一条）。筛选时按钮的
@@ -239,24 +245,33 @@ export function ResultsList({ offers, tagVocab }: { offers: EnrichedOffer[]; tag
       });
     }
   };
-  // 移除所选：把勾选的行从结果区隐去（纯展示，不写 pipeline.md），随即清空勾选——
-  // 勾选集的意义已经用掉，留着会让下一次批量动作（加入管道）指向看不见的行，正是本
-  // 文件要避免的那种「数字与屏幕不符」。
+  // 移除所选：把勾选的行从结果区隐去（纯展示，不写 pipeline.md）。处置完这批的勾要
+  // 清掉——勾选集的意义已经用掉，留着会让下一次批量动作（加入管道 / 拉黑）指向看不
+  // 见的行，正是本文件要避免的那种「数字与屏幕不符」。
   const removeSelected = () => {
-    removeOffers([...selected]);
-    setSelected(new Set());
+    if (selectedOffers.length === 0) return;
+    removeOffers(selectedOffers.map((o) => o.url));
+    // 只清掉被移除那批的勾（它们已从屏幕上消失）；被筛选挡在外面、仍勾着的行留着，
+    // 改回筛选时重新可见，勾选与按钮上的数字依旧对得上。
+    setSelected((s) => {
+      const next = new Set(s);
+      for (const o of selectedOffers) next.delete(o.url);
+      return next;
+    });
   };
 
-  // 勾选中的行（不限 addable——「不适合」与「能不能入管」无关）。
-  const selectedOffers = useMemo(() => remaining.filter((o) => selected.has(o.url)), [remaining, selected]);
   // 拉黑所选：把勾选行标题里的特征词作为黑名单候选带进标题门弹窗。并入的是
   // GatePanel 的草稿而非已存表——保存仍只发生在弹窗里，试算让用户先看到「会多毙
   // 几条」再决定；词表在下一次扫描生效（与手动改词表同一套语义，保存不重扫）。
   // 仅 browser 路径：标题门（及其配置弹窗）只挂载在这里，见下方 GatePanel 注释。
   const blacklistSelected = () => {
+    if (selectedOffers.length === 0) return;
     setPreadd(suggestDenyWords(selectedOffers));
     setGateOpen(true);
   };
+  // 两个批量按钮常显、无勾选时禁用：位置固定，不会因为勾/取消勾而让工具栏左右跳动。
+  // 数字取 selectedOffers（可见勾选）而非 selected（全量勾选），见上方注释。
+  const noVisibleSelection = selectedOffers.length === 0;
 
   return (
     <div className="space-y-4">
@@ -331,26 +346,26 @@ export function ResultsList({ offers, tagVocab }: { offers: EnrichedOffer[]; tag
               工具栏不再重复放一颗全选按钮。 */}
           {/* 移除所选：把勾选的行从结果区隐去（纯展示，刷新后仍保持；重新搜索即恢复）。
               排在主按钮「加入管道」左侧——次级动作不抢主 CTA 的位置。 */}
-          {selected.size > 0 && (
-            <button
-              type="button"
-              onClick={removeSelected}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface/40 px-2.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-brand-soft hover:text-brand"
-            >
-              {t("explore.results.removeSelected", { n: selected.size })}
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={removeSelected}
+            disabled={noVisibleSelection}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface/40 px-2.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-brand-soft hover:text-brand disabled:pointer-events-none disabled:opacity-50"
+          >
+            {t("explore.results.removeSelected", { n: selectedOffers.length })}
+          </button>
           {/* 拉黑所选：勾选行标题里的特征词 → 标题门黑名单草稿（打开弹窗，试算先行）。
               与「移除所选」互为补充：那只隐藏本次显示，这个让下一次扫描起不再搜到
               类似岗位。仅 browser 路径（与标题门同在）。 */}
-          {selected.size > 0 && isBsk && (
+          {isBsk && (
             <button
               type="button"
               onClick={blacklistSelected}
+              disabled={noVisibleSelection}
               title={t("explore.results.blacklistTitle")}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface/40 px-2.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-brand-soft hover:text-brand"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface/40 px-2.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-brand-soft hover:text-brand disabled:pointer-events-none disabled:opacity-50"
             >
-              <Ban className="size-3.5" /> {t("explore.results.blacklistSelected", { n: selected.size })}
+              <Ban className="size-3.5" /> {t("explore.results.blacklistSelected", { n: selectedOffers.length })}
             </button>
           )}
           {visibleAddable.length > 0 && (
