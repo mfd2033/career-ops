@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import {
   DEFAULT_FILTERS,
@@ -114,6 +114,10 @@ type ExploreCtx = {
   /** 结果区被用户显式移除（点「移除所选」）的 URL。持久化在 localStorage：
    *  刷新、切 mode、下一次搜索都保持隐藏；清空入口是 restoreRemoved。 */
   removed: Set<string>;
+  /** sessionStorage 快照的读盘是否已完成。false = 首帧（含 SSR HTML），此时任何
+   *  真页面都不是真相：配置表单、或 view=fresh 的「正在加载」整屏，都只是回灌
+   *  还没跑完的中间态。视图层据此先画骨架，避免刷新时先闪一页再跳到结果区。 */
+  restored: boolean;
   /** 把 URL 并入「已移除」集合（只影响结果区显示，不写 pipeline.md）。 */
   removeOffers: (urls: string[]) => void;
   /** 清空「已移除」集合，让被隐藏的行重新出现在结果区。 */
@@ -155,6 +159,12 @@ export function useExplore(): ExploreCtx {
   if (!c) throw new Error("useExplore must be used within <ExploreProvider>");
   return c;
 }
+
+// 快照回灌必须在浏览器绘制之前落地，否则刷新时第一帧画的是配置表单（服务端 HTML
+// 就是它），用户先看到一页「探索」表单再跳到结果区。layout effect 在 hydration
+// 提交后、绘制前同步执行；服务端渲染阶段退回 useEffect（isomorphic 写法，避免
+// useLayoutEffect 在 SSR 下的告警）。
+const useIsomorphicLayoutEffect = typeof window !== "undefined" ? useLayoutEffect : useEffect;
 
 // Explore results are expensive (a scan walks the ATS network; an AI search spends
 // tokens). Persist the SETTLED result set per-tab so a reload or a mode toggle never
@@ -245,11 +255,20 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
   const [aiIntent, setAiIntent] = useState("");
   const [aiTrace, setAiTrace] = useState<AiTraceChunk[]>([]);
   const [aiCost, setAiCost] = useState<AiCost>({ searches: 0, candidates: 0, fetches: 0 });
+  // 快照回灌是否已跑完（见 useIsomorphicLayoutEffect 的注释）。
+  const [restored, setRestored] = useState(false);
   const runningRef = useRef(false);
   const aiIntentRef = useRef(aiIntent);
   aiIntentRef.current = aiIntent;
   const filtersRef = useRef(filters);
   filtersRef.current = filters;
+  // 结果集镜像：loadFresh 要在「快照已回灌、但组件 effect 闭包还是首帧值」的时刻做
+  // 判断（要不要走 casting 整屏），只能读 ref 里已提交的最新值。
+  const offersRef = useRef(offers);
+  offersRef.current = offers;
+  // 本次挂载是否回灌到了带结果的快照（layout effect 里同步置位）。它必须在任何
+  // 被动 effect 读之前就生效，所以不能只靠上面的 offersRef（首帧闭包会把旧值读空）。
+  const bootRestoredRef = useRef(false);
 
   const setFilters = useCallback((f: ExploreFilters) => {
     touched.current = true;
@@ -727,40 +746,52 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
   const loadFresh = useCallback(async () => {
     if (runningRef.current) return;
     runningRef.current = true;
-    setPhase("casting");
-    setStatus(t("explore.disc.loadingFresh"));
-    setOffers([]);
-    setFolded([]);
-    setMatchCount(0);
-    setCompaniesScanned(0);
-    setCompaniesAvailable(0);
-    setCapHit(false);
-    setDroppedNoDate(0);
-    setPartial(false);
-    setSources({});
-    setError("");
+    // 刷新重入（今日页「查看全部」→ /explore?view=fresh 的 URL 在刷新后依然生效）：
+    // 快照里已经有一份结果集，就没必要再清空 + 走一遍 casting 整屏。那一次请求是
+    // 本地、零 token 的，静默替换即可——列表原地换成最新一批，页面不再先闪「正在
+    // 加载新匹配…」再回到结果区（用户报的「刷新先显示探索中」）。
+    const silent = offersRef.current.length > 0 || bootRestoredRef.current;
+    if (!silent) {
+      setPhase("casting");
+      setStatus(t("explore.disc.loadingFresh"));
+      setOffers([]);
+      setFolded([]);
+      setMatchCount(0);
+      setCompaniesScanned(0);
+      setCompaniesAvailable(0);
+      setCapHit(false);
+      setDroppedNoDate(0);
+      setPartial(false);
+      setSources({});
+      setError("");
+    }
     try {
       // A finite ceiling, not `all`: explorer-view renders every offer it gets,
       // so an unbounded list would be an unbounded DOM. `count` below stays the
       // complete total, which is what the header actually reports.
       const r = await fetch(`/api/whats-new?limit=${MAX_OFFER_LIMIT}`);
       if (!r.ok) {
+        if (silent) return; // 静默刷新失败：保留已经显示的结果，不弹整页错误
         setError(t("explore.err.loadFreshFailed", { status: r.status }));
         setPhase("failed");
         return;
       }
       const d = await r.json().catch(() => null);
       if (!d || !Array.isArray(d.offers)) {
+        if (silent) return;
         setError(t("explore.err.loadFreshUnexpected"));
         setPhase("failed");
         return;
       }
       const list: DiscoveredOffer[] = d.offers;
+      // 静默模式下空列表不擦已有结果区（本周没有新匹配时用户看到的还是上一份）。
+      if (silent && list.length === 0) return;
       setOffers(list);
       const count = Number(d.count);
       setMatchCount(Number.isFinite(count) ? Math.max(0, Math.trunc(count)) : list.length);
       setPhase(list.length > 0 ? "results" : "empty-current");
     } catch (e) {
+      if (silent) return;
       setError(e instanceof Error ? e.message : t("explore.err.loadFresh"));
       setPhase("failed");
     } finally {
@@ -1010,17 +1041,27 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
   }, [pathname]); // 修复：跨页/挂载都重读配置
 
   // Rehydrate the last settled result set on mount (per-tab sessionStorage), unless a
-  // search is already running. Done in an effect (not a useState initializer) to avoid
-  // an SSR hydration mismatch.
-  useEffect(() => {
-    if (runningRef.current) return;
+  // search is already running. Done in a LAYOUT effect so it lands before the first
+  // paint: the server HTML for this shell is the idle config form, and restoring it
+  // after paint made a reload flash that page (or, with ?view=fresh, the "loading"
+  // screen) before the results the user asked to keep.
+  useIsomorphicLayoutEffect(() => {
+    if (runningRef.current) {
+      setRestored(true);
+      return;
+    }
     let snap: ResultSnapshot | null = null;
     try {
       snap = JSON.parse(sessionStorage.getItem(RESULTS_KEY) || "null") as ResultSnapshot | null;
     } catch {
       snap = null;
     }
-    if (!snap || snap.v !== 1 || !Array.isArray(snap.offers)) return;
+    if (!snap || snap.v !== 1 || !Array.isArray(snap.offers)) {
+      bootRestoredRef.current = false;
+      setRestored(true);
+      return;
+    }
+    bootRestoredRef.current = snap.offers.length > 0;
     setModeState(snap.mode === "ai" ? "ai" : snap.mode === "browser" ? "browser" : "scan");
     setScanSource(snap.scanSource ?? (snap.mode === "browser" ? "bsk" : SCAN_SOURCE_DEFAULT[0]));
     setOffers(snap.offers);
@@ -1041,6 +1082,7 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     // Never rehydrate INTO a running phase — no live stream backs it.
     const RUNNING = new Set<Phase>(["casting", "scanning", "revealing", "hunting"]);
     setPhase(RUNNING.has(snap.phase) ? (snap.offers.length ? "results" : "idle") : snap.phase);
+    setRestored(true);
   }, []);
 
   // Persist only SETTLED states (never mid-stream) so a reload restores a complete set.
@@ -1062,11 +1104,11 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     () => ({
       filters, setFilters, initFilters, phase,
       running: phase === "casting" || phase === "scanning" || phase === "revealing" || phase === "hunting",
-      offers, folded, sources, matchCount, companiesScanned, companiesAvailable, capHit, droppedNoDate, status, partial, error, scannerMissing, added, removed, removeOffers, restoreRemoved, syncRemovedFromStorage, adding,
+      offers, folded, sources, matchCount, companiesScanned, companiesAvailable, capHit, droppedNoDate, status, partial, error, scannerMissing, added, removed, restored, removeOffers, restoreRemoved, syncRemovedFromStorage, adding,
       discover, discoverBrowser, loadFresh, addToPipeline, restoreSeen, restoring, applyPatch, reset,
       mode, setMode, scanSource, setScanSource, enabledSources, aiIntent, setAiIntent, discoverAI, aiTrace, aiCost,
     }),
-    [filters, setFilters, initFilters, phase, offers, folded, sources, matchCount, companiesScanned, companiesAvailable, capHit, droppedNoDate, status, partial, error, scannerMissing, added, removed, removeOffers, restoreRemoved, syncRemovedFromStorage, adding, discover, discoverBrowser, loadFresh, addToPipeline, restoreSeen, restoring, applyPatch, reset, mode, setMode, scanSource, setScanSource, enabledSources, aiIntent, discoverAI, aiTrace, aiCost],
+    [filters, setFilters, initFilters, phase, offers, folded, sources, matchCount, companiesScanned, companiesAvailable, capHit, droppedNoDate, status, partial, error, scannerMissing, added, removed, restored, removeOffers, restoreRemoved, syncRemovedFromStorage, adding, discover, discoverBrowser, loadFresh, addToPipeline, restoreSeen, restoring, applyPatch, reset, mode, setMode, scanSource, setScanSource, enabledSources, aiIntent, discoverAI, aiTrace, aiCost],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

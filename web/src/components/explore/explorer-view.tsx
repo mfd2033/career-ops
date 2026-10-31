@@ -40,7 +40,7 @@ export function ExplorerView({
    *  与收件箱关键词条同一份词表（ADR-0068 决议 2），不接受客户端自编词条。 */
   tagVocab?: TagVocab;
 }) {
-  const { filters, setFilters, initFilters, phase, running, offers, discover, discoverBrowser, loadFresh, status, error, scannerMissing, mode, setMode, scanSource, setScanSource, enabledSources, aiIntent, setAiIntent, discoverAI, companiesScanned, companiesAvailable, capHit, droppedNoDate, partial } = useExplore();
+  const { filters, setFilters, initFilters, phase, running, offers, discover, discoverBrowser, loadFresh, status, error, scannerMissing, mode, setMode, scanSource, setScanSource, enabledSources, aiIntent, setAiIntent, discoverAI, companiesScanned, companiesAvailable, capHit, droppedNoDate, partial, restored } = useExplore();
   const { t } = useI18n();
   const avail = companiesAvailable > companiesScanned ? t("explore.degraded.ofAvailable", { n: companiesAvailable.toLocaleString() }) : "";
   const partialTxt = partial ? t("explore.scanNotePartial") : "";
@@ -147,6 +147,10 @@ export function ExplorerView({
   // 老「浏览器」tab 并入扫描 tab 后，这里统一为"扫描 tab 内选中 BSK 引擎"即走浏览器抓取路径。
   // mode==="browser" 兼容旧会话恢复（URL ?mode=browser / 旧 sessionStorage）与旧深层链接。
   const isBsk = mode === "browser" || (!isAi && scanSource === "bsk");
+  // 快照回灌完成前不画真页面：此时 phase/mode/offers 都还是初值，画出来的配置表单
+  // （或 view=fresh 的「正在加载」整屏）不是真相——刷新一次就先闪一页再跳到结果区。
+  // 服务端 HTML 与客户端首帧都是这份骨架，不存在 hydration 不匹配。
+  if (!restored) return <RestoreSkeleton />;
   if (running) return isAi ? <AiHuntView cliName={cli.name} /> : <DiscoveringState />;
 
   const browserKeywordMissing = isBsk && !(filters.zhQuery ?? "").trim();
@@ -353,6 +357,24 @@ export function ExplorerView({
           {phase === "failed" && <FailedCard msg={error || status} scannerMissing={scannerMissing} onRetry={() => void discover()} />}
         </>
       )}
+    </div>
+  );
+}
+
+// 回灌骨架：只在 sessionStorage 快照读盘完成前出现（SSR HTML + hydration 那一瞬）。
+// 刻意画成中性占位——既不是配置表单也不是「探索中」，所以刷新时不会先误导用户。
+function RestoreSkeleton() {
+  return (
+    <div className="mx-auto w-full max-w-[1600px] px-5 py-8 md:px-8" aria-busy="true">
+      <div className="flex items-center gap-2.5">
+        <Compass className="size-6 text-brand" />
+        <div className="h-8 w-32 animate-pulse rounded-md bg-surface/60" />
+      </div>
+      <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {Array.from({ length: 6 }).map((_, i) => (
+          <div key={i} className="h-28 animate-pulse rounded-xl border border-border bg-surface/30" />
+        ))}
+      </div>
     </div>
   );
 }
