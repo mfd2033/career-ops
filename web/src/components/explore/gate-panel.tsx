@@ -215,8 +215,9 @@ export function GatePanel({
   onSaved: (positive: string[], negative: string[]) => void;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** 「拉黑所选」带入的黑名单候选词（results-list 推导）：数组引用一变就并入草稿
-   *  的黑名单一侧——每点一次按钮都是新数组，重复词由 mergeDenyWords 去重兑底。 */
+  /** 「拉黑」带入的黑名单候选词（results-list 推导）：工具栏「拉黑所选」取勾选行、
+   *  行内拉黑取那一行——同一条路，数组引用一变就并入草稿的黑名单一侧；每点一次
+   *  都是新数组，重复词由 mergeDenyWords 去重兑底。 */
   preaddNegative?: string[] | null;
 }) {
   const { t } = useI18n();
@@ -245,7 +246,7 @@ export function GatePanel({
     setDraft({ positive: [...positive], negative: [...negative] });
   }, [positive, negative]);
 
-  // 「拉黑所选」把候选词并进草稿黑名单（引用一变即并入；null/空数组不动）。并进
+  // 「拉黑」（所选 / 单行）把候选词并进草稿黑名单（引用一变即并入；null/空数组不动）。并进
   // 的是 draft 而不是已存表——保存仍然只发生在弹窗里（与词表编辑同一条回路），
   // 试算随之更新，用户保存前就能看到「会多毙几条」。
   // 真正新落的词（草稿里原本没有的）进高亮集合：重复点击带同一批词、或词已在

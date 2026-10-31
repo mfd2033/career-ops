@@ -144,6 +144,33 @@ test("「拉黑所选」feeds candidate deny words into the panel's DRAFT, never
   }
 });
 
+// 行内单行「拉黑」：与工具栏同一回路（同一个弹窗、同一份草稿、同一个保存口），只是候选
+// 词只取这一行的标题。没有这条守卫，下次重构很容易给单行另开一条写路径，或者让它顺手
+// 把行隐掉——那就是第二种语义了，而用户点的是「拉黑」，不是「移除」。
+test("行内「拉黑」与批量同一条回路 — 候选词只取这一行的标题", () => {
+  const list = flat(LIST);
+  assert.match(
+    list,
+    /setPreadd\(suggestDenyWords\(\[offer\]\)\)/,
+    "the single-row entry must derive candidates from THAT row's title (an array of one), through the same deny-words module as the bulk button",
+  );
+  assert.match(
+    list,
+    /onBlacklist=\{isBsk \? \(\) => blacklistOne\(o\) : undefined\}/,
+    "the row's button must reach the same handler, and only on the browser path where the gate exists",
+  );
+  // 与批量同一个出口：候选词只是并进草稿，保存仍只在弹窗里发生。
+  const one = list.slice(list.indexOf("const blacklistOne ="), list.indexOf("const noVisibleSelection"));
+  assert.ok(one.length > 0, "could not bound the single-row handler");
+  assert.match(one, /setGateOpen\(true\)/, "the row button opens the same modal rather than writing anything itself");
+  assert.ok(!/api\/portals|fetch\(/.test(one), "no second write path — the row button must not save on the user's behalf");
+
+  const card = flat("components/explore/discovery-card.tsx");
+  assert.match(card, /onBlacklist\?: \(\) => void;/, "the row takes the handler as an optional prop");
+  assert.match(card, /\{onBlacklist && \(/, "no handler = no button: a dead 拉黑 on the ATS path is worse than none");
+  assert.match(card, /t\("explore\.results\.blacklistRowTitle"\)/, "the button has to say what it does to a title word, not just 「拉黑」");
+});
+
 // 「删一个带入词，其余就不亮了」。仓里没有组件渲染基建（ADR-0072 known gap），所以这条
 // 只能锁形状；真正按 DOM 跑的红/绿复现在 web/tests/debug/explore-blacklist-highlight-
 // removal.mjs（Playwright + 固定快照），修之前观测到 4 个高亮 → 删一个 → 0 个。
@@ -242,6 +269,8 @@ test("the panel is labelled in both locales", () => {
     "explore.results.gateSaveFailed",
     "explore.results.blacklistSelected",
     "explore.results.blacklistTitle",
+    "explore.results.blacklistRow",
+    "explore.results.blacklistRowTitle",
     "explore.results.gatePreadded",
     "explore.results.filteredReasonNegative",
     "explore.results.filteredReasonNoPositive",

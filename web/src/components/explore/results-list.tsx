@@ -105,9 +105,9 @@ export function ResultsList({ offers, tagVocab }: { offers: EnrichedOffer[]; tag
   // 关闭即放弃（用户决定 2026-10-31）：草稿不跨打开保留，所以入口按钮上不再挂「未保存」
   // 徽标——关掉弹窗后没有可回头保存的东西。
   const [gateOpen, setGateOpen] = useState(false);
-  // 「拉黑所选」带入 GatePanel 的黑名单候选词（deny-words.mjs 从勾选行标题推导）。
-  // null = 无；每次点击都换新数组引用——GatePanel 按引用消费，重复点击由
-  // mergeDenyWords 去重兑底，不会落进两条同名 chip。
+  // 「拉黑」（工具栏所选 / 行内单条）带入 GatePanel 的黑名单候选词（deny-words.mjs
+  // 从行标题推导）。null = 无；每次点击都换新数组引用——GatePanel 按引用消费，重复
+  // 点击由 mergeDenyWords 去重兑底，不会落进两条同名 chip。
   const [preadd, setPreadd] = useState<string[] | null>(null);
   const [q, setQ] = useState("");
   // 薪资下限（月薪 K）：展示层过滤，纯视图状态，与 q 同类，不进 URL、不跨搜索保留。
@@ -267,6 +267,13 @@ export function ResultsList({ offers, tagVocab }: { offers: EnrichedOffer[]; tag
   const blacklistSelected = () => {
     if (selectedOffers.length === 0) return;
     setPreadd(suggestDenyWords(selectedOffers));
+    setGateOpen(true);
+  };
+  // 单行拉黑：与「拉黑所选」同一条回路（同一个弹窗、同一份草稿、同一个保存口），
+  // 只是候选词只取这一行的标题——不必先勾上再回工具栏点一次。勾选状态不参与，
+  // 所以处置某一条时不会顺手带走别的勾选。
+  const blacklistOne = (offer: DiscoveredOffer) => {
+    setPreadd(suggestDenyWords([offer]));
     setGateOpen(true);
   };
   // 两个批量按钮常显、无勾选时禁用：位置固定，不会因为勾/取消勾而让工具栏左右跳动。
@@ -479,6 +486,8 @@ export function ResultsList({ offers, tagVocab }: { offers: EnrichedOffer[]; tag
                 selectable={isSelectable(o, added)}
                 selected={selected.has(o.url)}
                 onToggleSelect={() => toggleSelect(o.url)}
+                // 行内拉黑与工具栏同一回路；不传 = 没有标题门（ATS 路径），按钮不渲染。
+                onBlacklist={isBsk ? () => blacklistOne(o) : undefined}
               />
             ))}
           </tbody>

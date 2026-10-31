@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
-import { ExternalLink, Plus, Check, Loader2, ShieldQuestion, Sparkles, Coins, X } from "lucide-react";
+import { ExternalLink, Plus, Check, Loader2, ShieldQuestion, Sparkles, Coins, X, Ban } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { instrumentSerif } from "@/lib/fonts";
 import { ATS_LABEL, isSalaryUnknown, type AtsSource, type DiscoveredOffer } from "@/lib/explore";
@@ -243,6 +243,7 @@ export function DiscoveryRow({
   selectable,
   selected,
   onToggleSelect,
+  onBlacklist,
 }: {
   offer: DiscoveredOffer;
   inPipeline: boolean;
@@ -250,6 +251,9 @@ export function DiscoveryRow({
   selectable?: boolean;
   selected?: boolean;
   onToggleSelect?: () => void;
+  /** 单行拉黑：由 ResultsList 接入标题门黑名单草稿（与工具栏「拉黑所选」同一回路）。
+   *  不传 = 这条路径没有标题门（ATS），按钮不渲染——点了没反应的按钮比没有更糟。 */
+  onBlacklist?: () => void;
 }) {
   const { t } = useI18n();
   const { removeOffers } = useExplore();
@@ -376,6 +380,19 @@ export function DiscoveryRow({
                 {t("explore.card.evaluate")}
               </button>
             </>
+          )}
+          {/* 单行拉黑：与工具栏「拉黑所选」同一条回路（打开标题门弹窗、候选词只取这
+              一行的标题、保存前先试算），只是不必先勾选再回工具栏。排在 × 左侧——
+              移除是隐去本次显示，拉黑是让下一次扫描不再回来，后者语义更重。 */}
+          {onBlacklist && (
+            <button
+              type="button"
+              onClick={onBlacklist}
+              title={t("explore.results.blacklistRowTitle")}
+              className="inline-flex items-center gap-1 whitespace-nowrap rounded-md border border-border px-2 py-1.5 text-xs font-medium text-muted transition-colors hover:border-brand/30 hover:bg-brand-soft hover:text-brand"
+            >
+              <Ban className="size-3.5" /> {t("explore.results.blacklistRow")}
+            </button>
           )}
           {/* 单行移除：复用批量「移除所选」的显示层机制（removeOffers → removed 集合），
               只隐去这一行，不写 pipeline.md。表格行密度高，× 常显（不玩卡片那套
