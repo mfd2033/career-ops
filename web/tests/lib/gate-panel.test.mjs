@@ -176,6 +176,35 @@ test("deleting one brought-in word re-lights only itself, never the whole batch"
   );
 });
 
+// 词条改名：点 chip 就地变输入框。重名不静默吞掉——与「加词去重」同一口径（addOne
+// 静默 no-op），但用户点的是一条已有的词，静默等于告诉他「改好了」，而文件里还是旧词。
+// 所以这里必须看得见地拒绝：提示在组下方，重名时留在编辑态等用户改。
+test("a chip is editable in place, and a duplicate name is refused out loud", () => {
+  const src = read(PANEL);
+  const body = panelBody();
+  // 按序号改名：portals.yml 的 negative 里真有重复词，按值改会改错那一条。
+  assert.match(src, /onRename: \(index: number, w: string\) => void/, "the group must rename by index, not by value — a repeated word would otherwise rename the wrong copy");
+  assert.match(src, /function renameOne\(list: string\[\], i: number, w: string\)/, "renaming is a position-aware splice, sitting next to addOne/removeOne");
+  assert.match(body, /const rename = \(side: keyof Words, index: number, w: string\)/, "the panel owns the rename write into the draft");
+  assert.match(body, /onRename=\{\(i, w\) => rename\("positive", i, w\)\}/, "the allow group must be editable too, not just the deny group");
+  assert.match(body, /onRename=\{\(i, w\) => rename\("negative", i, w\)\}/, "the deny group wires its rename to the same draft");
+  // 编辑入口：chip 文字本身是按钮（× 仍是删除，两个动作分开）。
+  assert.match(src, /onClick=\{\(\) => begin\(i\)\}/, "clicking the word must start editing it, not remove it");
+  // 重名提示是派生的、跟着输入实时变——不是提交时才第一次说话；且只在真改动了才说话
+  // （portals.yml 的 negative 里本来就有两条「销售」，点开其中一条不能一上来就报重名）。
+  assert.match(
+    src,
+    /const dup = editing !== null && value\.trim\(\) !== words\[editing\] && sameWord\(words, editing, value\)/,
+    "the duplicate hint must be derived from what is being typed, live — and stay quiet until the text actually changes",
+  );
+  assert.match(src, /if \(sameWord\(words, i, w\)\) return;/, "a duplicate commit must be refused, leaving the edit open");
+  assert.match(src, /function sameWord\(list: string\[\], i: number, w: string\)/, "the duplicate test skips the entry being edited and folds case/space like addOne");
+  assert.match(src, /k\.trim\(\)\.toLowerCase\(\) === key/, "…case- and edge-space-insensitive, or 「IT」/「it」 slips in as two entries");
+  assert.match(src, /t\("explore\.results\.gateEditDuplicate", \{ w: value\.trim\(\) \}\)/, "the refusal has to say which word collided");
+  // Esc 只撤这次改名：弹窗级 Esc 监听会把整个面板关掉，草稿一起丢。
+  assert.match(src, /e\.stopPropagation\(\);/, "Escape inside the rename input must not bubble up to the modal's close handler");
+});
+
 test("every reject names the word that killed it, read from the gate's own reason", () => {
   const list = read(LIST);
   assert.match(list, /o\.gateReason\.type === "negative"/, "a negative hit must be named");
@@ -199,6 +228,9 @@ test("the panel is labelled in both locales", () => {
     "explore.results.gateAddPlaceholder",
     "explore.results.gateAdd",
     "explore.results.gateRemove",
+    "explore.results.gateEdit",
+    "explore.results.gateEditHint",
+    "explore.results.gateEditDuplicate",
     "explore.results.gateTrial",
     "explore.results.gateTrialRescue",
     "explore.results.gateTrialDrop",

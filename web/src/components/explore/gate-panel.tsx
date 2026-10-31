@@ -37,13 +37,14 @@ const seedKey = (p: string[], n: string[]) => `${p.join("\u0000")}\n\u0001\n${n.
 /** 草稿与原表的差异，按内容比（顺序有意义：条目顺序就是文件里的顺序）。 */
 const isDirty = (draft: Words, saved: Words) => seedKey(draft.positive, draft.negative) !== seedKey(saved.positive, saved.negative);
 
-/** 一组可编辑词条：chip + 删除、行内加词输入框。 */
+/** 一组可编辑词条：点词改名、× 删除、行内加词输入框。 */
 function WordGroup({
   label,
   words,
   highlight,
   onAdd,
   onRemove,
+  onRename,
 }: {
   label: string;
   words: string[];
@@ -51,14 +52,44 @@ function WordGroup({
   highlight?: Set<string>;
   onAdd: (w: string) => void;
   onRemove: (w: string) => void;
+  /** 改第 i 个词。按序号定位：词表里真有重复词（portals.yml 的 negative 里「销售」两条），
+   *  按值改名会张冠李戴——用户点的是那一条，改的也必须是那一条。 */
+  onRename: (index: number, w: string) => void;
 }) {
   const { t } = useI18n();
   const [typed, setTyped] = useState("");
+  // 正在改写的条目序号与输入值；null = 没有在改。
+  const [editing, setEditing] = useState<number | null>(null);
+  const [value, setValue] = useState("");
   const submit = () => {
     const w = typed.trim();
     if (!w) return;
     onAdd(w);
     setTyped("");
+  };
+
+  const begin = (i: number) => {
+    setEditing(i);
+    setValue(words[i]);
+  };
+
+  // 重名判定跟着输入实时走，不等提交：打字当下就告诉用户「这个词已经有了」，而不是
+  // 敲完回车才被拦——那时他已经以为改好了。比的是「除这一条以外」的其他词，且只在
+  // 真改动了才提示：portals.yml 的 negative 里本来就落过两条「销售」，点开其中一条就
+  // 报重名是噪声，用户还没动手。
+  const dup = editing !== null && value.trim() !== words[editing] && sameWord(words, editing, value);
+
+  const commit = (i: number) => {
+    const w = value.trim();
+    // 清空 = 放弃：词表里不留空条目，与「加词」忽略空输入同一口径。
+    if (!w) {
+      setEditing(null);
+      return;
+    }
+    // 重名不落：留在编辑态，提示在组下方，等用户换个写法。
+    if (sameWord(words, i, w)) return;
+    if (w !== words[i]) onRename(i, w);
+    setEditing(null);
   };
   return (
     <div>
@@ -70,6 +101,33 @@ function WordGroup({
           // key 带序号：词表里真有重复词（portals.yml 的 negative 里「销售」出现两次）。
           // 高亮色与顶部带入提示同一家族（amber）：新词从提示一路亮到 chip，来源一眼可循。
           const hot = highlight?.has(w.trim().toLowerCase()) ?? false;
+          if (editing === i) {
+            return (
+              <span key={`${i}-${w}`} className="inline-flex items-center rounded-md border border-brand/50 bg-surface px-1.5 py-0.5">
+                <input
+                  autoFocus
+                  value={value}
+                  onChange={(e) => setValue(e.target.value)}
+                  onBlur={() => commit(i)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      commit(i);
+                    }
+                    if (e.key === "Escape") {
+                      // 只撤这次改名。不 stopPropagation 的话，弹窗级 Esc 监听会把整个
+                      // 面板一起关掉——用户想撤一个词的编辑，却丢了全部草稿。
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setEditing(null);
+                    }
+                  }}
+                  aria-label={t("explore.results.gateEdit", { w })}
+                  className="w-20 bg-transparent text-[11px] outline-none"
+                />
+              </span>
+            );
+          }
           return (
             <span
               key={`${i}-${w}`}
@@ -78,7 +136,11 @@ function WordGroup({
                 hot ? "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400" : "border-border bg-surface/50 text-foreground",
               )}
             >
-              {w}
+              {/* 词本身就是改名入口；删词仍走右侧的 ×。两个动作分开——点词就删会让
+                  修剪词表变成一次误点就丢一条。 */}
+              <button type="button" onClick={() => begin(i)} title={t("explore.results.gateEditHint", { w })} className="cursor-text text-left">
+                {w}
+              </button>
               <button
                 type="button"
                 onClick={() => onRemove(w)}
@@ -115,6 +177,11 @@ function WordGroup({
           </button>
         </span>
       </div>
+      {dup && (
+        <p className="mt-1 text-[11px] text-amber-600 dark:text-amber-400">
+          {t("explore.results.gateEditDuplicate", { w: value.trim() })}
+        </p>
+      )}
     </div>
   );
 }
@@ -248,6 +315,21 @@ export function GatePanel({
     }
   };
 
+  // 改名：与增删同一条回路——写进草稿，不是已存表；重名已在 WordGroup 里拦下（不兼容
+  // addOne 的静默 no-op：用户点的是已有词，静默就等于骗他说改好了）。
+  // 带入词的高亮跟着词本身走：旧键换成新键，否则改名后该 chip 就退了色。
+  const rename = (side: keyof Words, index: number, w: string) => {
+    setSaved(false);
+    setError("");
+    const from = draftRef.current[side][index]?.trim().toLowerCase();
+    const list = renameOne(draftRef.current[side], index, w);
+    setDraft((d) => ({ ...d, [side]: list }));
+    if (side === "negative" && from) {
+      const to = w.trim().toLowerCase();
+      setPreaddedWords((prev) => prev.map((k) => (k === from ? to : k)));
+    }
+  };
+
   const save = async () => {
     setSaving(true);
     setSaved(false);
@@ -302,13 +384,20 @@ export function GatePanel({
                   {t("explore.results.gatePreadded", { n: preaddedWords.length })}
                 </p>
               )}
-              <WordGroup label={t("explore.results.gatePositiveGroup")} words={draft.positive} onAdd={(w) => edit("positive", w)} onRemove={(w) => edit("positive", w, true)} />
+              <WordGroup
+                label={t("explore.results.gatePositiveGroup")}
+                words={draft.positive}
+                onAdd={(w) => edit("positive", w)}
+                onRemove={(w) => edit("positive", w, true)}
+                onRename={(i, w) => rename("positive", i, w)}
+              />
               <WordGroup
                 label={t("explore.results.gateNegativeGroup")}
                 words={draft.negative}
                 highlight={new Set(preaddedWords)}
                 onAdd={(w) => edit("negative", w)}
                 onRemove={(w) => edit("negative", w, true)}
+                onRename={(i, w) => rename("negative", i, w)}
               />
 
               <div className="rounded-lg border border-border bg-surface/40 px-2 py-1.5 text-[11px]">
@@ -362,6 +451,19 @@ function addOne(list: string[], w: string): string[] {
 function removeOne(list: string[], w: string): string[] {
   const i = list.indexOf(w);
   return i < 0 ? list : [...list.slice(0, i), ...list.slice(i + 1)];
+}
+
+/** 改第 i 条：按位置拼接，不碰其他条目——同名词表里可能不止一条，按值改会改错那一条。 */
+function renameOne(list: string[], i: number, w: string): string[] {
+  if (i < 0 || i >= list.length) return list;
+  return [...list.slice(0, i), w, ...list.slice(i + 1)];
+}
+
+/** 除第 i 条以外，是否已有同名词。大小写与首尾空白折叠，与 addOne 同一去重口径。 */
+function sameWord(list: string[], i: number, w: string): boolean {
+  const key = w.trim().toLowerCase();
+  if (!key) return false;
+  return list.some((k, j) => j !== i && k.trim().toLowerCase() === key);
 }
 
 function preview(offers: DiscoveredOffer[], moreLabel: (n: number) => string): string {
