@@ -227,7 +227,7 @@ export function TodayDashboard({
           {followups.length === 0 ? (
             <p className="text-sm text-muted">无</p>
           ) : (
-            <div className="grid min-h-0 flex-1 gap-2.5 overflow-y-auto overscroll-contain hide-scrollbar">
+            <div className="grid min-h-0 flex-1 content-start gap-2.5 overflow-y-auto overscroll-contain hide-scrollbar">
               {followups.map((f) => (
                 <FollowUpCard key={`${f.num}-${f.company}`} followup={f} onLogged={() => { setOverdue((n) => Math.max(0, n - 1)); refetch(); }} />
               ))}
@@ -260,7 +260,7 @@ export function TodayDashboard({
           {plannedCount === 0 ? (
             <p className="text-sm text-muted">无</p>
           ) : (
-            <div className="grid min-h-0 flex-1 gap-4 overflow-y-auto overscroll-contain hide-scrollbar">
+            <div className="grid min-h-0 flex-1 content-start gap-4 overflow-y-auto overscroll-contain hide-scrollbar">
               {plannedGroups.today.length > 0 && (
                 <PlannedGroup label="今日待投" apps={plannedGroups.today} />
               )}
