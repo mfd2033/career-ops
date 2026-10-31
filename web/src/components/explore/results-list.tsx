@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Search, Plus, ChevronRight, Coins, Ban } from "lucide-react";
+import { Search, Plus, ChevronRight, Coins, Ban, Sparkles } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { BROWSER_LABEL, type BrowserSource, type DiscoveredOffer } from "@/lib/explore";
 import { CostBadge } from "@/components/cost/cost-badge";
@@ -9,6 +9,7 @@ import { DiscoveryRow } from "./discovery-card";
 import { GatePanel } from "./gate-panel";
 import { InputClearButton } from "@/components/input-clear-button";
 import { useExplore } from "./explore-provider";
+import { useJobs } from "@/components/jobs/job-store";
 import { isSelectable, omitRemoved, resultTabOf, visibleOffers, filterBySalaryMin } from "@/lib/results-view.mjs";
 import { suggestDenyWords } from "@/lib/deny-words.mjs";
 import { countOfferTags, filterByTags, withSelectedCounts, withTags } from "@/lib/result-tags.mjs";
@@ -34,6 +35,12 @@ const TAB_LABEL_KEY: Record<ResultTab, string> = {
 const DEFAULT_TAB: ResultTab = "new";
 // tab 选中持久化到 localStorage，刷新后保留上次选择。
 const TAB_STORAGE_KEY = "explore.results.tab";
+// 单批评估的 URL 上限，与 /api/batch-evaluate 的 MAX_URLS 同值——超出部分切成下一批，
+// 一批一张任务卡（进度、取消都按批走，与管道页「重新评估」同一条 batch-evaluate 路径）。
+const EVAL_BATCH_MAX = 20;
+// 少量勾选直接派发（与 action registry 的 AUTO_FIRE_MAX 同口径）；超过先要一次确认：
+// 评估按条计 token，误触几十条不是「再点一次」能撤回的。
+const EVAL_CONFIRM_ABOVE = 3;
 const isResultTab = (v: unknown): v is ResultTab => typeof v === "string" && (TABS as string[]).includes(v);
 
 /** 被采集门毙掉的岗位（ADR-0029 决议 4）：只读、默认折叠。
@@ -214,6 +221,56 @@ export function ResultsList({ offers, tagVocab }: { offers: EnrichedOffer[]; tag
   const visibleAddable = useMemo(() => view.filter((o) => isSelectable(o, added)), [view, added]);
   const selectedAddable = visibleAddable.filter((o) => selected.has(o.url));
   const allAddableSelected = visibleAddable.length > 0 && selectedAddable.length === visibleAddable.length;
+  // 批量评估的二次确认态。批量评估与「加入管道」取同一个集合（selectedAddable）：
+  // 勾选本来就只对未入管、未评估的行开放（isSelectable），所以这个集合天然不会
+  // 重复评估。派发会先入管——与行内单条评估同一语义。
+  const [evalConfirm, setEvalConfirm] = useState(false);
+  const { startJob } = useJobs();
+  // 勾选集一变，上一次的确认就作废：不能让「确认评估」那颗按钮指向另一批岗位。
+  const evalSelectionKey = selectedAddable.map((o) => o.url).join("\n");
+  useEffect(() => {
+    setEvalConfirm(false);
+  }, [evalSelectionKey]);
+  const evaluateSelected = () => {
+    if (selectedAddable.length === 0) return;
+    const list = selectedAddable;
+    void addToPipeline(list); // evaluating implies it's in the pipeline — record it
+    if (list.length === 1) {
+      // 单条与行内「评估」完全同路（/api/run 串行，worker 自取报告号）。
+      const o = list[0];
+      startJob({ title: `${t("explore.card.evaluatePrefix")} ${o.company}`, subtitle: o.title, kind: "evaluate", input: o.url, page: "/explore" });
+    } else {
+      // 多条走 batch-evaluate：它一次预留连续报告号、由编排器统一 merge，才敢并发。
+      const batchId = `explore-eval-${Date.now()}`;
+      for (let i = 0; i < list.length; i += EVAL_BATCH_MAX) {
+        const chunk = list.slice(i, i + EVAL_BATCH_MAX);
+        const urls = chunk.map((o) => o.url);
+        startJob({
+          title: t("explore.results.evaluateBatch", { n: urls.length }),
+          subtitle: t("explore.results.evaluateBatchSubtitle", { first: chunk[0].company || chunk[0].title }),
+          kind: "batch-evaluate",
+          input: urls.join("\n"),
+          urls,
+          page: "/explore",
+          batchId: `${batchId}-${i / EVAL_BATCH_MAX + 1}`,
+        });
+      }
+    }
+    setEvalConfirm(false);
+    // 派发完即清勾：这批的意义已经用掉，留着会让下一次点按把同一批 URL 再派一遍
+    // （与「加入管道」成功后清勾同一动机）。
+    setSelected((s) => {
+      const next = new Set(s);
+      for (const o of list) next.delete(o.url);
+      return next;
+    });
+  };
+  // 首击：少量直接派发；大批先落一次确认。
+  const requestEvaluate = () => {
+    if (selectedAddable.length === 0) return;
+    if (selectedAddable.length <= EVAL_CONFIRM_ABOVE) evaluateSelected();
+    else setEvalConfirm(true);
+  };
   // 表头全选框：勾选/半选态只跟踪可见可加入行——「全选」承诺的是屏幕上的那批
   // （与批量条同一可见集合，见 results-view.mjs / ADR-0021；管道页表头同款）。
   const selectAllRef = useRef<HTMLInputElement>(null);
@@ -376,14 +433,47 @@ export function ResultsList({ offers, tagVocab }: { offers: EnrichedOffer[]; tag
             </button>
           )}
           {visibleAddable.length > 0 && (
-            <button
-              type="button"
-              disabled={selectedAddable.length === 0}
-              onClick={() => void addSelected()}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-xs font-semibold text-brand-foreground shadow-sm transition-all hover:brightness-110 disabled:opacity-50"
-            >
-              <Plus className="size-3.5" /> {t("explore.results.addSelected", { n: selectedAddable.length })}
-            </button>
+            <>
+              <button
+                type="button"
+                disabled={selectedAddable.length === 0}
+                onClick={() => void addSelected()}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-xs font-semibold text-brand-foreground shadow-sm transition-all hover:brightness-110 disabled:opacity-50"
+              >
+                <Plus className="size-3.5" /> {t("explore.results.addSelected", { n: selectedAddable.length })}
+              </button>
+              {/* 批量评估：与「加入管道」同一勾选集。超过 EVAL_CONFIRM_ABOVE 先换一对
+                  「确认 / 取消」——落点是把几十次真实评估送进队列，代价按条计 token。 */}
+              {evalConfirm ? (
+                <span className="inline-flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => void evaluateSelected()}
+                    title={t("explore.results.evaluateConfirmTitle", { n: selectedAddable.length })}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-xs font-semibold text-brand-foreground shadow-sm transition-all hover:brightness-110"
+                  >
+                    <Sparkles className="size-3.5" /> {t("explore.results.evaluateConfirm", { n: selectedAddable.length })}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEvalConfirm(false)}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface/40 px-2.5 py-1.5 text-xs font-medium text-muted transition-colors hover:text-foreground"
+                  >
+                    {t("explore.results.evaluateCancel")}
+                  </button>
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  disabled={selectedAddable.length === 0}
+                  onClick={requestEvaluate}
+                  title={t("explore.results.evaluateSelectedTitle")}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-brand/30 bg-surface/40 px-2.5 py-1.5 text-xs font-medium text-brand transition-colors hover:bg-brand-soft disabled:pointer-events-none disabled:opacity-50"
+                >
+                  <Sparkles className="size-3.5" /> {t("explore.results.evaluateSelected", { n: selectedAddable.length })}
+                </button>
+              )}
+            </>
           )}
           {/* 标题门配置：主 CTA「加入管道」右侧的次级入口，点击打开配置弹窗。
               仅 browser 路径有标题门（与下方 GatePanel 的挂载条件同构）；加不加管道不影响
