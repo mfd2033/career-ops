@@ -101,11 +101,10 @@ export function ResultsList({ offers, tagVocab }: { offers: EnrichedOffer[]; tag
   // 采集门跑在 browser 路径上（bsk 服务端 / 扩展页侧两条 driver），与 explorer-view 的
   // isBsk 同构。ATS 扫描也被标题门筛，但页面拿不到它的被毙条数——见 GateCard 注释。
   const isBsk = mode === "browser" || (!isAi && scanSource === "bsk");
-  // 标题门配置弹窗的开关（工单 03 交互改弹窗）：触发按钮在工具栏，GatePanel 只渲染弹窗；
-  // 组件本身始终挂载，草稿留在它的状态里，关了再开编辑不丢。gateDirty 是 GatePanel
-  // 上报的「有未保存改动」，徽标挂在「配置」按钮上（入口在哪，徽标在哪）。
+  // 标题门配置弹窗的开关（工单 03 交互改弹窗）：触发按钮在工具栏，GatePanel 只渲染弹窗。
+  // 关闭即放弃（用户决定 2026-10-31）：草稿不跨打开保留，所以入口按钮上不再挂「未保存」
+  // 徽标——关掉弹窗后没有可回头保存的东西。
   const [gateOpen, setGateOpen] = useState(false);
-  const [gateDirty, setGateDirty] = useState(false);
   // 「拉黑所选」带入 GatePanel 的黑名单候选词（deny-words.mjs 从勾选行标题推导）。
   // null = 无；每次点击都换新数组引用——GatePanel 按引用消费，重复点击由
   // mergeDenyWords 去重兑底，不会落进两条同名 chip。
@@ -263,6 +262,7 @@ export function ResultsList({ offers, tagVocab }: { offers: EnrichedOffer[]; tag
   // 拉黑所选：把勾选行标题里的特征词作为黑名单候选带进标题门弹窗。并入的是
   // GatePanel 的草稿而非已存表——保存仍只发生在弹窗里，试算让用户先看到「会多毙
   // 几条」再决定；词表在下一次扫描生效（与手动改词表同一套语义，保存不重扫）。
+  // 弹窗关闭即放弃，所以只有点过「保存」才真的改了词表。
   // 仅 browser 路径：标题门（及其配置弹窗）只挂载在这里，见下方 GatePanel 注释。
   const blacklistSelected = () => {
     if (selectedOffers.length === 0) return;
@@ -380,8 +380,7 @@ export function ResultsList({ offers, tagVocab }: { offers: EnrichedOffer[]; tag
           )}
           {/* 标题门配置：主 CTA「加入管道」右侧的次级入口，点击打开配置弹窗。
               仅 browser 路径有标题门（与下方 GatePanel 的挂载条件同构）；加不加管道不影响
-              它的可用性——改词表正是为了下一次扫描不再误杀，跟本批勾选无关。
-              弹窗关着但有未保存编辑时，徽标提醒回来保存或放弃。 */}
+              它的可用性——改词表正是为了下一次扫描不再误杀，跟本批勾选无关。 */}
           {isBsk && (
             <button
               type="button"
@@ -389,7 +388,6 @@ export function ResultsList({ offers, tagVocab }: { offers: EnrichedOffer[]; tag
               className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface/40 px-2.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-brand-soft hover:text-brand"
             >
               {t("explore.results.gateConfigure")}
-              {gateDirty && <span className="rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-amber-600 dark:text-amber-400">{t("explore.results.gateUnsaved")}</span>}
             </button>
           )}
         </div>
@@ -444,7 +442,6 @@ export function ResultsList({ offers, tagVocab }: { offers: EnrichedOffer[]; tag
           onSaved={(p, n) => setFilters({ ...filters, positive: p, negative: n })}
           open={gateOpen}
           onOpenChange={setGateOpen}
-          onDirtyChange={setGateDirty}
           preaddNegative={preadd}
         />
       )}

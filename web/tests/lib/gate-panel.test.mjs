@@ -17,8 +17,8 @@
 //      test while confidently reporting the opposite of what the scan does.
 //   2. The trial measures against the results ON SCREEN (kept/folded), not
 //      against the word list, so its answer stays true after a save.
-//   3. Saving writes the file and does NOT re-scan; the draft survives collapse,
-//      and a removal is a real removal.
+//   3. Saving writes the file and does NOT re-scan; closing the modal discards the
+//      draft, and a removal is a real removal.
 //   4. Rejects name the word that killed them, from the gate's own `gateReason`.
 
 import { test } from "node:test";
@@ -89,18 +89,27 @@ test("saving writes the file and does not re-scan", () => {
   assert.match(body, /method: "POST"/, "and there must be exactly one write path");
 });
 
-test("an unsaved edit is never thrown away by closing the modal or by an unrelated filter change", () => {
+test("closing the modal is a discard — every exit restores the saved list", () => {
   const body = panelBody();
   assert.match(body, /const \[draft, setDraft\] = useState<Words>\(\(\) => \(\{ positive: \[\.\.\.positive\], negative: \[\.\.\.negative\] \}\)\)/, "the draft must live in component state, not be derived from props");
   assert.match(body, /const dirty = isDirty\(draft, \{ positive, negative \}\)/, "dirtiness is content, not identity");
-  assert.match(body, /if \(next === seeded\.current\) return;/, "the reseed must compare CONTENT — `filters` is a fresh object on every setFilters, so an identity check would wipe in-progress edits whenever the user touched an unrelated condition");
-  // The card is gone; the dirty badge lives on the toolbar 「配置」 button (the modal's only
-  // entry), reported up via onDirtyChange — closed is exactly when the user needs to know
-  // the edits are still parked.
-  assert.match(body, /onDirtyChange\?\.\(dirty\)/, "the panel must report dirtiness up, so the badge can sit on the entry button while the modal is closed");
+  const resetBody = body.slice(body.indexOf("const resetDraft ="), body.indexOf("const close ="));
+  assert.ok(resetBody.length > 0, "could not bound the reset handler");
+  assert.match(resetBody, /setDraft\(\{ positive: \[\.\.\.positive\], negative: \[\.\.\.negative\] \}\)/, "closing must restore the saved list — an edit that was never saved is an edit that never happened");
+  // 三个出口（X / 遮罩 / Esc）必须收敛到同一个 close：漏掉任何一个，从它溜走的
+  // 编辑会活到下一次打开，而「未保存」的信号已经不在了。
+  assert.match(body, /if \(e\.target === e\.currentTarget\) close\(\)/, "the backdrop click must discard, not just hide");
+  assert.match(body, /onClick=\{close\} aria-label=\{t\("explore\.results\.gateClose"\)\}/, "the X button must discard too");
+  assert.match(body, /if \(e\.key === "Escape"\) close\(\)/, "Esc is the same low-commitment exit, so it discards as well");
+  // 关掉即放弃后，没有「未保存」可提醒：徽标与上报通道一并撤掉。
+  assert.ok(!body.includes("onDirtyChange"), "the panel must not report dirtiness up any more — nothing survives a close to come back for");
   const list = flat(LIST);
-  assert.match(list, /t\("explore\.results\.gateUnsaved"\)/, "the 「未保存」 badge must render on the toolbar button — outside the modal, visible while it is closed");
-  assert.ok(!panelBody().includes("gateUnsaved"), "the badge must not be inside the modal body, where it would only be readable after reopening");
+  assert.ok(!list.includes("gateUnsaved"), "the 「未保存」 badge has no meaning once closing discards the draft");
+});
+
+test("an unrelated filter change never wipes an in-progress edit", () => {
+  const body = panelBody();
+  assert.match(body, /if \(next === seeded\.current\) return;/, "the reseed must compare CONTENT — `filters` is a fresh object on every setFilters, so an identity check would wipe in-progress edits whenever the user touched an unrelated condition");
 });
 
 test("a removal is a real removal, and adding a duplicate is a no-op", () => {
@@ -187,7 +196,6 @@ test("the panel is labelled in both locales", () => {
     "explore.results.gateNegativeGroup",
     "explore.results.gateNone",
     "explore.results.gateQueryNote",
-    "explore.results.gateUnsaved",
     "explore.results.gateAddPlaceholder",
     "explore.results.gateAdd",
     "explore.results.gateRemove",

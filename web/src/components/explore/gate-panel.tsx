@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Plus, RotateCcw, ShieldCheck, X } from "lucide-react";
 
 import { buildTitleFilterExplained } from "@/lib/core/title-keywords.mjs";
@@ -24,7 +24,8 @@ import { cn } from "@/lib/cn";
 //   2. 写回**不丢注释**：portals.yml 的注释是词表的理由（哪类词刻意不加、为什么），
 //      丢了就再也回不来。所以走文本级拼接（lib/core/portals-merge.mjs），不走 yaml 往返。
 //   3. 保存**不重扫**：词表在下一次扫描生效，本次结果不动——否则用户会以为删个词就把
-//      已经看到的岗位撤回了。所以弹窗关了也不丢编辑（草稿留在状态里，牌面挂「未保存」）。
+//      已经看到的岗位撤回了。而没点保存的编辑**关掉即放弃**（用户决定 2026-10-31）：
+//      弹窗里没有「暂存」语义，X / 遮罩 / Esc 一律把草稿复位到已存表。
 
 type Words = { positive: string[]; negative: string[] };
 
@@ -122,15 +123,13 @@ function WordGroup({
  * The collection gate's word-list editor, rendered as a modal.
  *
  * 常驻摘要牌已撤（用户决定 2026-10-30）：牌面信息并入弹窗，入口只剩工具栏
- * 「加入管道」右侧的「配置」按钮。组件本身始终挂载（isBsk 时）——草稿活在
- * 状态里，弹窗关了编辑不丢；「未保存」徽标改由 onDirtyChange 上报给工具栏，
- * 挂在「配置」按钮上（入口在哪，徽标在哪）。
+ * 「加入管道」右侧的「配置」按钮。组件在 isBsk 时始终挂载，但草稿只活在一次打开
+ * 期间——关闭即放弃（用户决定 2026-10-31），重开时草稿就是已存表。
  *
  * @param positive/negative the word list AS SAVED (from the seeded filters) — the draft's baseline
  * @param kept the survivors on screen; `folded` the rejects (each carrying its `gateReason`)
  * @param onSaved lifts the new list back into the provider's filters, so the trial and a shared link keep describing the file that now exists
  * @param open/onOpenChange 弹窗开关由 ResultsList 持有——触发按钮在工具栏，与弹窗分居两处
- * @param onDirtyChange 把「有未保存改动」上报给父组件，挂在「配置」按钮上
  */
 export function GatePanel({
   positive,
@@ -140,7 +139,6 @@ export function GatePanel({
   onSaved,
   open,
   onOpenChange,
-  onDirtyChange,
   preaddNegative,
 }: {
   positive: string[];
@@ -150,7 +148,6 @@ export function GatePanel({
   onSaved: (positive: string[], negative: string[]) => void;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onDirtyChange?: (dirty: boolean) => void;
   /** 「拉黑所选」带入的黑名单候选词（results-list 推导）：数组引用一变就并入草稿
    *  的黑名单一侧——每点一次按钮都是新数组，重复词由 mergeDenyWords 去重兑底。 */
   preaddNegative?: string[] | null;
@@ -181,16 +178,6 @@ export function GatePanel({
     setDraft({ positive: [...positive], negative: [...negative] });
   }, [positive, negative]);
 
-  // Esc 关闭弹窗——与点遮罩同级的低承诺退出；草稿留在状态里，关了再开编辑还在。
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onOpenChange(false);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, onOpenChange]);
-
   // 「拉黑所选」把候选词并进草稿黑名单（引用一变即并入；null/空数组不动）。并进
   // 的是 draft 而不是已存表——保存仍然只发生在弹窗里（与词表编辑同一条回路），
   // 试算随之更新，用户保存前就能看到「会多毙几条」。
@@ -218,11 +205,31 @@ export function GatePanel({
 
   const dirty = isDirty(draft, { positive, negative });
 
-  // 「未保存」徽标改挂在工具栏「配置」按钮上：牌面撤掉后，弹窗关着时唯一的
-  // 「编辑还挂著」信号在入口处，用户不会忘记回来保存或放弃。
+  // 放弃改动：草稿复位到已存表，带入词的高亮、保存/失败提示一并清掉。
+  const resetDraft = useCallback(() => {
+    setSaved(false);
+    setError("");
+    setPreaddedWords([]);
+    setDraft({ positive: [...positive], negative: [...negative] });
+  }, [positive, negative]);
+
+  // 关闭即放弃（用户决定 2026-10-31）：X、遮罩、Esc 是同一个出口——没点保存的
+  // 改动就是没改，重开时草稿是已存表。三个入口必须都走这里：任何一个漏掉，从它
+  // 溜走的编辑会活到下一次打开，而「未保存」的信号已经不存在了。
+  const close = useCallback(() => {
+    resetDraft();
+    onOpenChange(false);
+  }, [resetDraft, onOpenChange]);
+
+  // Esc 关闭弹窗——与点遮罩同级的低承诺退出，所以同样按放弃处理。
   useEffect(() => {
-    onDirtyChange?.(dirty);
-  }, [dirty, onDirtyChange]);
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") close();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, close]);
 
   const edit = (side: keyof Words, w: string, remove = false) => {
     setSaved(false);
@@ -269,7 +276,7 @@ export function GatePanel({
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
           onMouseDown={(e) => {
-            if (e.target === e.currentTarget) onOpenChange(false);
+            if (e.target === e.currentTarget) close();
           }}
         >
           <div
@@ -282,7 +289,7 @@ export function GatePanel({
               <h2 className="flex items-center gap-2 font-display text-lg">
                 <ShieldCheck className="size-4 text-muted" /> {t("explore.results.gateModalTitle")}
               </h2>
-              <button type="button" onClick={() => onOpenChange(false)} aria-label={t("explore.results.gateClose")} className="rounded p-1 text-faint transition hover:text-foreground">
+              <button type="button" onClick={close} aria-label={t("explore.results.gateClose")} className="rounded p-1 text-faint transition hover:text-foreground">
                 <X className="size-4" />
               </button>
             </div>
@@ -330,12 +337,7 @@ export function GatePanel({
                 </button>
                 <button
                   type="button"
-                  onClick={() => {
-                    setSaved(false);
-                    setError("");
-                    setPreaddedWords([]);
-                    setDraft({ positive: [...positive], negative: [...negative] });
-                  }}
+                  onClick={resetDraft}
                   disabled={!dirty || saving}
                   className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface/40 px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-brand-soft hover:text-brand disabled:opacity-50"
                 >
