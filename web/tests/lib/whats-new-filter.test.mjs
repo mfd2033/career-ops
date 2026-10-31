@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { rowToOfferOrNull } from "../../src/lib/whats-new-filter.mjs";
+import { buildTitleFilterExplained } from "../../src/lib/core/title-keywords.mjs";
 
 // Regression (#whats-new browser-board leak): scan-history rows written by
 // browser-mode boards (智联/BOSS — runBrowserDiscovery hardcodes company:"")
@@ -147,4 +148,69 @@ test("empty salary cell trims to undefined (scan surfaced no comp)", () => {
   const offer = rowToOfferOrNull(ctx, blankSalary);
   assert.ok(offer);
   assert.equal(offer.salaryText, undefined);
+});
+
+// ── 标题门维度：今日页与探索页同一份判定 ──────────────────────────
+//
+// 台账 status 只记采集当时的门判，但 portals.yml title_filter 是活的——用户在
+// 规则弹窗里改词后，旧扫描里放行的行就成了当前词表下的该毙行。ctx.titleGate
+// 是当前词表编译出的门（buildTitleFilterExplained，与探索页结果区/两路采集
+// driver 同一份实现）；被它毙掉的行不得再进「本周新匹配」。
+
+// 与路由同一份编译：positive 含「项目经理」（含则留），negative 含「销售」。
+const gate = buildTitleFilterExplained({
+  positive: ["项目经理", "word:intern"],
+  negative: ["销售"],
+});
+
+const gatedRow = (title) => [
+  `https://www.zhipin.com/job_detail/gate-${encodeURIComponent(title)}.html`,
+  "2026-10-30", "browser-zhipin", title, "", "added", "",
+];
+
+test("title gate: negative hit drops the row", () => {
+  // 采集当时的词表没拦住（status 是 added），当前词表的黑名单词命中 → 毙。
+  assert.equal(rowToOfferOrNull({ ...ctx, titleGate: gate }, gatedRow("销售项目经理")), null);
+});
+
+test("title gate: no positive match drops the row", () => {
+  // 相关推荐式标题（叉车司机）：positive 一个不中 → no-positive 毙。
+  assert.equal(rowToOfferOrNull({ ...ctx, titleGate: gate }, gatedRow("叉车司机")), null);
+});
+
+test("title gate: positive hit keeps the row", () => {
+  const offer = rowToOfferOrNull({ ...ctx, titleGate: gate }, gatedRow("高级项目经理"));
+  assert.ok(offer);
+  assert.equal(offer.title, "高级项目经理");
+});
+
+test("title gate judges the trimmed title the card will display", () => {
+  // 猎聘会把城市/经验粘在标题上；台账 title 列去尾空格后就是卡片展示面，
+  // 门看的是同一块表面（与采集门「不剥尾、误杀靠调词表」同一取向）。
+  const c = [
+    "https://www.zhipin.com/job_detail/trim1.html", "2026-10-30", "browser-zhipin",
+    "  叉车司机  ", "", "added", "",
+  ];
+  assert.equal(rowToOfferOrNull({ ...ctx, titleGate: gate }, c), null);
+});
+
+test("empty title_filter compiles to a gate that passes everything (no constraint)", () => {
+  // 空 positive 是「无正向约束」，不是「全拒」；空词表绝不能清空整个回路。
+  const emptyGate = buildTitleFilterExplained({ positive: [], negative: [] });
+  const offer = rowToOfferOrNull({ ...ctx, titleGate: emptyGate }, gatedRow("叉车司机"));
+  assert.ok(offer);
+});
+
+test("negative-only title_filter rejects a few and keeps the rest", () => {
+  const negOnly = buildTitleFilterExplained({ negative: ["销售"] });
+  assert.equal(rowToOfferOrNull({ ...ctx, titleGate: negOnly }, gatedRow("销售助理")), null);
+  const offer = rowToOfferOrNull({ ...ctx, titleGate: negOnly }, gatedRow("叉车司机"));
+  assert.ok(offer);
+});
+
+test("no titleGate in ctx → gate filtering is a no-op (backward compatible)", () => {
+  // 旧调用方/单测不传 titleGate 时保持原行为；路由没读到 portals.yml 时也是这条路。
+  const offer = rowToOfferOrNull(ctx, gatedRow("叉车司机"));
+  assert.ok(offer);
+  assert.equal(offer.title, "叉车司机");
 });

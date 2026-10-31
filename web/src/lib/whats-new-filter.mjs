@@ -30,6 +30,18 @@
  * caught only by the company dimension — fine in practice, because browser-
  * board scan rows (the ones with empty company) carry the clean base link
  * recorded at discovery time.
+ *
+ * 3. Title-gate rejects resurfacing: the scan-history row's status records the
+ *    gate verdict AS OF THE SCAN (browser rejected rows land as
+ *    `skipped_title`), but the word list is ALIVE — the user edits
+ *    portals.yml `title_filter` via the rules modal, and a row that passed
+ *    under the old list is a reject under the current one. The supply loop
+ *    therefore re-judges every surviving row with the CURRENT compiled gate
+ *    (`ctx.titleGate`, built by the core's buildTitleFilterExplained — the
+ *    same compiled filter the explore results and both collection drivers
+ *    use, so all surfaces give one verdict). Absent/empty gate → no
+ *    constraint, everything passes: a missing or broken portals.yml must
+ *    blank the whole loop no more than it blanks a scan.
  */
 import { normalizeUrl } from "./core/url-key.mjs";
 
@@ -38,29 +50,35 @@ import { normalizeUrl } from "./core/url-key.mjs";
  * already-pending postings. Mirrors the semantics the route used inline;
  * extracted for testability.
  *
- * @param {{ norm: (s: string) => string, evaluated: Set<string>, evaluatedUrls: Set<string>, pipelineUrls?: Set<string> }} ctx
+ * @param {{ norm: (s: string) => string, evaluated: Set<string>, evaluatedUrls: Set<string>, pipelineUrls?: Set<string>, titleGate?: { pass: (title: string) => boolean } | null }} ctx
  *   - norm: normalized-text key fn (from the core's normalizeTextKey)
  *   - evaluated: normalized company names already in the tracker
  *   - evaluatedUrls: canonical posting URLs already in the tracker
  *   - pipelineUrls: canonical posting URLs pending in the inbox (data/pipeline.md
  *     `- [ ]` rows). Optional — absent means "don't filter on the pipeline".
+ *   - titleGate: the CURRENTLY compiled title gate ({ pass(title) } from the
+ *     core's buildTitleFilterExplained). Optional — absent means "gate off".
  * @param {string[]} c - scan-history row columns [url, first_seen, portal, title, company, status, location, …, salary(array index 12)]
  * @returns {object|null} DiscoveredOffer-shaped object, or null when the row
- *   is malformed, expired, already evaluated (by company OR URL), or already
- *   pending in the pipeline (by URL).
+ *   is malformed, expired, already evaluated (by company OR URL), already
+ *   pending in the pipeline (by URL), or rejected by the current title gate.
  */
 export function rowToOfferOrNull(ctx, c) {
-  const { norm, evaluated, evaluatedUrls, pipelineUrls } = ctx;
+  const { norm, evaluated, evaluatedUrls, pipelineUrls, titleGate } = ctx;
   const [url, firstSeen, portal, title, company, status, location, , , , , , salary] = c;
   if (!url || !/^https?:\/\//i.test(url)) return null;
   if (status && /skipped|expired/i.test(status)) return null;
   if (company && evaluated.has(norm(company))) return null;
   if (evaluatedUrls.has(normalizeUrl(url))) return null;
   if (pipelineUrls && pipelineUrls.has(normalizeUrl(url))) return null;
+  // 标题门用当前词表重判（词表是活的，status 只记采集当时的判定）。判的是台账
+  // title 列（去尾空格后即卡片展示的 title），与采集门看同一块表面。
+  const trimmedTitle = (title || "").trim();
+  if (titleGate && !titleGate.pass(trimmedTitle)) return null;
   return {
     url,
     company: (company || "").trim(),
-    title: (title || "").trim(),
+    title: trimmedTitle,
     location: (location || "").trim(),
     postedAt: /^\d{4}-\d{2}-\d{2}$/.test(firstSeen || "") ? firstSeen : "",
     ats: (portal || "").replace(/-full$/, "").trim() || "other",

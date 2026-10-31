@@ -71,6 +71,9 @@ export function TodayDashboard({
     // 取满 explore「查看全部」同一上限：两边拿到的是同一批行、同一个渲染天花板，
     // 「查看全部 N」的 N 才可能等于点进去后真实看到的行数。服务端 count 是 7 天窗口
     // 的完整总数，远超可渲染上限，拿它报数会变成一个点不进去的承诺（用户报的 724）。
+    // 标题门不用在这里重判：/api/whats-new 已用当前 portals.yml title_filter 编译
+    // 门（buildTitleFilterExplained，与探索页同一份实现）在服务端毙掉 rejected
+    // 行，这里拿到的已是过门行；客户端重判只会引入第二套口径。
     fetch(`/api/whats-new?limit=${MAX_OFFER_LIMIT}`)
       .then((r) => r.json())
       .then((d) => {
@@ -128,6 +131,8 @@ export function TodayDashboard({
     }, [applications]);
 
   const visibleFresh = useMemo(() => fresh.filter((o) => !removed.has(o.url)), [fresh, removed]);
+    // 过滤口径（有意保持两层）：标题门/已评估/在管道在服务端已判（见 refetch 注释），
+    // removed 是唯一的客户端维度——浏览器显示层处置，服务端看不到。
   // 报「实际能看到的行数」，而不是服务端 7 天窗口的完整 count：offers 已被上限截断，
   // count 里的行在 explore 同样渲染不出来。用 count 会让「查看全部 724」点进去只有
   // 十几条（用户报的不一致）。这个数与 explore 结果区头部计数同源同口径。

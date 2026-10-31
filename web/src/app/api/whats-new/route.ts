@@ -5,6 +5,8 @@ import { getNormalizeTextKey } from "@/lib/core/text-key";
 import type { DiscoveredOffer } from "@/lib/explore";
 import { collectWhatsNew, resolveOfferLimit } from "@/lib/whats-new.mjs";
 import { normalizeUrl, rowToOfferOrNull } from "@/lib/whats-new-filter.mjs";
+import { buildTitleFilterExplained } from "@/lib/core/title-keywords.mjs";
+import * as yaml from "js-yaml";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,6 +18,15 @@ export const dynamic = "force-dynamic";
 // complaint). cols: url, first_seen, portal, title, company, status, location,
 // …, salary (append-only col 13 — read back into the offer's salaryText so a
 // fresh browser match shows comp on the card).
+//
+// 标题门（与探索页同一份判定）：台账行的 status 只记采集当时的门判（浏览器路
+// 被毙的行落为 skipped_title），但词表是活的——用户在规则弹窗里改了
+// portals.yml 的 title_filter 后，旧扫描里放行的行就成了当前词表下的该毙行。
+// 所以这里用**当前**词表编译门（buildTitleFilterExplained，与探索页结果区和两
+// 路采集 driver 同一份实现），在 rowToOfferOrNull 里重判每一条：被毙的岗位不
+// 进今日页「本周新匹配」，count 同步真实——探索页 view=fresh 同读这个接口，
+// 两张页面的口径由同一份编译保证一致。portals.yml 缺失/损坏 → 门关（全部放
+// 行），与「空 positive 是无约束」的口径一致，绝不因配置问题清空整个回路。
 // Company matching keys come from the CORE (see lib/core/text-key.ts), never a
 // local reimplementation. The previous ASCII-only key deleted every non-Latin
 // letter, so "Škoda" collided with "Koda" — suppressing a real offer as
@@ -62,10 +73,22 @@ export async function GET(req: Request) {
   const evaluated = new Set(apps.map((a) => norm(a.company)).filter(Boolean));
   const evaluatedUrls = new Set(apps.map((a) => normalizeUrl(a.url)).filter(Boolean));
   const pipelineUrls = new Set(readInbox().filter((j) => !j.done).map((j) => normalizeUrl(j.url)).filter(Boolean));
+  // 当前词表 → 编译门。读不到 portals.yml（不存在/坏 YAML）时 titleFilter 保持
+  // undefined，门不编译——「没配置」是合法状态，不能让今日页清零。
+  let titleFilter: { positive?: unknown; negative?: unknown } | undefined;
+  try {
+    const doc = yaml.load(fs.readFileSync(path.join(careerOpsRoot(), "portals.yml"), "utf8")) as
+      | { title_filter?: { positive?: unknown; negative?: unknown } }
+      | null;
+    titleFilter = doc?.title_filter;
+  } catch {
+    /* portals 缺失或坏：门关，回路照常返回全部未处置行 */
+  }
+  const titleGate = titleFilter ? buildTitleFilterExplained(titleFilter) : null;
   // rowToOfferOrNull is a plain .mjs export (no type annotations) whose return
   // shape is exactly DiscoveredOffer — the tracked fields line up 1:1.
   const toOffer = (c: string[]): DiscoveredOffer | null =>
-    rowToOfferOrNull({ norm, evaluated, evaluatedUrls, pipelineUrls }, c) as DiscoveredOffer | null;
+    rowToOfferOrNull({ norm, evaluated, evaluatedUrls, pipelineUrls, titleGate }, c) as DiscoveredOffer | null;
 
   const { offers, count } = collectWhatsNew(rows, { cutoff, toOffer, offerLimit });
   return Response.json({ offers, count });
