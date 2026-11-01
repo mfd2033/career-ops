@@ -40,7 +40,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       suppressHydrationWarning
       className={`${inter.variable} ${instrumentSerif.variable} ${instrumentSerifItalic.variable}`}
     >
-      <body className="font-sans antialiased">
+      {/* suppressHydrationWarning：IDE 内置浏览器（CodeArts 预览等）会在 React
+          接管前给 <body> 注入自己的类名（如 `ide-dark`），与 SSR 输出的
+          className 不一致；这是外部注入，不是应用分支，抑制这一处属性比对，
+          避免每条路由都刷一条无意义的 hydration 报错。 */}
+      <body className="font-sans antialiased" suppressHydrationWarning>
         <Script id="career-ops-theme" strategy="beforeInteractive" dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
         <Script id="career-ops-lang" strategy="beforeInteractive" dangerouslySetInnerHTML={{ __html: LANG_SCRIPT }} />
         <LangProvider>
