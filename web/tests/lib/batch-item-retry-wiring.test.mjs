@@ -15,8 +15,22 @@ const STORE = read("../../src/components/jobs/job-store.tsx");
 const I18N = read("../../src/lib/i18n/clusters/jobs.ts");
 
 test("BatchItemList 只在失败且未跳过的子项渲染重试按钮", () => {
-  assert.match(LIST, /!it\.ok && !it\.skipped && <BatchItemRetryButton/);
+  assert.match(LIST, /!it\.ok && !it\.skipped && /);
+  assert.match(LIST, /<BatchItemRetryButton/);
   assert.match(LIST, /import \{ BatchItemRetryButton \}/);
+});
+
+// ADR-0093 修订 1：父批量终态（done/error）要传到子项判定，无 reason 的
+// 「结论丢失」占位才放行；三个渲染面（/jobs 行、详情页、ledger-only 视图）都要传。
+test("终态信号从三个渲染面透传到子项判定", () => {
+  assert.match(LIST, /parentTerminal = false/);
+  assert.match(LIST, /parentTerminal=\{parentTerminal\}/);
+  assert.match(BUTTON, /canRetryBatchItem\(item, \{ parentTerminal \}\)/);
+  const JOBS_PAGE = read("../../src/app/jobs/page.tsx");
+  const DETAIL_PAGE = read("../../src/app/jobs/[id]/page.tsx");
+  assert.match(JOBS_PAGE, /parentTerminal=\{j\.status === "error" \|\| j\.status === "done"\}/);
+  assert.match(DETAIL_PAGE, /parentTerminal=\{job\.status === "error" \|\| job\.status === "done"\}/);
+  assert.match(DETAIL_PAGE, /model=\{e\.model\} parentTerminal \/>/);
 });
 
 test("重试按钮派发独立 evaluate worker：input = 子项 URL，引擎取父批量快照", () => {
@@ -31,7 +45,13 @@ test("job-store 的 startJob 优先使用传进来的引擎快照", () => {
 });
 
 test("i18n：单项重试文案在 en/zh 两份字典里键完全对齐", () => {
-  const keys = ["jobs.batchItemRetry", "jobs.batchItemRetryHint", "jobs.batchItemRetryRunning", "jobs.batchItemRetryTitle"];
+  const keys = [
+    "jobs.batchItemRetry",
+    "jobs.batchItemRetryHint",
+    "jobs.batchItemRetryRunning",
+    "jobs.batchItemRetryTitle",
+    "jobs.batchItemNoConclusion",
+  ];
   for (const key of keys) {
     const hits = I18N.split(`"${key}":`).length - 1;
     assert.equal(hits, 2, `${key} 必须在 en/zh 各出现一次`);

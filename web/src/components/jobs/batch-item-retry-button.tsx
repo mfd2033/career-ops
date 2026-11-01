@@ -12,21 +12,26 @@ import { cn } from "@/lib/cn";
 // 原样保留；同 URL 已有在跑的 evaluate 卡时只剩「重试中…」，防连点重复消费。
 // checkup 子项（tracker# key）需要 /api/checkup-request 前哨，本组件由纯函数
 // canRetryBatchItem 天然拦掉。
+// ADR-0093 修订 1：父批量已终态时，没有 reason 的「结论丢失」占位项也放出按钮
+// （父卡还在跑则仍由纯函数拦住，避免与在跑的 worker 重复消费）。
 export function BatchItemRetryButton({
   item,
   cliId,
   model,
+  parentTerminal = false,
   className,
 }: {
   item: JobItem;
   /** 父批量派发时的引擎快照——重试「原样再来」（ADR-0093 决议 3）。 */
   cliId?: string;
   model?: string;
+  /** 父批量是否已达终态（done/error）：决定无 reason 的失败项能否重试。 */
+  parentTerminal?: boolean;
   className?: string;
 }) {
   const { jobs, startJob } = useJobs();
   const { t } = useI18n();
-  if (!canRetryBatchItem(item)) return null;
+  if (!canRetryBatchItem(item, { parentTerminal })) return null;
   if (hasLiveEvaluateForUrl(jobs, item.key)) {
     return (
       <span

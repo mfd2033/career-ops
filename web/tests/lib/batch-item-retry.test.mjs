@@ -31,6 +31,28 @@ test("canRetryBatchItem：无 reason 的 item-running 占位不可重试", () =>
   assert.equal(canRetryBatchItem({ key: "https://x/a", label: "https://x/a", ok: false, ts: 1 }), false);
 });
 
+// ADR-0093 修订 1：父批量已终态时，没等到结论的占位项就是「结论丢失」，可重试。
+const placeholder = { key: "https://jobs.example.com/roles/123", label: "https://jobs.example.com/roles/123", ok: false, ts: 1 };
+
+test("canRetryBatchItem：终态批量的无 reason 失败项（结论丢失）可重试", () => {
+  assert.equal(canRetryBatchItem(placeholder, { parentTerminal: true }), true);
+  // 显式 false 与缺省同口径：父卡还在跑时继续拦住，免得与在跑的 worker 重复消费。
+  assert.equal(canRetryBatchItem(placeholder, { parentTerminal: false }), false);
+  assert.equal(canRetryBatchItem(placeholder, {}), false);
+});
+
+test("canRetryBatchItem：终态也救不了成功/跳过/非 http key", () => {
+  assert.equal(canRetryBatchItem({ ...placeholder, ok: true }, { parentTerminal: true }), false);
+  assert.equal(canRetryBatchItem({ ...placeholder, skipped: true }, { parentTerminal: true }), false);
+  assert.equal(canRetryBatchItem({ ...placeholder, key: "42" }, { parentTerminal: true }), false);
+  assert.equal(canRetryBatchItem({ ...placeholder, reason: "   " }, { parentTerminal: false }), false);
+});
+
+test("canRetryBatchItem：带 reason 的失败项在终态与在跑两种父态下都可重试", () => {
+  assert.equal(canRetryBatchItem(failed, { parentTerminal: true }), true);
+  assert.equal(canRetryBatchItem(failed, { parentTerminal: false }), true);
+});
+
 test("canRetryBatchItem：checkup 的 tracker# key 不可重试（需前哨，本 ADR 不做）", () => {
   assert.equal(canRetryBatchItem({ key: "42", label: "#42 公司", ok: false, reason: "no-via", ts: 1 }), false);
 });

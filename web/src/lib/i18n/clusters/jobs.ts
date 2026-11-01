@@ -109,6 +109,9 @@ export const en: Dict = {
     "Re-runs this link as a standalone worker. The failed item stays in this batch's record.",
   "jobs.batchItemRetryRunning": "Retrying\u2026",
   "jobs.batchItemRetryTitle": "Retry evaluation",
+  // ADR-0093 修订 1：父批量已终态但该条结论从未到达（流断在在跑那一条上）。
+  "jobs.batchItemNoConclusion":
+    "No result arrived for this item (the batch stream ended first) \u2014 retry to get one.",
 };
 
 // Simplified Chinese strings. Every key in en must have a matching key here.
@@ -206,4 +209,6 @@ export const zh: Dict = {
   "jobs.batchItemRetryHint": "将该链接作为独立工作器重新评估；本批量里的失败记录原样保留。",
   "jobs.batchItemRetryRunning": "重试中\u2026",
   "jobs.batchItemRetryTitle": "重试评估",
+  // ADR-0093 修订 1：与 en 一一对应。
+  "jobs.batchItemNoConclusion": "该条结论未收到（批量流先断了）\u2014\u2014点重试重新评估。",
 };

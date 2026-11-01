@@ -31,11 +31,15 @@ export function BatchItemList({
   batchId,
   cliId,
   model,
+  parentTerminal = false,
 }: {
   items: JobItem[];
   batchId?: string;
   cliId?: string;
   model?: string;
+  /** 父批量是否已达终态（done/error）——ADR-0093 修订 1：终态下没收到结论的
+   *  失败项（流断掉的 item-running 占位）也可重试，且如实标明「结论丢失」。 */
+  parentTerminal?: boolean;
 }) {
   const { t } = useI18n();
   const engine = formatRunEngine(cliId, model);
@@ -44,6 +48,9 @@ export function BatchItemList({
       {items.map((it) => {
         const href = batchItemDetailHref(batchId, it);
         const secs = it.startedAt != null && it.finishedAt != null ? Math.round((it.finishedAt - it.startedAt) / 1000) : null;
+        // ADR-0093 修订 1：父批量已终态却没收到该条结论（item-running 占位没有
+        // reason）——要如实说明，不能让失败项看起来无因无故。
+        const lostConclusion = parentTerminal && !it.ok && !it.skipped && !it.reason;
         const clock = fmtStartedAt(it.finishedAt ?? it.ts);
         const inner = (
           <>
@@ -70,7 +77,9 @@ export function BatchItemList({
               {it.ok && it.star != null && <span className="shrink-0 rounded bg-emerald-500/15 px-1 py-0.5 text-[10px] font-semibold tabular-nums text-emerald-700 dark:text-emerald-400">{"\u2605"}{it.star}/5</span>}
               {/* ADR-0093：终态失败的 evaluate 子项可单独重跑（独立工作器，父批量
                   失败记录保留）；成功/跳过/占位项由纯函数拦掉。 */}
-              {!it.ok && !it.skipped && <BatchItemRetryButton item={it} cliId={cliId} model={model} className="mt-0.5" />}
+              {!it.ok && !it.skipped && (
+                <BatchItemRetryButton item={it} cliId={cliId} model={model} parentTerminal={parentTerminal} className="mt-0.5" />
+              )}
             </div>
             <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 pl-5 text-[11px] tabular-nums text-faint">
               {clock && <span title={t("jobs.endedAt", { time: clock })}>{clock}</span>}
@@ -86,7 +95,11 @@ export function BatchItemList({
                 </span>
               )}
             </div>
-            {!it.ok && it.reason && <div className="mt-1 truncate pl-5 text-[11px] text-faint" title={it.reason}>— {it.reason}</div>}
+            {!it.ok && (it.reason || lostConclusion) && (
+              <div className="mt-1 truncate pl-5 text-[11px] text-faint" title={it.reason ?? t("jobs.batchItemNoConclusion")}>
+                — {it.reason ?? t("jobs.batchItemNoConclusion")}
+              </div>
+            )}
             {/* ADR-0049：运行中项内联显示最后 5 步工具动作。 */}
             {it.steps && it.steps.length > 0 && (
               <div className="mt-1 pl-5 text-[10px] leading-tight text-faint/80">

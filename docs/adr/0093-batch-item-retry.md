@@ -26,6 +26,21 @@
 - **checkup 批量同样加重试**：必须接 `/api/checkup-request` 前哨，还要处理「同 tracker# 已在跑 → 替换面板」的裁决流；与本次「批量评估」诉求不重合，另行立项。
 - **整卡重试代替单项**：已有（ADR-0061），这正是要解决的问题。
 
+## 修订 1（2026-11-01）：父批量终态后，「结论丢失」的占位项也可重试
+
+**现场证据**（真实卡片 `job-1793529823588-1`，第 7 次尝试）：批量 2 项，一项成功（带 score/reportNum），另一项停在 `ok=false`、**没有 reason**、只有 16 条 tool 步骤；父卡状态 `error`（批量 NDJSON 流先断，卡片落「连接错误」）。按决议 1 的 `reason 非空` 门，这一项永远不渲染按钮——用户看到一条失败项，却没有任何补救入口。
+
+**根因**：`item-running` 占位（`job-store` 在 worker spawn 时就建）与「结论丢失」在数据上同形：都是 `ok=false` 且无 `reason`。决议 1 用 reason 缺失来代表「还在跑」，这个等价关系只在父批量仍在跑时成立；流断掉后那一条永远不会补上终态 `item` 事件，父卡却已是终态，占位从此冻结成一条无因失败。
+
+**决定**：
+
+1. `canRetryBatchItem(item, { parentTerminal })` 增加第二参：`parentTerminal === true`（父卡 done/error，含刷新后按 `interrupted` 猜标的卡）时，无 reason 的失败项按「结论丢失」放行；`parentTerminal` 缺省 false 时与决议 1 完全一致（父卡在跑 → 继续拒绝，避免与在跑 worker 重复消费）。
+2. 终态信号由三个渲染面显式透传，不在组件里猜：`/jobs` 展开行取行状态、本地卡详情页取 `job.status`、ledger-only 视图恒为终态（台账只记已终结的 run）。
+3. 该子项不做静默放行：`BatchItemList` 对「终态 + 无 reason」的失败项如实显示「该条结论未收到（批量流先断了）」（`jobs.batchItemNoConclusion`，en+zh），避免失败项看起来无因无故。
+4. 派发语义不变：仍是独立 `kind="evaluate"` 工作器、引擎取父批量快照、`hasLiveEvaluateForUrl` 防连点（决议 2/3/4）。
+
+**不改变**：服务端 API、`items` 数据结构与父卡计数（该项仍计在失败侧，重试是另一条独立记录）；checkup 批量仍不开放（需前哨）；`reason` 非空判定的既有语义保留。
+
 ## Consequences
 
 - 失败项的补救成本从「整批 20 次评估」降到 1 次；代价是新增一张独立卡片与一条台账记录，父批量的计数不变（用户可能看到「1 failed」同时顶部有新的重试 worker——这是如实的两个事实）。

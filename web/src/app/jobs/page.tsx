@@ -220,7 +220,13 @@ function JobsRow({ job: j }: { job: Job }) {
       {expandable && batchOpen && (
         <div className="px-4 pb-4 pl-9">
           {batchItems.length > 0 ? (
-            <BatchItemList items={batchItems} batchId={j.serverBatchId || j.runId} cliId={j.cliId} model={j.model} />
+            <BatchItemList
+              items={batchItems}
+              batchId={j.serverBatchId || j.runId}
+              cliId={j.cliId}
+              model={j.model}
+              parentTerminal={j.status === "error" || j.status === "done"}
+            />
           ) : (
             <p className="mt-2 text-xs text-muted">{t("jobs.batchWaiting")}</p>
           )}
