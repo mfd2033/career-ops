@@ -259,6 +259,11 @@ package-build.log
 # Qoder IDE local state (agent/scratch artifacts, machine-specific)
 .qoder/
 
+# CodeArts IDE/agent local state (index cache, temp, per-machine agent config).
+# Its own nested .gitignore (`*`) already hides it; stated here so deleting or
+# editing that file can never leak the index/temp tree into the repo.
+.codeartsdoer/
+
 # Session-scoped working docs (handoff / pack run logs, ephemeral)
 docs/handoff-*.md
 docs/pack-*.md
