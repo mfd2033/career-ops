@@ -16,7 +16,7 @@ import type { CheckupEntry } from "@/lib/format";
 import type { CadenceEntry } from "@/lib/followups";
 import { Badge } from "@/components/ui/badge";
 import { scoreTone, scoreNum, legitimacyTone, parseReport } from "@/lib/format";
-import { cleanHeading, splitSections } from "@/lib/report-sections.mjs";
+import { cleanHeading, splitSections, isVerdictHeading, extractGapHighlights } from "@/lib/report-sections.mjs";
 import { StatusSelect } from "@/components/status-select";
 import { StatusHistoryButton } from "@/components/status-history-button";
 import { CompanyLogo } from "@/components/company-logo";
@@ -34,15 +34,19 @@ import { DeliveryTimeHint } from "@/components/delivery-time-hint";
 import { sourcePlatform } from "@/lib/source-label.mjs";
 import { useI18n } from "@/lib/i18n/context";
 
-// Progressive disclosure of the report. The core writes prose blocks
-// "## F) Verdict (lead)", "## A) Role Summary", "## B) Match with CV", then
-// the remaining lettered blocks + machine artifacts (Machine Summary YAML,
+// Progressive disclosure of the report. The core writes "## A) Role Summary",
+// "## B) Match with CV", … plus optional non-lettered trailing blocks such as
+// "## 评估结论" / "## Verdict" (and machine artifacts: Machine Summary YAML,
 // Application Answers, submit log). A mainstream user deciding "should I
 // apply?" needs the verdict + fit; the rest is depth-on-demand. We lead with
 // the verdict as a callout, keep A/B expanded, collapse the other lettered
 // blocks as content, and drop machine artifacts to a dimmer "Technical" tier —
-// and strip the bare "F)" author-letters from headings (native <details>, no
+// and strip the bare author-letters from headings (native <details>, no
 // client JS — this stays a server component).
+//
+// The verdict block is located by heading text (isVerdictHeading), NOT by the
+// letter F: the standard template uses F for Interview Plan. See
+// lib/report-sections.mjs.
 //
 // Splitting and heading cleanup live in lib/report-sections.mjs so the
 // author-letter range has one definition; duplicating it here is what left
@@ -612,11 +616,23 @@ export function ReportView({
                 </article>
               );
             }
-            // Verdict (F) leads as a highlighted callout with no competing heading —
-            // it's THE answer. A/B stay expanded (fit detail); C–G collapse as
-            // content (with a 1-line preview); machine artifacts drop to a dimmer
-            // "Technical" tier so the CLI-DNA is present-but-clearly-secondary.
-            const verdict = sections.find((s) => s.letter === "F");
+            // Verdict leads as a highlighted callout with no competing heading —
+            // it's THE answer. A verdict block is identified by its heading
+            // ("Verdict" / "评估结论" / "结论"…), never by the letter F: the
+            // standard template uses F for Interview Plan, so the old
+            // `letter === "F"` lookup put the interview plan in the verdict slot
+            // on nearly every report. A/B stay expanded (fit detail); C–G
+            // collapse as content (with a 1-line preview); machine artifacts drop
+            // to a dimmer "Technical" tier so the CLI-DNA is
+            // present-but-clearly-secondary.
+            const verdict = sections.find((s) => isVerdictHeading(s.heading));
+            // 扣分原因排在评估结论上方：低分用户先看「为什么低」再看结论。
+            // 没有独立结论段的报告（标准模板只把 Gaps 挂在 B 段下）用 Gaps
+            // 子小节的条目首行做摘要，避免整份报告在顶部只留一个分数徽章。
+            // 取自 B 段而非全文：G) 真实性等段落也有「差距」小节，全文扫会把
+            // 无关条目混进来。
+            const gapSource = sections.find((s) => s.letter === "B")?.content ?? (meta?.body ?? report);
+            const gapHighlights = verdict ? [] : extractGapHighlights(gapSource);
             const rest = sections.filter((s) => s !== verdict);
             const machine = rest.filter((s) => isMachine(s.heading));
             const mainSections = rest.filter((s) => !isMachine(s.heading));
@@ -629,12 +645,31 @@ export function ReportView({
                   </article>
                 )}
 
-                {verdict && (
+                {(verdict || gapHighlights.length > 0) && (
                   <div className="rounded-2xl border border-brand/25 bg-brand-soft/50 px-5 py-4">
-                    <p className="mb-1 font-mono text-[11px] uppercase tracking-[0.16em] text-brand/80">{t("pipeline.report.verdict")}</p>
-                    <article className="report-prose [&_p]:font-medium [&_p]:text-foreground">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{verdict.content}</ReactMarkdown>
-                    </article>
+                    {gapHighlights.length > 0 && (
+                      <>
+                        <p className="mb-2 font-mono text-[11px] uppercase tracking-[0.16em] text-brand/80">{t("pipeline.report.deductions")}</p>
+                        <ul className="mb-4 space-y-1.5">
+                          {gapHighlights.map((gap, i) => (
+                            <li key={i} className="flex items-start gap-2 text-sm text-foreground">
+                              <span aria-hidden="true" className="mt-0.5 shrink-0 text-brand/70">▾</span>
+                              <span>{gap}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </>
+                    )}
+                    {verdict && (
+                      <>
+                        {gapHighlights.length > 0 && (
+                          <p className="mb-2 font-mono text-[11px] uppercase tracking-[0.16em] text-brand/80">{t("pipeline.report.verdict")}</p>
+                        )}
+                        <article className="report-prose [&_p]:font-medium [&_p]:text-foreground">
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>{verdict.content}</ReactMarkdown>
+                        </article>
+                      </>
+                    )}
                   </div>
                 )}
 
