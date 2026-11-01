@@ -565,6 +565,8 @@ export function ReportView({
           {checkupTarget && (
             <CheckupRequestButton n={id} checkup={checkup} target={checkupTarget} />
           )}
+          {/* 从追踪器移除（硬删除，disc#9）：紧邻「体检这家」右侧，与其余操作同排 */}
+          {app && canDelete && <DeleteFromTracker n={id} />}
           {/* 「记录跟进」（ADR-0075）：entry 存在即渲染；弹窗与 /followups 完全同一枚 */}
           {followupEntry && <LogFollowupButton entry={followupEntry} />}
         </div>
@@ -575,11 +577,6 @@ export function ReportView({
             如实说没有规律。 */}
         <DeliveryTimeHint platforms={deliveryPlatform ? [deliveryPlatform] : []} />
 
-        {app && canDelete && (
-          <div className="mt-3">
-            <DeleteFromTracker n={id} />
-          </div>
-        )}
 
         {(archetype || date || (url && url.startsWith("http"))) && (
           <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted">
