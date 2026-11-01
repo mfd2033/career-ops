@@ -15,7 +15,7 @@ import { CheckupRequestButton, type CheckupTarget } from "@/components/checkup-r
 import type { CheckupEntry } from "@/lib/format";
 import type { CadenceEntry } from "@/lib/followups";
 import { Badge } from "@/components/ui/badge";
-import { scoreTone, scoreNum, legitimacyTone, parseReport } from "@/lib/format";
+import { scoreTone, scoreNum, legitimacyTone, parseReport, canonStatus } from "@/lib/format";
 import { cleanHeading, splitSections, isVerdictHeading, extractGapHighlights } from "@/lib/report-sections.mjs";
 import { StatusSelect } from "@/components/status-select";
 import { StatusHistoryButton } from "@/components/status-history-button";
@@ -442,6 +442,16 @@ export function ReportView({
   // 投递时机平台（ADR-0085）：从报告 header 的 **URL:** 还原来源平台（与列表页
   // 「来源」列同一套域名映射）；不在 Boss/猎聘/智联（如 ATS、公司官网）→ null。
   const deliveryPlatform = sourcePlatform(url);
+  // 投递时机只在「还要不要投」这个决定上有意义：跳过/放弃/拒绝已经是做过的
+  // 决定，那一屏的答案是「不投了」，再提示「现在几点投合适」只是噪音。
+  // 占位状态（空 / — / -）不参与判定——canonStatus 把它们折成 DISCARDED，但那
+  // 是「未填」而不是「已放弃」。
+  const rawStatus = String(app?.status ?? "").trim();
+  const deliveryHintHidden =
+    rawStatus !== "" &&
+    rawStatus !== "—" &&
+    rawStatus !== "-" &&
+    ["SKIP", "DISCARDED", "REJECTED"].includes(canonStatus(rawStatus));
   const pdfReady = (app?.pdf ?? "").includes("✅");
   // The tailored CV is recorded in data/pdf-index.tsv keyed by its REPORT number
   // (a re-evaluated row keeps its tracker `#` but links a new report file, so the
@@ -574,8 +584,10 @@ export function ReportView({
         {/* 投递时机（ADR-0085）：紧贴操作区下方——看过分数/建议就决定要不要投，
             时机信息就在决策点旁边。只看「这一份从哪个平台来的」：猎聘的职位
             不会拿 Boss 的晚间时段来建议；来源不在三平台（ATS/官网…）时
-            如实说没有规律。 */}
-        <DeliveryTimeHint platforms={deliveryPlatform ? [deliveryPlatform] : []} />
+            如实说没有规律。跳过/放弃/拒绝（已做过决定）不渲染这一条。 */}
+        {!deliveryHintHidden && (
+          <DeliveryTimeHint platforms={deliveryPlatform ? [deliveryPlatform] : []} />
+        )}
 
 
         {(archetype || date || (url && url.startsWith("http"))) && (

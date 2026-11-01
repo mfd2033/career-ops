@@ -194,12 +194,25 @@ test("组件接线：报告详情页只显示「该报告来源平台」的建�
   const reportView = readFileSync(join(here, "../../src/components/report-view.tsx"), "utf8");
   assert.match(reportView, /import \{ DeliveryTimeHint \} from "@\/components\/delivery-time-hint"/);
   // 必须把来源平台传下去：不传就退回三平台视角，针对性就没了。
-  assert.match(reportView, /<DeliveryTimeHint platforms=\{deliveryPlatform \? \[deliveryPlatform\] : \[\]\} \/>/);
+  assert.match(
+    reportView,
+    /\{!deliveryHintHidden && \(\s*<DeliveryTimeHint platforms=\{deliveryPlatform \? \[deliveryPlatform\] : \[\]\} \/>/,
+  );
   assert.match(reportView, /const deliveryPlatform = sourcePlatform\(url\)/);
   // 两条路由都渲染 ReportView，所以挂在这一层就同时覆盖详情页与深链页。
   for (const route of ["../../src/app/pipeline/[id]/page.tsx", "../../src/app/report/[id]/page.tsx"]) {
     assert.match(readFileSync(join(here, route), "utf8"), /<ReportView\b/);
   }
+});
+
+test("组件接线：跳过/放弃/拒绝（已决定的终态）不再渲染投递时机条", () => {
+  const reportView = readFileSync(join(here, "../../src/components/report-view.tsx"), "utf8");
+  // 三种终态按 canonical token 判定（别名/大小写交给 canonStatus）
+  assert.match(reportView, /\["SKIP", "DISCARDED", "REJECTED"\]\.includes\(canonStatus\(rawStatus\)\)/);
+  // 占位状态（空 / — / -）是「未填」，不能被 canonStatus 折成 DISCARDED 而误隐
+  assert.match(reportView, /rawStatus !== "—"/);
+  assert.match(reportView, /rawStatus !== "-"/);
+  assert.match(reportView, /\{!deliveryHintHidden && \(\s*<DeliveryTimeHint/);
 });
 
 // ── 平台来源还原（source-label.mjs）：详情页只按这一套认平台 ──
