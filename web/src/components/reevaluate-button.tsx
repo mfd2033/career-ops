@@ -60,15 +60,13 @@ export function ReevaluateButton({ id, url, company }: { id: string; url?: strin
     );
 
   return (
-    <span className="inline-flex items-center gap-1.5">
-      <button
-        onClick={trigger}
-        title={t("pipeline.reevaluateTitle", { company })}
-        className="inline-flex items-center justify-center gap-1.5 rounded-full border border-border px-3 py-1 text-xs font-medium text-muted transition-colors hover:border-brand/40 hover:text-brand max-sm:min-h-[44px]"
-      >
-        <RotateCcw className="size-3.5" /> {t("pipeline.reevaluate")}
-      </button>
+    <button
+      onClick={trigger}
+      title={t("pipeline.reevaluateTitle", { company })}
+      className="inline-flex items-center justify-center gap-1.5 rounded-full border border-border px-3 py-1 text-xs font-medium text-muted transition-colors hover:border-brand/40 hover:text-brand max-sm:min-h-[44px]"
+    >
+      <RotateCcw className="size-3.5" /> {t("pipeline.reevaluate")}
       <CostHint className="text-faint" />
-    </span>
+    </button>
   );
 }

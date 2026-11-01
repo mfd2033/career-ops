@@ -56,15 +56,13 @@ export function GeneratePdfButton({ n, report, company, pdfReady }: { n: string;
   // AI (spends tokens). Surface it right on the trigger so cost is never a
   // surprise — the community's #1 pain (mirrors Explore's token-honesty).
   return (
-    <span className="inline-flex items-center gap-1.5">
-      <button
-        onClick={generate}
-        className="inline-flex items-center justify-center gap-1.5 rounded-full border border-border px-3 py-1 text-xs font-medium text-muted transition-colors hover:border-brand/40 hover:text-brand max-sm:min-h-[44px]"
-        title={t("pipeline.generateTitle")}
-      >
-        <FileDown className="size-3.5" /> {t("pipeline.generateCv")}
-      </button>
+    <button
+      onClick={generate}
+      className="inline-flex items-center justify-center gap-1.5 rounded-full border border-border px-3 py-1 text-xs font-medium text-muted transition-colors hover:border-brand/40 hover:text-brand max-sm:min-h-[44px]"
+      title={t("pipeline.generateTitle")}
+    >
+      <FileDown className="size-3.5" /> {t("pipeline.generateCv")}
       <CostHint className="text-faint" />
-    </span>
+    </button>
   );
 }

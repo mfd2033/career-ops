@@ -58,6 +58,17 @@ test("模式切换只在 AI 搜索一侧提示消耗", () => {
   assert.ok(hintAt > aiStart && scanStart < aiStart, "唯一提示必须落在 AI 搜索按钮内");
 });
 
+test("成本图标嵌在按钮内部，不挂在按钮外侧", () => {
+  for (const relative of ["components/generate-pdf-button.tsx", "components/reevaluate-button.tsx"]) {
+    const src = read(relative);
+    const open = src.lastIndexOf("<button");
+    const close = src.lastIndexOf("</button>");
+    const hint = src.lastIndexOf("<CostHint");
+    assert.ok(open !== -1 && close !== -1 && hint !== -1, `${relative} 应同时含按钮与成本图标`);
+    assert.ok(open < hint && hint < close, `${relative} 的成本图标必须在按钮开始与结束标签之间`);
+  }
+});
+
 test("i18n 只保留消耗 tokens 的键，免费类文案已清除", () => {
   const dict = read("lib/i18n/clusters/shared.ts");
   assert.match(dict, /"shared\.cost\.spend": /);
