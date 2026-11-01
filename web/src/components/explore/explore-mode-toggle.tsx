@@ -2,7 +2,7 @@
 
 import { Compass, Sparkles } from "lucide-react";
 import { cn } from "@/lib/cn";
-import { CostBadge } from "@/components/cost/cost-badge";
+import { CostHint } from "@/components/cost/cost-hint";
 import type { ExploreMode } from "@/lib/explore";
 import { useI18n } from "@/lib/i18n/context";
 
@@ -35,9 +35,7 @@ export function ExploreModeToggle({
       >
         <Compass className="size-4" />
         <span className="font-medium">{t("explore.mode.scan")}</span>
-        <span className="hidden sm:inline-flex">
-          <CostBadge kind="free-network" size="xs" />
-        </span>
+
       </button>
       <button
         type="button"
@@ -50,9 +48,7 @@ export function ExploreModeToggle({
       >
         <Sparkles className="size-4" />
         <span className="font-medium">{t("explore.mode.aiSearch")}</span>
-        <span className="hidden sm:inline-flex">
-          <CostBadge kind="spend" size="xs" />
-        </span>
+        <CostHint className="text-faint" />
         {!cliConfigured && <span className="text-[10px] text-faint">{t("explore.mode.needsCli")}</span>}
       </button>
     </div>

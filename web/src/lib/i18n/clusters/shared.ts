@@ -77,14 +77,9 @@ export const en: Dict = {
   "shared.beta.cancel": "Cancel",
   "shared.beta.openIssue": "Open GitHub issue",
 
-  // cost badge
-  "shared.cost.free": "Free",
+  // 消耗 tokens 提示
   "shared.cost.spend": "Uses tokens",
-  "shared.cost.freeGemini": "Free · Gemini",
-  "shared.cost.freeNetworkTip": "Scans the public ATS network over HTTP. No AI, no tokens, nothing sent — and it writes nothing until you choose to add a role.",
-  "shared.cost.freeTip": "No tokens. Reads or writes local files only.",
   "shared.cost.spendTip": "Runs a real A–F evaluation on your own AI. This is the only thing that spends tokens — and only when you pick a role.",
-  "shared.cost.freeGeminiTip": "Evaluate with Google's free Gemini tier — no token cost.",
 
   // onboarding banner
   "shared.onboarding.cv": "your CV",
@@ -174,14 +169,9 @@ export const zh: Dict = {
   "shared.beta.cancel": "取消",
   "shared.beta.openIssue": "打开 GitHub issue",
 
-  // cost badge
-  "shared.cost.free": "免费",
+  // 消耗 tokens 提示
   "shared.cost.spend": "消耗 tokens",
-  "shared.cost.freeGemini": "免费 · Gemini",
-  "shared.cost.freeNetworkTip": "通过 HTTP 扫描公开 ATS 网络。无 AI、无 tokens、不发送任何内容——在你选择添加职位之前不会写入任何内容。",
-  "shared.cost.freeTip": "无 tokens。仅读取或写入本地文件。",
   "shared.cost.spendTip": "在你自己的 AI 上运行真正的 A–F 评估。这是唯一消耗 tokens 的环节——且仅在你选择某个职位时。",
-  "shared.cost.freeGeminiTip": "使用 Google 的免费 Gemini 档位进行评估——无 token 成本。",
 
   // onboarding banner
   "shared.onboarding.cv": "你的简历",

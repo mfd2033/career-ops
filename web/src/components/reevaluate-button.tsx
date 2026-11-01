@@ -5,7 +5,7 @@ import { Loader2, RotateCcw, RefreshCw } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useJobs } from "@/components/jobs/job-store";
-import { CostBadge } from "@/components/cost/cost-badge";
+import { CostHint } from "@/components/cost/cost-hint";
 import { useI18n } from "@/lib/i18n/context";
 
 // Re-runs the REAL career-ops evaluation for THIS posting (worker kind
@@ -68,7 +68,7 @@ export function ReevaluateButton({ id, url, company }: { id: string; url?: strin
       >
         <RotateCcw className="size-3.5" /> {t("pipeline.reevaluate")}
       </button>
-      <CostBadge kind="spend" size="xs" />
+      <CostHint className="text-faint" />
     </span>
   );
 }

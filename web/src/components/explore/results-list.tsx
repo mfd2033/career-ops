@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Search, Plus, ChevronRight, Coins, Ban, Sparkles } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { BROWSER_LABEL, type BrowserSource, type DiscoveredOffer } from "@/lib/explore";
-import { CostBadge } from "@/components/cost/cost-badge";
+import { CostHint } from "@/components/cost/cost-hint";
 import { DiscoveryRow } from "./discovery-card";
 import { GatePanel } from "./gate-panel";
 import { InputClearButton } from "@/components/input-clear-button";
@@ -344,7 +344,7 @@ export function ResultsList({ offers, tagVocab }: { offers: EnrichedOffer[]; tag
         <div>
           <p className="text-sm text-foreground">
             <span className="font-semibold">{counts[tab]}</span> {isAi ? t(remaining.length === 1 ? "explore.results.candidateOne" : "explore.results.candidateMany", { n: counts[tab] }) : t(remaining.length === 1 ? "explore.results.freshRoleOne" : "explore.results.freshRoleMany", { n: counts[tab] })}
-            <CostBadge kind={isAi ? "spend" : "free-network"} size="xs" className="ml-2 align-middle" />
+            {isAi && <CostHint className="ml-2 align-middle text-faint" />}
           </p>
           <p className="text-[12px] text-faint">
             {isAi

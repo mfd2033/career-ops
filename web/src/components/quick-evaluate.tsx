@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Sparkles } from "lucide-react";
 import { useJobs } from "@/components/jobs/job-store";
-import { CostBadge } from "@/components/cost/cost-badge";
+import { CostHint } from "@/components/cost/cost-hint";
 import { useI18n } from "@/lib/i18n/context";
 
 // Auto-pipeline, one click: paste a job URL → fire a real evaluation worker
@@ -50,7 +50,7 @@ export function QuickEvaluate() {
         </button>
       </div>
       <div className="mt-2 flex items-center gap-2">
-        <CostBadge kind="spend" size="xs" />
+        <CostHint className="text-faint" />
         <span className="text-xs text-faint">{t("pipeline.evaluateNote")}</span>
       </div>
       {hint && <p className="mt-1 text-xs text-faint">{hint}</p>}

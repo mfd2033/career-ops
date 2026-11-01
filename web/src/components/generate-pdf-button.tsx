@@ -4,7 +4,7 @@ import { useMemo } from "react";
 import Link from "next/link";
 import { FileDown, Loader2, FileText, RotateCcw } from "lucide-react";
 import { useJobs } from "@/components/jobs/job-store";
-import { CostBadge } from "@/components/cost/cost-badge";
+import { CostHint } from "@/components/cost/cost-hint";
 import { useI18n } from "@/lib/i18n/context";
 
 // Fires the real career-ops `pdf` mode (worker kind "pdf") to generate an
@@ -64,7 +64,7 @@ export function GeneratePdfButton({ n, report, company, pdfReady }: { n: string;
       >
         <FileDown className="size-3.5" /> {t("pipeline.generateCv")}
       </button>
-      <CostBadge kind="spend" size="xs" />
+      <CostHint className="text-faint" />
     </span>
   );
 }

@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { ChevronDown, Coins, Settings, Sparkles, X } from "lucide-react";
 import { CompanyLogo } from "@/components/company-logo";
-import { CostBadge } from "@/components/cost/cost-badge";
+import { CostHint } from "@/components/cost/cost-hint";
 import { useI18n } from "@/lib/i18n/context";
 import { cn } from "@/lib/cn";
 import { openableUrl } from "@/lib/inbox-url.mjs";
@@ -125,7 +125,7 @@ export function ShortlistTray({
 
           {/* cost line — always visible on mobile (where it doesn't fit in the button) */}
           <div className="flex items-center gap-2 border-t border-border/60 px-3 py-1.5 text-[11px] text-muted sm:hidden">
-            <CostBadge kind="spend" size="xs" />
+            <CostHint className="text-faint" />
             <span>{costText} — {t("inbox.onlySpends")}</span>
           </div>
         </div>

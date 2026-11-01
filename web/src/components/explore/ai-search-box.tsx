@@ -2,7 +2,7 @@
 
 import { useRef } from "react";
 import { ArrowRight, Sparkles } from "lucide-react";
-import { CostBadge } from "@/components/cost/cost-badge";
+import { CostHint } from "@/components/cost/cost-hint";
 import { useI18n } from "@/lib/i18n/context";
 
 // The "magic" natural-language box: a soft contained halo at rest that intensifies
@@ -86,7 +86,7 @@ export function AiSearchBox({
             className="inline-flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-brand-foreground shadow-sm transition hover:brightness-110 disabled:opacity-50"
           >
             {t("explore.ai.searchButton")}
-            <CostBadge kind="spend" size="xs" />
+            <CostHint className="text-brand-foreground/70" />
             <ArrowRight className="size-4" />
           </button>
         </div>
