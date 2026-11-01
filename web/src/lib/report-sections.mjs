@@ -84,8 +84,36 @@ const BOLD_SUBHEADING = /^\*\*([^*]+?)\*\*\s*[:：]?\s*$/;
 /** 编号条目（`1.` / `2)`）或无序条目（`-` / `*`），且顶格——缩进子行是
  *  「硬门槛还是加分项 / 能否等价证明 / 怎么补」的解释，不属于条目首行。 */
 const GAP_ITEM = /^(?:\d+[.)]|[-*])\s+(.*)$/;
+/** 整行粗体包裹的编号条目（`**1. 连锁餐饮行业经验 — 硬门槛。**`），有的模式
+ *  写成这样而不是 `1. **标题**`。 */
+const BOLD_WRAPPED_ITEM = /^\*\*\s*(?:\d+[.)]|[-*])\s+(.*?)\s*\*\*$/;
 /** 条目自带 `**标题**：解释…` 时只取标题本身。 */
 const ITEM_BOLD_HEAD = /^\*\*([^*]+)\*\*/;
+/** 解释性子行的开头（有的模式不缩进，与条目同列）：放进摘要里只会是噪音。 */
+const ITEM_NOISE = /^(?:是?硬门槛还是|缓解策略|应对策略|怎么补|如何补|能否|是否可以|是否|相邻经验|无相邻经验|作品|项目覆盖|解释|说明)/;
+
+/**
+ * 条目首行及其层级：`1.` 编号条目为 `numbered`，`-`/`*` 为 `bullet`；
+ * `bold` 表示条目名本身带粗体（`1. **…**` / `- **…**`）。
+ * 认不出是条目时返回 null。
+ * @param {string} line
+ * @returns {{ text: string, kind: "numbered" | "bullet", bold: boolean } | null}
+ */
+function gapItem(line) {
+  const wrapped = line.match(BOLD_WRAPPED_ITEM);
+  if (wrapped) return { text: wrapped[1], kind: /^\*\*\s*\d/.test(line) ? "numbered" : "bullet", bold: true };
+  const item = line.match(GAP_ITEM);
+  if (!item) return null;
+  return {
+    text: item[1].match(ITEM_BOLD_HEAD)?.[1] ?? item[1],
+    kind: /^\d/.test(line) ? "numbered" : "bullet",
+    bold: item[1].startsWith("**"),
+  };
+}
+
+const TABLE_SEPARATOR = /^\|[\s:|-]+\|?\s*$/;
+/** 表格形式的差距（`| Gap | 性质 | 缓解策略 |`）取第一列。 */
+const TABLE_FIRST_CELL = /^\|([^|]*)\|/;
 
 /**
  * @param {string} markdown 报告正文（通常是 B 段或整篇 body）
@@ -93,29 +121,57 @@ const ITEM_BOLD_HEAD = /^\*\*([^*]+)\*\*/;
  * @returns {string[]}
  */
 export function extractGapHighlights(markdown, max = 6) {
-  /** @type {string[]} */
-  const out = [];
+  /** 编号条目或带粗体标题的条目——它们是「一条差距」。 */
+  const strong = [];
+  /** 普通 `- ` 行：在有强条目时通常只是上一条的解释，仅作兜底。 */
+  const weak = [];
+  const lines = markdown.split("\n");
   let inGap = false;
-  for (const line of markdown.split("\n")) {
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
     const heading = line.match(/^#{2,4}\s+(.*)$/);
     if (heading) {
       inGap = GAP_SUBHEADING.test(heading[1]);
       continue;
     }
-    const bold = line.match(BOLD_SUBHEADING);
-    if (bold) {
-      inGap = GAP_SUBHEADING.test(bold[1]);
+    const boldHeading = line.match(BOLD_SUBHEADING);
+    const item = gapItem(line);
+    // 整行粗体的编号条目（`**1. …**`）也满足 BOLD_SUBHEADING 的形状，必须先判
+    // 条目，否则它会把自己所在的小节「关掉」，后面的条目全被跳过（#1210）。
+    if (item === null && boldHeading) {
+      const title = boldHeading[1];
+      if (inGap) {
+        // 已经在差距小节里：粗体行是条目本身（「🔴 硬缺口：大模型经验缺失」），
+        // 除非它是不含「差距/缺口」的短标题——那才是下一个主题。
+        if (!GAP_SUBHEADING.test(title) && title.length <= 30) inGap = false;
+        else if (title.length >= 4 && !strong.includes(title)) strong.push(title);
+        continue;
+      }
+      // 不在小节里：粗体行要带「差距/缺口」才开启小节（`**能力差距 (Gaps)：**`）。
+      if (GAP_SUBHEADING.test(title)) inGap = true;
       continue;
     }
     if (!inGap) continue;
-    const item = line.match(GAP_ITEM);
-    if (!item) continue;
-    const text = (item[1].match(ITEM_BOLD_HEAD)?.[1] ?? item[1]).replace(/[*_`]/g, "").trim();
-    if (text.length < 4 || out.includes(text)) continue;
-    out.push(text.length > 90 ? text.slice(0, 90).trimEnd() + "…" : text);
-    if (out.length >= max) break;
+    // 表格形式：跳过分隔行，以及「表头」——紧跟着分隔行的那一行。
+    if (line.startsWith("|")) {
+      if (TABLE_SEPARATOR.test(line) || TABLE_SEPARATOR.test(lines[i + 1] ?? "")) continue;
+      const cell = (line.match(TABLE_FIRST_CELL)?.[1] ?? "").replace(/[*_`]/g, "").trim();
+      if (cell.length >= 4 && !strong.includes(cell)) {
+        strong.push(cell.length > 90 ? cell.slice(0, 90).trimEnd() + "…" : cell);
+      }
+      continue;
+    }
+    if (item === null) continue;
+    const text = item.text.replace(/[*_`]/g, "").trim();
+    if (text.length < 4) continue;
+    const bucket = item.kind === "numbered" || item.bold ? strong : weak;
+    if (bucket.includes(text)) continue;
+    bucket.push(text.length > 90 ? text.slice(0, 90).trimEnd() + "…" : text);
   }
-  return out;
+  // 同一小节里既有条目又有解释行时，解释行（「是硬门槛还是加分项？…」
+  // 「用 cv.md 已有表述抵消：…」）不该混进摘要；只在没有任何强条目时兜底。
+  const picked = strong.length > 0 ? strong : weak.filter((t) => !ITEM_NOISE.test(t) && !/[?？]$/.test(t));
+  return picked.slice(0, max);
 }
 
 /**

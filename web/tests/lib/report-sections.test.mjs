@@ -189,3 +189,50 @@ test("extractGapHighlights caps the list and needs a Gaps sub-section", () => {
   assert.deepEqual(extractGapHighlights("## A) Role Summary\n- bullet"), []);
   assert.deepEqual(extractGapHighlights("### 差距分析\n1. 学历"), []);
 });
+
+test("bold-wrapped numbered items are extracted; same-column explanation lines are not (#1210)", () => {
+  // 有的模式把编号写进粗体里（`**1. …**`），并且解释子行不缩进、与条目同列。
+  // 旧规则会把粗体行误判成小节标题，整节条目全部跳过。
+  const md = [
+    "### Gaps（弥补策略）",
+    "**1. 连锁餐饮行业经验（至少 2 年）— 硬门槛。**",
+    "- 是硬门槛还是加分项？JD 明确写「至少 2 年」。",
+    "- 怎么补？行业知识无法短期补齐。",
+    "**2. 数据中台 / 主数据项目经验 — 硬门槛。**",
+    "- 无作品覆盖。",
+  ].join("\n");
+  assert.deepEqual(extractGapHighlights(md), [
+    "连锁餐饮行业经验（至少 2 年）— 硬门槛。",
+    "数据中台 / 主数据项目经验 — 硬门槛。",
+  ]);
+});
+
+test("bullet items are only a fallback when the section has no numbered items", () => {
+  const md = ["### 差距分析", "- 学历不匹配", "- 行业经验缺失"].join("\n");
+  assert.deepEqual(extractGapHighlights(md), ["学历不匹配", "行业经验缺失"]);
+});
+
+test("paragraph-style bold gap headings inside a gap section are items (#771)", () => {
+  const md = [
+    "### 缺口分析",
+    "**🔴 硬缺口：大模型/AI 领域经验缺失**",
+    "JD 明确要求 3 年以上相关经验。",
+    "- 是否为硬阻塞：是。",
+    "**⚠️ 软缺口：学历要求（大专 vs 本科隐含）**",
+    "候选人大专学历。",
+    "### 地理/远程障碍",
+    "北京 vs 郑州。",
+  ].join("\n");
+  assert.deepEqual(extractGapHighlights(md), ["🔴 硬缺口：大模型/AI 领域经验缺失", "⚠️ 软缺口：学历要求（大专 vs 本科隐含）"]);
+});
+
+test("table-form gaps take the first column and skip the header rows (#1023)", () => {
+  const md = [
+    "### Gaps & Mitigation",
+    "| Gap | 性质 | 缓解策略 |",
+    "|-----|------|---------|",
+    "| 行业不匹配（软件 vs 机械制造） | 硬障碍 | 强调迁移性 |",
+    "| 大专学历（JD 要求本科） | 软障碍 | 16 年经验弥补 |",
+  ].join("\n");
+  assert.deepEqual(extractGapHighlights(md), ["行业不匹配（软件 vs 机械制造）", "大专学历（JD 要求本科）"]);
+});
