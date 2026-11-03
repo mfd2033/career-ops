@@ -37,6 +37,8 @@ import { resolveCli, dropCrossEngineModel } from "@/lib/clis";
 import {
   withModelFlag,
   isFatalGenericStderr,
+  classifyFatalStderr,
+  fatalStopMessage,
   makeCheckupHtmlProbe,
   checkupArtifactRowCountForTracker,
   batchCheckupFinalEvent,
@@ -65,6 +67,9 @@ const MAX_PARALLEL = 3; // shared with batch-evaluate: browser-scraping workers 
 // Same per-worker wall-clock cap /api/run gives kind:"checkup" (runaway-research
 // guard: #582/#682 burned 30 minutes each and persisted nothing).
 const CHECKUP_WORKER_KILL_MS = 1_800_000;
+// ADR-0094：静默看门狗阈值。任何 stdout/stderr 字节都会重置它，所以只有真的停在
+// 原地（如 CLI 在额度/传输错误后不退出）才会触发；比 30 分钟总阀更早发现“挂死”。
+const CHECKUP_SILENCE_MS = 900_000;
 
 // Structured-mode stdout (claude/codebuddy stream-json) carries the verdict
 // text inside JSON string values — most encoders leave ★ literal, but one that
@@ -259,6 +264,16 @@ export async function POST(req: Request) {
             let sawError = false;
             let star: number | null = null;
             let timedOut = false;
+            // ADR-0094：命中跨引擎致命错误的停机原因 + 停机幂等（致命错误、静默看门狗、
+            // 总时长阀、close 四条路径都可能走到 finish，只允许生效一次）。
+            let fatalReason: string | null = null;
+            let settled = false;
+            let killer: ReturnType<typeof setTimeout> | null = null;
+            let idle: ReturnType<typeof setTimeout> | null = null;
+            const clearTimers = () => {
+              if (killer) { clearTimeout(killer); killer = null; }
+              if (idle) { clearTimeout(idle); idle = null; }
+            };
             const poolHandle = acquire({ url: `#${t.n}`, title: t.company, reportNum: Number(t.n), source: "batch", cliId, model: model || undefined });
             poolHandles.add(poolHandle);
             const prompt = buildPrompt({
@@ -283,6 +298,9 @@ export async function POST(req: Request) {
             const { args: workerArgs } = resolveWorkerInvocation(spec, { kind: "checkup", prompt });
             const args = withModelFlag(workerArgs, spec.model, model);
             const finish = (outcome: CheckupOutcome) => {
+              if (settled) return;
+              settled = true;
+              clearTimers();
               poolHandles.delete(poolHandle);
               release(poolHandle.id);
               resolve(outcome);
@@ -309,13 +327,35 @@ export async function POST(req: Request) {
               const startedMs = Date.now();
               const child = spawnHeadlessCli(binPath, args, { cwd: root, env: process.env });
               children.add(child);
-              const killer = setTimeout(() => {
+              let stderrBuf = "";
+              let stderrTail = "";
+              // ADR-0094：三道停机阀共用一个出口——命中致命错误行 / 静默过久 / 总时长，
+              // 都立即结案并终止整棵进程树，而不是等一个可能永不到来的 close。
+              const stopNow = (reason: string) => {
+                if (settled) return;
+                fatalReason = reason;
+                const tail = stderrTail.replace(/\s+/g, " ").trim();
+                send({ type: "text", text: `\n\u274C #${t.n} ${t.company}: ${reason} — the run was stopped.\n` });
+                terminateCli(child);
+                finish(plain({ errMsg: reason.slice(0, 400), star, stderrTail: tail ? tail.slice(-STDERR_TAIL_CHARS) : null, startedMs }));
+              };
+              const armIdle = () => {
+                if (settled) return;
+                if (idle) clearTimeout(idle);
+                idle = setTimeout(
+                  () => stopNow(`The CLI produced no output for ${Math.round(CHECKUP_SILENCE_MS / 60000)} minutes — it appears hung`),
+                  CHECKUP_SILENCE_MS,
+                );
+              };
+              killer = setTimeout(() => {
                 timedOut = true;
                 terminateCli(child);
               }, CHECKUP_WORKER_KILL_MS);
+              armIdle();
               child.stdout?.setEncoding("utf-8");
               child.stderr?.setEncoding("utf-8");
               child.stdout?.on("data", (chunk: string) => {
+                armIdle();
                 const sm = chunk.match(STAR_RE) ?? chunk.match(STAR_FALLBACK_RE);
                 if (sm) star = parseFloat(sm[1]);
               });
@@ -323,12 +363,19 @@ export async function POST(req: Request) {
               // claude/opencode stream progress telemetry to stderr — a bare word
               // match would flag clean runs as failures.
               const isFatalStderr = spec.stderrIsFatal ?? isFatalGenericStderr;
-              let stderrBuf = "";
-              let stderrTail = "";
               const flagStderrLine = (line: string) => {
-                if (line.trim() && isFatalStderr(line)) sawError = true;
+                if (!line.trim()) return;
+                // ADR-0094：先问跨引擎致命类别（额度/认证/模型/传输）——命中就停。
+                const fatal = classifyFatalStderr(line);
+                if (fatal) {
+                  stopNow(fatalStopMessage(fatal));
+                  return;
+                }
+                // 旧的 per-CLI 宽判定保留：只参与最终成败标记，不再触发停机。
+                if (isFatalStderr(line)) sawError = true;
               };
               child.stderr?.on("data", (chunk: string) => {
+                armIdle();
                 stderrBuf += chunk;
                 stderrTail = (stderrTail + chunk).slice(-STDERR_TAIL_CHARS);
                 let nl;
@@ -346,18 +393,17 @@ export async function POST(req: Request) {
               };
               child.on("error", (err) => {
                 sawError = true;
-                clearTimeout(killer);
+                clearTimers();
                 send({ type: "text", text: `\u274C #${t.n} ${t.company}: ${err.message}\n` });
-                finish(plain({ errMsg: err.message.slice(0, 200), star, stderrTail: tailOf() }));
+                finish(plain({ errMsg: err.message.slice(0, 200), star, stderrTail: tailOf(), startedMs }));
                 children.delete(child);
               });
               child.on("close", (code) => {
-                clearTimeout(killer);
                 if (stderrBuf) {
                   flagStderrLine(stderrBuf);
                   stderrBuf = "";
                 }
-                const cleanExit = code === 0;
+                const cleanExit = code === 0 && !fatalReason;
                 const persisted = artifactRowsFor(t.n) > rowsBefore;
                 finish({
                   cleanExit,
@@ -365,7 +411,8 @@ export async function POST(req: Request) {
                   persisted,
                   timedOut,
                   star,
-                  errMsg: timedOut ? `checkup worker exceeded its ${CHECKUP_WORKER_KILL_MS / 60_000}-minute cap and was killed` : null,
+                  // ADR-0094：具体死因（额度/认证/模型/传输）优先于总时长文案。
+                  errMsg: fatalReason ?? (timedOut ? `checkup worker exceeded its ${CHECKUP_WORKER_KILL_MS / 60_000}-minute cap and was killed` : null),
                   cancelled: false,
                   stderrTail: tailOf(),
                   startedMs,

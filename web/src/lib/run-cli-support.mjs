@@ -119,15 +119,21 @@ function tokenCount(value) {
  * everything else, so a stderr classifier only needs to catch the failures that
  * produce no usable stream at all. */
 const FATAL_AUTH_STDERR_RE =
-  /unauthorized|forbidden|not authenticated|please log in|sign[ -]?in required|credential.*missing/i;
+  /unauthorized|forbidden|not authenticated|please log in|sign[ -]?in required|credential.*missing|invalid api[ -]?key|api[ -]?key\s*(?:is\s+)?(?:missing|invalid|expired|revoked)/i;
 
-/** Quota/rate-limit failures — fatal like auth, EXCEPT when the line announces
- * its own retry: the CLI is handling it, and the run can still complete
+/** Quota/rate-limit/credits failures — fatal like auth, EXCEPT when the line
+ * announces its own retry: the CLI is handling it, and the run can still complete
  * cleanly. Same reasoning as CODEX_TRANSIENT_ERROR_RE, for the stderr channel —
  * flagging a self-retrying 429 fatal re-creates the false-red #2085 exists to
  * remove (sawError fails the honesty gate even on exit 0 with a written
- * report). Auth gets no such carve-out: it never heals by retrying. */
-const FATAL_QUOTA_STDERR_RE = /quota|rate limit/i;
+ * report). Auth gets no such carve-out: it never heals by retrying.
+ *
+ * 措辞必须跨引擎收全（ADR-0094）：同一个「额度没了」在 Claude 叫 `usage limit
+ * reached`、在 OpenCode 叫 `Free usage limit reached … subscribe to keep going`、
+ * 在 Codex 叫 `quota`/`429`。只写 quota|rate limit 会漏掉 OpenCode 这一整类
+ * （2026-11-03 实测：免费模型耗尽后任务挂了 61 分钟且未判失败）。 */
+const FATAL_QUOTA_STDERR_RE =
+  /quota|rate[ -]?limit|usage limit|free usage|free tier|credit balance|insufficient (?:funds|balance|credits?|quota)|out of credits?|payment required|subscribe to (?:keep going|continue)|\b402\b|\b429\b/i;
 // Only a retry the CLI ANNOUNCES AS IN PROGRESS ("retrying", "retry in 5s",
 // "will retry") — a bare /retry/ would also match terminal wording like
 // "do not retry" or "retry limit exhausted" and silence a genuine failure.
@@ -219,6 +225,99 @@ export function isFatalOpenCodeStderr(line) {
  */
 export function isFatalGenericStderr(line) {
   return GENERIC_FATAL_STDERR_RE.test(line);
+}
+
+// ---------------------------------------------------------------------------
+// Cross-engine fail-fast classification (ADR-0094)
+// ---------------------------------------------------------------------------
+// 「出错就停」需要一条与引擎、模型都无关的判定：不论 claude / codex / opencode /
+// gemini / qwen / copilot / grok / antigravity，也不论配了哪个模型，只要出现下面
+// 这些**确定致命**的类别，派发方立刻终止该次评估并把原因写进终态。
+//
+// 与 per-CLI `stderrIsFatal` 的分工（两者不可合并）：
+//   • 那套分类器回答「这一行算不算本 CLI 的 error」，仍只用于 sawError 标记；
+//   • 这里回答「这一行是不是任何引擎都不该继续跑」，命中即终止进程。
+// 所以这里刻意**不含**裸 `error` / `not found` / `denied` —— 它们正是 #2085 与
+// #1974 两次「把干净运行判成失败」的来源。标记可以宽，终止必须准：命错一次就是
+// 杀掉一个本来能写完报告的评估。
+
+/** 模型不可用：选错引擎/模型、该模型已下线或被服务端拒绝。 */
+const FATAL_MODEL_STDERR_RE =
+  /\bmodel\b[^\n]{0,40}(?:not found|unavailable|does not exist|not supported|is invalid)|unknown model|invalid model|no such model/i;
+
+/** 传输层失败：这类错误最常见的表现恰恰是「进程不退出、一直挂着」。 */
+const FATAL_TRANSPORT_STDERR_RE =
+  /AI_APICallError|APICallError|APIConnectionError|ECONNREFUSED|ECONNRESET|ENOTFOUND|ETIMEDOUT|EAI_AGAIN|getaddrinfo|socket hang up|fetch failed|network error|connection (?:refused|reset|closed)/i;
+
+/** 判定顺序即优先级：认证 → 模型 → 额度 → 传输。 */
+const FATAL_LINE_CATEGORIES = [
+  {
+    category: "auth",
+    re: FATAL_AUTH_STDERR_RE,
+    reason: "Authentication failed — the CLI is not signed in or its credentials are invalid",
+    retryCarveOut: false,
+  },
+  {
+    category: "model",
+    re: FATAL_MODEL_STDERR_RE,
+    reason: "The selected model is not available to this CLI",
+    retryCarveOut: true,
+  },
+  {
+    category: "usage",
+    re: FATAL_QUOTA_STDERR_RE,
+    reason: "Model quota/usage limit reached — the selected model has no quota or credits left",
+    retryCarveOut: true,
+  },
+  {
+    category: "transport",
+    re: FATAL_TRANSPORT_STDERR_RE,
+    reason: "The model API could not be reached (network/transport failure)",
+    retryCarveOut: true,
+  },
+];
+
+/**
+ * Classify one stderr line as a cross-engine fatal error.
+ *
+ * Returns null for ordinary progress telemetry — including a line that announces
+ * its own retry (`retrying`, `retry in 5s`, `will retry`), which means the CLI is
+ * handling the failure itself and the run can still finish cleanly. Auth is the
+ * one exception: it never heals by retrying.
+ *
+ * @param {string} line
+ * @returns {{category: "auth"|"model"|"usage"|"transport", reason: string, text: string} | null}
+ */
+export function classifyFatalStderr(line) {
+  if (typeof line !== "string" || !line.trim()) return null;
+  const retrying = RETRYING_STDERR_RE.test(line);
+  for (const c of FATAL_LINE_CATEGORIES) {
+    if (c.retryCarveOut && retrying) continue;
+    if (c.re.test(line)) return { category: c.category, reason: c.reason, text: line.trim() };
+  }
+  return null;
+}
+
+/** Convenience boolean for callers that only need "stop now, yes/no". */
+export function isFatalCliStderr(line) {
+  return classifyFatalStderr(line) !== null;
+}
+
+/**
+ * One-line, human-readable stop reason for the terminal message / ledger row.
+ *
+ * Says WHAT class of failure it was and quotes what the CLI actually printed, so
+ * the card explains itself instead of showing a generic "hit an error". The quote
+ * is collapsed to one line (ledger rows are single-line) and capped.
+ *
+ * @param {{reason: string, text?: string} | null} hit
+ * @param {number} [maxChars]
+ * @returns {string}
+ */
+export function fatalStopMessage(hit, maxChars = 240) {
+  if (!hit) return "";
+  const detail = String(hit.text ?? "").replace(/\s+/g, " ").trim().slice(0, maxChars);
+  return detail ? `${hit.reason}. The CLI said: ${detail}` : hit.reason;
 }
 
 const GENERIC_FATAL_STDERR_RE =
@@ -700,7 +799,7 @@ export function blacklistGateLedgerFields(gate) {
  * mirrors the original if/else chain exactly; the evaluate message is kept
  * byte-identical.
  *
- * @param {{kind: string, cleanExit: boolean, sawError: boolean, emittedText: boolean, persisted: boolean, timedOut?: boolean, checkupAlreadyCurrentStar?: number | null, blacklistGate?: boolean}} args
+ * @param {{kind: string, cleanExit: boolean, sawError: boolean, emittedText: boolean, persisted: boolean, timedOut?: boolean, checkupAlreadyCurrentStar?: number | null, blacklistGate?: boolean, fatalReason?: string | null}} args
  *   `timedOut` = the harness's own kill timer stopped it (route.ts's `killer`), which is
  *   NOT the CLI's fault and must be reported as such — see the branch below.
  *   `checkupAlreadyCurrentStar` = 本 tracker# 当天已有一条可核验体检行时的星级
@@ -710,9 +809,16 @@ export function blacklistGateLedgerFields(gate) {
  *   `blacklistGate` = 该 run 命中了公司黑名单门禁并主动停止（route.ts 用
  *   `detectBlacklistGate(stdoutTail)` 判定）。这不是失败而是按设计拦截，记 done + 说明，
  *   不再提示无谓重跑（ADR-0084，2026-10-17 12:28 误判的修复）。
+ *   `fatalReason` = route 命中了 `classifyFatalStderr` 并主动终止本次 run 时的一句话原因
+ *   （ADR-0094）。它优先于通用门文案：额度/认证/模型/传输失败必须说出自己的名字，
+ *   否则用户会照着「去查装没装 CLI」去排错，方向完全错。
  * @returns {{ok: true, alreadyCurrent?: boolean, blockedByBlacklist?: boolean, message?: string} | {ok: false, message: string}}
  */
-export function persistRunOutcome({ kind, cleanExit, sawError, emittedText, persisted, timedOut = false, checkupAlreadyCurrentStar = null, blacklistGate = false }) {
+export function persistRunOutcome({ kind, cleanExit, sawError, emittedText, persisted, timedOut = false, checkupAlreadyCurrentStar = null, blacklistGate = false, fatalReason = null }) {
+  // ADR-0094：具体死因 > 通用门文案。没有它，「模型额度用尽」会显示成
+  // "is it installed and authenticated?"——一句会把人带向错误方向的猜测。
+  const withFatal = (message) =>
+    typeof fatalReason === "string" && fatalReason.trim() ? `${fatalReason.trim()} — ${message}` : message;
   // 本地定时器杀的，先于一切判——否则「无 stdout + 非 0 退出」会落进下面的
   // noOutputError 分支，把 30 分钟体检上限读成安装/登录问题（2026-09-17 #682 实测：
   // 卡片写着 "is it installed and authenticated?"，真因是撞了 checkup 的 1_800_000ms
@@ -740,10 +846,10 @@ export function persistRunOutcome({ kind, cleanExit, sawError, emittedText, pers
   // was evaluating or running a checkup — one place for the condition/message
   // pair (formerly route.ts's noOutputError).
   if (!emittedText && !sawError && !cleanExit) {
-    return { ok: false, message: "The CLI exited with an error — is it installed and authenticated?" };
+    return { ok: false, message: withFatal("The CLI exited with an error — is it installed and authenticated?") };
   }
   if (!emittedText && !sawError) {
-    return { ok: false, message: "The CLI produced no output — is it installed and authenticated? (career-ops is best on Claude Code.)" };
+    return { ok: false, message: withFatal("The CLI produced no output — is it installed and authenticated? (career-ops is best on Claude Code.)") };
   }
   // Blacklist gate stop (ADR-0084): a clean, text-emitting run that wrote no
   // report because the gate deliberately stopped before Block A. This is the
@@ -778,10 +884,10 @@ export function persistRunOutcome({ kind, cleanExit, sawError, emittedText, pers
     const message = kind === "checkup"
       ? "This checkup finished without a usable row in the checkup ledger (data/company-checkups.tsv) — no new row landed, or the row it added names an HTML report that isn't there. Nothing was persisted, so it's not recorded. Re-run it to verify."
       : "This evaluation didn't save a report, so it's not in your tracker. Full evaluation is verified on Claude Code.";
-    return { ok: false, message };
+    return { ok: false, message: withFatal(message) };
   }
   if (!cleanExit || sawError) {
-    return { ok: false, message: "This run hit an error before finishing, so it isn't recorded as a confident result — re-run it to verify." };
+    return { ok: false, message: withFatal("This run hit an error before finishing, so it isn't recorded as a confident result — re-run it to verify.") };
   }
   return { ok: true };
 }

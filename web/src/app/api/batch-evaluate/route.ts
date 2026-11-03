@@ -30,7 +30,7 @@ import { buildRunLedgerSteps } from "@/lib/run-steps.mjs";
 import { buildBatchLedgerRecord } from "@/lib/batch-ledger.mjs";
 import { buildBatchChildRecord } from "@/lib/batch-child-ledger.mjs";
 import { resolveCli, dropCrossEngineModel } from "@/lib/clis";
-import { withModelFlag, isFatalGenericStderr, parseReservationOutput } from "@/lib/run-cli-support.mjs";
+import { withModelFlag, isFatalGenericStderr, classifyFatalStderr, fatalStopMessage, parseReservationOutput } from "@/lib/run-cli-support.mjs";
 import { resolveWorkerInvocation } from "@/lib/worker-invocation.mjs";
 import { isReservedReportFile } from "@/lib/report-files.mjs";
 import { spawnHeadlessCli, terminateCli } from "@/lib/spawn-cli.mjs";
@@ -54,6 +54,13 @@ export const maxDuration = 800;
 
 const MAX_URLS = 20;
 const MAX_PARALLEL = 3; // bounded worker pool; batch-runner.sh uses 1, this stays modest
+// ADR-0094：批量 worker 的两道停机阀（此前一道都没有——2026-11-03 那次 OpenCode
+// 额度耗尽后进程不退出，池槽被占满 61 分钟，后面排队的 worker 一起饿死）。
+//   • 总时长与 /api/run 的 kind:evaluate 同口径（30 分钟）；
+//   • 静默阈值更早发现“挂死”：任何 stdout/stderr 字节都会重置它，只有真的停在
+//     原地才会触发；15 分钟留足了慢速 CLI（codebuddy/hy3 工具间隔实测 1-4 分钟）的余量。
+const WORKER_KILL_MS = 1_800_000;
+const WORKER_SILENCE_MS = 900_000;
 
 const execFileAsync = promisify(execFile);
 
@@ -275,6 +282,16 @@ export async function POST(req: Request) {
             // 代理显式输出的错误行(如登录墙 `ERROR: cannot extract JD ...`)。
             // 用于让 pipeline 卡片显示真实失败原因,而非误导性的通用双消息。
             let errMsg: string | null = null;
+            // ADR-0094：命中跨引擎致命错误（额度/认证/模型/传输）时的停机原因。
+            let fatalReason: string | null = null;
+            // 停机幂等：致命错误、看门狗、close 三条路径都会走到 finish，只允许生效一次。
+            let settled = false;
+            let killer: ReturnType<typeof setTimeout> | null = null;
+            let idle: ReturnType<typeof setTimeout> | null = null;
+            const clearTimers = () => {
+              if (killer) { clearTimeout(killer); killer = null; }
+              if (idle) { clearTimeout(idle); idle = null; }
+            };
             // ADR-0049：收集逐工具事件供子台账持久化（T03 消费）。
             const collectedEvents: Array<{type: string, name?: string, detail?: string, ts?: number}> = [];
             const url = urls[i];
@@ -306,6 +323,11 @@ export async function POST(req: Request) {
               model,
             );
             const finish = (outcome: { cleanExit: boolean; sawError: boolean; verdict: string | null; errMsg: string | null; cancelled?: boolean }) => {
+              // close 事件可能在人工/看门狗停机之后才到达——只认第一次，否则池槽会被
+              // 释放两次、状态也会被后来的“干净退出”覆盖成成功。
+              if (settled) return;
+              settled = true;
+              clearTimers();
               poolHandles.delete(poolHandle);
               release(poolHandle.id);
               resolve({ ...outcome, startedMs, collectedEvents } as { cleanExit: boolean; sawError: boolean; verdict: string | null; errMsg: string | null; cancelled: boolean; startedMs: number; collectedEvents: typeof collectedEvents });
@@ -326,6 +348,29 @@ export async function POST(req: Request) {
               // ADR-0049 决议 5：spawn 后立即宣告 item-running，让客户端建立
               // reportNum→行映射，后续 tool 事件凭 itemKey 路由到正确卡片。
               send({ type: "item-running", reportNum: num, url });
+              // ADR-0094：停机阀。三道触发源（致命错误行 / 静默过久 / 总时长）共用一个出口：
+              // 写清原因 → 终止整棵进程树 → 交给 close 收尾（finish 幂等）。
+              const stopNow = (reason: string) => {
+                if (settled) return;
+                fatalReason = reason;
+                errMsg = reason;
+                send({ type: "text", text: `\n\u274C ${url}: ${reason} — the run was stopped.\n` });
+                terminateCli(child);
+                // 立即结案，不等 close：这是「停止评估」的语义——拿回池槽、把失败写进
+                // 卡片与子台账，都发生在此刻；taskkill 迟迟不回也不会再堵住队列
+                // （close 到达时会被 settled 拦住，不会二次结案）。
+                finish({ cleanExit: false, sawError: true, verdict, errMsg: reason });
+              };
+              const armIdle = () => {
+                if (settled) return;
+                if (idle) clearTimeout(idle);
+                idle = setTimeout(
+                  () => stopNow(`The CLI produced no output for ${Math.round(WORKER_SILENCE_MS / 60000)} minutes — it appears hung`),
+                  WORKER_SILENCE_MS,
+                );
+              };
+              killer = setTimeout(() => stopNow("This run hit the harness's 30-minute limit and was stopped"), WORKER_KILL_MS);
+              armIdle();
               if (invocation.structured) {
                 // Structured engines (ADR-0054): JSONL-buffer stdout, parse each
                 // event via the engine's OWN spec.parseEvent, forward tool events
@@ -347,9 +392,14 @@ export async function POST(req: Request) {
                     send({ type: "tool", itemKey: num, name: ev.tool, ...(detail ? { detail } : {}) });
                     collectedEvents.push({ type: "tool", name: ev.tool, ...(detail ? { detail } : {}), ts: Date.now() });
                   }
-                  if (ev?.error) sawError = true;
+                  if (ev?.error) {
+                    sawError = true;
+                    // ADR-0094：结构化引擎自报的 error 同样立即停机，不等它自己退。
+                    stopNow(fatalStopMessage({ reason: "The CLI reported an error", text: ev.error }));
+                  }
                 };
                 child.stdout?.on("data", (chunk: string) => {
+                  armIdle();
                   lineBuf += chunk;
                   let nl: number;
                   while ((nl = lineBuf.indexOf("\n")) !== -1) {
@@ -366,6 +416,7 @@ export async function POST(req: Request) {
                 // Non-structured engines (ADR-0054): plain text stdout, regex-sniff
                 // VERDICT/ERROR (legacy path, byte-identical to pre-0054 behavior).
                 child.stdout?.on("data", (chunk: string) => {
+                  armIdle();
                   const vm = chunk.match(/VERDICT:[^\n]*/i);
                   if (vm) verdict = vm[0];
                   const em = chunk.match(/ERROR:[^\n]*/i);
@@ -379,9 +430,19 @@ export async function POST(req: Request) {
               const isFatalStderr = spec.stderrIsFatal ?? isFatalGenericStderr;
               let stderrBuf = "";
               const flagStderrLine = (line: string) => {
-                if (line.trim() && isFatalStderr(line)) sawError = true;
+                if (!line.trim()) return;
+                // ADR-0094：先问跨引擎致命类别（额度/认证/模型/传输）——命中就停，
+                // 不等进程自己退出。OpenCode 在额度耗尽后正是永不退出（2026-11-03）。
+                const fatal = classifyFatalStderr(line);
+                if (fatal) {
+                  stopNow(fatalStopMessage(fatal));
+                  return;
+                }
+                // 旧的 per-CLI 宽判定保留：它只参与最终成败标记，不再触发停机。
+                if (isFatalStderr(line)) sawError = true;
               };
               child.stderr?.on("data", (chunk: string) => {
+                armIdle();
                 stderrBuf += chunk;
                 let nl;
                 while ((nl = stderrBuf.indexOf("\n")) !== -1) {
@@ -400,7 +461,8 @@ export async function POST(req: Request) {
                   flagStderrLine(stderrBuf);
                   stderrBuf = "";
                 }
-                finish({ cleanExit: code === 0, sawError, verdict, errMsg });
+                // fatalReason 优先：它比通用的 "hit an error" 信息量高得多。
+                finish({ cleanExit: code === 0 && !fatalReason, sawError, verdict, errMsg: fatalReason ?? errMsg });
                 children.delete(child);
               });
             })();

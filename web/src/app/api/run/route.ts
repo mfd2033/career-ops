@@ -10,7 +10,7 @@ import { after } from "next/server";
 import { resolveCli, dropCrossEngineModel } from "@/lib/clis";
 import { cliDisplayName } from "@/lib/cli-labels.mjs";
 import { resolveWorkerInvocation } from "@/lib/worker-invocation.mjs";
-import { accumulateTokens, authExpiredHint, blacklistGateLedgerFields, checkupArtifactRowCount, checkupArtifactTodayForTracker, makeCheckupHtmlProbe, detectBlacklistGate, failureEvidence, failureLedgerMsg, hasNewCompletedReport, isFatalGenericStderr, persistRunOutcome, PERSISTENCE_GATED_KINDS, withModelFlag } from "@/lib/run-cli-support.mjs";
+import { accumulateTokens, authExpiredHint, blacklistGateLedgerFields, checkupArtifactRowCount, checkupArtifactTodayForTracker, classifyFatalStderr, fatalStopMessage, makeCheckupHtmlProbe, detectBlacklistGate, failureEvidence, failureLedgerMsg, hasNewCompletedReport, isFatalGenericStderr, persistRunOutcome, PERSISTENCE_GATED_KINDS, withModelFlag } from "@/lib/run-cli-support.mjs";
 import { spawnHeadlessCli, terminateCli } from "@/lib/spawn-cli.mjs";
 import { careerOpsRoot, readMemory, findReportFile, readInbox, readScanDates, findCheckupTarget, readApplications, rootScript, readMarketModesDir, listMarketModes } from "@/lib/career-ops";
 import { checkupDispatchText } from "@/lib/checkup-request.mjs";
@@ -564,8 +564,23 @@ async function runPipeline({
     // is how a bare `auth` came to match "Authentication successful" and mark a
     // successful run as failed on six of the eight runtimes (#1974).
     const isFatalStderr = spec.stderrIsFatal ?? isFatalGenericStderr;
+    // ADR-0094：命中跨引擎致命类别（额度/认证/模型/传输）就主动终止本 run，而不是只
+    // 标记一下继续等——OpenCode 在额度耗尽后正是永不退出（2026-11-03 挂了 61 分钟）。
+    // 这里不发 error 事件：终态由 close 统一发出并带上 stoppedReason，台账只写一次。
+    let stoppedReason: string | null = null;
     const flagStderrLine = (line: string) => {
-      if (!line.trim() || !isFatalStderr(line)) return;
+      if (!line.trim()) return;
+      const fatal = classifyFatalStderr(line);
+      if (fatal) {
+        if (!stoppedReason) {
+          stoppedReason = fatalStopMessage(fatal);
+          sawError = true;
+          if (child) terminateCli(child);
+        }
+        return;
+      }
+      // 旧的 per-CLI 宽判定保留：仍然报错给实时卡片，但不再主动终止进程。
+      if (!isFatalStderr(line)) return;
       sawError = true;
       send({ type: "error", msg: line.trim().slice(0, 200) });
     };
@@ -662,6 +677,16 @@ async function runPipeline({
       if (typeof ev?.costUsd === "number") lastCostUsd = ev.costUsd;
       if (ev?.error) {
         sawError = true;
+        // ADR-0094：结构化事件里的致命类别同样立即停机。命中时不发 error：终态留给
+        // close 统一发——recordEnd 只认第一条，先发的通用消息会把真实死因挤出台账。
+        const fatal = classifyFatalStderr(ev.error);
+        if (fatal) {
+          if (!stoppedReason) {
+            stoppedReason = fatalStopMessage(fatal);
+            if (child) terminateCli(child);
+          }
+          return;
+        }
         send({ type: "error", msg: ev.error.slice(0, 200) });
       }
     };
@@ -901,7 +926,9 @@ async function runPipeline({
             hasPaths: pdfPaths !== undefined,
           });
           if (!outcome.ok) {
-            send({ type: "error", msg: outcome.message });
+            // pdf 分支的成败文案来自 pdfRunOutcome，不经过 persistRunOutcome 的
+            // withFatal——在这里补上具体死因，否则用户只会看到「信封缺失」。
+            send({ type: "error", msg: stoppedReason ? `${stoppedReason} — ${outcome.message}` : outcome.message });
           } else if (!pdfPaths || envelope?.ok !== true) {
             // Unreachable: pdfRunOutcome validated both via hasPaths/envelope.ok.
             // Kept for narrowing, but it must REPORT rather than fall through to a
@@ -943,7 +970,7 @@ async function runPipeline({
         // zero-artifact runs got banked as done (2026-09-16, #73/#131).
         // 门禁标记只算一次：既喂诚实门（!!gate），也留给台账写 blockedCompany。
         const gate = detectBlacklistGate(stdoutTail);
-        const outcome = persistRunOutcome({ kind, cleanExit, sawError, emittedText, persisted, timedOut, checkupAlreadyCurrentStar, blacklistGate: !!gate });
+        const outcome = persistRunOutcome({ kind, cleanExit, sawError, emittedText, persisted, timedOut, checkupAlreadyCurrentStar, blacklistGate: !!gate, fatalReason: stoppedReason });
         if (outcome.ok && outcome.blockedByBlacklist && gate) blacklistGateHit = gate;
         if (outcome.ok && kind === "evaluate" && !outcome.blockedByBlacklist) {
           // Archiving the inbox row is route work after the CLI is gone, and it
