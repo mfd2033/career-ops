@@ -226,6 +226,7 @@ function JobsRow({ job: j }: { job: Job }) {
               cliId={j.cliId}
               model={j.model}
               parentTerminal={j.status === "error" || j.status === "done"}
+              retryKept={j.retryKept}
             />
           ) : (
             <p className="mt-2 text-xs text-muted">{t("jobs.batchWaiting")}</p>

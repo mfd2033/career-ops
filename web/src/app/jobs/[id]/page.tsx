@@ -408,6 +408,7 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
                 cliId={job.cliId}
                 model={job.model}
                 parentTerminal={job.status === "error" || job.status === "done"}
+                retryKept={job.retryKept}
               />
             </>
           )}

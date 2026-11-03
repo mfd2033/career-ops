@@ -7,6 +7,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   BATCH_JOB_KINDS,
+  batchRetryPlan,
   canRetryJob,
   nextAttempt,
   resetJobForRetry,
@@ -71,6 +72,95 @@ test("canRetryJob：单任务卡缺 kind 或 input 不可重试", () => {
 test("canRetryJob：null/undefined 保守拒绝", () => {
   assert.equal(canRetryJob(null), false);
   assert.equal(canRetryJob(undefined), false);
+});
+
+// ADR-0095：3 项批量评估——一项成功、一项带 reason 的失败、一项停在 item-running
+// 占位（结论丢失）。
+const batchJob = {
+  id: "job-7",
+  status: "error",
+  kind: "batch-evaluate",
+  input: "3 urls",
+  urls: ["https://x/a", "https://x/b", "https://x/c"],
+  items: [
+    { key: "https://x/a", label: "https://x/a", ok: true, score: 4.2, reportNum: 42, ts: 1 },
+    { key: "https://x/b", label: "https://x/b", ok: false, reason: "worker exited 1", ts: 2 },
+    { key: "https://x/c", label: "https://x/c", ok: false, ts: 3 },
+  ],
+};
+
+test("batchRetryPlan：只重跑失败与无结论项，已成功项进 kept — ADR-0095", () => {
+  assert.deepEqual(batchRetryPlan(batchJob), {
+    field: "urls",
+    retry: ["https://x/b", "https://x/c"],
+    kept: ["https://x/a"],
+    scoped: true,
+  });
+});
+
+test("batchRetryPlan：skipped 项算已定结论，不重跑（ADR-0041 决议 5）", () => {
+  const job = { ...batchJob, items: [{ key: "https://x/a", ok: false, skipped: true, ts: 1 }] };
+  const plan = batchRetryPlan({ ...job, urls: ["https://x/a", "https://x/b"] });
+  assert.deepEqual(plan.retry, ["https://x/b"]);
+  assert.deepEqual(plan.kept, ["https://x/a"]);
+});
+
+test("batchRetryPlan：items 缺失/为空时判不了成功项，退回全量（宁重复不漏跑）", () => {
+  for (const items of [undefined, []]) {
+    const plan = batchRetryPlan({ ...batchJob, items });
+    assert.deepEqual(plan, { field: "urls", retry: [...batchJob.urls], kept: [], scoped: false });
+  }
+});
+
+test("batchRetryPlan：checkup 批量与单任务卡不子集化", () => {
+  // checkup 的子项 key 是 tracker#，重跑要先过 /api/checkup-request 前哨——
+  // 整卡重试维持全量（ADR-0093 决议 4 / ADR-0095）。
+  const checkup = {
+    id: "job-8",
+    status: "error",
+    kind: "batch-checkup",
+    input: "2 rows",
+    ns: ["12", "13"],
+    items: [{ key: "12", ok: true, ts: 1 }],
+  };
+  assert.deepEqual(batchRetryPlan(checkup), { field: "ns", retry: ["12", "13"], kept: [], scoped: false });
+  assert.equal(batchRetryPlan({ ...singleError }), null);
+  assert.equal(batchRetryPlan(null), null);
+});
+
+test("batchRetryPlan：全部成功时没有可重试项，canRetryJob 为 false", () => {
+  const allOk = {
+    ...batchJob,
+    items: batchJob.urls.map((u) => ({ key: u, ok: true, ts: 1 })),
+  };
+  assert.deepEqual(batchRetryPlan(allOk).retry, []);
+  assert.equal(canRetryJob(allOk), false);
+});
+
+test("canRetryJob：批量评估只要还有失败/无结论项就可重试", () => {
+  assert.equal(canRetryJob(batchJob), true);
+});
+
+test("resetJobForRetry：scoped 重试收窄 urls，并保留已成功项结论", () => {
+  const retry = batchRetryPlan(batchJob);
+  const r = resetJobForRetry(batchJob, { now: 1000, separatorLabel: "sep", retry });
+  // 本轮只跑失败/无结论的两项；checkup 的 ns 快照不受影响
+  assert.deepEqual(r.urls, ["https://x/b", "https://x/c"]);
+  assert.equal(r.ns, undefined);
+  // 已成功项的结论（报告号/分数）与「本轮未重跑」的键都留在卡上
+  assert.deepEqual(r.items, [batchJob.items[0]]);
+  assert.deepEqual(r.retryKept, ["https://x/a"]);
+  // 失败的旧结论被清掉（本轮会重出）；attempt 与时间线照常推进
+  assert.equal(r.status, "running");
+  assert.equal(r.attempt, 2);
+  assert.equal(r.text, "");
+});
+
+test("resetJobForRetry：非 scoped 仍整批重跑，items 整体清除（旧行为）", () => {
+  const r = resetJobForRetry(batchJob, { now: 1000, separatorLabel: "sep", retry: { field: "urls", retry: [...batchJob.urls], kept: [], scoped: false } });
+  assert.deepEqual(r.urls, batchJob.urls);
+  assert.equal("items" in r, false);
+  assert.equal("retryKept" in r, false);
 });
 
 test("nextAttempt：缺省视为第 1 次，重试后是第 2 次", () => {

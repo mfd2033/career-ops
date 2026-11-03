@@ -4,13 +4,15 @@ import { useState } from "react";
 import { RotateCcw } from "lucide-react";
 import { useJobs, type Job } from "@/components/jobs/job-store";
 import { useI18n } from "@/lib/i18n/context";
-import { canRetryJob } from "@/lib/job-retry.mjs";
+import { batchRetryPlan, canRetryJob } from "@/lib/job-retry.mjs";
 import { cn } from "@/lib/cn";
 
 // ADR-0061 决议 1/6/7：error 卡的手动重试按钮（/jobs 行 + 详情页共用）。
-// 单任务一键直达；批量（urls/ns 条数 > 1）先弹确认框，明示整卡重跑与条数
+// 单任务一键直达；批量（urls/ns 条数 > 1）先弹确认框，明示重跑范围与条数
 // （复用 ADR-0057 的内嵌弹窗模式，不用 window.confirm）。canRetryJob 不通过
-// 的卡（取消/完成/池源/ledger-only）完全不渲染。
+// 的卡（取消/完成/池源/ledger-only/无失败项可跑）完全不渲染。
+// ADR-0095：批量评估的重跑范围是「失败/无结论子集」，弹窗要说清跳过了多少
+// 已成功项——否则用户会按旧文案以为整批又要重烧一遍。
 export function RetryJobButton({
   job,
   withLabel = false,
@@ -25,8 +27,11 @@ export function RetryJobButton({
   const { t } = useI18n();
   const [confirmOpen, setConfirmOpen] = useState(false);
   if (!canRetryJob(job)) return null;
-  // 整卡重跑的条数：evaluate 批量看 urls，checkup 批量看 ns（二者互斥，与派发二分同口径）。
-  const n = job.urls?.length ?? job.ns?.length ?? 0;
+  // 重跑条数：ADR-0095 批量评估取「本轮失败/无结论子集」，其余（单任务、
+  // checkup 批量、无 items 的旧卡）仍是 urls/ns 全量（与派发二分同口径）。
+  const plan = batchRetryPlan(job);
+  const failedOnly = plan?.scoped === true && plan.kept.length > 0 ? plan : null;
+  const n = failedOnly ? failedOnly.retry.length : (job.urls?.length ?? job.ns?.length ?? 0);
   const needsConfirm = n > 1;
 
   const requestRetry = () => {
@@ -60,7 +65,11 @@ export function RetryJobButton({
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4" role="dialog" aria-modal="true">
           <div className="w-full max-w-sm rounded-2xl border border-border bg-surface p-5 shadow-xl">
             <h3 className="font-display text-base">{t("jobs.retryConfirmTitle")}</h3>
-            <p className="mt-2 text-sm text-muted">{t("jobs.retryConfirmBody", { n })}</p>
+            <p className="mt-2 text-sm text-muted">
+              {failedOnly
+                ? t("jobs.retryFailedOnlyBody", { n, kept: failedOnly.kept.length })
+                : t("jobs.retryConfirmBody", { n })}
+            </p>
             <div className="mt-5 flex justify-end gap-2">
               <button
                 type="button"
@@ -77,7 +86,7 @@ export function RetryJobButton({
                 }}
                 className="rounded-md bg-brand px-3 py-1.5 text-xs font-medium text-brand-foreground transition-colors hover:bg-brand-200"
               >
-                {t("jobs.retryConfirmConfirm")}
+                {failedOnly ? t("jobs.retryFailedOnlyConfirm") : t("jobs.retryConfirmConfirm")}
               </button>
             </div>
           </div>

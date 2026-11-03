@@ -55,6 +55,10 @@
 
 **验证**：`node --test web/tests/lib/batch-item-retry-wiring.test.mjs`（断言按钮不再携带 `cliId`/`model`、`job-store` 两处派发均 `await resolveEngineFallback()`）；`web` tsc 干净。
 
+## 修订 3（2026-11-03）：整卡重试改为「只重跑失败项」
+
+ADR-0095 把批量评估的整卡重试从「整批从头跑」改成「失败/无结论子集」，并在重试时保留已成功项的子项结论（`retryKept`）——Alternatives 中「把失败子集塞回父卡重跑」当年的否决理由（成功项结论当场消失）由此消解。本 ADR 的单项重试入口不变：它仍是粒度更细、不动父卡的选择。
+
 ## Consequences
 
 - 失败项的补救成本从「整批 20 次评估」降到 1 次；代价是新增一张独立卡片与一条台账记录，父批量的计数不变（用户可能看到「1 failed」同时顶部有新的重试 worker——这是如实的两个事实）。

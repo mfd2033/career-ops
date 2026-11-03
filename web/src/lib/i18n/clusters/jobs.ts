@@ -103,6 +103,13 @@ export const en: Dict = {
     "The whole batch re-runs from scratch ({n} items) — items that already succeeded will run again.",
   "jobs.retryConfirmCancel": "Cancel",
   "jobs.retryConfirmConfirm": "Re-run batch",
+  // ADR-0095：批量评估的重试只跑失败/无结论项，弹窗与子项标注说明跳过范围。
+  "jobs.retryFailedOnlyBody":
+    "Only the {n} item(s) that failed or returned no result will run again \u2014 the {kept} already-succeeded item(s) are skipped.",
+  "jobs.retryFailedOnlyConfirm": "Retry failed items",
+  "jobs.batchItemRetryKept": "not re-run",
+  "jobs.batchItemRetryKeptHint":
+    "Kept from the previous attempt \u2014 this retry skipped it because it had already succeeded.",
   // ADR-0093 单项重试：失败子项按钮、独立工作器标题与在跑提示。
   "jobs.batchItemRetry": "Retry item",
   "jobs.batchItemRetryHint":
@@ -204,6 +211,12 @@ export const zh: Dict = {
   "jobs.retryConfirmBody": "整批将从头重跑（共 {n} 项），已成功项也会重新执行。",
   "jobs.retryConfirmCancel": "取消",
   "jobs.retryConfirmConfirm": "整批重跑",
+  // ADR-0095：与 en 一一对应。
+  "jobs.retryFailedOnlyBody":
+    "本次只重跑失败或无结论的 {n} 项，已成功的 {kept} 项跳过（不重复评估）。",
+  "jobs.retryFailedOnlyConfirm": "重试失败项",
+  "jobs.batchItemRetryKept": "未重跑",
+  "jobs.batchItemRetryKeptHint": "沿用上一轮已成功的结论，本次重试已跳过该项。",
   // ADR-0093 单项重试：与 en 一一对应。
   "jobs.batchItemRetry": "重试该项",
   "jobs.batchItemRetryHint": "将该链接作为独立工作器重新评估；本批量里的失败记录原样保留。",

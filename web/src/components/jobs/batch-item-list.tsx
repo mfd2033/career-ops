@@ -32,6 +32,7 @@ export function BatchItemList({
   cliId,
   model,
   parentTerminal = false,
+  retryKept,
 }: {
   items: JobItem[];
   batchId?: string;
@@ -40,13 +41,18 @@ export function BatchItemList({
   /** 父批量是否已达终态（done/error）——ADR-0093 修订 1：终态下没收到结论的
    *  失败项（流断掉的 item-running 占位）也可重试，且如实标明「结论丢失」。 */
   parentTerminal?: boolean;
+  /** ADR-0095：本轮重试跳过的项键（结论沿用上一轮）——这些行不是本次刚跑的，
+   *  要标清楚，否则重试中的卡片看起来像已经跑完了全部。 */
+  retryKept?: string[];
 }) {
   const { t } = useI18n();
   const engine = formatRunEngine(cliId, model);
+  const keptSet = new Set(retryKept ?? []);
   return (
     <ul className="mt-2 grid max-h-[28rem] gap-2 overflow-y-auto sm:grid-cols-2">
       {items.map((it) => {
         const href = batchItemDetailHref(batchId, it);
+        const fromPrevAttempt = keptSet.has(it.key);
         const secs = it.startedAt != null && it.finishedAt != null ? Math.round((it.finishedAt - it.startedAt) / 1000) : null;
         // ADR-0093 修订 1：父批量已终态却没收到该条结论（item-running 占位没有
         // reason）——要如实说明，不能让失败项看起来无因无故。
@@ -75,6 +81,16 @@ export function BatchItemList({
               </span>
               {it.ok && it.score != null && <span className="shrink-0 rounded bg-emerald-500/15 px-1 py-0.5 text-[10px] font-semibold tabular-nums text-emerald-700 dark:text-emerald-400">{it.score}/5</span>}
               {it.ok && it.star != null && <span className="shrink-0 rounded bg-emerald-500/15 px-1 py-0.5 text-[10px] font-semibold tabular-nums text-emerald-700 dark:text-emerald-400">{"\u2605"}{it.star}/5</span>}
+              {/* ADR-0095：本轮重试跳过的项（上一轮已成功）——降权标注「未重跑」，
+                  与本次真正重跑的项区分开。 */}
+              {fromPrevAttempt && (
+                <span
+                  className="shrink-0 rounded bg-surface-hover px-1 py-0.5 text-[10px] text-faint"
+                  title={t("jobs.batchItemRetryKeptHint")}
+                >
+                  {t("jobs.batchItemRetryKept")}
+                </span>
+              )}
               {/* ADR-0093：终态失败的 evaluate 子项可单独重跑（独立工作器，父批量
                   失败记录保留）；成功/跳过/占位项由纯函数拦掉。引擎不随派发透传——
                   修订 2：重试取派发那一刻的最新模型配置。 */}

@@ -5,7 +5,7 @@ import { scoreTone } from "@/lib/format";
 import { readSavedCliId, readSavedModel, resolveCliId } from "@/lib/saved-cli";
 import { useI18n } from "@/lib/i18n/context";
 import { reconcileJobsWithLedger } from "@/lib/job-ledger-reconcile.mjs";
-import { canRetryJob, nextAttempt, resetJobForRetry } from "@/lib/job-retry.mjs";
+import { canRetryJob, batchRetryPlan, nextAttempt, resetJobForRetry } from "@/lib/job-retry.mjs";
 import { pickAdoptableRuns, ADOPT_PREFIX } from "@/lib/job-adopt.mjs";
 import { ledgerRunsToCards } from "@/lib/ledger-display.mjs";
 
@@ -100,9 +100,13 @@ export type Job = {
   // cap 截断时计数仍以此为准）；本地卡暂不填（batchPos.n 已承载同信息）。
   batchTotal?: number;
   // ADR-0061 任务重试：批量派发参数快照——整卡重跑时唯一可靠的取参来源
-  // （items 只是结论清单、可能被 cap 截断，不能反推原始清单）。
+  // （items 只是结论清单、可能被 cap 截断，不能反推原始清单）。ADR-0095：批量
+  // 评估重试会把它收窄成「本轮要跑的失败项子集」，成功项不在其中。
   urls?: string[];
   ns?: string[];
+  // ADR-0095：本轮重试跳过、结论沿用上一轮的成功（或跳过）项键——子项清单
+  // 据此标注「未重跑」，避免看起来像本轮刚跑完的。
+  retryKept?: string[];
   // ADR-0061 任务重试：尝试次数（缺省 = 1）；重试时 +1，>1 时列表/详情展示。
   attempt?: number;
   steps: JobStep[];
@@ -1021,21 +1025,29 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
         return;
       }
       const n = nextAttempt(local);
-      patch(local.id, () => resetJobForRetry(local, { now: Date.now(), separatorLabel: t("jobs.retryAttemptSeparator", { n }) }) as Job);
+      // ADR-0095：批量评估只重跑失败/无结论项（已成功项跳过，不重复烧 token）；
+      // 非 scoped（checkup 批量、无 items 的旧卡）仍是整批重跑。重置后的卡就是
+      // 本轮的真实派发参数——直接用它下发，不另算一份。
+      const reset = resetJobForRetry(local, {
+        now: Date.now(),
+        separatorLabel: t("jobs.retryAttemptSeparator", { n }),
+        retry: batchRetryPlan(local),
+      }) as Job;
+      patch(local.id, () => reset);
       (async () => {
         const engine = await resolveEngineFallback();
         dispatchJob(
           local.id,
           {
-            title: local.title,
-            subtitle: local.subtitle,
-            kind: local.kind!,
-            input: local.input!,
-            page: local.page,
-            batchId: local.batchId,
-            reportNum: local.reportNum,
-            urls: local.urls,
-            ns: local.ns,
+            title: reset.title,
+            subtitle: reset.subtitle,
+            kind: reset.kind!,
+            input: reset.input!,
+            page: reset.page,
+            batchId: reset.batchId,
+            reportNum: reset.reportNum,
+            urls: reset.urls,
+            ns: reset.ns,
           },
           engine,
         );
