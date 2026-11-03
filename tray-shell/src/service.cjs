@@ -20,6 +20,23 @@ const ACTION_REUSE = "reuse";
 const ACTION_START_FRESH = "start-fresh";
 const ACTION_KILL_THEN_START = "kill-then-start";
 
+/**
+ * 浏览器进程不杀（2026-11-03 用户要求）：打包/启动壳都不替用户关浏览器。
+ * Edge 是本机默认浏览器，也是仪表盘的常用打开方式——它哪怕出现成 3000 的占用者
+ * （扩展、WebView 宿主等），也只报给用户，交给他们自己关那个窗口。
+ */
+const BROWSER_IMAGES = new Set(["msedge.exe", "chrome.exe", "firefox.exe", "brave.exe", "opera.exe", "vivaldi.exe"]);
+
+function isBrowserImage(image) {
+  return BROWSER_IMAGES.has(String(image || "").trim().toLowerCase());
+}
+
+/** 3000 被浏览器占着时的提示：说清楚「我们没杀」，并给出用户自己的动作。 */
+function browserOccupiedMsg(occupant) {
+  const who = occupant && occupant.pid ? `${occupant.image || "浏览器"} (PID ${occupant.pid})` : "浏览器";
+  return `3000 端口被${who}占用且不应答。\n\n不会替你结束浏览器进程：请关掉占用 3000 的窗口/标签页后重试。`;
+}
+
 // 健康探测的超时给宽一点：本地服务平时 10ms，但壳刚起来（Electron 冷启动 + 面板首帧）
 // 那两秒里偶发一次 1.5s 超时，没必要让托盘闪一下灰。
 const HEALTH_TIMEOUT_MS = 2500;
@@ -222,6 +239,10 @@ function createService({ port = WEB_PORT, careerRoot, runtime, logs, openBrowser
     }
 
     if (action === ACTION_KILL_THEN_START) {
+      if (isBrowserImage(occupant.image)) {
+        markFailed(browserOccupiedMsg(occupant));
+        return false;
+      }
       log(`接管决策：3000 被 ${occupant.image || "未知进程"}(pid=${occupant.pid}) 占用且无应答，杀进程树后起服`);
       const killed = await procApi.killTree(occupant.pid);
       if (!killed) {
@@ -265,6 +286,10 @@ function createService({ port = WEB_PORT, careerRoot, runtime, logs, openBrowser
 
     if (!(await procApi.waitPortFree(port, 10_000))) {
       const occupant = await procApi.listenerOf(port);
+      if (occupant.pid && isBrowserImage(occupant.image)) {
+        markFailed(browserOccupiedMsg(occupant));
+        return false;
+      }
       if (!occupant.pid || !(await procApi.killTree(occupant.pid)) || !(await procApi.waitPortFree(port, 5_000))) {
         markFailed(cannotFreeMsg(occupant, "重启时端口未能空出"));
         return false;
@@ -336,8 +361,10 @@ module.exports = {
   ACTION_KILL_THEN_START,
   ACTION_REUSE,
   ACTION_START_FRESH,
+  BROWSER_IMAGES,
   WEB_PORT,
   cannotFreeMsg,
   createService,
   decideTakeover,
+  isBrowserImage,
 };

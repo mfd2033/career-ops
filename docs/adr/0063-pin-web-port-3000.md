@@ -56,3 +56,10 @@
 - **工单 02（脚本）**：`start-dashboard.ps1` 删随机口/`ReadPortFromLock`/LOCK，改 `ProbeAlive`+`KillPortOwner`（`taskkill /T /F` 任何占用者），补 `using System.Net;`（原 `WaitForServerReady` 亦缺，属既有潜在 bug），删死字段 `_running`，内嵌 C# 编译通过；`start-dashboard.js` 删假 `pickFreePort`/LOCK、`killNodeProcesses`→`killPortOwner`（加 `/T`），`node --check` 通过。
 - **工单 03（重打包 + 验收）**：web 本体本次未改，采用**仅 launcher 重打包**（`go build -ldflags -X main.cacheVersion=976a776`，对齐现有 runtime 目录，避免整包 `next build` 的耗时与副作用），旧 exe 备份为 `career-dashboard-launcher.exe.bak-2026-09-25`。四判据之 SHA 对齐已实证：当前活实例 `/api/version` 返回 `200` 且 `sha=976a776`，与 exe 注入的 `cacheVersion`、runtime 目录三者一致；「复用」路径经真实实例触发验证。
 - **待用户执行（GUI 侧，无法自动化）**：杀后接管、冷启动起 3000、托盘重启三条路径的浏览器目视验收（见工单 03 末条）。
+
+## 修订（2026-11-03）：浏览器进程从「杀任何占用者」中豁免
+
+- **背景**：决策 2 ② 的口径是「杀任何占用 3000 的进程树，不限 node」，落地后在托盘壳（`tray-shell/`）与打包编排里也照搬了。但其中一类占用者是用户的浏览器（Edge 是本机默认浏览器，也是仪表盘的常用打开方式）：结束它等于替用户关掉全部窗口与标签页，代价远大于「端口腾出来」。
+- **新规则**：`msedge.exe` / `chrome.exe` / `firefox.exe` / `brave.exe` / `opera.exe` / `vivaldi.exe` 一律不杀。3000 被浏览器占着且不应答时，接管链停在 `failed` 并点名「不会替你结束浏览器：请关掉占用 3000 的窗口/标签页后重试」（`tray-shell/src/service.cjs` 的 `isBrowserImage`）；`local/pack-launcher.mjs` 的端口兜底同理，改为打印占用者并停下。其余占用者语义不变（仍按决策 2 ② 杀进程树）。
+- **顺带**：壳就绪后打开仪表盘不再无脑 `shell.openExternal`——Edge 已有同地址标签页（活动标签）时只把该窗口切到前台，不新开标签（`tray-shell/src/browser.cjs`，读地址栏只读不写，探测失败即退回直接打开）。
+- **不变**：端口仍固定 3000、绝不回退（决策 1）。

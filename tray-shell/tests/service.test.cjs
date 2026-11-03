@@ -82,7 +82,8 @@ test("复用外部实例：owned=false、ready=true、pid 取监听者，且不 
 test("杀不掉占用者：failed + 点名 PID，且不换端口", async () => {
   const { service, calls } = makeService({
     procApi: {
-      listenerOf: async () => ({ pid: 4242, image: "chrome.exe" }),
+      // 非浏览器（浏览器走「不杀」那条路，见下面的用例）
+      listenerOf: async () => ({ pid: 4242, image: "node.exe" }),
       killTree: async (pid) => {
         calls.killTree.push(pid);
         return false;
@@ -95,10 +96,44 @@ test("杀不掉占用者：failed + 点名 PID，且不换端口", async () => {
   assert.equal(facts.failed, true);
   assert.equal(facts.ready, false);
   assert.equal(facts.starting, false);
-  assert.match(facts.failReason, /chrome\.exe \(PID 4242\)/);
+  assert.match(facts.failReason, /node\.exe \(PID 4242\)/);
   assert.match(facts.failReason, /端口固定为 3000/);
   assert.deepEqual(calls.killTree, [4242]);
   assert.deepEqual(calls.waitPortFree, []);
+});
+
+test("3000 被浏览器占用且无应答：不杀浏览器，failed 并说明「不会替你结束浏览器」", async () => {
+  const { service, calls } = makeService({
+    procApi: {
+      listenerOf: async () => ({ pid: 2612, image: "msedge.exe" }),
+    },
+  });
+
+  assert.equal(await service.start(), false);
+  const facts = service.facts();
+  assert.equal(facts.failed, true);
+  assert.equal(facts.ready, false);
+  assert.match(facts.failReason, /msedge\.exe \(PID 2612\)/);
+  assert.match(facts.failReason, /不会替你结束浏览器/);
+  // 关键：一个 taskkill 都没发
+  assert.deepEqual(calls.killTree, []);
+});
+
+test("重启时 3000 被浏览器抢走：同样不杀，只报 failed", async () => {
+  const { service, calls } = makeService({
+    procApi: {
+      waitPortFree: async (port) => {
+        calls.waitPortFree.push(port);
+        return false;
+      },
+      listenerOf: async () => ({ pid: 2612, image: "msedge.exe" }),
+    },
+  });
+
+  assert.equal(await service.restart(), false);
+  assert.equal(service.facts().failed, true);
+  assert.match(service.facts().failReason, /不会替你结束浏览器/);
+  assert.deepEqual(calls.killTree, []);
 });
 
 test("健康探测：通 → run；端口彻底没人听两次 → down", async () => {

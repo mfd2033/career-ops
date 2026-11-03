@@ -14,6 +14,7 @@ const { app, BrowserWindow, Menu, Tray, dialog, ipcMain, nativeImage, nativeThem
 const runtimeModule = require("./runtime.cjs");
 const logger = require("./logger.cjs");
 const { WEB_PORT, createService } = require("./service.cjs");
+const { openOrFocus } = require("./browser.cjs");
 const { buildSnapshot, createBusinessFetcher } = require("./snapshot.cjs");
 const { trayStateOf, trayTooltip } = require("./state.cjs");
 const { drawTrayIcon } = require("./tray-icon.cjs");
@@ -389,8 +390,26 @@ function startTimers() {
 
 // ---------------- 动作 ----------------
 
+/**
+ * 打开一个仪表盘地址。
+ *
+ * 不再无脑 openExternal：Edge 里已经开着同一个页面时（地址栏命中）只把那个窗口
+ * 切到前台，不叠新标签——反复打包/启动的「标签页越攒越多」就是这么来的。
+ * 探测失败一律退回直接打开（见 browser.cjs），这里只负责不抛。
+ */
+async function openBrowserUrl(url) {
+  try {
+    const result = await openOrFocus(url, { openExternal: (target) => shell.openExternal(target) });
+    if (result.focused) sink?.line("launcher", `浏览器已有该页面（pid=${result.pid}）→ 切到该窗口，不新开标签`);
+    return result;
+  } catch (error) {
+    sink?.line("launcher", `打开浏览器失败：${error.message}`);
+    return { opened: false, focused: false, pid: 0, url };
+  }
+}
+
 function openDashboard() {
-  shell.openExternal(service ? service.url : `http://localhost:${WEB_PORT}`);
+  return openBrowserUrl(service ? service.url : `http://localhost:${WEB_PORT}`);
 }
 
 /** `app:openTab` 的取值收敛在这里：四个管道 tab + 跟进页。 */
@@ -440,9 +459,7 @@ function registerIpc() {
     openDashboard();
   });
 
-  ipcMain.handle("app:openTab", (_event, tab) => {
-    shell.openExternal(tabUrl(tab));
-  });
+  ipcMain.handle("app:openTab", (_event, tab) => openBrowserUrl(tabUrl(tab)));
 
   ipcMain.handle("logs:show", () => showLogs());
 

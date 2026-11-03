@@ -33,6 +33,7 @@
     - `taskkill /F /IM CareerDashboardTray.exe /T`（`/T` 必须，否则 node 子进程残留；Electron 是一组同名进程，主/GPU/渲染/工具都会被带走）。
     - 另有一个 `electron.exe`（开发态 `npm run tray`）时：只杀 **exe 路径在 `career-tray/` 下**的那些。脚本用 CIM 查 `ExecutablePath` 过滤后按 PID 杀；CIM 不可用就跳过，交给端口兜底。
     - 端口兜底：`Get-NetTCPConnection -LocalPort 3000 -State Listen` 取 PID → `taskkill /F /PID <pid>`，确认无 Listen 记录再继续。
+    - **浏览器进程绝不杀（2026-11-03，用户要求）**：`msedge.exe` / `chrome.exe` / `firefox.exe` 等出现在 dev 端口或 3000 上时，`pack-launcher.mjs` 只打印「跳过浏览器进程 …请自行关闭该标签页后重跑」并停下，由用户自己关窗口——打包不替用户关浏览器。
   - 0.3 **为什么必须先停**：`build-dashboard-ui.mjs` 第 5c 步会先 `rmSync` 再重建 `.dashboard-runtime\v{cacheVersion}\`。重打同版本时 cacheVersion 相同 → 旧实例正在用的 runtime 目录被直接删：Windows 下文件被占用 → 脚本抛错；未抛错则旧实例静默失效。
   - 0.4 **环境清理**：`web/node_modules` 缺失才 `npm install`（registry 已指 npmmirror）；先按命令行停掉本仓 dev server（见上一条 ②），再删 `web/.next`（删不掉时脚本会报占用并给下一步，不再裸抛 ENOTEMPTY）。冷删可能要 2 分钟以上。
 
@@ -60,6 +61,7 @@
     - **进程存活观察点**：`tasklist /FI "IMAGENAME eq CareerDashboardTray.exe"` —— 出现即视为壳已起（Electron 会同时有一组子进程，属正常）。
     - **窗口预期**：不出现任何控制台窗口；**面板默认不弹出**（左键点托盘才展开）；日志窗口默认不存在（右键「显示日志窗口」才创建）。
     - 预期结果：命令立即返回；约 60s 内服务就绪，默认浏览器打开 `http://localhost:3000`。
+      - **不叠标签页**：Edge 里已经开着同一个页面时，壳只把那个窗口切到前台（`AppActivate`），不新开标签——实现见 `tray-shell/src/browser.cjs`（读窗口地址栏，只读不写；只看活动标签，探测失败即退回直接打开）。
   - 2.2 **验证**：`Invoke-RestMethod http://localhost:3000/api/version`
     - 预期：HTTP 200，`{"sha":"{短sha}","packaged":true,...}` → 成功。
     - 失败判据：`packaged:false` 或 sha 不符 = 服务的是工作树而非打包构建（查 `.dashboard-runtime` 权限、`career-tray/` 是否被杀软占用）；连接失败/超时 = 见 2.3。
