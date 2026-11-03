@@ -291,8 +291,9 @@ test("the panel is labelled in both locales", () => {
 test("保存失败按状态码给 i18n 键，不把接口错误串塞进界面", () => {
   const panel = read(PANEL);
   assert.ok(!/j\??\.error\s*\|\|/.test(panel), "the API's error string must not become the on-screen message");
-  assert.match(panel, /status === 400\) return "explore\.results\.gateSaveBadRequest"/);
-  assert.match(panel, /status === 404\) return "explore\.results\.gateSaveNoPortals"/);
+  assert.match(panel, /errorKey\(SAVE_ERROR_KEYS, r\.status\)/, "the status→key mapping is the shared http-error.mjs one");
+  assert.match(panel, /bad_request: "explore\.results\.gateSaveBadRequest"/);
+  assert.match(panel, /not_found: "explore\.results\.gateSaveNoPortals"/);
   // 存键、渲染时翻：切语言时已显示的报错也要跟着变。
   assert.match(panel, /\{error && <span[^>]*>\{t\(error\)\}<\/span>\}/);
 });

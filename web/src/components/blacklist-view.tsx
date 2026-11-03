@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Ban, Plus, Search, ShieldAlert, ShieldOff, X } from "lucide-react";
 import { useI18n } from "@/lib/i18n/context";
 import { format } from "@/lib/i18n";
+import { errorKey } from "@/lib/http-error.mjs";
 import { cn } from "@/lib/cn";
 import { fieldCls, fieldWrapCls } from "@/components/ui/field-styles";
 import { EmptyState, ErrorBanner, Loading } from "@/components/ui/status";
@@ -21,6 +22,13 @@ type Entry = {
   blocked: number;
 };
 type Payload = { today: string; totalBlocked: number; entries: Entry[] };
+
+/** 写入失败的错误类 → 文案键。未覆盖的类自动回落 server（见 http-error.mjs）。 */
+const BLACKLIST_ERROR_KEYS = {
+  server: "blacklist.errorGeneric",
+  network: "blacklist.errorNetwork",
+  bad_request: "blacklist.errorBadRequest",
+};
 
 export function BlacklistView() {
   const { t } = useI18n();
@@ -50,9 +58,9 @@ export function BlacklistView() {
   const exempted = entries.filter((e) => e.exemptActive);
   const evidence = entries.reduce((s, e) => s + e.reports + e.postings, 0);
   const earliest = entries.length ? entries.map((e) => e.since).filter(Boolean).sort()[0] : "—";
-  // 接口错误码不直接上屏：短码映射为界面文案，真正的可读消息（如后端校验提示）原样保留。
-  const errText =
-    err === "error" ? t("blacklist.errorGeneric") : err === "network" ? t("blacklist.errorNetwork") : err;
+  // 接口错误码不直接上屏：按状态码取界面文案，存的是**键**，渲染时再翻——
+  // 中途切语言，已显示的报错也跟着变。判定在 http-error.mjs（与标题门共用）。
+  const errText = err ? t(err) : null;
 
   async function post(method: string, body: unknown, key: string) {
     setBusy(key);
@@ -63,12 +71,13 @@ export function BlacklistView() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
       });
-      const j = await r.json();
-      if (!r.ok) { setErr(j.error || "error"); return false; }
+      // 响应体刻意不读：`{error: "company is required"}` 这类是内部措辞，
+      // 界面文案由状态码决定（http-error.mjs），不靠服务端字符串。
+      if (!r.ok) { setErr(errorKey(BLACKLIST_ERROR_KEYS, r.status)); return false; }
       load();
       return true;
     } catch {
-      setErr("network");
+      setErr(errorKey(BLACKLIST_ERROR_KEYS));
       return false;
     } finally {
       setBusy(null);

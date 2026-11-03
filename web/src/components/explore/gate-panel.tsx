@@ -7,6 +7,7 @@ import { buildTitleFilterExplained } from "@/lib/core/title-keywords.mjs";
 import { mergeDenyWords } from "@/lib/deny-words.mjs";
 import type { DiscoveredOffer } from "@/lib/explore";
 import { useI18n } from "@/lib/i18n/context";
+import { errorKey } from "@/lib/http-error.mjs";
 import { cn } from "@/lib/cn";
 import { fieldCls } from "@/components/ui/field-styles";
 
@@ -32,6 +33,13 @@ type Words = { positive: string[]; negative: string[] };
 
 /** 试算预览最多列几条标题——再多就不是「看一眼」而是另一份结果列表了。 */
 const PREVIEW = 4;
+
+/** 保存失败的错误类 → 文案键。未覆盖的类自动回落 server（见 http-error.mjs）。 */
+const SAVE_ERROR_KEYS = {
+  server: "explore.results.gateSaveFailed",
+  bad_request: "explore.results.gateSaveBadRequest",
+  not_found: "explore.results.gateSaveNoPortals",
+};
 
 const seedKey = (p: string[], n: string[]) => `${p.join("\u0000")}\n\u0001\n${n.join("\u0000")}`;
 
@@ -333,14 +341,8 @@ export function GatePanel({
   };
 
   // 保存失败按**状态码**给界面文案：接口回的 "bad json" / "invalid word list" /
-  // "portals.yml not found" 是内部措辞，不该上屏（与黑名单页同一条口径）。
-  // 存的是 i18n 键而不是译文——渲染时再翻，中途切语言也能跟上。
-  const saveErrorKey = (status: number) => {
-    if (status === 400) return "explore.results.gateSaveBadRequest";
-    if (status === 404) return "explore.results.gateSaveNoPortals";
-    return "explore.results.gateSaveFailed";
-  };
-
+  // "portals.yml not found" 是内部措辞，不该上屏。映射表在 http-error.mjs（与黑名单页
+  // 共用同一份判定）。存的是 i18n 键而不是译文——渲染时再翻，中途切语言也能跟上。
   const save = async () => {
     setSaving(true);
     setSaved(false);
@@ -352,15 +354,15 @@ export function GatePanel({
         body: JSON.stringify(draft),
       });
       if (!r.ok) {
-        setError(saveErrorKey(r.status));
+        setError(errorKey(SAVE_ERROR_KEYS, r.status));
         return;
       }
       setSaved(true);
       setPreaddedWords([]);
       onSaved(draft.positive, draft.negative);
     } catch {
-      // fetch 本身抛（服务没起）= 没有状态码：落到通用文案。
-      setError("explore.results.gateSaveFailed");
+      // fetch 本身抛（服务没起、断网）= 没有状态码 → network 类。
+      setError(errorKey(SAVE_ERROR_KEYS));
     } finally {
       setSaving(false);
     }
