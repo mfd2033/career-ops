@@ -332,6 +332,15 @@ export function GatePanel({
     }
   };
 
+  // 保存失败按**状态码**给界面文案：接口回的 "bad json" / "invalid word list" /
+  // "portals.yml not found" 是内部措辞，不该上屏（与黑名单页同一条口径）。
+  // 存的是 i18n 键而不是译文——渲染时再翻，中途切语言也能跟上。
+  const saveErrorKey = (status: number) => {
+    if (status === 400) return "explore.results.gateSaveBadRequest";
+    if (status === 404) return "explore.results.gateSaveNoPortals";
+    return "explore.results.gateSaveFailed";
+  };
+
   const save = async () => {
     setSaving(true);
     setSaved(false);
@@ -342,16 +351,30 @@ export function GatePanel({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(draft),
       });
-      const j = (await r.json().catch(() => ({}))) as { error?: string };
-      if (!r.ok) throw new Error(j?.error || `HTTP ${r.status}`);
+      if (!r.ok) {
+        setError(saveErrorKey(r.status));
+        return;
+      }
       setSaved(true);
       setPreaddedWords([]);
       onSaved(draft.positive, draft.negative);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+    } catch {
+      // fetch 本身抛（服务没起）= 没有状态码：落到通用文案。
+      setError("explore.results.gateSaveFailed");
     } finally {
       setSaving(false);
     }
+  };
+
+  // 试算预览：分隔符与「还有 N 条」都走 i18n。中文的「、」与全角括号不能硬编码在
+  // JSX 里——那样英文界面会渲成 `would come back：Alpha（+3 more）`。
+  const previewList = (offers: DiscoveredOffer[]) => {
+    const head = offers.slice(0, PREVIEW).map((o) => o.title || o.url);
+    const rest = offers.length - head.length;
+    const list = head.join(t("explore.results.listSeparator"));
+    return rest > 0
+      ? t("explore.results.gateTrialTruncated", { list, more: t("explore.results.filteredMore", { n: rest }) })
+      : list;
   };
 
   return (
@@ -409,12 +432,12 @@ export function GatePanel({
                 <p className="text-foreground">{t("explore.results.gateTrial", { rescue: trial.rescue.length, drop: trial.drop.length })}</p>
                 {trial.rescue.length > 0 && (
                   <p className="mt-0.5 text-faint">
-                    {t("explore.results.gateTrialRescue")}：{preview(trial.rescue, (n) => t("explore.results.filteredMore", { n }))}
+                    {t("explore.results.gateTrialRescue", { list: previewList(trial.rescue) })}
                   </p>
                 )}
                 {trial.drop.length > 0 && (
                   <p className="mt-0.5 text-faint">
-                    {t("explore.results.gateTrialDrop")}：{preview(trial.drop, (n) => t("explore.results.filteredMore", { n }))}
+                    {t("explore.results.gateTrialDrop", { list: previewList(trial.drop) })}
                   </p>
                 )}
                 <p className="mt-1 text-[10px] leading-relaxed text-faint">{t("explore.results.gateTrialNote")}</p>
@@ -440,7 +463,7 @@ export function GatePanel({
                 <RotateCcw className="size-3.5" /> {t("explore.results.gateDiscard")}
               </button>
               {saved && <span className="text-[11px] text-emerald-600 dark:text-emerald-400">{t("explore.results.gateSaved")}</span>}
-              {error && <span className="text-[11px] text-amber-600 dark:text-amber-400">{t("explore.results.gateSaveFailed", { msg: error })}</span>}
+              {error && <span className="text-[11px] text-amber-600 dark:text-amber-400">{t(error)}</span>}
             </div>
           </div>
         </div>
@@ -470,10 +493,4 @@ function sameWord(list: string[], i: number, w: string): boolean {
   const key = w.trim().toLowerCase();
   if (!key) return false;
   return list.some((k, j) => j !== i && k.trim().toLowerCase() === key);
-}
-
-function preview(offers: DiscoveredOffer[], moreLabel: (n: number) => string): string {
-  const head = offers.slice(0, PREVIEW).map((o) => o.title || o.url);
-  const rest = offers.length - head.length;
-  return rest > 0 ? `${head.join("、")}（${moreLabel(rest)}）` : head.join("、");
 }

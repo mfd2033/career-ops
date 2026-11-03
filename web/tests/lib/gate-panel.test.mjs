@@ -267,6 +267,10 @@ test("the panel is labelled in both locales", () => {
     "explore.results.gateDiscard",
     "explore.results.gateSaved",
     "explore.results.gateSaveFailed",
+    "explore.results.gateSaveBadRequest",
+    "explore.results.gateSaveNoPortals",
+    "explore.results.gateTrialTruncated",
+    "explore.results.listSeparator",
     "explore.results.blacklistSelected",
     "explore.results.blacklistTitle",
     "explore.results.blacklistRow",
@@ -280,4 +284,25 @@ test("the panel is labelled in both locales", () => {
     const hits = (src.match(new RegExp(`"${key.replace(/\./g, "\\.")}":`, "g")) ?? []).length;
     assert.equal(hits, 2, `${key} must exist in both locales (found ${hits}) — an English-only key renders as the raw id in zh, which is how a missing translation ships unnoticed`);
   }
+});
+
+// 接口错误码不上屏（与黑名单页同一条口径）。UI 审计 FAIL #11 同源：`j.error` 回的是
+// "bad json" / "invalid word list" / "portals.yml not found"，那是内部措辞。
+test("保存失败按状态码给 i18n 键，不把接口错误串塞进界面", () => {
+  const panel = read(PANEL);
+  assert.ok(!/j\??\.error\s*\|\|/.test(panel), "the API's error string must not become the on-screen message");
+  assert.match(panel, /status === 400\) return "explore\.results\.gateSaveBadRequest"/);
+  assert.match(panel, /status === 404\) return "explore\.results\.gateSaveNoPortals"/);
+  // 存键、渲染时翻：切语言时已显示的报错也要跟着变。
+  assert.match(panel, /\{error && <span[^>]*>\{t\(error\)\}<\/span>\}/);
+});
+
+// 中文的「、」与全角括号不能硬编码在组件里：英文界面会渲成 `would come back：a（+3 more）`。
+test("词表预览的分隔符与标点都走 i18n", () => {
+  const panel = read(PANEL);
+  const list = read(LIST);
+  assert.ok(!/join\("、"\)/.test(panel), "the panel must not hard-code the Chinese list separator");
+  assert.ok(!/join\("、"\)/.test(list), "the results list must not hard-code the Chinese list separator");
+  assert.ok(!/\}）：\{/.test(panel), "the trial lines must fold their colon into the i18n template");
+  assert.match(panel, /t\("explore\.results\.gateTrialRescue", \{ list: previewList\(trial\.rescue\) \}\)/);
 });

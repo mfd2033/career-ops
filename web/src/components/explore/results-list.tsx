@@ -589,7 +589,7 @@ export function ResultsList({ offers, tagVocab }: { offers: EnrichedOffer[]; tag
       {view.length === 0 && (
         <p className="py-10 text-center text-sm text-faint">
           {tags.size > 0
-            ? t("explore.results.noTagMatch", { tags: [...tags].join("、") })
+            ? t("explore.results.noTagMatch", { tags: [...tags].join(t("explore.results.listSeparator")) })
             : salaryMin
               ? t("explore.results.noSalaryMatch", { n: salaryMin })
               : q.trim()
