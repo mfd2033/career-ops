@@ -12,6 +12,8 @@
 //    只认真目录会把已部署的技能整批判成未安装（真机踩过：五个候选目录 113 份全链接
 //    → 面板 0 副本、体检指针解析不到）。链接同样收，断链由读不到 SKILL.md 自然筛掉。
 //  - 单目录缺失/失败 → 静默跳过：换机、skills-manager 未 deploy 都不是错误（决议 4）。
+//  - 除常量清单外，用户在配置页手动指定的目录（存 ~/.career-ops-web/config.json 的
+//    skillDirs）也参与扫描——技能库不总在 home 下，展示与派发必须同一条扫描路径。
 //  - 不做二进制探测、不走 skills-manager-cli（决议 1）；每请求实时扫，无缓存（决议 8）。
 
 import fs from "node:fs";
@@ -31,6 +33,12 @@ export const SKILL_DIR_CANDIDATES = [
  *  api/run/route.ts 的解析与消费方都从这里取，改技能名只改这一处。展示层
  *  （skills-panel.tsx）不 import 本模块（它带 node:fs），白名单字面量自行维护。 */
 export const OFFER_CHECKUP_SKILL_NAME = "offer体检";
+
+/** 用户手动指定目录的上限：真实使用远到不了这个量级，超过基本是粘贴事故。 */
+export const MAX_CUSTOM_SKILL_DIRS = 20;
+
+/** 目录字符串的长度上限：真实路径远短于此，超长只可能是贴错了东西。 */
+const MAX_SKILL_DIR_LENGTH = 512;
 
 /**
  * 解析 SKILL.md 头部 frontmatter 的 name/version 两个标量。
@@ -69,18 +77,83 @@ export function compareVersions(a, b) {
 }
 
 /**
+ * 归一化用户手动填写的技能安装目录；不可用时返回 null。
+ *
+ * 与 cli-dirs 的取舍有一处不同：技能目录的默认清单本身就是相对 home 的写法
+ * （`.claude/skills`），用户照抄候选清单时必须成立，所以相对路径按 home 解析，
+ * 而不是像引擎目录那样一律拒绝。引号、`~`、尾部分隔符的处理与引擎目录一致。
+ *
+ * @param {unknown} raw - 输入框原值
+ * @param {string} [home] - 用户 home，用于展开 `~` 与相对路径
+ * @returns {string|null} 绝对路径（去掉尾部路径分隔符），或 null
+ */
+export function normalizeSkillDir(raw, home = os.homedir()) {
+  if (typeof raw !== "string") return null;
+  let value = raw.trim();
+  if (!value || value.length > MAX_SKILL_DIR_LENGTH) return null;
+  if (value.length > 1) {
+    const quoted = (value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"));
+    if (quoted) value = value.slice(1, -1).trim();
+  }
+  if (!value || value.length > MAX_SKILL_DIR_LENGTH) return null;
+  if (value === "~") value = home;
+  else if (value.startsWith("~/") || value.startsWith("~\\")) value = path.join(home, value.slice(2));
+  const absolute = path.resolve(home, value);
+  return absolute.replace(/[\\/]+$/, "") || absolute;
+}
+
+/** Windows 路径大小写不敏感；去重与「是否已在默认清单」都按同一比较键。 */
+function dirKey(dir) {
+  return process.platform === "win32" ? dir.toLowerCase() : dir;
+}
+
+/**
+ * 清洗用户指定的整张技能目录表：非数组 → 空表；不可归一化的项、默认清单里已有的
+ * 目录、重复项全部丢弃。默认清单已经扫过，再收一次只会让面板的副本计数翻倍。
+ *
+ * @param {unknown} raw
+ * @param {string} [home]
+ * @param {string[]} [candidates] - 默认扫描清单（相对 home 或绝对）
+ * @returns {string[]}
+ */
+export function sanitizeSkillDirs(raw, home = os.homedir(), candidates = SKILL_DIR_CANDIDATES) {
+  if (!Array.isArray(raw)) return [];
+  const builtIn = new Set(candidates.map((dir) => dirKey(path.resolve(home, dir))));
+  const out = [];
+  const seen = new Set();
+  for (const item of raw) {
+    const dir = normalizeSkillDir(item, home);
+    if (!dir) continue;
+    const key = dirKey(dir);
+    if (builtIn.has(key) || seen.has(key)) continue;
+    seen.add(key);
+    out.push(dir);
+    if (out.length >= MAX_CUSTOM_SKILL_DIRS) break;
+  }
+  return out;
+}
+
+/**
  * 扫描本机技能副本。home 可注入（测试用临时目录，不碰真实用户目录）。
- * @param {{ home?: string, candidates?: string[] }} [opts]
+ * @param {{ home?: string, candidates?: string[], extraDirs?: string[] }} [opts]
+ *          extraDirs 是用户手动指定的目录（绝对路径，相对路径按 home 解析），
+ *          与默认清单一起扫描、按解析后的目录去重。
  * @returns {Array<{ name: string, version: string | null, path: string, realPath: string, agentDir: string }>}
  *          name 缺 frontmatter 时回退目录名。path 是派发侧在 agent 目录下看到的路径
  *          （agentDir 语义的来源）；realPath 是解析链接后的真实位置（中央库常在 home
  *          之外，例如 Windows 上库在 `D:\.skills-manager\skills`），展示层用它答
  *          「到底装在哪」。解析失败（极少：链接目标权限异常）回落 path。
  */
-export function scanSkillRegistry({ home = os.homedir(), candidates = SKILL_DIR_CANDIDATES } = {}) {
+export function scanSkillRegistry({ home = os.homedir(), candidates = SKILL_DIR_CANDIDATES, extraDirs = [] } = {}) {
   const copies = [];
-  for (const agentDir of candidates) {
-    const base = path.join(home, agentDir);
+  const seenDirs = new Set();
+  for (const agentDir of [...candidates, ...extraDirs]) {
+    const base = path.resolve(home, agentDir);
+    // path.resolve（而不是 path.join）：用户填的绝对是真绝对，join 会把 `D:\skills`
+    // 拼到 home 后面变成 home\D:\skills。
+    const key = dirKey(base);
+    if (seenDirs.has(key)) continue;
+    seenDirs.add(key);
     let entries;
     try {
       entries = fs.readdirSync(base, { withFileTypes: true });

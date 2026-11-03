@@ -9,6 +9,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { sanitizeCliDirs } from "./cli-dirs.mjs";
+import { sanitizeSkillDirs } from "./skill-registry.mjs";
 
 export type UnknownEmployerPolicy = "placeholder" | "agency";
 
@@ -20,6 +21,9 @@ export type AppConfig = {
   /** ADR-0097：用户为某个引擎指定的安装目录（引擎 id → 绝对路径）。检测与派发
    * 都读它，所以它必须住服务端——派发是 headless 子进程，读不到 localStorage。 */
   cliDirs?: Record<string, string>;
+  /** 用户手动指定的技能安装目录（绝对路径）：/api/skills 展示与体检派发共用同一
+   * 扫描器，额外目录也必须住服务端，理由同上。 */
+  skillDirs?: string[];
 };
 
 export const UNKNOWN_EMPLOYER_OPTIONS: readonly UnknownEmployerPolicy[] = ["placeholder", "agency"];
@@ -45,6 +49,10 @@ export function readAppConfig(): AppConfig {
     // 不该被带到派发路径上。`~` 按运行这个服务的用户 home 展开。
     const cliDirs = sanitizeCliDirs(raw.cliDirs, os.homedir());
     if (Object.keys(cliDirs).length > 0) out.cliDirs = cliDirs;
+    // 手动指定的技能目录同样过纯函数清洗：默认清单里已有的、重复的、不可解析的
+    // 一概丢弃，避免扫描时同一目录被算两次。
+    const skillDirs = sanitizeSkillDirs(raw.skillDirs, os.homedir());
+    if (skillDirs.length > 0) out.skillDirs = skillDirs;
     return out;
   } catch {
     return {};

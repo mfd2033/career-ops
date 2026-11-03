@@ -346,8 +346,12 @@ async function runPipeline({
   // ADR-0056 决议 5：体检 prompt 的技能指针——与 /api/skills 同一个 skill-registry
   // 解析 offer体检 的最高版本副本（绝对路径 + 版本）；找不到 → undefined，prompt 与
   // 旧版逐字节一致（workflow 第 8 条：技能缺失不硬失败）。决议 8：每派发实时扫。
+  // 用户手动指定的技能目录也要参与，否则面板里看得见、派发时却读不到。
   const checkupSkill =
-    kind === "checkup" ? (resolveSkillCopy(scanSkillRegistry(), OFFER_CHECKUP_SKILL_NAME) ?? undefined) : undefined;
+    kind === "checkup"
+      ? (resolveSkillCopy(scanSkillRegistry({ extraDirs: readAppConfig().skillDirs ?? [] }), OFFER_CHECKUP_SKILL_NAME) ??
+        undefined)
+      : undefined;
   const prompt = buildPrompt({ kind, input, memory: readMemory(), today, postedAt, unknownEmployer: readAppConfig().unknownEmployer, checkupCompany, checkupSkill, jdText, company: employer, reportNum: pdfPaths?.reportNum, reportFile: pdfPaths?.reportFile, marketMode: resolveMarketMode({ raw: readMarketModesDir(), available: listMarketModes() }) });
 
   // Which tools each kind gets, and the whole argv for every runtime that HAS an

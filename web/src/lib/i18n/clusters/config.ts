@@ -248,6 +248,15 @@ export const en: Dict = {
   "config.skillsOfferHint": "The web checkup worker reads the highest-version copy of this skill for its 7-dimension research; the report footer records that version.",
   "config.skillsBskHint": "The browser scan (bsk) relies on this skill to drive your logged-in browser.",
   "config.skillsLoadError": "Couldn't scan the skill directories.",
+  "config.skillsDirsLabel": "Skill folders",
+  "config.skillsDirsHint": "Extra folders scanned for SKILL.md. They only widen the search — installing and upgrading stay with your skill manager.",
+  "config.skillsDirsPlaceholder": "D:\\skills",
+  "config.skillsDirsAdd": "Add",
+  "config.skillsDirsEmpty": "No extra folders — only the default locations are scanned.",
+  "config.skillsDirsRemove": "Remove",
+  "config.skillsDirInvalid": "Enter an absolute folder path or one starting with ~.",
+  "config.skillsDirAlreadyScanned": "That folder is already in the scan scope.",
+  "config.skillsDirSaveError": "Couldn't save the folder list. Try again.",
 
   // ── 配置页布局重排（原型落地）：左侧目录导航 + 按保存档位分区 + 悬浮保存条 ──
   "config.navEngine": "AI Engine",
@@ -523,6 +532,15 @@ export const zh: Dict = {
   "config.skillsOfferHint": "web 端公司体检 worker 读取此技能的最高版本副本执行 7 维调研，报告页脚会记录该版本号。",
   "config.skillsBskHint": "浏览器扫描（bsk）依赖此技能驱动你已登录的浏览器。",
   "config.skillsLoadError": "扫描技能目录失败。",
+  "config.skillsDirsLabel": "技能安装目录",
+  "config.skillsDirsHint": "额外扫描这些目录下的 SKILL.md，只扩大搜索范围——安装与升级仍由技能管理器负责。",
+  "config.skillsDirsPlaceholder": "D:\\skills",
+  "config.skillsDirsAdd": "添加",
+  "config.skillsDirsEmpty": "未指定额外目录——只扫描上述默认位置。",
+  "config.skillsDirsRemove": "移除",
+  "config.skillsDirInvalid": "请填绝对路径，或以 ~ 开头。",
+  "config.skillsDirAlreadyScanned": "该目录已在扫描范围内。",
+  "config.skillsDirSaveError": "保存目录列表失败，请重试。",
 
   // ── 配置页布局重排（原型落地）：左侧目录导航 + 按保存档位分区 + 悬浮保存条 ──
   "config.navEngine": "AI 引擎",

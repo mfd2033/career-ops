@@ -144,7 +144,9 @@ export async function POST(req: Request) {
   // 共用同一副本——/api/run 每请求实时扫（决议 8），而一批本来就是同一时刻的
   // N 次派发，批内快照一致反而更合理。找不到副本 → undefined，prompt 落回
   // 旧分支逐字节兼容（workflow 第 8 条：技能缺失不硬失败）。
-  const checkupSkill = resolveSkillCopy(scanSkillRegistry(), OFFER_CHECKUP_SKILL_NAME) ?? undefined;
+  const checkupSkill =
+    resolveSkillCopy(scanSkillRegistry({ extraDirs: readAppConfig().skillDirs ?? [] }), OFFER_CHECKUP_SKILL_NAME) ??
+    undefined;
   // ADR-0035: resolve every target company at DISPATCH (the same resolver the
   // single checkup path uses) so the worker never re-derives it from the
   // tracker. Rows that don't resolve are failed items up front — they never

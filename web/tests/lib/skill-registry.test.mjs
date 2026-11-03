@@ -11,15 +11,19 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
+import fs, { readFileSync } from "node:fs";
 import os from "node:os";
-import path from "node:path";
+import path, { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   parseSkillFrontmatter,
   compareVersions,
   scanSkillRegistry,
   groupSkills,
   resolveSkillCopy,
+  normalizeSkillDir,
+  sanitizeSkillDirs,
+  MAX_CUSTOM_SKILL_DIRS,
   SKILL_DIR_CANDIDATES,
 } from "../../src/lib/skill-registry.mjs";
 
@@ -180,4 +184,128 @@ test("resolveSkillCopy: 跨目录取最高版本；找不到 → null；全无�
     "browser-skill",
   );
   assert.equal(noVersion.path, "p1", "全无版本号也返回副本，版本由调用方按未标注处理");
+});
+
+// --- 手动指定安装目录（配置页输入/选择）----------------------------------------
+
+const HOME = path.resolve("home", "tester");
+/** 平台无关的绝对目录（不同平台拼出来的形状不同，期望值也用 path 算）。 */
+const ABS = path.resolve("library", "skills");
+
+test("normalizeSkillDir: 绝对路径、~、home 相对写法都归一化，引号与尾分隔符去掉", () => {
+  assert.equal(normalizeSkillDir(ABS, HOME), ABS);
+  assert.equal(normalizeSkillDir(`${ABS}${path.sep}`, HOME), ABS, "尾分隔符不参与身份");
+  assert.equal(normalizeSkillDir(`  ${ABS}  `, HOME), ABS, "首尾空白不是路径的一部分");
+  assert.equal(normalizeSkillDir(`"${ABS}"`, HOME), ABS, "资源管理器『复制为路径』的引号");
+  assert.equal(normalizeSkillDir("~", HOME), HOME);
+  assert.equal(normalizeSkillDir(`~${path.sep}skills`, HOME), path.join(HOME, "skills"));
+  // 默认清单本身是相对 home 的写法，用户照抄候选清单时必须成立。
+  assert.equal(normalizeSkillDir(".claude/skills", HOME), path.resolve(HOME, ".claude", "skills"));
+  assert.equal(normalizeSkillDir("", HOME), null);
+  assert.equal(normalizeSkillDir("   ", HOME), null);
+  assert.equal(normalizeSkillDir(42, HOME), null);
+  assert.equal(normalizeSkillDir(`${path.sep}${"x".repeat(600)}`, HOME), null, "超长值基本是粘贴事故");
+});
+
+test("sanitizeSkillDirs: 默认清单已有的、重复的、非法项全部丢弃", () => {
+  const dirs = sanitizeSkillDirs(
+    [ABS, `${ABS}${path.sep}`, ".claude/skills", "~/.claude/skills", "", null, 42],
+    HOME,
+  );
+  // `.claude/skills` 与 `~/.claude/skills` 都解析到默认清单里的目录 → 丢掉；
+  // 两个 ABS 写法是同一个目录 → 只留一个。
+  assert.deepEqual(dirs, [ABS]);
+  assert.deepEqual(sanitizeSkillDirs(null, HOME), [], "非数组 → 空表，不抛错");
+  assert.deepEqual(sanitizeSkillDirs("D:\\skills", HOME), [], "整表必须是数组");
+});
+
+test("sanitizeSkillDirs: 数量有上限，超出部分截断", () => {
+  const raw = Array.from({ length: MAX_CUSTOM_SKILL_DIRS + 5 }, (_, i) => path.join(HOME, `extra-${i}`));
+  assert.equal(sanitizeSkillDirs(raw, HOME).length, MAX_CUSTOM_SKILL_DIRS);
+});
+
+test("scanSkillRegistry: extraDirs 收 home 之外的绝对目录，且不会被拼到 home 上", () => {
+  const home = makeHome();
+  const library = makeHome();
+  writeSkill(library, ".", "offer体检", OFFER_FM);
+
+  const copies = scanSkillRegistry({ home, extraDirs: [library, `${library}${path.sep}`] });
+  assert.equal(copies.length, 1, "同一目录的两种写法只扫一次");
+  const [offer] = copies;
+  assert.equal(offer.name, "offer体检");
+  assert.equal(offer.version, "1.2.0");
+  assert.equal(offer.path, path.join(library, "offer体检", "SKILL.md"), "path.resolve 不能把绝对目录接到 home 后面");
+  assert.equal(offer.agentDir, library);
+});
+
+// --- 接线：服务端持久化 + 展示与派发同源 ---------------------------------------
+
+const WEB = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
+const read = (...parts) => readFileSync(join(WEB, ...parts), "utf8");
+
+const APP_CONFIG = read("src", "lib", "app-config.ts");
+const SKILLS_ROUTE = read("src", "app", "api", "skills", "route.ts");
+const RUN_ROUTE = read("src", "app", "api", "run", "route.ts");
+const BATCH_ROUTE = read("src", "app", "api", "batch-checkup", "route.ts");
+const PANEL = read("src", "components", "skills-panel.tsx");
+const DICT = read("src", "lib", "i18n", "clusters", "config.ts");
+
+test("skillDirs 是服务端持久化配置，读入时清洗", () => {
+  assert.match(APP_CONFIG, /skillDirs\?: string\[\]/, "AppConfig must carry skillDirs");
+  assert.match(APP_CONFIG, /sanitizeSkillDirs\(raw\.skillDirs/, "readAppConfig must sanitize what it reads");
+});
+
+test("GET/POST /api/skills 用同一份扫描输入，POST 落库后立即回扫", () => {
+  assert.match(SKILLS_ROUTE, /export async function POST/, "POST /api/skills must exist");
+  assert.match(SKILLS_ROUTE, /sanitizeSkillDirs\(body\.skillDirs/, "the route must sanitize before writing");
+  assert.match(SKILLS_ROUTE, /writeAppConfig\(next\)/, "the route must persist the list");
+  assert.match(SKILLS_ROUTE, /scanSkillRegistry\(\{ extraDirs/, "GET and POST must scan with the extra dirs");
+  assert.match(SKILLS_ROUTE, /readAppConfig\(\)\.skillDirs/, "GET must read the persisted list");
+});
+
+test("展示与体检派发共用同一份额外目录输入", () => {
+  assert.match(RUN_ROUTE, /scanSkillRegistry\(\{ extraDirs: readAppConfig\(\)\.skillDirs/, "single checkup must see custom dirs");
+  assert.match(BATCH_ROUTE, /scanSkillRegistry\(\{ extraDirs: readAppConfig\(\)\.skillDirs/, "batch checkup must see them too");
+});
+
+test("面板：可输入、可选择、可移除，且保存走服务端", () => {
+  assert.match(PANEL, /fetch\("\/api\/clis\/pick-dir"/, "the folder picker must be wired");
+  assert.match(PANEL, /body: JSON.stringify\(\{ skillDirs: next \}\)/, "the panel must POST the whole list");
+  assert.match(PANEL, /e\.key === "Enter"/, "typing a path and pressing Enter must add it");
+  assert.match(PANEL, /config\.skillsDirsRemove/, "saved dirs need a remove action");
+  assert.match(PANEL, /config\.skillsDirsEmpty/, "an empty list needs a stated empty state");
+  assert.match(PANEL, /config\.skillsDirAlreadyScanned/, "a duplicate must be reported, not silently dropped");
+});
+
+test("面板守 UI 清单：cursor、live region、hover 不位移、对比度、触控", () => {
+  // Tailwind v4 preflight 把 button 设成 cursor: default，手型必须显式给。
+  assert.match(PANEL, /cursor-pointer items-center justify-center rounded-lg/, "buttons need a pointer cursor");
+  assert.match(PANEL, /disabled:cursor-not-allowed/, "busy/empty states must not look clickable");
+  // hover 只换颜色：挂 padding/size/scale 都会让整行跳一下。
+  assert.doesNotMatch(PANEL, /hover:(?:p-|m-|w-|h-|scale|text-\[|gap-)/, "hover must not change geometry");
+  assert.match(PANEL, /role="status"\s*\n\s*aria-live="polite"/, "the result must be a persistent live region");
+  assert.match(PANEL, /placeholder:text-faint/, "the placeholder needs the AA token");
+  assert.match(PANEL, /focus-visible:ring-2 focus-visible:ring-brand\/40/, "inputs and buttons need a visible focus ring");
+  assert.match(PANEL, /max-sm:min-h-\[44px\]/, "touch targets need 44px on phones");
+  assert.match(PANEL, /<label\s*\n\s*htmlFor=\{dirInputId\}/, "the path field needs a real label");
+});
+
+test("新增文案在中英两本字典里都存在", () => {
+  const [enBlock, zhBlock] = DICT.split("export const zh");
+  assert.ok(enBlock && zhBlock, "config.ts shape changed — key parsing is stale");
+  const KEYS = [
+    "config.skillsDirsLabel",
+    "config.skillsDirsHint",
+    "config.skillsDirsPlaceholder",
+    "config.skillsDirsAdd",
+    "config.skillsDirsEmpty",
+    "config.skillsDirsRemove",
+    "config.skillsDirInvalid",
+    "config.skillsDirAlreadyScanned",
+    "config.skillsDirSaveError",
+  ];
+  for (const key of KEYS) {
+    assert.ok(enBlock.includes(`"${key}":`), `English dict is missing ${key}`);
+    assert.ok(zhBlock.includes(`"${key}":`), `Chinese dict is missing ${key}`);
+  }
 });
