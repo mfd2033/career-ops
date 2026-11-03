@@ -61,7 +61,7 @@
     - **进程存活观察点**：`tasklist /FI "IMAGENAME eq CareerDashboardTray.exe"` —— 出现即视为壳已起（Electron 会同时有一组子进程，属正常）。
     - **窗口预期**：不出现任何控制台窗口；**面板默认不弹出**（左键点托盘才展开）；日志窗口默认不存在（右键「显示日志窗口」才创建）。
     - 预期结果：命令立即返回；约 60s 内服务就绪，默认浏览器打开 `http://localhost:3000`。
-      - **不叠标签页**：Edge 里已经开着同一个页面时，壳只把那个窗口切到前台（`AppActivate`），不新开标签——实现见 `tray-shell/src/browser.cjs`（读窗口地址栏，只读不写；只看活动标签，探测失败即退回直接打开）。
+      - **不叠标签页**：Edge 里已经开着同一个页面时（无论它是不是当前活动标签），壳只把那个标签/窗口切到前台，不新开标签——实现见 `tray-shell/src/browser.cjs`：先读各窗口地址栏（活动标签），没命中再读标签条（`TabItem` 的标题），挑标题像本仪表盘的标签选中它、把地址栏的 URL 读回来核对，对不上就切回原标签；全程只读 + 至多切一次标签，探测失败即退回直接打开。
   - 2.2 **验证**：`Invoke-RestMethod http://localhost:3000/api/version`
     - 预期：HTTP 200，`{"sha":"{短sha}","packaged":true,...}` → 成功。
     - 失败判据：`packaged:false` 或 sha 不符 = 服务的是工作树而非打包构建（查 `.dashboard-runtime` 权限、`career-tray/` 是否被杀软占用）；连接失败/超时 = 见 2.3。

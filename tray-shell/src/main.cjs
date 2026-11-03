@@ -400,7 +400,11 @@ function startTimers() {
 async function openBrowserUrl(url) {
   try {
     const result = await openOrFocus(url, { openExternal: (target) => shell.openExternal(target) });
-    if (result.focused) sink?.line("launcher", `浏览器已有该页面（pid=${result.pid}）→ 切到该窗口，不新开标签`);
+    if (result.focused && result.backgroundTab) {
+      sink?.line("launcher", `浏览器后台标签已有该页面（pid=${result.pid}）→ 切过去，不新开标签`);
+    } else if (result.focused) {
+      sink?.line("launcher", `浏览器已有该页面（pid=${result.pid}）→ 切到该窗口，不新开标签`);
+    }
     return result;
   } catch (error) {
     sink?.line("launcher", `打开浏览器失败：${error.message}`);
