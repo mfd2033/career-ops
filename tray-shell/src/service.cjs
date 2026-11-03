@@ -13,6 +13,9 @@
 
 const { spawn } = require("node:child_process");
 const proc = require("./proc.cjs");
+// 浏览器清单是单一事实源（ADR-0063 修订二）：打包脚本与壳用同一份，
+// 增删浏览器只会发生在 tray-shell/src/process-tree.cjs 一处。
+const { BROWSER_IMAGES, isBrowserImage } = require("./process-tree.cjs");
 
 const WEB_PORT = 3000;
 
@@ -24,12 +27,8 @@ const ACTION_KILL_THEN_START = "kill-then-start";
  * 浏览器进程不杀（2026-11-03 用户要求）：打包/启动壳都不替用户关浏览器。
  * Edge 是本机默认浏览器，也是仪表盘的常用打开方式——它哪怕出现成 3000 的占用者
  * （扩展、WebView 宿主等），也只报给用户，交给他们自己关那个窗口。
+ * 清单本身在 process-tree.cjs（与打包脚本共用）。
  */
-const BROWSER_IMAGES = new Set(["msedge.exe", "chrome.exe", "firefox.exe", "brave.exe", "opera.exe", "vivaldi.exe"]);
-
-function isBrowserImage(image) {
-  return BROWSER_IMAGES.has(String(image || "").trim().toLowerCase());
-}
 
 /** 3000 被浏览器占着时的提示：说清楚「我们没杀」，并给出用户自己的动作。 */
 function browserOccupiedMsg(occupant) {
