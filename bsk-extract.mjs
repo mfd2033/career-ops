@@ -398,6 +398,7 @@ export async function extractWithBsk({ url, mode = 'jd', max = 200, maxChars = 1
         '--timeout', `${Math.round(CAPTCHA_HELP_TIMEOUT_MS / 1000)}s`,
       ];
       if (sync.contextId) helpArgs.push('--context', sync.contextId);
+      if (sync.observationId) helpArgs.push('--observation', sync.observationId);
       await runBsk(helpArgs, CAPTCHA_HELP_TIMEOUT_MS + 20_000);
       const rawAfter = await readDomReadyViaBsk(sessionId, mode, url);
       return mode === 'listing'
@@ -416,6 +417,42 @@ export async function extractWithBsk({ url, mode = 'jd', max = 200, maxChars = 1
         // the session auto-expires after idle; never mask the real result
       }
     }
+  }
+}
+
+/**
+ * Parse `bsk cooperate sync --json` into the one-shot credentials a shared-tab
+ * action needs.
+ *
+ * Two facts this must get right, both learned the hard way (2026-11-02):
+ *   • bsk prefixes its JSON with a UTF-8 BOM, which `JSON.parse` rejects. An
+ *     unstripped BOM made EVERY sync look unsupported, so the caller silently
+ *     fell back to a bare `evaluate` — harmless while the old policy tolerated
+ *     it, fatal once bsk 0.4.1 (protocol 1.8) enforced strict observations.
+ *   • 0.4.1 hands the authorization out as TWO ids: `context_id` plus the
+ *     `observation_id` of the read the caller is authorizing. `evaluate` needs
+ *     both (`--context` AND `--observation`); context alone is refused with
+ *     "this action needs an explicit current observation".
+ *
+ * Pure — exported for tests.
+ *
+ * @param {string} stdout raw `cooperate sync --json` output
+ * @returns {{ supported: boolean, contextId: string, observationId: string }}
+ */
+export function parseSyncOutput(stdout) {
+  try {
+    const parsed = JSON.parse(String(stdout ?? '').replace(/^\uFEFF/, ''));
+    const ctx = parsed?.context_id;
+    const obs = [parsed?.observation_id, parsed?.observation?.observation_id].find(
+      (v) => typeof v === 'string' && v.trim(),
+    );
+    return {
+      supported: true,
+      contextId: typeof ctx === 'string' ? ctx.trim() : '',
+      observationId: typeof obs === 'string' ? obs.trim() : '',
+    };
+  } catch {
+    return { supported: false, contextId: '', observationId: '' };
   }
 }
 
@@ -441,7 +478,7 @@ export async function extractWithBsk({ url, mode = 'jd', max = 200, maxChars = 1
  *     caller retries rather than guessing.
  *
  * @param {string} sessionId
- * @returns {Promise<{ supported: boolean, contextId: string }>}
+ * @returns {Promise<{ supported: boolean, contextId: string, observationId: string }>}
  */
 async function syncActionContext(sessionId) {
   try {
@@ -449,14 +486,12 @@ async function syncActionContext(sessionId) {
       ['cooperate', 'sync', '--session', sessionId, '--json', '--settle'],
       COOPERATE_SYNC_TIMEOUT_MS,
     );
-    const parsed = JSON.parse(String(stdout ?? ''));
-    const id = parsed?.context_id;
-    return { supported: true, contextId: typeof id === 'string' ? id.trim() : '' };
+    return parseSyncOutput(stdout);
   } catch (err) {
     // A vanished CLI is terminal — degrading to the legacy call would only
     // replace the honest `bsk_missing` with a confusing `bsk_command_failed`.
     if (err?.code === 'bsk_missing') throw err;
-    return { supported: false, contextId: '' };
+    return { supported: false, contextId: '', observationId: '' };
   }
 }
 
@@ -472,7 +507,12 @@ export function isObservationRefusal(err) {
   const m = String(err?.message ?? '');
   return (
     m.includes('shared page control or observation changed') ||
-    m.includes('The observed page or control state changed')
+    m.includes('The observed page or control state changed') ||
+    // bsk 0.4.1 (protocol 1.8) strict policy: the sync succeeded but the action
+    // did not name the observation it acts on. Same recovery as the two above
+    // (re-sync, re-fire) — and without this match the refusal skipped the
+    // retry loop entirely and surfaced as a terminal `bsk_command_failed`.
+    m.includes('this action needs an explicit current observation')
   );
 }
 
@@ -485,6 +525,9 @@ async function readDomViaBsk(sessionId) {
     if (sync.supported && !sync.contextId) return null;
     const args = ['evaluate', READ_DOM_JS, '--session', sessionId];
     if (sync.contextId) args.push('--context', sync.contextId);
+    // 0.4.1 (protocol 1.8) strict policy: context alone is refused — the read
+    // must name the observation it is authorizing, or evaluate never runs.
+    if (sync.observationId) args.push('--observation', sync.observationId);
     let stdout;
     try {
       ({ stdout } = await runBsk(args, 20_000));

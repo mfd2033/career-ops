@@ -24,7 +24,7 @@ import { tmpdir } from 'node:os';
 
 import { pass, fail, ROOT } from './helpers.mjs';
 import { pickExtractor } from '../browser-extract.mjs';
-import { extractWithBsk, parseSessionId, zhListingAnchors, listingWithCities, extractCityFromText, extractSalaryFromText, shouldReloadListing, isObservationRefusal, execWithHardTimeout } from '../bsk-extract.mjs';
+import { extractWithBsk, parseSessionId, zhListingAnchors, listingWithCities, extractCityFromText, extractSalaryFromText, shouldReloadListing, isObservationRefusal, parseSyncOutput, execWithHardTimeout } from '../bsk-extract.mjs';
 import { isZhJobDetailUrl } from '../lib/zh-jobs.mjs';
 
 const NODE = process.execPath;
@@ -320,6 +320,8 @@ const refusalCases = [
   // [desc, message, expected]
   ['sync/dispatch wording', 'bsk evaluate ... failed: error: shared page control or observation changed', true],
   ['observation wording (sync-side)', 'error: The observed page or control state changed; synchronize', true],
+  // bsk 0.4.1 (protocol 1.8) strict policy — same recovery, different wording
+  ['strict observation wording', 'error: this action needs an explicit current observation', true],
   ['daemon offline -> NOT retried', 'bsk daemon not reachable — start browser-skill (`bsk status`) and re-run', false],
   ['missing CLI -> NOT retried', 'bsk CLI not found on PATH (install browser-skill, or check `bsk status`)', false],
   ['empty message -> NOT retried', '', false],
@@ -330,6 +332,49 @@ for (const [desc, message, expected] of refusalCases) {
     pass(`isObservationRefusal(${desc}) -> ${expected}`);
   } else {
     fail(`isObservationRefusal(${desc}) -> ${got}, expected ${expected}`);
+  }
+}
+
+// ── S9c: parseSyncOutput (cooperate-sync credential parsing) ──────────────
+// bsk writes a UTF-8 BOM in front of its JSON. An unstripped BOM made every
+// sync look "unsupported", so evaluate ran bare — tolerated by protocol 1.7,
+// refused by 1.8 strict policy. Both credential ids must survive parsing.
+const syncCases = [
+  // [desc, stdout, expected]
+  [
+    'BOM + top-level observation_id',
+    '\uFEFF{"context_id":"ctx-1","observation_id":"obs-1","control_policy":"target"}',
+    { supported: true, contextId: 'ctx-1', observationId: 'obs-1' },
+  ],
+  [
+    'observation_id nested under observation',
+    '{"context_id":"ctx-2","observation":{"observation_id":"obs-2"}}',
+    { supported: true, contextId: 'ctx-2', observationId: 'obs-2' },
+  ],
+  [
+    'legacy bsk: context only, no observation',
+    '{"context_id":"ctx-3"}',
+    { supported: true, contextId: 'ctx-3', observationId: '' },
+  ],
+  [
+    'human holds the tab: no context',
+    '{"context_id":null,"observation_id":null,"ready":false}',
+    { supported: true, contextId: '', observationId: '' },
+  ],
+  [
+    'not JSON (old bsk has no cooperate) -> unsupported',
+    'error: unrecognized subcommand `cooperate`',
+    { supported: false, contextId: '', observationId: '' },
+  ],
+  ['empty output -> unsupported', '', { supported: false, contextId: '', observationId: '' }],
+];
+for (const [desc, stdout, expected] of syncCases) {
+  const got = parseSyncOutput(stdout);
+  const ok = JSON.stringify(got) === JSON.stringify(expected);
+  if (ok) {
+    pass(`parseSyncOutput(${desc}) -> ${JSON.stringify(got)}`);
+  } else {
+    fail(`parseSyncOutput(${desc}) -> ${JSON.stringify(got)}, expected ${JSON.stringify(expected)}`);
   }
 }
 
