@@ -14,7 +14,7 @@
 
 1. **只对终态失败的 evaluate 子项提供入口**：`!ok && !skipped && reason 非空 && key 是 http(s) URL`。进行中占位、跳过项、成功项、checkup 项（tracker#）都不渲染按钮。
 2. **重试 = 派发一个独立单任务工作器**（`kind="evaluate"`、`input=失败项 URL`），而不是重跑父批量、也不复用父卡。父批量的失败证据（reason、单项清单）原样保留；新 run 在台账里是独立记录，可在 /jobs 直接打开。
-3. **引擎沿用父批量的派发快照**：`BatchItemList` 已持有 `cliId`/`model`（批量卡与台账行都带），重试派发用这一对值，缺失才回退当前设置——与 ADR-0061 决议 5「原样再来」同口径。为此 `StartOpts` 增加可选 `cliId`/`model`。
+3. **引擎沿用父批量的派发快照**：`BatchItemList` 已持有 `cliId`/`model`（批量卡与台账行都带），重试派发用这一对值，缺失才回退当前设置——与 ADR-0061 决议 5「原样再来」同口径。为此 `StartOpts` 增加可选 `cliId`/`model`。**（本条被修订 2 推翻：引擎改取派发那一刻的最新设置。）**
 4. **防重复派发**：同 URL 已存在 `running`/`queued` 的 `evaluate` 卡时，按钮位显示「重试中…」而非可点按钮（单 URL 串行、避免误触刷屏式重复消费）。
 5. **不做二次确认**：单项重试与行内评估同代价，一次点击直达；与 ADR-0061「批量整卡重跑才拦截」的分级一致。
 6. **组件无 hooks 依赖的判定抽成纯函数**：`canRetryBatchItem` 与 `hasLiveEvaluateForUrl` 放 `.mjs`，`node --test` 锁定（沿用 ADR-0057/0061 的既有缺口补法）。
@@ -40,6 +40,20 @@
 4. 派发语义不变：仍是独立 `kind="evaluate"` 工作器、引擎取父批量快照、`hasLiveEvaluateForUrl` 防连点（决议 2/3/4）。
 
 **不改变**：服务端 API、`items` 数据结构与父卡计数（该项仍计在失败侧，重试是另一条独立记录）；checkup 批量仍不开放（需前哨）；`reason` 非空判定的既有语义保留。
+
+## 修订 2（2026-11-03）：引擎改取派发那一刻的最新设置（推翻决议 3）
+
+**诱因**：ADR-0061 修订 2 把整卡重试的引擎来源从「卡上快照」改成了「派发那一刻的最新设置」——失败多半就出在那个模型上，重试必须能吃到用户刚改好的配置。单项重试与整卡重试是同一个用户动作的粒度差异，规则必须一致；只改一边会得到「整卡重试换新模型、单项重试仍用旧模型」的错乱。
+
+**决定**：
+
+1. `BatchItemRetryButton` 不再接收/透传 `cliId`/`model`；`StartOpts` 删除可选的 `cliId`/`model`（它们唯一的使用者就是本条）。`startJob` 恒走 `resolveEngineFallback()`，与新建任务、整卡重试同一条解析路径。
+2. 父批量的引擎仍作为**展示**信息留在 `BatchItemList`（子项行上的引擎标注不改）——它如实描述那次批量派发请求了什么，但不再左右重试选什么模型。
+3. 重试的新 run 在卡片与台账里记的是本次解析出的引擎（ADR-0043「派发时请求的值」不变）。
+
+**不改变**：重试仍是「独立单任务 evaluate worker」（决议 2）、`hasLiveEvaluateForUrl` 防连点（决议 4）、父批量失败证据与计数（决议 1/修订 1）。
+
+**验证**：`node --test web/tests/lib/batch-item-retry-wiring.test.mjs`（断言按钮不再携带 `cliId`/`model`、`job-store` 两处派发均 `await resolveEngineFallback()`）；`web` tsc 干净。
 
 ## Consequences
 

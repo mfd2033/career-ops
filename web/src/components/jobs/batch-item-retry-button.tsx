@@ -14,17 +14,14 @@ import { cn } from "@/lib/cn";
 // canRetryBatchItem 天然拦掉。
 // ADR-0093 修订 1：父批量已终态时，没有 reason 的「结论丢失」占位项也放出按钮
 // （父卡还在跑则仍由纯函数拦住，避免与在跑的 worker 重复消费）。
+// ADR-0093 修订 2：引擎不再传父批量快照——startJob 自己取派发那一刻的最新模型
+// 配置（与整卡重试同口径）。父批量的引擎只用于卡片展示，不再左右重试选什么模型。
 export function BatchItemRetryButton({
   item,
-  cliId,
-  model,
   parentTerminal = false,
   className,
 }: {
   item: JobItem;
-  /** 父批量派发时的引擎快照——重试「原样再来」（ADR-0093 决议 3）。 */
-  cliId?: string;
-  model?: string;
   /** 父批量是否已达终态（done/error）：决定无 reason 的失败项能否重试。 */
   parentTerminal?: boolean;
   className?: string;
@@ -55,8 +52,6 @@ export function BatchItemRetryButton({
           subtitle: item.key,
           kind: "evaluate",
           input: item.key,
-          cliId,
-          model,
         });
       }}
       title={t("jobs.batchItemRetryHint")}

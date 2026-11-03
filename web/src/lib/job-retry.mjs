@@ -9,6 +9,10 @@
  * 完整参数，永远不可重试。ledger-only 行（ADR-0061 修订 1）：单次卡台账存了
  * kind+input，可重试（retryJob 对不在本地 store 的卡种子一张全新本地卡）；
  * 批量卡台账只有结论清单、无 urls/ns，仍然不可重试。
+ *
+ * 注意区分两类「快照」：派发参数（kind/input/urls/ns）重试必须原样复用；
+ * 运行引擎（cliId/model）**不是**重试的取参来源——ADR-0061 修订 2 起，重试
+ * 一律取派发那一刻的最新模型配置（失败往往就出在那个模型上）。
  */
 
 /** 批量任务的 kind——它们的派发参数是 urls/ns 而非单个 input。 */
@@ -50,7 +54,8 @@ export function nextAttempt(job) {
 /**
  * 为重试重置一张卡（原卡复用，ADR-0061 决议 3）：不换 id、不新增卡。
  * 保留展示与派发字段（title/subtitle/page/input/kind/cliId/model/reportNum/
- * batchId/urls/ns），attempt+1、状态回 running、时间线追加「第 N 次尝试」
+ * batchId/urls/ns，引擎字段会被本次派发改写——见下），attempt+1、状态回
+ * running、时间线追加「第 N 次尝试」
  * 分隔行后保留旧步骤（STEPS_CAP 滚动窗口自然截断更早的尝试）；上次运行的
  * 运行态与结论（items/batchPos/serverBatchId/text/result/cost/runId/
  * interruptedAt/时间戳/阶段）全部清除，由新 run 重建。
@@ -59,6 +64,10 @@ export function nextAttempt(job) {
  * @param {{ now: number, separatorLabel: string }} opts - now = 重试发起时刻；
  *   separatorLabel = 分隔行文案（调用方用 i18n 生成，如 t("jobs.retryAttempt", { n })）。
  * @returns {Record<string, unknown>} 重置后的新卡对象（原对象不变）。
+ *
+ * `cliId`/`model` 仍照抄原卡，但它们描述的是**上一轮**尝试；本次尝试的引擎由
+ * 派发前解析的最新设置覆盖（ADR-0061 修订 2），这里保留只为避免重置瞬间卡片
+ * 上「派发给」一栏闪成未记录。
  */
 export function resetJobForRetry(job, { now, separatorLabel }) {
   return {

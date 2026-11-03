@@ -121,7 +121,7 @@ export type Job = {
   endedAt?: number;
 };
 
-type StartOpts = { title: string; subtitle?: string; kind: string; input: string; page?: string; batchId?: string; urls?: string[]; ns?: string[]; reportNum?: string; cliId?: string; model?: string };
+type StartOpts = { title: string; subtitle?: string; kind: string; input: string; page?: string; batchId?: string; urls?: string[]; ns?: string[]; reportNum?: string };
 
 // /api/runs/history 的台账行形状（服务端 run 账本，终态）。tolerant reader：
 // 旧行可能缺字段（ADR-0043 前无 cliId/model，ADR-0045 前无 items/total）。
@@ -187,9 +187,10 @@ function parseVerdict(text: string): JobResult {
   return { score: null, summary: "", tone: "muted" };
 }
 
-// ADR-0043/0061：派发引擎的「当前设置」兜底解析。startJob 每次派发都走这里；
-// retryJob 只在卡上没有引擎快照（cliId 缺失）时才回退到它——重试语义是
-// 「原样再来」，引擎优先沿用失败那次的 cliId/model（决议 5）。
+// ADR-0043 / ADR-0061 修订 2 / ADR-0093 修订 2：派发引擎的唯一来源——配置页
+// 已保存的 cliId + model（缺失才去解析本机默认 CLI）。**新任务、整卡重试、批量
+// 失败子项重试全部走这里**，一律取派发那一刻的最新设置：失败往往就是因为那个
+// 模型不好用，重试必须能吃到用户刚改好的配置，而不是原样再失败一次。
 async function resolveEngineFallback(): Promise<{ cliId?: string; model?: string }> {
   const cliId = readSavedCliId() || (await resolveCliId());
   return { cliId: cliId || undefined, model: readSavedModel() || undefined };
@@ -689,8 +690,10 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
 
   // ADR-0061 任务重试：startJob 与 retryJob 共用的派发体——卡片就绪后按
   // urls/ns 二分（单任务 POST /api/run，批量 POST batch-* 端点 + NDJSON 流），
-  // 事件接线与抽取前逐行保真；服务端零改动。engine 是本次实际派发的引擎
-  // （新任务 = 当前设置解析；重试 = 卡上快照，决议 5）。
+  // 事件接线与抽取前逐行保真；服务端零改动。engine 是本次实际派发的引擎，
+  // 两处调用方都来自 resolveEngineFallback（派发那一刻的最新设置）。
+  // 卡片上的 cliId/model 只记录「上一轮尝试请求了什么」，由下面的 patch 在
+  // 本次真正派发前改写成本次的值。
   const dispatchJob = useCallback(
     (id: string, opts: StartOpts, engine: { cliId?: string; model?: string }) => {
       if (!opts.urls && !opts.ns) {
@@ -992,9 +995,9 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
       setJobs((js) => [job, ...js]);
       removed.current.delete(id);
       (async () => {
-        // ADR-0093 决议 3：批量失败子项重试沿用父批量的引擎快照（原样再来）；
-        // 缺省（所有既有调用点）才解析当前设置。
-        const engine = opts.cliId ? { cliId: opts.cliId, model: opts.model } : await resolveEngineFallback();
+        // ADR-0093 修订 2：批量失败子项重试不再沿用父批量的引擎快照——与整卡
+        // 重试同口径，取派发这一刻的最新模型配置（原因通常就是旧模型跑不动）。
+        const engine = await resolveEngineFallback();
         dispatchJob(id, opts, engine);
       })();
       return id;
@@ -1002,11 +1005,11 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
     [dispatchJob, t],
   );
 
-  // ADR-0061 决议 1/3/4/5 + 修订 1：手动重试。本地 error 卡原卡复用（attempt+1、
-  // 时间线追加「第 N 次尝试」分隔行、运行态清空），引擎沿用卡上快照、缺失才
-  // 回退当前设置。ledger-only 卡（扩展/CLI/别的页签发起，本浏览器无本地卡）不在
-  // store jobs 里、无法原卡复用：按卡上 kind+input 种子一张全新本地卡走 startJob
-  // 同一条派发路径（新 runId、attempt 从 1 起）。
+  // ADR-0061 决议 1/3/4 + 修订 1/2：手动重试。本地 error 卡原卡复用（attempt+1、
+  // 时间线追加「第 N 次尝试」分隔行、运行态清空），引擎**取重试这一刻的最新设置**
+  // （修订 2 推翻决议 5 的卡上快照）。ledger-only 卡（扩展/CLI/别的页签发起，本浏览器
+  // 无本地卡）不在 store jobs 里、无法原卡复用：按卡上 kind+input 种子一张全新本地卡
+  // 走 startJob 同一条派发路径（新 runId、attempt 从 1 起，引擎同样取最新设置）。
   const retryJob = useCallback(
     (job: Job) => {
       if (!canRetryJob(job)) return;
@@ -1020,7 +1023,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
       const n = nextAttempt(local);
       patch(local.id, () => resetJobForRetry(local, { now: Date.now(), separatorLabel: t("jobs.retryAttemptSeparator", { n }) }) as Job);
       (async () => {
-        const engine = local.cliId ? { cliId: local.cliId, model: local.model } : await resolveEngineFallback();
+        const engine = await resolveEngineFallback();
         dispatchJob(
           local.id,
           {

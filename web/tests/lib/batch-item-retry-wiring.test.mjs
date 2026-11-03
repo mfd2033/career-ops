@@ -1,6 +1,6 @@
 // 单项重试的接线守卫（ADR-0093）：组件无 DOM 测试基建，用源码字符串锁定
-// 「失败项 → BatchItemRetryButton → startJob(kind=evaluate, input=失败项 URL,
-// 引擎沿用父批量快照)」这条链，以及 en/zh 文案键对称，防止后续重构悄悄拆掉。
+// 「失败项 → BatchItemRetryButton → startJob(kind=evaluate, input=失败项 URL)」
+// 这条链，以及 en/zh 文案键对称，防止后续重构悄悄拆掉。
 //
 // Run:  node --test tests/lib/batch-item-retry-wiring.test.mjs
 
@@ -33,15 +33,19 @@ test("终态信号从三个渲染面透传到子项判定", () => {
   assert.match(DETAIL_PAGE, /model=\{e\.model\} parentTerminal \/>/);
 });
 
-test("重试按钮派发独立 evaluate worker：input = 子项 URL，引擎取父批量快照", () => {
+test("重试按钮派发独立 evaluate worker：input = 子项 URL", () => {
   assert.match(BUTTON, /kind: "evaluate"/);
   assert.match(BUTTON, /input: item\.key/);
-  assert.match(BUTTON, /cliId,\s*\n\s*model,/, "引擎快照必须随派发透传");
   assert.match(BUTTON, /hasLiveEvaluateForUrl/, "同 URL 在跑时须拦重复派发");
 });
 
-test("job-store 的 startJob 优先使用传进来的引擎快照", () => {
-  assert.match(STORE, /opts\.cliId \? \{ cliId: opts\.cliId, model: opts\.model \} : await resolveEngineFallback\(\)/);
+// ADR-0093 修订 2（推翻决议 3）：重试不再随派发透传父批量的引擎快照——
+// startJob 自己取派发那一刻的最新模型配置（与 ADR-0061 修订 2 同口径）。
+test("单项重试不透传父批量引擎快照，改由 startJob 解析最新设置", () => {
+  assert.doesNotMatch(BUTTON, /cliId|model/, "重试按钮不得再携带父批量引擎值");
+  assert.match(STORE, /const engine = await resolveEngineFallback\(\);/, "startJob 与 retryJob 都必须取最新设置");
+  assert.doesNotMatch(STORE, /opts\.cliId \?/, "startJob 不得再按传参快照分支");
+  assert.doesNotMatch(STORE, /local\.cliId \?/, "retryJob 不得再沿用卡上快照");
 });
 
 test("i18n：单项重试文案在 en/zh 两份字典里键完全对齐", () => {
