@@ -393,9 +393,14 @@ function startTimers() {
 /**
  * 打开一个仪表盘地址。
  *
- * 不再无脑 openExternal：Edge 里已经开着同一个页面时（地址栏命中）只把那个窗口
- * 切到前台，不叠新标签——反复打包/启动的「标签页越攒越多」就是这么来的。
+ * 不再无脑 openExternal：Edge 里已经开着同一个页面时（活动标签或后台标签）只把
+ * 那个标签切到前台，不叠新标签——反复打包/启动的「标签页越攒越多」就是这么来的。
  * 探测失败一律退回直接打开（见 browser.cjs），这里只负责不抛。
+ *
+ * 注意：Windows 上 `shell.openExternal` 会让浏览器以本壳为父进程创建
+ * （实测 `msedge.exe` 的 ParentProcessId = 壳的 pid），所以停壳时**绝不能用
+ * `taskkill /T`**——那会沿进程树连坐，把用户整个浏览器一起杀掉（2026-11-03 事故）。
+ * 停壳请走 `local/pack-launcher.mjs` 的实现：自己走树、逐个 /PID、跳过浏览器。
  */
 async function openBrowserUrl(url) {
   try {

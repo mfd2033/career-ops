@@ -30,7 +30,7 @@
 - **第 0 步 打包前置（硬性）**
   - 0.1 **git 状态确认**：`git rev-parse --short HEAD` → 7 位短 sha（cacheVersion 基础）；`git status --porcelain` → 空 = `{sha}`，非空 = `{sha}-dirty`。想要干净版本号先 commit。
   - 0.2 **停止旧实例**
-    - `taskkill /F /IM CareerDashboardTray.exe /T`（`/T` 必须，否则 node 子进程残留；Electron 是一组同名进程，主/GPU/渲染/工具都会被带走）。
+    - **禁用 `taskkill /F /IM CareerDashboardTray.exe /T`（2026-11-03 事故）**：`/T` 沿进程树连坐，而壳用 `shell.openExternal` 打开的浏览器恰好在壳的树下（实测 `msedge.exe` 的 `ParentProcessId` = 壳的 pid）——一条 `/T` 下来，用户整个 Edge 窗口（外加所有标签页）一起被干掉。正确做法：CIM 取壳的 PID → 自己按 `ParentProcessId` 走完整棵树 → 逐个 `taskkill /F /PID <pid>`（**不带 `/T`**），碰到 `msedge.exe` / `chrome.exe` 等浏览器及其子树跳过并打日志。`pack-launcher.mjs` 的 `killTreeSkippingBrowsers()` 就是这个实现：node 子进程仍在树里，照常清掉、不残留，浏览器原样留着。
     - 另有一个 `electron.exe`（开发态 `npm run tray`）时：只杀 **exe 路径在 `career-tray/` 下**的那些。脚本用 CIM 查 `ExecutablePath` 过滤后按 PID 杀；CIM 不可用就跳过，交给端口兜底。
     - 端口兜底：`Get-NetTCPConnection -LocalPort 3000 -State Listen` 取 PID → `taskkill /F /PID <pid>`，确认无 Listen 记录再继续。
     - **浏览器进程绝不杀（2026-11-03，用户要求）**：`msedge.exe` / `chrome.exe` / `firefox.exe` 等出现在 dev 端口或 3000 上时，`pack-launcher.mjs` 只打印「跳过浏览器进程 …请自行关闭该标签页后重跑」并停下，由用户自己关窗口——打包不替用户关浏览器。

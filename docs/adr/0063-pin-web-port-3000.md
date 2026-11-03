@@ -64,3 +64,9 @@
 - **顺带**：壳就绪后打开仪表盘不再无脑 `shell.openExternal`——Edge 已有同地址标签页时只把它切到前台，不新开标签（`tray-shell/src/browser.cjs`，读地址栏只读不写，探测失败即退回直接打开）。
   - 2026-11-03 二次修订：首版只看**活动**标签（地址栏只反映活动标签），而用户的实际情形恰恰是「仪表盘开在后台标签里」，于是仍然叠新标签。现改为：活动标签没命中时读标签条（UIA `TabItem` 的 Name = 标题，不含 URL），选标题像本仪表盘的候选标签、把地址栏的 URL 读回来核对（对不上就切回原标签）；品牌词取自目标页 `<title>` 首段，抓不到退回常量 `career-ops`。最多试 3 个候选。
 - **不变**：端口仍固定 3000、绝不回退（决策 1）。
+
+## 修订二（2026-11-03）：停壳禁用 `taskkill /T`
+
+- **事故**：打包后用户的 Edge 整个消失了（23 个标签页一起）。根因不是显式 taskkill 浏览器，而是 `taskkill /F /IM CareerDashboardTray.exe /T`：壳用 `shell.openExternal` 打开仪表盘时，浏览器以壳为父进程创建（实测 `msedge.exe` 的 `ParentProcessId` = 壳的 pid），`/T` 沿树连坐。文档 0.2 当时还写着「`/T` 必须」——就是它。
+- **新规则**：停壳改成「CIM 取 PID → 按 `ParentProcessId` 自己走树 → 逐个 `taskkill /F /PID`（不带 `/T`）→ 跳过 `msedge.exe` 等浏览器及其子树」，实现见 `local/pack-launcher.mjs` 的 `killTreeSkippingBrowsers()`。node 服务子进程仍在树里，照常清掉，端口照样腾出来。
+- **遗留关联**：浏览器仍是壳的子进程（Electron 的 `shell.openExternal` 行为），所以除了停壳不能 `/T`，其它任何「按名杀 + `/T`」的命令也不得指向 `CareerDashboardTray.exe`。
