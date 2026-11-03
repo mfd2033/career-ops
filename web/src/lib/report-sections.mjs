@@ -81,6 +81,12 @@ export function isVerdictHeading(heading) {
 const GAP_SUBHEADING = /(?:gaps?|差距|缺口)/i;
 /** 有的模式写成独立一行粗体小节标题（`**能力差距 (Gaps)：**`），不是 `###`。 */
 const BOLD_SUBHEADING = /^\*\*([^*]+?)\*\*\s*[:：]?\s*$/;
+/** 差距小节内部的分组标签（`**硬门槛（不可缓解）：**` / `**可迁移部分：**`）：
+ *  冒号结尾、且核心词说的是「差距」而不是「怎么补」。 */
+const GAP_GROUP_WORD = /(?:门槛|缺口|差距|不匹配|缺失|偏离|不足)/;
+/** 缓解/应对类标签（`**缓解策略：**` / `**Gaps Mitigation:**`）——它们关闭差距小节，
+ *  后面的条目是「怎么补」而不是「为什么低」。 */
+const MITIGATION_LABEL = /(?:缓解|弥补|应对|策略|建议|措施|mitigation)/i;
 /** 编号条目（`1.` / `2)`）或无序条目（`-` / `*`），且顶格——缩进子行是
  *  「硬门槛还是加分项 / 能否等价证明 / 怎么补」的解释，不属于条目首行。 */
 const GAP_ITEM = /^(?:\d+[.)]|[-*])\s+(.*)$/;
@@ -112,8 +118,21 @@ function gapItem(line) {
 }
 
 const TABLE_SEPARATOR = /^\|[\s:|-]+\|?\s*$/;
-/** 表格形式的差距（`| Gap | 性质 | 缓解策略 |`）取第一列。 */
-const TABLE_FIRST_CELL = /^\|([^|]*)\|/;
+/** 表格形式的差距（`| Gap | 性质 | 缓解策略 |`）取第一列；首列若只是
+ *  「#」或序号（`| # | 差距 | …` / `| 1 | 差距 | …`），换用下一列。 */
+const INDEX_CELL = /^\d+[.)]?\s*$|^[#＃№]$/;
+
+/**
+ * 拆表格行的单元格（去掉行首/行尾竖线），并清掉内联标记。
+ * @param {string} line
+ * @returns {string[]}
+ */
+function tableCells(line) {
+  const parts = line.split("|");
+  if (line.trimStart().startsWith("|")) parts.shift();
+  if (line.trimEnd().endsWith("|")) parts.pop();
+  return parts.map((cell) => cell.replace(/[*_`]/g, "").trim());
+}
 
 /**
  * @param {string} markdown 报告正文（通常是 B 段或整篇 body）
@@ -141,9 +160,16 @@ export function extractGapHighlights(markdown, max = 6) {
     if (item === null && boldHeading) {
       const title = boldHeading[1];
       if (inGap) {
-        // 已经在差距小节里：粗体行是条目本身（「🔴 硬缺口：大模型经验缺失」），
-        // 除非它是不含「差距/缺口」的短标题——那才是下一个主题。
-        if (!GAP_SUBHEADING.test(title) && title.length <= 30) inGap = false;
+        // 冒号结尾的粗体行可能是小节内的分组标签（`**硬门槛（不可缓解）：**`），
+        // 也可能是交给下一节的标题（`**缓解策略：**`）。前者当「新主题」会关闭
+        // 小节，后面同属差距的条目全部丢失（#1251 及同类报告）；后者必须关闭，
+        // 否则「怎么补」会被当成「为什么低」混进顶部摘要。判据看冒号前的核心词，
+        // 并忽略括号里的限定语（`硬门槛（难以短期弥补）`仍是分组标签）。
+        const labelCore = title.replace(/（[^）]*）|\([^)]*\)/g, "").trim();
+        if (/[:：]\s*$/.test(title) && GAP_GROUP_WORD.test(labelCore) && !MITIGATION_LABEL.test(labelCore)) {
+          continue;
+        }
+        if (MITIGATION_LABEL.test(labelCore) || (!GAP_SUBHEADING.test(title) && title.length <= 30)) inGap = false;
         else if (title.length >= 4 && !strong.includes(title)) strong.push(title);
         continue;
       }
@@ -155,7 +181,11 @@ export function extractGapHighlights(markdown, max = 6) {
     // 表格形式：跳过分隔行，以及「表头」——紧跟着分隔行的那一行。
     if (line.startsWith("|")) {
       if (TABLE_SEPARATOR.test(line) || TABLE_SEPARATOR.test(lines[i + 1] ?? "")) continue;
-      const cell = (line.match(TABLE_FIRST_CELL)?.[1] ?? "").replace(/[*_`]/g, "").trim();
+      const cells = tableCells(line);
+      // 首列是序号列时它不是差距本身：`| 1 | 主流数据采集技术与工具… |`
+      // 取第一列只会拿到一个长度不足的「1」，整张表被丢空。
+      const start = cells.length > 1 && INDEX_CELL.test(cells[0] ?? "") ? 1 : 0;
+      const cell = cells.slice(start).find((c) => c.length > 0) ?? "";
       if (cell.length >= 4 && !strong.includes(cell)) {
         strong.push(cell.length > 90 ? cell.slice(0, 90).trimEnd() + "…" : cell);
       }

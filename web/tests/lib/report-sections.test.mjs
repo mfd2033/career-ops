@@ -236,3 +236,45 @@ test("table-form gaps take the first column and skip the header rows (#1023)", (
   ].join("\n");
   assert.deepEqual(extractGapHighlights(md), ["行业不匹配（软件 vs 机械制造）", "大专学历（JD 要求本科）"]);
 });
+
+test("a table whose first column is a row number takes the gap column instead (#1251)", () => {
+  // 1251 的差距表写着 `| # | 差距 | 硬门槛还是加分项 | … |`。旧实现只取第一列，
+  // 数据行第一列是「1」/「2」，长度不足 4 被丢弃 → 页面顶部整块扣分原因消失。
+  const md = [
+    "### 能力差距与弥补策略",
+    "| # | 差距 | 硬门槛还是加分项 | 能否用相邻经验等价证明 |",
+    "|---|---|---|---|",
+    "| 1 | 主流数据采集技术与工具（爬虫/采集端/标注平台） | 半硬门槛 | 部分可以 |",
+    "| 2 | 数据规范体系（标注口径、抽检、一致性） | 加分项偏硬 | 可以 |",
+  ].join("\n");
+  assert.deepEqual(extractGapHighlights(md), [
+    "主流数据采集技术与工具（爬虫/采集端/标注平台）",
+    "数据规范体系（标注口径、抽检、一致性）",
+  ]);
+});
+
+test("bold colon group labels inside a gap section do not close it", () => {
+  // `**硬门槛（不可缓解）：**` 是差距小节内部的分组标签。旧规则把它当成
+  // 「下一个主题」关掉小节，后面同组的编号条目全丢，页面顶部只剩分数。
+  const md = [
+    "### Gap Analysis",
+    "**硬门槛（不可缓解）：**",
+    "1. **学历不达标**：JD要求本科及以上。",
+    "2. **专业不匹配**：岗位要求机械设计，候选人为软件开发。",
+    "**可迁移部分：**",
+    "- 团队管理经验可迁移",
+  ].join("\n");
+  assert.deepEqual(extractGapHighlights(md), ["学历不达标", "专业不匹配"]);
+});
+
+test("mitigation labels still close the gap section", () => {
+  // 「怎么补」不是「为什么低」：缓解策略、Gaps Mitigation 之后的条目不该进
+  // 顶部扣分摘要。括号里的限定语不影响分组标签判定。
+  const md = [
+    "### 核心差距",
+    "**缓解策略：**",
+    "1. **强调方法论迁移**：把 PMP 方法论讲到交付节奏上。",
+    "2. **补齐工具链**：两周内自学并跑通采集流程。",
+  ].join("\n");
+  assert.deepEqual(extractGapHighlights(md), []);
+});
