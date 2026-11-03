@@ -261,7 +261,9 @@ const FATAL_LINE_CATEGORIES = [
     category: "model",
     re: FATAL_MODEL_STDERR_RE,
     reason: "The selected model is not available to this CLI",
-    retryCarveOut: true,
+    // ADR-0094 决议 6 只给「额度 / 传输」两类豁免：没有 CLI 会靠重试把一个不存在的模型
+    // 变出来，所以行内出现 retrying 也不能把选错模型放过。
+    retryCarveOut: false,
   },
   {
     category: "usage",
@@ -296,11 +298,6 @@ export function classifyFatalStderr(line) {
     if (c.re.test(line)) return { category: c.category, reason: c.reason, text: line.trim() };
   }
   return null;
-}
-
-/** Convenience boolean for callers that only need "stop now, yes/no". */
-export function isFatalCliStderr(line) {
-  return classifyFatalStderr(line) !== null;
 }
 
 /**
@@ -811,14 +808,16 @@ export function blacklistGateLedgerFields(gate) {
  *   不再提示无谓重跑（ADR-0084，2026-10-17 12:28 误判的修复）。
  *   `fatalReason` = route 命中了 `classifyFatalStderr` 并主动终止本次 run 时的一句话原因
  *   （ADR-0094）。它优先于通用门文案：额度/认证/模型/传输失败必须说出自己的名字，
- *   否则用户会照着「去查装没装 CLI」去排错，方向完全错。
+ *   否则用户会照着「去查装没装 CLI」去排错，方向完全错。注意「优先」在下面两支是
+ *   **整句替换**而不是拼接——把「去查装没装 CLI」留在后半句，用户读到的仍是那个错误方向。
  * @returns {{ok: true, alreadyCurrent?: boolean, blockedByBlacklist?: boolean, message?: string} | {ok: false, message: string}}
  */
 export function persistRunOutcome({ kind, cleanExit, sawError, emittedText, persisted, timedOut = false, checkupAlreadyCurrentStar = null, blacklistGate = false, fatalReason = null }) {
   // ADR-0094：具体死因 > 通用门文案。没有它，「模型额度用尽」会显示成
   // "is it installed and authenticated?"——一句会把人带向错误方向的猜测。
-  const withFatal = (message) =>
-    typeof fatalReason === "string" && fatalReason.trim() ? `${fatalReason.trim()} — ${message}` : message;
+  const fatalOnly = typeof fatalReason === "string" && fatalReason.trim() ? fatalReason.trim() : null;
+  // 只用于「结果没落地」这类**事实陈述**：死因在前、事实在后，两句都是真的。
+  const withFatal = (message) => (fatalOnly ? `${fatalOnly} — ${message}` : message);
   // 本地定时器杀的，先于一切判——否则「无 stdout + 非 0 退出」会落进下面的
   // noOutputError 分支，把 30 分钟体检上限读成安装/登录问题（2026-09-17 #682 实测：
   // 卡片写着 "is it installed and authenticated?"，真因是撞了 checkup 的 1_800_000ms
@@ -845,11 +844,19 @@ export function persistRunOutcome({ kind, cleanExit, sawError, emittedText, pers
   // A CLI that produced no output at all is the same failure mode whether it
   // was evaluating or running a checkup — one place for the condition/message
   // pair (formerly route.ts's noOutputError).
+  // 这两支是「装没装、登没登」的**猜测**文案：命中明确死因时整句换掉，不拼接。
+  // 拼上去用户仍会读到那句错误的排错方向，这正是 ADR-0094 决议 4 要消灭的形态。
   if (!emittedText && !sawError && !cleanExit) {
-    return { ok: false, message: withFatal("The CLI exited with an error — is it installed and authenticated?") };
+    return {
+      ok: false,
+      message: fatalOnly ?? "The CLI exited with an error — is it installed and authenticated?",
+    };
   }
   if (!emittedText && !sawError) {
-    return { ok: false, message: withFatal("The CLI produced no output — is it installed and authenticated? (career-ops is best on Claude Code.)") };
+    return {
+      ok: false,
+      message: fatalOnly ?? "The CLI produced no output — is it installed and authenticated? (career-ops is best on Claude Code.)",
+    };
   }
   // Blacklist gate stop (ADR-0084): a clean, text-emitting run that wrote no
   // report because the gate deliberately stopped before Block A. This is the

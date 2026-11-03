@@ -20,7 +20,6 @@ import {
   fatalStopMessage,
   hasNewCompletedReport,
   isFatalClaudeStderr,
-  isFatalCliStderr,
   isFatalCodexStderr,
   isFatalGenericStderr,
   isFatalOpenCodeStderr,
@@ -72,6 +71,12 @@ test("CLI 自报重试中的限流不判死（它还在自己处理）", () => {
   assert.equal(classifyFatalStderr("quota exceeded, will retry"), null);
 });
 
+// ADR-0094 决议 6 的豁免只给「额度 / 传输」两侧：选错模型不靠重试自愈。
+test("选错模型即使行内写着 retrying 也照样判死", () => {
+  assert.equal(classifyFatalStderr("unknown model: foo/bar (retrying)")?.category, "model");
+  assert.equal(classifyFatalStderr("model gpt-5.9 not found, will retry")?.category, "model");
+});
+
 test("普通进度遥测不判死（误杀就是杀掉一个能写完报告的评估）", () => {
   const noise = [
     "",
@@ -83,17 +88,39 @@ test("普通进度遥测不判死（误杀就是杀掉一个能写完报告的�
   for (const line of noise) assert.equal(classifyFatalStderr(line), null, line);
 });
 
-test("isFatalCliStderr 与 classifyFatalStderr 同边界", () => {
-  assert.equal(isFatalCliStderr("quota exceeded"), true);
-  assert.equal(isFatalCliStderr("server ready"), false);
-});
-
 test("fatalStopMessage：一句结论 + 引擎原文，压成单行供台账", () => {
   const hit = classifyFatalStderr("Free usage limit reached.\nSubscribe to keep going.");
   const msg = fatalStopMessage(hit);
   assert.match(msg, /quota\/usage limit/i);
   assert.match(msg, /Free usage limit reached\. Subscribe to keep going\./);
   assert.doesNotMatch(msg, /\n/);
+});
+
+test("persistRunOutcome：死因**替掉**「装没装/登没登」的猜测文案，而不是拼在前面", () => {
+  // ADR-0094 决议 4：「模型额度用尽」不能再显示成 is it installed and authenticated?。
+  // 拼接会把那句错误的排错方向留在卡片上，用户照着查一遍 CLI 才回来重试。
+  const gated = persistRunOutcome({
+    kind: "evaluate",
+    cleanExit: false,
+    sawError: false,
+    emittedText: false,
+    persisted: false,
+    fatalReason: "Model quota/usage limit reached",
+  });
+  assert.equal(gated.ok, false);
+  assert.equal(gated.message, "Model quota/usage limit reached");
+  assert.doesNotMatch(gated.message, /installed and authenticated/);
+
+  const noOutput = persistRunOutcome({
+    kind: "evaluate",
+    cleanExit: true,
+    sawError: false,
+    emittedText: false,
+    persisted: false,
+    fatalReason: "Authentication failed — the CLI is not signed in",
+  });
+  assert.equal(noOutput.message, "Authentication failed — the CLI is not signed in");
+  assert.doesNotMatch(noOutput.message, /installed and authenticated/);
 });
 
 test("persistRunOutcome：具体死因优先于通用门文案", () => {
@@ -107,6 +134,18 @@ test("persistRunOutcome：具体死因优先于通用门文案", () => {
   });
   assert.equal(outcome.ok, false);
   assert.match(outcome.message, /^Model quota\/usage limit reached — /);
+});
+
+test("persistRunOutcome：没有死因时「装没装」的猜测文案原样保留", () => {
+  const outcome = persistRunOutcome({
+    kind: "evaluate",
+    cleanExit: false,
+    sawError: false,
+    emittedText: false,
+    persisted: false,
+  });
+  assert.equal(outcome.ok, false);
+  assert.match(outcome.message, /is it installed and authenticated/);
 });
 
 test("persistRunOutcome：没有死因时文案保持原样", () => {
