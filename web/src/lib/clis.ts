@@ -8,6 +8,8 @@ import { loadQoderModels, resetQoderModelCache } from "./qoder-models.mjs";
 import { loadClaudeModels } from "./claude-models.mjs";
 import { cliDisplayName } from "./cli-labels.mjs";
 import { cliSearchDirs, npmPrefixDirs, workbuddyBundledCliDirs } from "./cli-bin-dirs.mjs";
+import { cliDirsSignature, isInsideDir, normalizeCliDir, sanitizeCliDirs } from "./cli-dirs.mjs";
+import { readAppConfig } from "./app-config";
 import { isNodeScript, spawnTargetFor } from "./spawn-cli.mjs";
 import { claudeCliArgs } from "./claude-invocation.mjs";
 import { parseQoderEvent, qoderCliArgs } from "./qoder-invocation.mjs";
@@ -488,6 +490,10 @@ export type DetectedCli = {
    *  installer, or the copy another product bundles) has to be answerable from
    *  the UI: which binary, and which version of it. */
   version?: string;
+  /** ADR-0097：命中的二进制是不是来自用户指定的目录。`custom` = 真的用上了他
+   * 填的那一份；`auto` = 填了但那次没命中，走的是自动链路。界面要能说清两者，
+   * 否则「我指定了目录」就成了一句没有回执的声明。 */
+  pathSource?: "custom" | "auto";
   model: ModelMeta;
 };
 
@@ -496,7 +502,7 @@ export type DetectedCli = {
 // worker results — the honesty gate then eats the run and the user never
 // learns why. `--version` is the cheapest probe with no side effects; a run
 // probe is deliberately NOT used (cost + real side effects).
-function probeCli(binPath: string): { usable: boolean; version?: string } {
+function probeCli(binPath: string): { usable: boolean; version?: string; failure?: "spawn" | "empty" } {
   try {
     // Through the shared spawn target, so a resolved node-script entry is
     // probed the same way it will later be run (ADR-0053) — probing the bare
@@ -514,16 +520,35 @@ function probeCli(binPath: string): { usable: boolean; version?: string } {
       .find(Boolean);
     // Still ADR-0028's rule: an exit-0 probe with no output means the tool is
     // installed but headless-broken, not usable.
-    return firstLine ? { usable: true, version: firstLine } : { usable: false };
+    // `failure` 只给「指定目录测试」用（ADR-0097 决议 6）：「跑不起来」与「能跑但
+    // 不吭声」对用户是两个不同动作（换目录 / 去登录），检测本身仍只读 `usable`。
+    return firstLine ? { usable: true, version: firstLine } : { usable: false, failure: "empty" };
   } catch {
-    return { usable: false };
+    return { usable: false, failure: "spawn" };
   }
 }
 
-/** The dirs one engine's binary is looked up in: the shared search dirs first
- * (PATH precedence), then that engine's own vendor dirs (ADR-0052). */
-function dirsFor(spec: CliSpec, shared: string[]): string[] {
-  return cliSearchDirs(shared, spec.binDirs, os.homedir());
+/** The dirs one engine's binary is looked up in: the user-specified dir first
+ * (ADR-0097 — an explicit pick is an override, so it must actually override the
+ * auto-discovered one), then the shared search dirs (PATH precedence), then
+ * that engine's own vendor dirs (ADR-0052). A custom dir that holds nothing
+ * does NOT short-circuit: the auto chain still runs, so deleting that directory
+ * cannot make a working engine disappear. */
+function dirsFor(spec: CliSpec, shared: string[], customDir?: string | null): string[] {
+  const base = customDir ? [customDir, ...shared] : shared;
+  return cliSearchDirs(base, spec.binDirs, os.homedir());
+}
+
+/**
+ * 用户为某个引擎指定的安装目录（ADR-0097）。
+ *
+ * 只读服务端配置：配置页的 localStorage 副本对 headless 子进程不可见（ADR-0004
+ * D3），而派发正是子进程——目录只有住服务端才算数。
+ *
+ * @returns {Record<string, string>} 引擎 id → 归一化后的绝对路径（已清洗）
+ */
+export function readCustomCliDirs(): Record<string, string> {
+  return sanitizeCliDirs(readAppConfig().cliDirs, os.homedir());
 }
 
 /**
@@ -535,8 +560,8 @@ function dirsFor(spec: CliSpec, shared: string[]): string[] {
  * it is selectable and then fails at spawn (ADR-0052); the reverse — resolvable
  * but reported missing — is the same bug wearing a different hat.
  */
-function findBinFor(spec: CliSpec): string | null {
-  const found = findBin(spec.bin, dirsFor(spec, searchDirs()));
+function findBinFor(spec: CliSpec, customDir?: string | null): string | null {
+  const found = findBin(spec.bin, dirsFor(spec, searchDirs(), customDir));
   if (found || !spec.fallbackDirs) return found;
   try {
     // Only the fallback dirs are searched here: the primary list already came
@@ -548,8 +573,10 @@ function findBinFor(spec: CliSpec): string | null {
 }
 
 export function detectClis(): DetectedCli[] {
+  const customDirs = readCustomCliDirs();
   return KNOWN.map((c) => {
-    const found = findBinFor(c);
+    const customDir = customDirs[c.id] ?? null;
+    const found = findBinFor(c, customDir);
     const probe = found ? probeCli(found) : null;
     const usable = probe ? probe.usable : undefined;
     let model = c.model;
@@ -593,7 +620,18 @@ export function detectClis(): DetectedCli[] {
         model = { ...c.model, options: dynamic };
       }
     }
-    return { id: c.id, name: c.name, run: c.run, url: c.url, installed: !!found, path: found, usable, version: probe?.version, model };
+    return {
+      id: c.id,
+      name: c.name,
+      run: c.run,
+      url: c.url,
+      installed: !!found,
+      path: found,
+      usable,
+      version: probe?.version,
+      pathSource: customDir && found ? (isInsideDir(customDir, found) ? "custom" : "auto") : undefined,
+      model,
+    };
   });
 }
 
@@ -605,15 +643,27 @@ export function detectClis(): DetectedCli[] {
 // resolveCliId()'s fallback — pays the scan, every later caller reads memory.
 // Only the config page's manual re-check passes refresh: true, which is the
 // cache's sole invalidation path (and also re-spawns the opencode model list).
+//
+// ADR-0097 决议 4：cache invalidation must not depend on the caller remembering to
+// refresh. The engine→dir map is written by a DIFFERENT route (`/api/config`) than
+// the one that reads detection (`/api/clis`), so a stale cache here would report
+// "not installed" for an engine the user just pointed at — or worse, keep
+// dispatching with the previous dir — until someone clicked re-check. The
+// signature is folded into the cache key instead.
 let cachedDetection: DetectedCli[] | null = null;
+let cachedDirsSignature: string | null = null;
 
 export function detectClisCached({ refresh = false }: { refresh?: boolean } = {}): DetectedCli[] {
-  if (cachedDetection && !refresh) return cachedDetection;
+  const signature = cliDirsSignature(readCustomCliDirs());
+  if (cachedDetection && !refresh && signature === cachedDirsSignature) return cachedDetection;
   if (refresh) {
     resetOpencodeModelCache();
     resetQoderModelCache();
   }
   cachedDetection = detectClis();
+  // 读完再取一次：两个读取之间存在写入时，用旧签名会让下一次调用白跑一趟重算——
+  // 无害，而把签名取在前的后果相反（信了已经过期的结果），所以取在检测之后。
+  cachedDirsSignature = cliDirsSignature(readCustomCliDirs());
   return cachedDetection;
 }
 
@@ -622,8 +672,54 @@ export function resolveCli(id: string): { spec: CliSpec; binPath: string } | nul
   if (!spec) return null;
   // Same dir list as detection: a runtime the config page reports as installed
   // must also be resolvable for an actual dispatch, or the engine is selectable
-  // and then fails at spawn (ADR-0052).
-  const binPath = findBinFor(spec);
+  // and then fails at spawn (ADR-0052) — including the dir the user specified
+  // (ADR-0097: detection and dispatch share one resolution path).
+  const binPath = findBinFor(spec, readCustomCliDirs()[id]);
   if (!binPath) return null;
   return { spec, binPath };
+}
+
+/**
+ * 「指定目录是否可用」的结论码（ADR-0097 决议 6）。分类而不是吐内部错误:
+ * 用户能做的动作只有「改目录」或「去登录」，文案必须落到这两个动作上。
+ */
+export type CliDirCode = "ok" | "unknown-cli" | "not-absolute" | "not-found" | "no-output" | "probe-failed";
+
+export type CliDirCheck = {
+  ok: boolean;
+  code: CliDirCode;
+  /** The engine's binary name, so the page can say WHAT it looked for. */
+  bin: string;
+  path?: string;
+  version?: string;
+  usable?: boolean;
+};
+
+/**
+ * 测试一个用户指定的安装目录能不能跑这个引擎（ADR-0097 决议 5/8）。
+ *
+ * 只在该目录内按引擎自己的 `bin` 名找，**不回落 PATH**：否则「测试通过」可能
+ * 测的是另一个位置的同类二进制，用户改错目录也会得到绿灯。二进制名来自服务端
+ * 的 `CliSpec`，调用方无法借这个接口执行别的东西。
+ *
+ * 只读：不写配置、不改检测缓存。落库只走配置页的统一保存。
+ *
+ * @param {string} cliId - KNOWN 的引擎 id
+ * @param {string} rawDir - 用户填的目录（已/未归一化均可）
+ * @returns {CliDirCheck}
+ */
+export function verifyCliDir(cliId: string, rawDir: string): CliDirCheck {
+  const spec = KNOWN.find((c) => c.id === cliId);
+  if (!spec) return { ok: false, code: "unknown-cli", bin: "" };
+  const dir = normalizeCliDir(rawDir, os.homedir());
+  if (!dir) return { ok: false, code: "not-absolute", bin: spec.bin };
+  const found = findBin(spec.bin, [dir]);
+  if (!found) return { ok: false, code: "not-found", bin: spec.bin };
+  // ADR-0028 的规则原样复用：找到了不等于能用。
+  const probe = probeCli(found);
+  if (!probe.usable) {
+    const code: CliDirCode = probe.failure === "spawn" ? "probe-failed" : "no-output";
+    return { ok: false, code, bin: spec.bin, path: found };
+  }
+  return { ok: true, code: "ok", bin: spec.bin, path: found, version: probe.version, usable: true };
 }

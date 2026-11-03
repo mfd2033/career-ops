@@ -16,7 +16,7 @@ export const CONFIG_KEY = "career-ops:config";
 // @returns {Promise<boolean>} true when the server accepted the write.
 /** ADR-0028 决议 3：导出给 config-form——cliId/model 的保存回执必须可见，
  *  静默丢写正是「以为存了 claude、实际派发了 opencode」的根因（#836 同教训）。 */
-export async function pushServerConfig(patch: Record<string, string>): Promise<boolean> {
+export async function pushServerConfig(patch: Record<string, unknown>): Promise<boolean> {
   try {
     const res = await fetch("/api/config", {
       method: "POST",
@@ -189,6 +189,32 @@ export async function readSavedConcurrencyPool(): Promise<number> {
     return typeof v === "number" && Number.isInteger(v) && v >= 1 ? v : CONCURRENCY_POOL_DEFAULT;
   } catch {
     return CONCURRENCY_POOL_DEFAULT;
+  }
+}
+
+/**
+ * 用户为某个引擎指定的安装目录（ADR-0097）：服务端持真值。
+ *
+ * 不放 localStorage —— 派发是 headless 子进程，读不到浏览器存储（ADR-0004 D3），
+ * 存两份只会造出「配置页显示已指定、实际派发用不上」这类静默不一致。读回只用于
+ * 配置页回显草稿。
+ *
+ * 读不到 / 请求失败 → 空表（引擎照旧走自动检测，不因一次请求失败而报错）。
+ */
+export async function readSavedCliDirs(): Promise<Record<string, string>> {
+  try {
+    const res = await fetch("/api/config");
+    if (!res.ok) return {};
+    const data = (await res.json()) as { cliDirs?: unknown };
+    const raw = data.cliDirs;
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+    const out: Record<string, string> = {};
+    for (const [engineId, dir] of Object.entries(raw as Record<string, unknown>)) {
+      if (typeof dir === "string" && dir) out[engineId] = dir;
+    }
+    return out;
+  } catch {
+    return {};
   }
 }
 

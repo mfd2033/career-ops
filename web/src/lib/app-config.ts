@@ -8,6 +8,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { sanitizeCliDirs } from "./cli-dirs.mjs";
 
 export type UnknownEmployerPolicy = "placeholder" | "agency";
 
@@ -16,6 +17,9 @@ export type AppConfig = {
   model?: string;
   unknownEmployer?: UnknownEmployerPolicy;
   concurrencyPool?: number; // global CLI-concurrency cap; default 4 (see concurrency-pool.ts)
+  /** ADR-0097：用户为某个引擎指定的安装目录（引擎 id → 绝对路径）。检测与派发
+   * 都读它，所以它必须住服务端——派发是 headless 子进程，读不到 localStorage。 */
+  cliDirs?: Record<string, string>;
 };
 
 export const UNKNOWN_EMPLOYER_OPTIONS: readonly UnknownEmployerPolicy[] = ["placeholder", "agency"];
@@ -37,6 +41,10 @@ export function readAppConfig(): AppConfig {
     if (typeof raw.concurrencyPool === "number" && Number.isInteger(raw.concurrencyPool) && raw.concurrencyPool >= 1) {
       out.concurrencyPool = raw.concurrencyPool;
     }
+    // 指定目录表过纯函数清洗（非法键、非绝对路径都会消失）：一个不可解析的目录
+    // 不该被带到派发路径上。`~` 按运行这个服务的用户 home 展开。
+    const cliDirs = sanitizeCliDirs(raw.cliDirs, os.homedir());
+    if (Object.keys(cliDirs).length > 0) out.cliDirs = cliDirs;
     return out;
   } catch {
     return {};

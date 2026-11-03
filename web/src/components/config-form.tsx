@@ -21,7 +21,7 @@ import { SkillsPanel } from "@/components/skills-panel";
 import { AboutPanel } from "@/components/about-panel";
 import { JobTargetSettings } from "@/components/job-target-settings";
 import { SalaryTargetSettings } from "@/components/salary-target-settings";
-import { persistModel, pushServerConfig, readSavedCliId, readSavedModel, readSavedUnknownEmployer, persistUnknownEmployer, readServerUnknownEmployer, mirrorUnknownEmployer, pickDefaultInstalled, type UnknownEmployerPolicy } from "@/lib/saved-cli";
+import { persistModel, pushServerConfig, readSavedCliId, readSavedModel, readSavedUnknownEmployer, persistUnknownEmployer, readServerUnknownEmployer, mirrorUnknownEmployer, pickDefaultInstalled, readSavedCliDirs, type UnknownEmployerPolicy } from "@/lib/saved-cli";
 import { readSavedConcurrencyPool, persistConcurrencyPool, CONCURRENCY_POOL_DEFAULT } from "@/lib/saved-cli";
 import { resolveModelPicker } from "@/lib/model-picker.mjs";
 import { reconcileEnginePick } from "@/lib/model-ownership.mjs";
@@ -60,10 +60,22 @@ type Cli = {
   usable?: boolean;
   /** ADR-0053 决议 10：探测到的二进制自报的版本。 */
   version?: string;
+  /** ADR-0097：命中路径是否来自用户指定的目录（custom = 真用上了他填的那份）。 */
+  pathSource?: "custom" | "auto";
   model: ModelMeta;
 };
 
 type Mode = "cli" | "key" | "manual";
+
+/** `POST /api/clis/verify` 的回执（ADR-0097）：只存在于本页，不落库。 */
+type DirCheck = {
+  status: "testing" | "done";
+  ok?: boolean;
+  code?: string;
+  bin?: string;
+  path?: string;
+  version?: string;
+};
 
 // 密钥束的 provider 预设已随密钥库卡迁入 key-vault-card.tsx（ADR-0083）：
 // provider 不再是页面级全局单选，而是一把密钥自己的属性。
@@ -128,6 +140,11 @@ export function ConfigForm() {
   // ADR-0015：检测结果的时间戳（null = 本浏览器还没成功检测过）与手动重检进行态。
   const [checkedAt, setCheckedAt] = useState<number | null>(null);
   const [rechecking, setRechecking] = useState(false);
+  // ADR-0097：未检测到的引擎 → 用户指定的安装目录（草稿）。服务端持真值，这里只是
+  // 一份回显＋待保存的草稿；落库走底部的统一保存。
+  const [cliDirs, setCliDirs] = useState<Record<string, string>>({});
+  // 目录测试的回执，按引擎 id 记：一个引擎测完不改动别的引擎的那一行。
+  const [dirChecks, setDirChecks] = useState<Record<string, DirCheck>>({});
 
   // 保存条的待保存计数：只登记「统一保存」三区里、经 save() 落库的草稿字段改动。
   // 用 Set 而非自增计数，保证「保存 N 项」反映的是改动字段数（同一字段反复改只算一项）。
@@ -186,6 +203,8 @@ export function ConfigForm() {
     });
     // 全局并发上限是服务端持真值，异步读回回显。
     readSavedConcurrencyPool().then(setConcurrencyPool);
+    // 指定安装目录同理（服务端持真值）：早于此读到结果不影响已有输入。
+    readSavedCliDirs().then(setCliDirs);
   }, []);
 
   // 缓存渲染与真查渲染共用同一条落地路径（ADR-0015）：下拉选中/自动保存逻辑
@@ -241,6 +260,53 @@ export function ConfigForm() {
         /* 保留旧缓存与旧下拉 */
       })
       .finally(() => setRechecking(false));
+  }
+
+  // ADR-0097：测试一个指定目录。只问服务端「这个目录里有没有这个引擎、它跑不跑得起来」，
+  // 不落库——落库是底部统一保存的事（一次回车就永久改掉派发路径比多按一次保存危险）。
+  async function testCliDir(cliId: string) {
+    const dir = (cliDirs[cliId] ?? "").trim();
+    if (!dir) return;
+    setDirChecks((prev) => ({ ...prev, [cliId]: { status: "testing" } }));
+    try {
+      const res = await fetch("/api/clis/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cliId, dir }),
+      });
+      const data = (await res.json()) as Omit<DirCheck, "status">;
+      setDirChecks((prev) => ({ ...prev, [cliId]: { ...data, status: "done" } }));
+    } catch {
+      // 请求本身失败：不能静默——那会让「没反应」看起来像「没测」。
+      setDirChecks((prev) => ({ ...prev, [cliId]: { status: "done", ok: false, code: "probe-failed" } }));
+    }
+  }
+
+  /** 输入一改，上一条回执就作废——留着「✓ 可用」而输入框里已是另一个目录，等于骗人。 */
+  function clearDirCheck(cliId: string) {
+    setDirChecks((prev) => {
+      if (!prev[cliId]) return prev;
+      const next = { ...prev };
+      delete next[cliId];
+      return next;
+    });
+  }
+
+  /** 测试回执按结论码给文案（ADR-0097 决议 6：用户能做的只有改目录或去登录）。 */
+  function dirCheckText(check: DirCheck): string {
+    const bin = check.bin ?? "";
+    switch (check.code) {
+      case "not-absolute":
+        return t("config.cliDirNotAbsolute");
+      case "not-found":
+        return t("config.cliDirNotFound", { bin });
+      case "no-output":
+        return t("config.cliDirNoOutput", { bin });
+      case "unknown-cli":
+        return t("config.cliDirUnknownCli");
+      default:
+        return t("config.cliDirProbeFailed", { bin });
+    }
   }
 
   function save() {
@@ -329,7 +395,19 @@ export function ConfigForm() {
     // ADR-0028 决议 3：服务端镜像写入结果必须可见——静默丢写正是
     // 「以为存了 claude、实际派发了 opencode」的根因（#836 同教训）。
     // 被守卫洗掉的模型 POST 空串，路由对空串就是删除该键（不留脏值）。
-    pushServerConfig({ cliId, model: nextModel }).then((ok) => setMirrorFailed(!ok));
+    // ADR-0097：指定安装目录随同一次保存落库（服务端持真值，派发读它）。
+    // 空串等于「取消指定」，所以只提交有值的项（路由侧整表覆盖）。
+    const dirsPayload: Record<string, string> = {};
+    for (const [engineId, dir] of Object.entries(cliDirs)) {
+      const trimmed = dir.trim();
+      if (trimmed) dirsPayload[engineId] = trimmed;
+    }
+    pushServerConfig({ cliId, model: nextModel, cliDirs: dirsPayload }).then((ok) => {
+      setMirrorFailed(!ok);
+      // 目录一变检测结论就变（未安装 → 可用）：保存成功后立刻重查，让「未安装」分组
+      // 与工具回执跟上用户刚做的动作；写入失败则保留旧结果，不假装成功。
+      if (ok && Object.keys(dirsPayload).length > 0) recheck();
+    });
   }
 
   const installed = clis?.filter((c) => c.installed) ?? [];
@@ -591,6 +669,9 @@ export function ConfigForm() {
                           <p className="mt-1.5 truncate font-mono text-[11px] text-faint" title={headerCli.path}>
                             {headerCli.path}
                             {headerCli.version ? ` · ${headerCli.version}` : ""}
+                            {/* ADR-0097：指定目录生效时要说清「用的就是你那份」——
+                                否则填了目录却命中 PATH 里另一个时，界面两句都不说。 */}
+                            {headerCli.pathSource === "custom" ? ` · ${t("config.cliDirFromCustom")}` : ""}
                           </p>
                         )}
                         {/* ADR-0028：installed ≠ usable——headless 无输出的工具派发必败，就地警告。 */}
@@ -614,7 +695,7 @@ export function ConfigForm() {
                               type="button"
                               onClick={() => setShowInstallLinks((v) => !v)}
                               aria-expanded={showInstallLinks}
-                              className="flex items-center gap-1.5 text-xs text-faint transition-colors hover:text-foreground max-sm:min-h-[44px]"
+                              className="flex cursor-pointer items-center gap-1.5 text-xs text-faint transition-colors hover:text-foreground max-sm:min-h-[44px]"
                             >
                               <ChevronRight
                                 className={cn("size-3.5 transition-transform", showInstallLinks && "rotate-90")}
@@ -624,21 +705,79 @@ export function ConfigForm() {
                               {showInstallLinks ? t("config.aiToolHideInstall") : t("config.aiToolShowInstall")}
                             </button>
                             {showInstallLinks && (
-                              <ul className="mt-2 grid gap-1.5 sm:grid-cols-2">
-                                {missing.map((c) => (
-                                  <li key={c.id}>
-                                    <a
-                                      href={c.url}
-                                      target="_blank"
-                                      rel="noreferrer"
-                                      className="flex items-center justify-between gap-2 rounded-lg border border-border/60 bg-surface/30 px-3 py-2 text-xs text-muted transition-colors hover:bg-surface-hover hover:text-foreground"
-                                    >
-                                      <span className="truncate">{c.name}</span>
-                                      <ExternalLink className="size-3 shrink-0 text-brand" />
-                                    </a>
-                                  </li>
-                                ))}
-                              </ul>
+                              <>
+                                {/* ADR-0097：未检测到的引擎逐行给出「指定安装目录 + 测试」。
+                                    装了但不在 PATH/常见目录（便携版、非默认盘、scoop）的用户
+                                    以前只有「重装」一条路；现在填目录就能就地验。 */}
+                                <ul className="mt-2 grid gap-2">
+                                  {missing.map((c) => {
+                                    const check = dirChecks[c.id];
+                                    const busy = check?.status === "testing";
+                                    const draft = cliDirs[c.id] ?? "";
+                                    return (
+                                      <li key={c.id} className="rounded-lg border border-border/60 bg-surface/30 p-2.5">
+                                        <div className="flex items-center justify-between gap-2">
+                                          <span className="min-w-0 truncate text-xs font-medium text-muted">{c.name}</span>
+                                          <a
+                                            href={c.url}
+                                            target="_blank"
+                                            rel="noreferrer"
+                                            className="flex shrink-0 items-center gap-1 text-xs text-brand-text hover:underline max-sm:min-h-[44px]"
+                                          >
+                                            {t("config.aiToolInstallLink")}
+                                            <ExternalLink className="size-3 shrink-0" />
+                                          </a>
+                                        </div>
+                                        <div className="mt-2 flex items-center gap-1.5">
+                                          <input
+                                            type="text"
+                                            value={draft}
+                                            onChange={(e) => {
+                                              setCliDirs((prev) => ({ ...prev, [c.id]: e.target.value }));
+                                              clearDirCheck(c.id);
+                                              touch("cliDirs");
+                                            }}
+                                            placeholder={t("config.cliDirPlaceholder")}
+                                            aria-label={`${c.name} · ${t("config.cliDirTitle")}`}
+                                            spellCheck={false}
+                                            className="min-w-0 flex-1 rounded-lg border border-border bg-surface px-2.5 py-1.5 font-mono text-xs text-foreground outline-none transition-colors placeholder:text-faint focus:border-brand/50 focus-visible:ring-2 focus-visible:ring-brand/40 max-sm:min-h-[44px]"
+                                          />
+                                          <button
+                                            type="button"
+                                            onClick={() => void testCliDir(c.id)}
+                                            disabled={busy || !draft.trim()}
+                                            aria-label={`${t("config.cliDirTest")} · ${c.name}`}
+                                            className="inline-flex min-w-[84px] shrink-0 cursor-pointer items-center justify-center rounded-lg border border-border bg-surface px-2.5 py-1.5 text-xs font-semibold text-muted transition-colors hover:bg-surface-hover hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 max-sm:min-h-[44px]"
+                                          >
+                                            {busy ? t("config.cliDirTesting") : t("config.cliDirTest")}
+                                          </button>
+                                        </div>
+                                        {/* 常驻 live region：只在有结果时成形，空状态下 sr-only——
+                                            否则读屏用户在按钮变「测试中…」后收不到任何结论。 */}
+                                        <p
+                                          role="status"
+                                          aria-live="polite"
+                                          className={cn(
+                                            "break-all font-mono text-xs leading-relaxed",
+                                            check?.status === "done"
+                                              ? check.ok
+                                                ? "mt-1.5 text-emerald-700 dark:text-emerald-400"
+                                                : "mt-1.5 text-amber-700 dark:text-amber-400"
+                                              : "sr-only",
+                                          )}
+                                        >
+                                          {check?.status === "done"
+                                            ? check.ok
+                                              ? t("config.cliDirOk", { path: check.path ?? "", version: check.version ?? "" })
+                                              : dirCheckText(check)
+                                            : ""}
+                                        </p>
+                                      </li>
+                                    );
+                                  })}
+                                </ul>
+                                <p className="mt-2 text-xs leading-relaxed text-faint">{t("config.cliDirSaveHint")}</p>
+                              </>
                             )}
                           </div>
                         )}
