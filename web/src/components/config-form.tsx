@@ -8,6 +8,7 @@ import {
   Info,
   Loader2,
   ExternalLink,
+  FolderOpen,
   ChevronDown,
   ChevronRight,
   Sparkles,
@@ -145,6 +146,10 @@ export function ConfigForm() {
   const [cliDirs, setCliDirs] = useState<Record<string, string>>({});
   // 目录测试的回执，按引擎 id 记：一个引擎测完不改动别的引擎的那一行。
   const [dirChecks, setDirChecks] = useState<Record<string, DirCheck>>({});
+  // ADR-0097 决议 9：系统目录对话框的进行态与失败回执。成功和取消都不留痕——
+  // 成功立刻变成目录值 + 一次测试结论，取消是用户的意图，不该被复述成提示。
+  const [picking, setPicking] = useState<Record<string, boolean>>({});
+  const [pickNotices, setPickNotices] = useState<Record<string, string>>({});
 
   // 保存条的待保存计数：只登记「统一保存」三区里、经 save() 落库的草稿字段改动。
   // 用 Set 而非自增计数，保证「保存 N 项」反映的是改动字段数（同一字段反复改只算一项）。
@@ -264,8 +269,9 @@ export function ConfigForm() {
 
   // ADR-0097：测试一个指定目录。只问服务端「这个目录里有没有这个引擎、它跑不跑得起来」，
   // 不落库——落库是底部统一保存的事（一次回车就永久改掉派发路径比多按一次保存危险）。
-  async function testCliDir(cliId: string) {
-    const dir = (cliDirs[cliId] ?? "").trim();
+  async function testCliDir(cliId: string, dirOverride?: string) {
+    // dirOverride 给「刚在对话框里选完」用：setCliDirs 是异步的，那一刻 state 里还是旧值。
+    const dir = (dirOverride ?? cliDirs[cliId] ?? "").trim();
     if (!dir) return;
     setDirChecks((prev) => ({ ...prev, [cliId]: { status: "testing" } }));
     try {
@@ -290,6 +296,52 @@ export function ConfigForm() {
       delete next[cliId];
       return next;
     });
+  }
+
+  /** 对话框回执与目录输入一样会过期：用户手改了目录，上一条「打不开」就不该再挂着。 */
+  function clearPickNotice(cliId: string) {
+    setPickNotices((prev) => {
+      if (!prev[cliId]) return prev;
+      const next = { ...prev };
+      delete next[cliId];
+      return next;
+    });
+  }
+
+  /** 打开系统目录对话框（ADR-0097 决议 9）：选中的绝对路径写进草稿，然后立刻验一次。 */
+  async function pickCliDir(cliId: string) {
+    setPicking((prev) => ({ ...prev, [cliId]: true }));
+    clearPickNotice(cliId);
+    try {
+      const res = await fetch("/api/clis/pick-dir", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        // 起始目录 = 输入框里的当前值：用户在对话框里接着上次的位置点，而不是每次从「此电脑」开始。
+        body: JSON.stringify({ start: (cliDirs[cliId] ?? "").trim() }),
+      });
+      const data = (await res.json()) as { status?: string; dir?: string; reason?: string };
+      const picked = data.status === "picked" && typeof data.dir === "string" ? data.dir : "";
+      if (picked) {
+        setCliDirs((prev) => ({ ...prev, [cliId]: picked }));
+        touch("cliDirs");
+        clearDirCheck(cliId);
+        // 选完就验：用户挑的是「这个文件夹」，真正关心的是「它到底行不行」。
+        void testCliDir(cliId, picked);
+      } else if (data.status !== "cancelled") {
+        setPickNotices((prev) => ({ ...prev, [cliId]: pickNoticeText(data) }));
+      }
+    } catch {
+      setPickNotices((prev) => ({ ...prev, [cliId]: t("config.cliDirPickFailed") }));
+    } finally {
+      setPicking((prev) => ({ ...prev, [cliId]: false }));
+    }
+  }
+
+  /** 对话框没给出目录时说清为什么，落在用户能做的动作上（ADR-0097 决议 6 同一纪律）。 */
+  function pickNoticeText(result: { status?: string; reason?: string }): string {
+    if (result.status === "busy") return t("config.cliDirPickBusy");
+    if (result.status === "unsupported") return t("config.cliDirPickUnsupported");
+    return result.reason === "timeout" ? t("config.cliDirPickTimeout") : t("config.cliDirPickFailed");
   }
 
   /** 测试回执按结论码给文案（ADR-0097 决议 6：用户能做的只有改目录或去登录）。 */
@@ -713,6 +765,8 @@ export function ConfigForm() {
                                   {missing.map((c) => {
                                     const check = dirChecks[c.id];
                                     const busy = check?.status === "testing";
+                                    const choosing = picking[c.id] === true;
+                                    const notice = pickNotices[c.id];
                                     const draft = cliDirs[c.id] ?? "";
                                     return (
                                       <li key={c.id} className="rounded-lg border border-border/60 bg-surface/30 p-2.5">
@@ -735,6 +789,7 @@ export function ConfigForm() {
                                             onChange={(e) => {
                                               setCliDirs((prev) => ({ ...prev, [c.id]: e.target.value }));
                                               clearDirCheck(c.id);
+                                              clearPickNotice(c.id);
                                               touch("cliDirs");
                                             }}
                                             placeholder={t("config.cliDirPlaceholder")}
@@ -742,6 +797,22 @@ export function ConfigForm() {
                                             spellCheck={false}
                                             className="min-w-0 flex-1 rounded-lg border border-border bg-surface px-2.5 py-1.5 font-mono text-xs text-foreground outline-none transition-colors placeholder:text-faint focus:border-brand/50 focus-visible:ring-2 focus-visible:ring-brand/40 max-sm:min-h-[44px]"
                                           />
+                                          {/* ADR-0097 决议 9：点这里弹系统文件夹对话框。做成图标按钮是为了
+                                              在手机窄屏上给路径输入框留出可读宽度；语义由 aria-label 补全。 */}
+                                          <button
+                                            type="button"
+                                            onClick={() => void pickCliDir(c.id)}
+                                            disabled={choosing}
+                                            aria-label={`${t("config.cliDirBrowse")} · ${c.name}`}
+                                            title={t("config.cliDirBrowse")}
+                                            className="inline-flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-lg border border-border bg-surface text-muted transition-colors hover:bg-surface-hover hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 max-sm:min-h-[44px] max-sm:min-w-[44px]"
+                                          >
+                                            {choosing ? (
+                                              <Loader2 className="size-3.5 animate-spin" />
+                                            ) : (
+                                              <FolderOpen className="size-3.5" />
+                                            )}
+                                          </button>
                                           <button
                                             type="button"
                                             onClick={() => void testCliDir(c.id)}
@@ -753,7 +824,9 @@ export function ConfigForm() {
                                           </button>
                                         </div>
                                         {/* 常驻 live region：只在有结果时成形，空状态下 sr-only——
-                                            否则读屏用户在按钮变「测试中…」后收不到任何结论。 */}
+                                            否则读屏用户在按钮变「测试中…」后收不到任何结论。
+                                            目录对话框的回执（不支持/正在选择/超时）也落在这里：
+                                            一个引擎一行只该有一个会说话的结论。 */}
                                         <p
                                           role="status"
                                           aria-live="polite"
@@ -763,14 +836,16 @@ export function ConfigForm() {
                                               ? check.ok
                                                 ? "mt-1.5 text-emerald-700 dark:text-emerald-400"
                                                 : "mt-1.5 text-amber-700 dark:text-amber-400"
-                                              : "sr-only",
+                                              : notice
+                                                ? "mt-1.5 font-sans text-amber-700 dark:text-amber-400"
+                                                : "sr-only",
                                           )}
                                         >
                                           {check?.status === "done"
                                             ? check.ok
                                               ? t("config.cliDirOk", { path: check.path ?? "", version: check.version ?? "" })
                                               : dirCheckText(check)
-                                            : ""}
+                                            : (notice ?? "")}
                                         </p>
                                       </li>
                                     );

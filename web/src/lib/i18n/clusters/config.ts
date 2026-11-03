@@ -40,6 +40,12 @@ export const en: Dict = {
   "config.cliDirUnknownCli": "Unknown AI tool.",
   "config.cliDirSaveHint": "Testing only checks the folder. Click Save at the bottom to actually use it.",
   "config.cliDirFromCustom": "from the folder you chose",
+  // ADR-0097 决议 9：目录可以直接点选（系统文件夹对话框由本地服务弹出）。
+  "config.cliDirBrowse": "Choose folder",
+  "config.cliDirPickUnsupported": "The folder picker only works on Windows — paste the absolute path instead.",
+  "config.cliDirPickBusy": "A folder picker is already open — finish that one first.",
+  "config.cliDirPickTimeout": "The folder picker timed out. Try again.",
+  "config.cliDirPickFailed": "Couldn't open the folder picker — paste the path instead.",
   "config.currentTool": "Currently using",
   // ADR-0073 决议 2：nothing has been saved in this browser — the card head shows the
   // machine default, and must say so instead of claiming it is in use.
@@ -311,6 +317,12 @@ export const zh: Dict = {
   "config.cliDirUnknownCli": "未知的 AI 工具。",
   "config.cliDirSaveHint": "测试只验证目录；点底部「保存设置」才会真正用上。",
   "config.cliDirFromCustom": "来自你指定的目录",
+  // ADR-0097 决议 9：目录可以直接点选（系统文件夹对话框由本地服务弹出）。
+  "config.cliDirBrowse": "选择目录",
+  "config.cliDirPickUnsupported": "目录选择器目前只在 Windows 上可用 —— 请手动粘贴绝对路径。",
+  "config.cliDirPickBusy": "已经有一个目录选择窗口打开了，先把它处理完。",
+  "config.cliDirPickTimeout": "目录选择窗口超时了，请重试。",
+  "config.cliDirPickFailed": "打不开目录选择窗口 —— 请手动粘贴路径。",
   "config.currentTool": "当前使用",
   // ADR-0073 决议 2：本浏览器还没保存过引擎，头部显示的是本机默认，不能谎称「当前使用」。
   "config.defaultTool": "本机默认（未保存）",
