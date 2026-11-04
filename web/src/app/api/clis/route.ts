@@ -11,7 +11,12 @@ export const dynamic = "force-dynamic";
 // answers from cache (the first request after startup performs the real scan);
 // `?refresh=1` — the config page's manual re-check button — invalidates it and
 // really rescans, including opencode's cached model list.
+//
+// ADR-0098: the scan is async (each engine's `--version`, the model catalogues and
+// the WorkBuddy registry lookup are child processes). Waiting for this response no
+// longer freezes `/api/version` — the tray's 2.5s probe and the extension's 6s
+// probe stay green while a re-check runs.
 export async function GET(request: Request) {
   const refresh = new URL(request.url).searchParams.get("refresh") === "1";
-  return NextResponse.json({ clis: detectClisCached({ refresh }) });
+  return NextResponse.json({ clis: await detectClisCached({ refresh }) });
 }

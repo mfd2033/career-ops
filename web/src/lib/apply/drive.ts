@@ -117,7 +117,7 @@ export async function driveSession(
   answers?: { label: string; value: string }[],
   model?: string,
 ): Promise<DriveResult> {
-  const resolved = resolveCli(cliId);
+  const resolved = await resolveCli(cliId);
   const steps: DriveStep[] = [];
   if (!resolved || cliId !== "claude") {
     return { reached: false, turns: 0, reason: "Agentic drive currently needs Claude Code (browser-driving CLI).", steps };

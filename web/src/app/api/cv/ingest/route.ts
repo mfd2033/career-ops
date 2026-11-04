@@ -96,7 +96,7 @@ export async function POST(req: Request) {
     return Response.json({ error: "bad request" }, { status: 400 });
   }
 
-  const resolved = resolveCli(cliId);
+  const resolved = await resolveCli(cliId);
   if (!resolved) {
     if (tempFile) cleanupTemp(tempFile);
     return Response.json({ error: `CLI '${cliId}' not found on this machine` }, { status: 404 });

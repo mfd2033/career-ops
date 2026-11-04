@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { execFileSync } from "node:child_process";
+import { stdoutOf } from "./exec-async.mjs";
 
 // Strip JS-style comments from a JSONC string, string-aware: a `//` inside a
 // quoted string (e.g. an https:// baseURL) must survive, while both line
@@ -146,21 +146,26 @@ export function resetOpencodeModelCache() {
  * opencode not installed or a PATH hiccup). The command result is cached for
  * a minute so the config page's /api/clis calls don't spawn a subprocess each.
  *
+ * 异步（ADR-0098 决议 3）：这个子进程跑在 `/api/clis` 的请求路径上，同步版会把
+ * 单线程的 web 服务冻到它退出（实测模型目录冷时把整个路由拖到 17.8s）。
+ *
  * @param {string} [binPath] - the resolved opencode executable; defaults to `opencode`
- * @returns {{id: string, label: string}[]}
+ * @param {(file: string, args: string[], options: object) => Promise<string>} [exec]
+ *   injected for tests
+ * @returns {Promise<{id: string, label: string}[]>}
  */
-export function loadOpencodeModels(binPath) {
+export async function loadOpencodeModels(binPath, exec = stdoutOf) {
   if (commandCache && Date.now() - commandCacheAt < COMMAND_CACHE_TTL_MS) {
     return commandCache;
   }
   try {
-    const out = execFileSync(binPath || "opencode", ["models"], {
+    const out = await exec(binPath || "opencode", ["models"], {
       encoding: "utf8",
       timeout: 15_000,
       windowsHide: true,
       stdio: ["ignore", "pipe", "ignore"],
     });
-    const models = parseModelsOutput(out);
+    const models = parseModelsOutput(String(out));
     if (models.length > 0) {
       commandCache = models;
       commandCacheAt = Date.now();

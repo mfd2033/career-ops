@@ -57,7 +57,7 @@ export async function POST(req: Request) {
     return new Response(JSON.stringify({ error: "message and cliId required" }), { status: 400 });
   }
 
-  const resolved = resolveCli(cliId);
+  const resolved = await resolveCli(cliId);
   if (!resolved) {
     return new Response(JSON.stringify({ error: `CLI '${cliId}' not found on this machine` }), {
       status: 404,

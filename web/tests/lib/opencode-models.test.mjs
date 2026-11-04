@@ -127,7 +127,7 @@ test("parseModelsOutput turns command output into id/label pairs", () => {
   ]);
 });
 
-test("loadOpencodeModels falls back to config files when the command cannot run", (t) => {
+test("loadOpencodeModels falls back to config files when the command cannot run", async (t) => {
   // A nonexistent bin path makes execFileSync throw → the file-based fallback
   // must still yield models instead of crashing.
   const dir = mkdtempSync(join(tmpdir(), "opencode-models-fallback-"));
@@ -138,7 +138,7 @@ test("loadOpencodeModels falls back to config files when the command cannot run"
   t.after(() => {
     process.cwd = realCwd;
   });
-  const models = mod.loadOpencodeModels("definitely-not-a-real-binary-xyz");
+  const models = await mod.loadOpencodeModels("definitely-not-a-real-binary-xyz");
   // The fallback reads the real config paths first (user-level may exist on the
   // developer machine), so the exact model set is machine-dependent — assert the
   // contract that matters: it returns a non-empty list instead of throwing.

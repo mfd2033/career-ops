@@ -22,6 +22,10 @@
   // 备选区间：只为 dev 实例留着，不是扫描区间遗产。
   const ALT_PORT_MIN = 3001;
   const ALT_PORT_MAX = 3040;
+  // 本 fork 文档化的 dev 口（AGENTS.md：`node local/dev-web.mjs -p 3101`）。
+  // 它落在 3001-3040 之外——说过「备选区间只为 dev 留着」却探不到 dev 口，
+  // 那就是一句空话；单列出来比把区间撑到 3101 诚实（不扫中间 60 个没人用的口）。
+  const DEV_PORTS = [3101];
 
   // 3000 主探的预算。3s 是 ADR-0050 时代的取值，那时唯一的慢因是 Chromium 对环回
   // 地址的首次连接预热（~0.6-1.2s）；现在真正的慢因是 web 端单线程事件循环被
@@ -33,10 +37,11 @@
   // 二次复探（只复探 3000）：第一次已经付过预热代价，不必再给满 6s。
   const RETRY_TIMEOUT_MS = 4000;
 
-  /** 备选区间的端口列表（3001-3040，含两端）。 */
+  /** 备选区间的端口列表（3001-3040 沿用上游区间，外加本 fork 的 dev 口）。 */
   function altPorts() {
     const out = [];
     for (let port = ALT_PORT_MIN; port <= ALT_PORT_MAX; port++) out.push(port);
+    for (const port of DEV_PORTS) if (!out.includes(port)) out.push(port);
     return out;
   }
 
@@ -117,6 +122,7 @@
     PRIMARY_PORT,
     ALT_PORT_MIN,
     ALT_PORT_MAX,
+    DEV_PORTS,
     PROBE_TIMEOUT_MS,
     ALT_PROBE_TIMEOUT_MS,
     RETRY_TIMEOUT_MS,

@@ -25,5 +25,5 @@ export async function POST(request: Request) {
   if (!cliId || !dir.trim()) {
     return NextResponse.json({ error: "cliId and dir are required" }, { status: 400 });
   }
-  return NextResponse.json(verifyCliDir(cliId, dir));
+  return NextResponse.json(await verifyCliDir(cliId, dir));
 }

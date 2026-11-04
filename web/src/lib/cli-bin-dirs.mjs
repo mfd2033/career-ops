@@ -1,5 +1,5 @@
-import { execFileSync } from "node:child_process";
 import path from "node:path";
+import { stdoutOf } from "./exec-async.mjs";
 
 // Where a runtime's binary may live, per engine (ADR-0052).
 //
@@ -236,26 +236,26 @@ export function parseWorkbuddyCliDirs(regOutput, env = {}) {
 /**
  * Locate the CodeBuddy CLI bundled inside WorkBuddy, if this machine has it.
  *
- * Synchronous (like every other lookup in detection) and never throws: the
- * product may be absent, `reg` may be unavailable, or the key may hold nothing
- * usable — all of which simply mean "no fallback directory".
+ * Asynchronous (ADR-0098 决议 3): `reg query … /s` walks a whole registry hive —
+ * on a busy machine that is hundreds of milliseconds to seconds, and this call sits
+ * on `/api/clis`'s request path (it is codebuddy's `fallbackDirs` provider). The
+ * two roots are queried concurrently (`Promise.all`) since neither depends on the
+ * other. Never throws: the product may be absent, `reg` may be unavailable, or the
+ * key may hold nothing usable — all of which simply mean "no fallback directory".
  *
- * @returns {string[]}
+ * @returns {Promise<string[]>}
  */
-export function workbuddyBundledCliDirs() {
+export async function workbuddyBundledCliDirs() {
   if (process.platform !== "win32") return [];
-  const found = [];
-  for (const root of UNINSTALL_ROOTS) {
+  const runs = UNINSTALL_ROOTS.map(async (root) => {
     try {
-      const out = execFileSync("reg", ["query", root, "/s", "/f", "WorkBuddy", "/d"], {
-        encoding: "utf8",
-        timeout: 15_000,
-        stdio: ["ignore", "pipe", "ignore"],
+      const out = await stdoutOf("reg", ["query", root, "/s", "/f", "WorkBuddy", "/d"], {
+        timeoutMs: 15_000,
       });
-      found.push(...parseWorkbuddyCliDirs(out, process.env));
+      return parseWorkbuddyCliDirs(out, process.env);
     } catch {
-      /* key absent, no match, or reg unavailable — nothing to add */
+      return []; // key absent, no match, or reg unavailable — nothing to add
     }
-  }
-  return [...new Set(found)];
+  });
+  return [...new Set((await Promise.all(runs)).flat())];
 }

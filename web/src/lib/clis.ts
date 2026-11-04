@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
+import { stdoutOf } from "./exec-async.mjs";
 import { codexStreamArgs, isFatalClaudeStderr, isFatalCodexStderr, isFatalOpenCodeStderr, parseClaudeEvent, parseCodexEvent } from "./run-cli-support.mjs";
 import { loadOpencodeModels, resetOpencodeModelCache } from "./opencode-models.mjs";
 import { loadQoderModels, resetQoderModelCache } from "./qoder-models.mjs";
@@ -47,8 +47,10 @@ export type CliSpec = {
    * that depends on where the user installed THAT product (WorkBuddy ships the
    * CodeBuddy CLI; ADR-0053). Declared as a function because locating it costs a
    * subprocess, and a detection sweep must not pay that for an engine that is
-   * already resolvable. Must never throw: a failure means "no such dir". */
-  fallbackDirs?: () => string[];
+   * already resolvable. May be async (ADR-0098: that subprocess is `reg query`,
+   * which must not block the event loop). Must never throw: a failure means
+   * "no such dir". */
+  fallbackDirs?: () => string[] | Promise<string[]>;
   run: string;
   url: string;
   /** headless invocation args for a single prompt, emitting PLAIN TEXT on stdout.
@@ -502,19 +504,21 @@ export type DetectedCli = {
 // worker results — the honesty gate then eats the run and the user never
 // learns why. `--version` is the cheapest probe with no side effects; a run
 // probe is deliberately NOT used (cost + real side effects).
-function probeCli(binPath: string): { usable: boolean; version?: string; failure?: "spawn" | "empty" } {
+//
+// 异步（ADR-0098 决议 3）：每个引擎一次子进程，原先走 `spawnSync`（15s 超时），
+// 8 个引擎就是 8 次同步等待。检测现在用 `Promise.all` 并发跑，总时长从「求和」
+// 变成「最慢的那一个」。
+async function probeCli(binPath: string): Promise<{ usable: boolean; version?: string; failure?: "spawn" | "empty" }> {
   try {
     // Through the shared spawn target, so a resolved node-script entry is
     // probed the same way it will later be run (ADR-0053) — probing the bare
     // path would report `usable: false` for a CLI that spawns fine.
     const target = spawnTargetFor(binPath);
-    const out = spawnSync(target.command, [...target.args, "--version"], {
-      encoding: "utf8",
-      timeout: 15_000,
-      stdio: ["ignore", "pipe", "pipe"],
+    const stdout = await stdoutOf(target.command, [...target.args, "--version"], {
+      timeoutMs: 15_000,
       env: { ...process.env, ...target.env },
     });
-    const firstLine = String(out.stdout ?? "")
+    const firstLine = String(stdout ?? "")
       .split(/\r?\n/)
       .map((line) => line.trim())
       .find(Boolean);
@@ -559,25 +563,30 @@ export function readCustomCliDirs(): Record<string, string> {
  * page reports as installed must also be resolvable for an actual dispatch, or
  * it is selectable and then fails at spawn (ADR-0052); the reverse — resolvable
  * but reported missing — is the same bug wearing a different hat.
+ *
+ * 异步（ADR-0098 决议 3）：`fallbackDirs` 可以是 `reg query`（WorkBuddy 那条），
+ * 同步等它就把整个 web 服务冻住。
  */
-function findBinFor(spec: CliSpec, customDir?: string | null): string | null {
+async function findBinFor(spec: CliSpec, customDir?: string | null): Promise<string | null> {
   const found = findBin(spec.bin, dirsFor(spec, searchDirs(), customDir));
   if (found || !spec.fallbackDirs) return found;
   try {
     // Only the fallback dirs are searched here: the primary list already came
     // up empty, and `~` expansion / dedupe still apply (ADR-0053).
-    return findBin(spec.bin, cliSearchDirs([], spec.fallbackDirs(), os.homedir()));
+    return findBin(spec.bin, cliSearchDirs([], await spec.fallbackDirs(), os.homedir()));
   } catch {
     return null; // a broken locator must not take the whole sweep down
   }
 }
 
-export function detectClis(): DetectedCli[] {
+export async function detectClis(): Promise<DetectedCli[]> {
   const customDirs = readCustomCliDirs();
-  return KNOWN.map((c) => {
+  // ADR-0098 决议 3：每个引擎的「找二进制 + 跑 --version」彼此无关，并发跑。
+  // 顺序仍是 KNOWN 的顺序（map 保序），只是等待重叠。
+  return Promise.all(KNOWN.map(async (c) => {
     const customDir = customDirs[c.id] ?? null;
-    const found = findBinFor(c, customDir);
-    const probe = found ? probeCli(found) : null;
+    const found = await findBinFor(c, customDir);
+    const probe = found ? await probeCli(found) : null;
     const usable = probe ? probe.usable : undefined;
     let model = c.model;
     // opencode's model list is user-config-driven (opencode.jsonc providers),
@@ -589,7 +598,7 @@ export function detectClis(): DetectedCli[] {
       // every configured provider — via the `opencode models` command (config
       // files as fallback). A static list would diverge from what the opencode
       // TUI/desktop shows.
-      const dynamic = loadOpencodeModels(found ?? undefined);
+      const dynamic = await loadOpencodeModels(found ?? undefined);
       if (dynamic.length > 0) {
         // The static default is not in the real list, so it would render as an
         // unselectable phantom. Fall back to the first real model.
@@ -604,7 +613,7 @@ export function detectClis(): DetectedCli[] {
     // then says it could not list the models, rather than offering a copied
     // list that may no longer exist.
     if (c.id === "qoder-cn" && found) {
-      const dynamic = loadQoderModels(found);
+      const dynamic = await loadQoderModels(found);
       if (dynamic.length > 0) {
         model = { ...c.model, options: dynamic, default: dynamic[0].id };
       }
@@ -632,17 +641,21 @@ export function detectClis(): DetectedCli[] {
       pathSource: customDir && found ? (isInsideDir(customDir, found) ? "custom" : "auto") : undefined,
       model,
     };
-  });
+  }));
 }
 
-// ADR-0015: a real detection is a synchronous sweep of PATH + candidate dirs
-// (on Windows including npm's global node_modules), possibly spawning the
-// `opencode models` subprocess. It answers a near-static question ("what is
-// installed on this machine"), so the result is cached for the process
+// ADR-0015: a real detection is a sweep of PATH + candidate dirs (on Windows
+// including npm's global node_modules), plus spawning each engine's `--version`
+// and possibly the `opencode models` subprocess. It answers a near-static question
+// ("what is installed on this machine"), so the result is cached for the process
 // lifetime: the FIRST caller — the config page's one auto-check or
 // resolveCliId()'s fallback — pays the scan, every later caller reads memory.
 // Only the config page's manual re-check passes refresh: true, which is the
 // cache's sole invalidation path (and also re-spawns the opencode model list).
+//
+// ADR-0098: the sweep is async now (each probe is an async child process) and
+// concurrent callers share ONE sweep — two tabs opening the config page must not
+// double the subprocess count.
 //
 // ADR-0097 决议 4：cache invalidation must not depend on the caller remembering to
 // refresh. The engine→dir map is written by a DIFFERENT route (`/api/config`) than
@@ -652,29 +665,47 @@ export function detectClis(): DetectedCli[] {
 // signature is folded into the cache key instead.
 let cachedDetection: DetectedCli[] | null = null;
 let cachedDirsSignature: string | null = null;
+/** @type {Promise<DetectedCli[]>|null} 在飞的那一次检测（并发合流） */
+let detectionInflight: Promise<DetectedCli[]> | null = null;
 
-export function detectClisCached({ refresh = false }: { refresh?: boolean } = {}): DetectedCli[] {
+export async function detectClisCached({ refresh = false }: { refresh?: boolean } = {}): Promise<DetectedCli[]> {
   const signature = cliDirsSignature(readCustomCliDirs());
   if (cachedDetection && !refresh && signature === cachedDirsSignature) return cachedDetection;
+  if (detectionInflight) return detectionInflight;
   if (refresh) {
     resetOpencodeModelCache();
     resetQoderModelCache();
   }
-  cachedDetection = detectClis();
-  // 读完再取一次：两个读取之间存在写入时，用旧签名会让下一次调用白跑一趟重算——
-  // 无害，而把签名取在前的后果相反（信了已经过期的结果），所以取在检测之后。
-  cachedDirsSignature = cliDirsSignature(readCustomCliDirs());
-  return cachedDetection;
+  const running = detectClis();
+  detectionInflight = running;
+  try {
+    const detected = await running;
+    cachedDetection = detected;
+    // 读完再取一次：两个读取之间存在写入时，用旧签名会让下一次调用白跑一趟重算——
+    // 无害，而把签名取在前的后果相反（信了已经过期的结果），所以取在检测之后。
+    cachedDirsSignature = cliDirsSignature(readCustomCliDirs());
+    return detected;
+  } finally {
+    if (detectionInflight === running) detectionInflight = null;
+  }
 }
 
-export function resolveCli(id: string): { spec: CliSpec; binPath: string } | null {
+/**
+ * Resolve one engine's binary for dispatch.
+ *
+ * 异步（ADR-0098 决议 3）：与检测走同一条 `findBinFor`，而它可能等一个 `reg query`。
+ *
+ * @param id KNOWN 里的引擎 id
+ * @returns 命中时的 spec + 绝对路径，否则 null
+ */
+export async function resolveCli(id: string): Promise<{ spec: CliSpec; binPath: string } | null> {
   const spec = KNOWN.find((c) => c.id === id);
   if (!spec) return null;
   // Same dir list as detection: a runtime the config page reports as installed
   // must also be resolvable for an actual dispatch, or the engine is selectable
   // and then fails at spawn (ADR-0052) — including the dir the user specified
   // (ADR-0097: detection and dispatch share one resolution path).
-  const binPath = findBinFor(spec, readCustomCliDirs()[id]);
+  const binPath = await findBinFor(spec, readCustomCliDirs()[id]);
   if (!binPath) return null;
   return { spec, binPath };
 }
@@ -708,7 +739,7 @@ export type CliDirCheck = {
  * @param {string} rawDir - 用户填的目录（已/未归一化均可）
  * @returns {CliDirCheck}
  */
-export function verifyCliDir(cliId: string, rawDir: string): CliDirCheck {
+export async function verifyCliDir(cliId: string, rawDir: string): Promise<CliDirCheck> {
   const spec = KNOWN.find((c) => c.id === cliId);
   if (!spec) return { ok: false, code: "unknown-cli", bin: "" };
   const dir = normalizeCliDir(rawDir, os.homedir());
@@ -716,7 +747,7 @@ export function verifyCliDir(cliId: string, rawDir: string): CliDirCheck {
   const found = findBin(spec.bin, [dir]);
   if (!found) return { ok: false, code: "not-found", bin: spec.bin };
   // ADR-0028 的规则原样复用：找到了不等于能用。
-  const probe = probeCli(found);
+  const probe = await probeCli(found);
   if (!probe.usable) {
     const code: CliDirCode = probe.failure === "spawn" ? "probe-failed" : "no-output";
     return { ok: false, code, bin: spec.bin, path: found };

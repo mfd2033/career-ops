@@ -89,7 +89,7 @@ export async function POST(req: Request) {
   const company = typeof body.company === "string" ? body.company : "";
   const cliId = typeof body.cliId === "string" ? body.cliId : "";
   const requestedModel = typeof body.model === "string" ? body.model : "";
-  const resolved = cliId ? resolveCli(cliId) : null;
+  const resolved = cliId ? await resolveCli(cliId) : null;
   if (!resolved) {
     return new Response(JSON.stringify({ error: `CLI '${cliId}' not found` }), {
       status: 404,

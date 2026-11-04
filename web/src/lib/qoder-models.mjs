@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { stdoutOf } from "./exec-async.mjs";
 
 // Qoder CN's model catalogue, as the CLI itself reports it (ADR-0052 决议 7-9).
 //
@@ -68,17 +68,21 @@ export function resetQoderModelCache() {
  * can change between two page loads, and caching an empty list would hide the
  * catalogue for a minute after a login.
  *
+ * 异步（ADR-0098 决议 3）：`--list-models` 是个子进程，同步跑会把整个 web 服务
+ * 冻到它退出为止，而这条调用就发生在 `/api/clis` 的请求路径上。
+ *
  * @param {string} [binPath] - the resolved qoderclicn executable
- * @param {typeof execFileSync} [exec] - injected so the cache/refresh contract
- *   is unit-testable without spawning anything
- * @returns {{id: string, label: string}[]} empty when the CLI cannot answer
+ * @param {(file: string, args: string[], options: object) => Promise<string>} [exec]
+ *   injected so the cache/refresh contract is unit-testable without spawning
+ *   anything (sync functions work too — their value is awaited as-is)
+ * @returns {Promise<{id: string, label: string}[]>} empty when the CLI cannot answer
  */
-export function loadQoderModels(binPath, exec = execFileSync) {
+export async function loadQoderModels(binPath, exec = stdoutOf) {
   if (commandCache && Date.now() - commandCacheAt < COMMAND_CACHE_TTL_MS) {
     return commandCache;
   }
   try {
-    const out = exec(binPath || "qoderclicn", ["--list-models"], {
+    const out = await exec(binPath || "qoderclicn", ["--list-models"], {
       encoding: "utf8",
       timeout: 15_000,
       windowsHide: true,

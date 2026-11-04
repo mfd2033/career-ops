@@ -31,3 +31,28 @@ import path from "node:path";
 export function isReservedReportFile(file) {
   return /^\d+-RESERVED\.md$/.test(path.basename(file));
 }
+
+/**
+ * 「报告号 → 文件名」索引（ADR-0098 决议 7）。
+ *
+ * WHY: 报告定位原先在逐行循环里 `readdirSync(reports/)`（816 行 = 816 次目录扫描，
+ * 每次 824 个条目）。目录清单一次读进来建索引，循环里只剩一次 Map 查找。
+ *
+ * 规则与 `resolveReportPathFor` 的兜底同源：只有 `.md`、跳过 `{n}-RESERVED.md` 哨兵、
+ * 号取文件名前缀里的整数。**同号多个文件时首个胜出**——与 `readdir` 的顺序一致，
+ * 也与既有 `files.find(...)` 的行为一致，不引入新的优先级。
+ *
+ * @param {string[]} names - `reports/` 的文件名清单（不含路径）
+ * @returns {Map<number, string>} 号 → 文件名
+ */
+export function reportFileIndex(names) {
+  const index = new Map();
+  for (const name of names || []) {
+    if (typeof name !== "string" || !name.endsWith(".md")) continue;
+    if (isReservedReportFile(name)) continue;
+    const num = parseInt(name, 10);
+    if (!Number.isFinite(num) || index.has(num)) continue;
+    index.set(num, name);
+  }
+  return index;
+}

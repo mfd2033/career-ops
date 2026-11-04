@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { execFileSync } from "node:child_process";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { careerOpsRoot, readApplications } from "@/lib/career-ops";
 import { atomicWriteWithBackup } from "@/lib/core/safe-write";
 import { foldBlacklistGates } from "@/lib/blacklist-gate.mjs";
@@ -142,13 +143,19 @@ function blacklistRunCompanies(lib: any): { blockedKeys: string[]; totalBlocked:
 
 /** Snapshot the data layer to the shadow ledger before a write (AGENTS.md
  *  mandate). Non-zero exit aborts the write — never rewrite user data without
- *  the safety net. A missing script (fresh checkout) is skipped, not fatal. */
-function runShadowBackup(): { ok: boolean; note?: string } {
+ *  the safety net. A missing script (fresh checkout) is skipped, not fatal.
+ *
+ *  异步（ADR-0098 决议 3）：VACUUM 整个影子仓库要几秒，而 `execFileSync` 会把
+ *  单线程的 web 服务一起冻住——托盘探针、扩展探测、其它页面的保存都会在那个窗口
+ *  里超时。失败语义不变：非零退出照样中止写入。 */
+const execFileAsync = promisify(execFile);
+
+async function runShadowBackup(): Promise<{ ok: boolean; note?: string }> {
   const root = careerOpsRoot();
   const cmd = path.join(root, "local", "backup-data.cmd");
   if (!fs.existsSync(cmd)) return { ok: true, note: "no backup-data.cmd; skipped" };
   try {
-    execFileSync("cmd.exe", ["/c", cmd], { cwd: root, stdio: "pipe", timeout: 60_000 });
+    await execFileAsync("cmd.exe", ["/c", cmd], { cwd: root, timeout: 60_000 });
     return { ok: true };
   } catch (e) {
     return { ok: false, note: e instanceof Error ? e.message : String(e) };
@@ -159,7 +166,7 @@ function runShadowBackup(): { ok: boolean; note?: string } {
  *  Throws if the shadow backup fails, aborting the write. */
 export async function writeBlacklist(preamble: string, rows: BlacklistRow[]): Promise<void> {
   const lib = await loadBlacklistLib();
-  const bk = runShadowBackup();
+  const bk = await runShadowBackup();
   if (!bk.ok) throw new Error(`shadow backup failed: ${bk.note}`);
   const text = lib.renderBlacklistTable(preamble, rows);
   atomicWriteWithBackup(blacklistPath(), text);

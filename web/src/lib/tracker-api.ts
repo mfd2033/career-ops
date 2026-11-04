@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import fs from "node:fs";
+import path from "node:path";
 import { careerOpsRoot, rootScript } from "@/lib/career-ops";
+import { createQueryCache } from "@/lib/query-cache.mjs";
 import {
   boundedLockWait,
   failureBody,
@@ -23,6 +25,47 @@ import {
 
 /** Hard kill for one child run. Generous: a creating write waits on the lock. */
 export const TRACKER_TIMEOUT_MS = 30_000;
+
+/**
+ * `data/applications.md` 的签名（mtimeMs+size）。
+ *
+ * ADR-0098 决议 4：tracker 行的**一切**变化都从这里出发——只读查询的结果只取决于
+ * 这个文件（子进程的 SQLite 索引是它的派生物，会自动再同步）。文件没变就不必再
+ * spawn 一个 Node 子进程（实测 411ms/次）；变了就整代作废，不靠谁记得刷新。
+ *
+ * @returns 签名串；文件不存在时返回 "-"（fresh checkout 也要能答）
+ */
+async function applicationsSignature(): Promise<string> {
+  try {
+    const st = await fs.promises.stat(path.join(careerOpsRoot(), "data", "applications.md"));
+    return `${st.mtimeMs}:${st.size}`;
+  } catch {
+    return "-";
+  }
+}
+
+// 只缓存「成功且带 rows 文档」的查询结果：超时、非零退出、spawn 失败都是环境
+// 状态，不是「文件没变」的结论（ADR-0098 决议 4 —— 失败不进缓存）。
+const queryCache = createQueryCache({
+  signatureOf: applicationsSignature,
+  isCacheable: (run: CliOutcome) => run.status === 200 && Array.isArray(run.rows),
+});
+
+/**
+ * 跑一次只读查询，能复用就复用、能合流就合流（ADR-0098 决议 5）。
+ *
+ * @param key - 输入的身份（argv 拼成的稳定串）
+ * @param run - 真正 spawn 子进程的那次调用
+ * @returns 那次 run 的结果（可能来自缓存或别人在飞的那一个）
+ */
+export function runCachedTrackerQuery(key: string, run: () => Promise<CliOutcome>): Promise<CliOutcome> {
+  return queryCache.get(key, run);
+}
+
+/** 写路径后主动作废（签名本来也会变，这一步只是让下一次读不必等一次 stat）。 */
+export function invalidateTrackerQueries(): void {
+  queryCache.invalidate();
+}
 
 /** One finished CLI run, with the parts the routes actually branch on. */
 export type CliOutcome = {
@@ -100,6 +143,10 @@ export async function runTrackerScript(
     timeoutMs,
     env: boundedLockWait(timeoutMs),
   });
+  // 写路径成功 → 立刻作废查询缓存（ADR-0098 决议 5）。判据是 argv 的子命令而不是
+  // 脚本名：同一个 `tracker.mjs` 既能 `query` 也能 `sync`/`delete`，按脚本名判断
+  // 会把写漏掉，而那正是用户最在乎的那次刷新。
+  if (run.code === 0 && args[0] !== "query") invalidateTrackerQueries();
   const parsed = parseCliJson(run.stdout);
   // query prints a bare array of row objects. Narrow it here rather than
   // claiming at the call site: the document arrives from a child process, so

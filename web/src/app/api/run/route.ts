@@ -87,7 +87,7 @@ export async function POST(req: Request) {
   if (!input || !cliId) {
     return new Response(JSON.stringify({ error: "input and cliId required" }), { status: 400 });
   }
-  const resolved = resolveCli(cliId);
+  const resolved = await resolveCli(cliId);
   if (!resolved) {
     return new Response(JSON.stringify({ error: `CLI '${cliId}' not found` }), {
       status: 404,

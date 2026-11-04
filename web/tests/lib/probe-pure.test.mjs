@@ -20,6 +20,7 @@ const {
   PRIMARY_PORT,
   ALT_PORT_MIN,
   ALT_PORT_MAX,
+  DEV_PORTS,
   PROBE_TIMEOUT_MS,
   ALT_PROBE_TIMEOUT_MS,
   RETRY_TIMEOUT_MS,
@@ -35,12 +36,19 @@ test("主端口就是 ADR-0063 固定的 3000", () => {
   assert.equal(PRIMARY_PORT, 3000);
 });
 
-test("备选区间是 3001-3040，且不含主端口（共 40 个）", () => {
+test("备选区间是 3001-3040，外加本 fork 的 dev 口，且不含主端口", () => {
   const ports = altPorts();
-  assert.equal(ports.length, 40);
+  // 3001-3040 共 40 个，再加 DEV_PORTS（3101）。
+  assert.equal(ports.length, 40 + DEV_PORTS.filter((p) => p > ALT_PORT_MAX).length);
   assert.equal(ports[0], ALT_PORT_MIN);
-  assert.equal(ports[ports.length - 1], ALT_PORT_MAX);
+  assert.equal(ports[ALT_PORT_MAX - ALT_PORT_MIN], ALT_PORT_MAX, "区间部分仍以 3040 结尾");
   assert.ok(!ports.includes(PRIMARY_PORT));
+});
+
+test("dev 口 3101 真的在备选列表里（否则「只为 dev 留着」是一句空话）", () => {
+  // 3101 落在 3001-3040 之外：曾经只靠区间，结果 dev 实例对扩展完全不可见。
+  assert.ok(DEV_PORTS.includes(3101));
+  assert.ok(altPorts().includes(3101));
 });
 
 test("主探窗口不再是 3s——服务忙时 3s 会把「在跑」误判成「没跑」", () => {

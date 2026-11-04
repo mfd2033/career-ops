@@ -4,6 +4,7 @@ import {
   coreScriptMissing,
   failResponse,
   okResponse,
+  runCachedTrackerQuery,
   runTrackerScript,
 } from "@/lib/tracker-api";
 import { addArgv, queryArgv } from "@/lib/tracker-cli.mjs";
@@ -12,6 +13,8 @@ import { canonicalizeStatus } from "@/lib/core/states";
 export const runtime = "nodejs";
 // Tracker reads are always fresh: the CLI auto-resyncs its index when the
 // markdown moved, and a cached route response would serve yesterday's rows back.
+// The cache added in ADR-0098 keeps that promise by keying on applications.md's
+// mtime+size — a TTL would be the thing this comment is warning about.
 export const dynamic = "force-dynamic";
 
 /**
@@ -44,7 +47,12 @@ export async function GET(req: Request): Promise<Response> {
   const built = queryArgv(params);
   if ("error" in built) return badRequest(built.error.code, built.error.message);
 
-  const run = await runTrackerScript("tracker", built.argv);
+  // ADR-0098 决议 4/5：相同 argv + applications.md 未变 → 不再 spawn 子进程；
+  // 并发同参数请求共享那一次 child run。key 不包含 limit（故意不转发给 CLI），
+  // 所以不同分页共用同一份完整结果，下面按 limit 切片仍各自正确。
+  const run = await runCachedTrackerQuery(built.argv.join("\u0000"), () =>
+    runTrackerScript("tracker", built.argv),
+  );
   if (run.status !== 200) return failResponse("", run);
   if (!run.rows) {
     return badRequest("internal", "tracker query returned no rows document");

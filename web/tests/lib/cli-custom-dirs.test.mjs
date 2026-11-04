@@ -152,21 +152,21 @@ test("the custom dirs are read from the server config, not from the browser", ()
 
 test("detection cache is invalidated by the dir map, not only by ?refresh=1", () => {
   // 写目录的是 /api/config，读检测的是 /api/clis：靠调用方记得刷就是押前端记性。
-  const body = /export function detectClisCached[\s\S]*?\n}/.exec(clisSrc);
+  const body = /export (?:async )?function detectClisCached[\s\S]*?\n}/.exec(clisSrc);
   assert.ok(body, "detectClisCached is gone");
   assert.match(body[0], /cliDirsSignature\(readCustomCliDirs\(\)\)/, "the cache key must fold in the dir signature");
 });
 
 test("the dir probe looks ONLY inside the given folder", () => {
   // 回落 PATH 会让「测试通过」可能测的是另一个位置的同类二进制（ADR-0097 决议 5）。
-  const body = /export function verifyCliDir[\s\S]*?\n}/.exec(clisSrc);
+  const body = /export (?:async )?function verifyCliDir[\s\S]*?\n}/.exec(clisSrc);
   assert.ok(body, "verifyCliDir is gone");
   assert.match(body[0], /findBin\(spec\.bin,\s*\[dir\]\)/, "verifyCliDir must search the one dir it was given");
   assert.doesNotMatch(body[0], /searchDirs\(\)/, "the probe must not fall back to the auto chain");
 });
 
 test("every failure of the probe is a class code, never an internal message", () => {
-  const body = /export function verifyCliDir[\s\S]*?\n}/.exec(clisSrc);
+  const body = /export (?:async )?function verifyCliDir[\s\S]*?\n}/.exec(clisSrc);
   assert.ok(body);
   for (const code of ["unknown-cli", "not-absolute", "not-found", "no-output"]) {
     assert.match(body[0], new RegExp(`"${code}"`), `verifyCliDir never reports ${code}`);

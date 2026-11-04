@@ -112,7 +112,7 @@ type Interpreted = { n: number; skip?: boolean; label?: string; type?: string; o
  *  re-tag the chosen controls with data-co-field, and return clean ApplyField[].
  *  Returns [] if the CLI is missing or interpretation fails (caller falls back). */
 export async function agentInterpretForm(frame: Frame, cliId: string, title: string, model?: string): Promise<ApplyField[]> {
-  const resolved = resolveCli(cliId);
+  const resolved = await resolveCli(cliId);
   if (!resolved) return [];
   const cands = await captureCandidates(frame).catch(() => [] as Cand[]);
   if (!cands.length) return [];

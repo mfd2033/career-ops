@@ -77,34 +77,34 @@ test("parse: nothing in, nothing out", () => {
 
 // --- the command path -------------------------------------------------------
 
-test("load: parses the CLI's answer and caches it across calls", () => {
+test("load: parses the CLI's answer and caches it across calls", async () => {
   resetQoderModelCache();
   let calls = 0;
   const exec = () => {
     calls++;
     return REAL_OUTPUT;
   };
-  assert.equal(loadQoderModels("qoderclicn", exec).length, 14);
-  assert.equal(loadQoderModels("qoderclicn", exec).length, 14);
+  assert.equal((await loadQoderModels("qoderclicn", exec)).length, 14);
+  assert.equal((await loadQoderModels("qoderclicn", exec)).length, 14);
   assert.equal(calls, 1, "a second call inside the TTL must not spawn again");
   resetQoderModelCache();
 });
 
-test("load: a manual re-check really re-queries", () => {
+test("load: a manual re-check really re-queries", async () => {
   resetQoderModelCache();
   let calls = 0;
   const exec = () => {
     calls++;
     return REAL_OUTPUT;
   };
-  loadQoderModels("qoderclicn", exec);
+  await loadQoderModels("qoderclicn", exec);
   resetQoderModelCache();
-  loadQoderModels("qoderclicn", exec);
+  await loadQoderModels("qoderclicn", exec);
   assert.equal(calls, 2, "detectClisCached({refresh:true}) must force a real query");
   resetQoderModelCache();
 });
 
-test("load: not signed in (the command throws) is an EMPTY list, and is not cached", () => {
+test("load: not signed in (the command throws) is an EMPTY list, and is not cached", async () => {
   resetQoderModelCache();
   let calls = 0;
   const exec = () => {
@@ -113,15 +113,15 @@ test("load: not signed in (the command throws) is an EMPTY list, and is not cach
     err.stderr = "Not logged in. Run `qoderclicn login` to authenticate.";
     throw err;
   };
-  assert.deepEqual(loadQoderModels("qoderclicn", exec), []);
-  assert.deepEqual(loadQoderModels("qoderclicn", exec), []);
+  assert.deepEqual(await loadQoderModels("qoderclicn", exec), []);
+  assert.deepEqual(await loadQoderModels("qoderclicn", exec), []);
   assert.equal(calls, 2, "a failure must not be cached — the reason can change between page loads");
   resetQoderModelCache();
 });
 
-test("load: a headerless-but-empty answer is an empty list, not a phantom model", () => {
+test("load: a headerless-but-empty answer is an empty list, not a phantom model", async () => {
   resetQoderModelCache();
-  assert.deepEqual(loadQoderModels("qoderclicn", () => "MODEL\n"), []);
+  assert.deepEqual(await loadQoderModels("qoderclicn", () => "MODEL\n"), []);
   resetQoderModelCache();
 });
 

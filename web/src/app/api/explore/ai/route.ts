@@ -143,7 +143,7 @@ export async function POST(req: Request) {
   const model = body.model;
   if (!query || !cliId) return Response.json({ error: "query and cliId required" }, { status: 400 });
 
-  const resolved = resolveCli(cliId);
+  const resolved = await resolveCli(cliId);
   if (!resolved) return Response.json({ error: `CLI '${cliId}' not found on this machine` }, { status: 404 });
   const { spec, binPath } = resolved;
 

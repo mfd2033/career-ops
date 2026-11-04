@@ -5,7 +5,7 @@ import { atomicWrite } from "@/lib/core/safe-write";
 import { parseApplications } from "@/lib/tracker-table.mjs";
 // One definition of the `{n}-RESERVED.md` convention, shared with
 // run-cli-support.mjs — see report-files.mjs for why it lives there.
-import { isReservedReportFile } from "@/lib/report-files.mjs";
+import { isReservedReportFile, reportFileIndex } from "@/lib/report-files.mjs";
 // Reuse the canonical tolerant report parser (format.ts is explicitly shared
 // by server + client, no fs). One definition of `**URL:**` extraction.
 import { parseReport } from "@/lib/format";
@@ -716,11 +716,46 @@ export function findReportFile(n: string): string | null {
   return containedRealpath(p, root) ? p : null;
 }
 
-/** True containment check: resolves symlinks before comparing, so a link
- *  planted under data/ or reports/ can't leak files outside the project. */
-function containedRealpath(p: string, root: string): boolean {
+/** 目录 → 真实路径（进程级 memo）。
+ *
+ *  ADR-0098 决议 6：`fs.realpathSync()` 在 Windows 上约 0.3ms，而报告链路里它被
+ *  按行调用（816 行 = 241ms）。目录的真实路径在一次进程生命周期里不会变（本仓库
+ *  D:\workspace\career-ops 本身就是 F:\workspace\career-ops 的目录联接，更要记住），
+ *  所以按目录 memo，只留每个候选文件自己的一次 lstat。 */
+const realDirCache = new Map<string, string>();
+
+function realDirOf(dir: string): string {
+  const hit = realDirCache.get(dir);
+  if (hit !== undefined) return hit;
+  let real = "";
   try {
-    return fs.realpathSync(p).startsWith(fs.realpathSync(root) + path.sep);
+    real = fs.realpathSync(dir);
+  } catch {
+    real = ""; // 目录不存在——调用方按「不包含」处理，不缓存空结果以外的语义
+  }
+  realDirCache.set(dir, real);
+  return real;
+}
+
+/** 包含性校验：文件必须落在 `root` 之内。
+ *
+ *  ADR-0098：原实现对每个候选文件 `realpathSync(p)` + `realpathSync(root)`（两次，
+ *  816 行 = 484ms，占整条链路一半以上）。现在：
+ *    • 两次 realpath 换成「目录」级 memo（同一目录只算一次）；
+ *    • 文件本身只在 **lstat 说是符号链接时** 才再解一层。
+ *  强度不变：名字来自 `readdir` 不含分隔符，真正的越界手段只有「目录被替换成联接」
+ *  （目录真实路径不在 root 内 → 拒绝）与「文件是符号链接」（解一层再比）。 */
+function containedRealpath(p: string, root: string): boolean {
+  const realRoot = realDirOf(root);
+  const realDir = realDirOf(path.dirname(p));
+  if (!realRoot || !realDir) return false;
+  if (realDir !== realRoot && !realDir.startsWith(realRoot + path.sep)) return false;
+  try {
+    // 缺失的文件照旧算「不包含」，与 realpathSync 抛错的旧行为一致。
+    if (fs.lstatSync(p).isSymbolicLink()) {
+      return fs.realpathSync(p).startsWith(realRoot + path.sep);
+    }
+    return true;
   } catch {
     return false; // missing file or unresolvable link — treat as not found
   }
@@ -869,8 +904,11 @@ export function readCheckupSuggestion(id: string): boolean {
 export function readCheckupSuggestions(apps: Application[]): Record<string, true> {
   const ledgerIdx = checkupIndex(read("data/company-checkups.tsv") ?? "") as Record<string, CheckupEntry>;
   const out: Record<string, true> = {};
+  // ADR-0098：目录只扫一次。原实现在循环里调 resolveReportPathFor，缺链的行各扫
+  // 一遍 reports/（824 个条目）——那是这条路由最大的同步成本。
+  const reportIndex = reportsIndexOf();
   for (const app of apps) {
-    const file = resolveReportPathFor(app);
+    const file = resolveReportPathFor(app, reportIndex);
     if (!file) continue;
     let legitimacy: string | null = null;
     try {
@@ -892,31 +930,58 @@ export function readCheckupSuggestions(apps: Application[]): Record<string, true
  * loop over many applications — re-reading the tracker file per app would be
  * O(n²) FS reads (#749-class regression). Returns null if the link is missing
  * or the file can't be resolved safely.
+ *
+ * ADR-0098：`index` 是「一次 readdir 建好的号→文件名」索引（reportFileIndex）。
+ * 不传则退回自己扫一次目录——便于单个调用，但**循环调用方必须传**，否则 816 行
+ * 就是 816 次目录扫描。
+ *
+ * @param app - tracker 行
+ * @param index - 可选的号→文件名索引
+ * @returns 报告绝对路径或 null
  */
-function resolveReportPathFor(app: Application): string | null {
+export function resolveReportPathFor(app: Application, index?: Map<number, string>): string | null {
   const root = careerOpsRoot();
   const linked = app.report.match(/\]\(([^)]+)\)/)?.[1];
   if (linked) {
     const p = path.resolve(root, "data", linked);
     if (p.endsWith(".md") && !isReservedReportFile(p) && containedRealpath(p, root)) return p;
   }
-  // Fallback: scan reports/ for a file whose leading number matches app.n.
+  // Fallback: look up reports/ by the leading number of the filename.
   // Mirrors findReportFile's fallback so a hand-edited or missing link still
   // resolves the right report.
-  let files: string[];
-  try {
-    files = fs.readdirSync(path.join(root, "reports"));
-  } catch {
-    return null;
-  }
   const target = parseInt(app.n, 10);
   if (Number.isNaN(target)) return null;
-  const match = files.find(
-    (f) => f.endsWith(".md") && !isReservedReportFile(f) && parseInt(f, 10) === target,
-  );
+  let match: string | undefined;
+  if (index) {
+    match = index.get(target);
+  } else {
+    let files: string[];
+    try {
+      files = fs.readdirSync(path.join(root, "reports"));
+    } catch {
+      return null;
+    }
+    match = reportFileIndex(files).get(target);
+  }
   if (!match) return null;
   const p = path.join(root, "reports", match);
   return containedRealpath(p, root) ? p : null;
+}
+
+/** 报告正文 → 职位 URL（无则 null）。ADR-0098：`readApplicationUrl` 的拆解版，
+ *  读盘与解析分开，好让缓存层按 (mtimeMs, size) 跳过重复读取。 */
+export function reportUrlFromMarkdown(md: string): string | null {
+  const url = parseReport(md).fields.find((f) => f.label === "URL")?.value;
+  return url && /^https?:\/\//i.test(url) ? url : null;
+}
+
+/** 异步读一份报告的职位 URL。读盘异常/无 URL 一律 null（宁缺毋假）。 */
+export async function readReportUrl(file: string): Promise<string | null> {
+  try {
+    return reportUrlFromMarkdown(await fs.promises.readFile(file, "utf8"));
+  } catch {
+    return null;
+  }
 }
 
 /** Read a single application's posting URL from its report's `**URL:**` header
@@ -927,9 +992,7 @@ export function readApplicationUrl(app: Application): string | undefined {
   const file = resolveReportPathFor(app);
   if (!file) return undefined;
   try {
-    const md = fs.readFileSync(file, "utf8");
-    const url = parseReport(md).fields.find((f) => f.label === "URL")?.value;
-    return url && /^https?:\/\//i.test(url) ? url : undefined;
+    return reportUrlFromMarkdown(fs.readFileSync(file, "utf8")) ?? undefined;
   } catch {
     return undefined;
   }
@@ -944,11 +1007,30 @@ export function readApplicationUrl(app: Application): string | undefined {
  */
 export function readApplicationUrls(apps: Application[]): Record<string, string> {
   const out: Record<string, string> = {};
+  const reportIndex = reportsIndexOf();
   for (const app of apps) {
-    const url = readApplicationUrl(app);
-    if (url) out[app.n] = url;
+    const file = resolveReportPathFor(app, reportIndex);
+    if (!file) continue;
+    try {
+      const url = reportUrlFromMarkdown(fs.readFileSync(file, "utf8"));
+      if (url) out[app.n] = url;
+    } catch {
+      /* 读不出的报告直接跳过：批量重评只关心能重评的那部分 */
+    }
   }
   return out;
+}
+
+/** `reports/` 的「号 → 文件名」索引；目录不存在/不可读 → 空索引。
+ *
+ *  给循环调用方共用（ADR-0098 决议 7）。只用于解析**路径**，读完仍需
+ *  `containedRealpath` 把关，所以从清单拿名字不会把越界文件带进来。 */
+export function reportsIndexOf(): Map<number, string> {
+  try {
+    return reportFileIndex(fs.readdirSync(path.join(careerOpsRoot(), "reports")));
+  } catch {
+    return new Map();
+  }
 }
 
 /** The CANONICAL user-customization file the CLI/TUI reads. Durable facts the

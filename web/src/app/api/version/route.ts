@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { resolveVersionChannels, SERVER_CAPABILITIES } from "@/lib/version-info.mjs";
+import { createOnceValue } from "@/lib/once-value.mjs";
 
 // The WEB build's own version + channel (NOT the user's data checkout) — read from
 // the repo's VERSION (parent of the web/ cwd). The channel is derived from a
@@ -26,7 +27,7 @@ function readVersion(): string {
 
 function shortSha(): string {
   try {
-    return execSync("git rev-parse --short HEAD", { cwd: process.cwd(), stdio: ["ignore", "pipe", "ignore"] }).toString().trim();
+    return execFileSync("git", ["rev-parse", "--short", "HEAD"], { cwd: process.cwd(), stdio: ["ignore", "pipe", "ignore"] }).toString().trim();
   } catch {
     return "";
   }
@@ -55,7 +56,11 @@ function webVersion(): string {
   }
 }
 
-export async function GET() {
+// ADR-0098 决议 2：探针**零 I/O、零子进程**。这份读数在进程生命周期内不会变
+// （打包版的 sha 本来就是冻结的；dev 下的 sha 是「正在跑的这个进程」的身份），
+// 所以只在第一个请求时算一次。原实现每次请求都 execSync(git rev-parse) + 读
+// 4 个文件：空载 19ms 看着无害，但机器一忙它自己就变成那条超时的探针。
+const versionFacts = createOnceValue(() => {
   const buildInfo = readBuildInfo();
   // coreVersion / channel / version folding lives in a pure module so the
   // packaged-vs-dev precedence is unit-tested without booting a server (#8).
@@ -64,7 +69,7 @@ export async function GET() {
     buildInfoCoreVersion: buildInfo?.coreVersion,
     webVersion: webVersion(),
   });
-  return Response.json({
+  return {
     version,
     coreVersion,
     channel,
@@ -72,6 +77,12 @@ export async function GET() {
     sha: buildInfo?.sha ?? shortSha(),
     builtAt: buildInfo?.builtAt,
     packaged: !!buildInfo,
+  };
+});
+
+export async function GET() {
+  return Response.json({
+    ...versionFacts(),
     // ADR-0051 决议 11：能力协商走这里，不走 /api/config（那个是用户可变存储）。
     // 老服务端没这个键 → 扩展读不到能力 → 自己回落批量路。
     capabilities: SERVER_CAPABILITIES,
