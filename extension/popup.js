@@ -28,26 +28,43 @@ function msg(type, payload) {
   });
 }
 
+/**
+ * 连接状态三态落 UI：已连接 / 服务在忙（探测超时）/ 未检测到服务。
+ *
+ * 三态是这一版的关键：托盘只肯在「连续 30s 答不上」时才报挂，而扩展的探测窗口只有
+ * 几秒，两者之间的窗口里服务进程在、端口在听、但事件循环被重路由占住。那个状态下
+ * 说「未检测到本地 web 服务」会把用户指向一个根本没停的服务。
+ * 徽章仍是二值（ADR-0050 决策：版本校验失败按未连处理），三态只落在 popup 文案上。
+ */
+async function paintState(s) {
+  if (s && s.ok && s.connected && s.port) {
+    stateEl.textContent = `已连接 localhost:${s.port}`;
+    stateEl.className = "state connected";
+    reprobeBtn.hidden = true;
+    footTipEl.textContent = `本地 web：localhost:${s.port}`;
+    await paintSelection();
+    return;
+  }
+  reprobeBtn.hidden = false;
+  selectionEl.hidden = true;
+  if (s && s.ok && s.reason === "timeout") {
+    const secs = Math.round((s.timeoutMs || 6000) / 1000);
+    stateEl.textContent = "本地服务在忙（探测超时）";
+    stateEl.className = "state busy";
+    footTipEl.textContent = `服务进程在，但 ${secs} 秒内没答复；稍后点「重新探测」`;
+  } else {
+    stateEl.textContent = "未检测到本地 web 服务";
+    stateEl.className = "state disconnected";
+    footTipEl.textContent = "请先启动 career-dashboard";
+  }
+}
+
 async function init() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   activeTabId = tab && typeof tab.id === "number" ? tab.id : null;
 
-  const s = await msg("get-state");
-  if (s.ok && s.connected && s.port) {
-    stateEl.textContent = `已连接 localhost:${s.port}`;
-    stateEl.className = "state connected";
-    reprobeBtn.hidden = true;
-    await paintSelection();
-    footTipEl.textContent = `本地 web：localhost:${s.port}`;
-    await paintDiag();
-  } else {
-    stateEl.textContent = "未检测到本地 web 服务";
-    stateEl.className = "state disconnected";
-    reprobeBtn.hidden = false;
-    selectionEl.hidden = true;
-    footTipEl.textContent = "请先启动 career-dashboard";
-    await paintDiag();
-  }
+  await paintState(await msg("get-state"));
+  await paintDiag();
 }
 
 /** Show background-side state (eval map key count, resolved port) for debugging. */
@@ -62,6 +79,9 @@ async function paintDiag() {
     versionErr: d.versionErr,
     evalKeys: d.evalKeys,
   };
+  // 逐端口明细：哪一口超时、哪一口拒连、哪一口坐着别的服务，一眼可见。
+  if (d.probeDiag) base.probeDiag = d.probeDiag;
+  if (d.probeAt) base.probeAt = new Date(d.probeAt).toISOString();
   if (d.contentDiag) base.contentDiag = d.contentDiag;
   lastDiagJson = JSON.stringify(base, null, 2);
   diagEl.textContent = lastDiagJson;
@@ -187,17 +207,12 @@ reprobeBtn.addEventListener("click", () => {
   stateEl.textContent = "检测中…";
   stateEl.className = "state probing";
   chrome.runtime.sendMessage({ type: "get-state", force: true }, async (res) => {
-    if (!chrome.runtime.lastError && res.ok && res.connected && res.port) {
-      stateEl.textContent = `已连接 localhost:${res.port}`;
-      stateEl.className = "state connected";
-      reprobeBtn.hidden = true;
-      footTipEl.textContent = `本地 web：localhost:${res.port}`;
-      await paintSelection();
-    } else {
-      stateEl.textContent = "未检测到本地 web 服务";
-      stateEl.className = "state disconnected";
-      reprobeBtn.hidden = false;
+    if (chrome.runtime.lastError) {
+      await paintState(null);
+      return;
     }
+    await paintState(res);
+    await paintDiag();
   });
 });
 

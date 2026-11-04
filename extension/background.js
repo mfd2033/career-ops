@@ -8,7 +8,8 @@
 // host_permissions let it read without CORS.
 //
 // Responsibilities:
-//   • probe localhost:3000-3040 /api/version → web port (cache, re-probe)
+//   • probe localhost:3000 /api/version → web port (3000 first, 3001-3040 only as
+//     a dev-entry fallback; cache, re-probe)
 //   • resolve cliId/model from the web config page's saved pick (/api/config)
 //   • load + refresh the "evaluated" map (/api/report-status)
 //   • run batch evaluation (/api/batch-evaluate) and stream NDJSON to the popup
@@ -18,12 +19,15 @@
 
 // ---- port probing ---------------------------------------------------------
 
-const PORT_MIN = 3000;
-const PORT_MAX = 3040;
-// Chromium 对 127.0.0.1 等私有地址的首次连接有 ~0.6-1.2s 预热延迟（PNA/IP 决策，
-// 不发 OPTIONS，同一浏览器进程内仅首次生效）。900ms 超时会恰好截断冷启动探测，
-// 导致"服务未运行"误报，故放宽到 3s。
-const PROBE_TIMEOUT_MS = 3000;
+// 端口固定 3000（ADR-0063 决策 1），探测口径随之改为「3000 优先，不通再放宽到
+// 3001-3040」。备选区间只为 dev 入口留着（`node local/dev-web.mjs -p 3101`，3000 上
+// 通常跑着托盘壳）；常规路径只发 1 个探活请求。判定逻辑全在 probe-pure.js（可单测），
+// 这里只做 fetch + abort 计时 + 缓存。
+importScripts("probe-pure.js");
+const PROBE = self.__careerOpsProbePure;
+if (!PROBE) throw new Error("[bg] probe-pure.js 未加载:扩展文件不完整");
+
+const PRIMARY_PORT = PROBE.PRIMARY_PORT;
 // 报告正文比版本探活大得多，也要等 Next 真的读完盘、渲染完响应，给 10s：超了就是
 // 服务挂了 / 盘在另一台机器上转不动，报错比让用户盯着一个空弹窗强。
 const FETCH_CONTENT_TIMEOUT_MS = 10000;
@@ -35,56 +39,93 @@ let probing = null;
 // debug box, since BOSS blocks DevTools by resizing/kicking the page).
 let lastContentDiag = null;
 
-// 最近一次版本探测失败的根因：http 状态下标为 `http:{status}`，网络/CORS 错误标记为 `net:{msg}`，CORS 拦截常表现为 TypeError。
-let lastProbeErr = null;
+// 最近一轮探测的逐端口结果（probe-pure.diagOf）：popup 诊断框据此分清「3000 超时 =
+// 服务忙」与「3000 拒连 = 没起服务」。以前的单值 lastProbeErr 会被最后 settle 的那个
+// 端口覆盖，区间扫描下永远是最慢的那个赢，看不出真因。
+let lastProbe = { at: 0, port: null, reason: null, table: {} };
 
-async function versionOk(base) {
+/**
+ * 一次 /api/version 探测 → probe-pure 的归一形状（附 port）。
+ * 这里只负责把「超时 / 异常 / 状态码 / 正文」摊平成 classifyProbe 的入参。
+ */
+async function probeVersion(port, timeoutMs) {
+  const started = Date.now();
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), PROBE_TIMEOUT_MS);
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    const res = await fetch(`${base}/api/version`, { signal: ctrl.signal });
-    if (!res.ok) {
-      lastProbeErr = `http:${res.status}`;
-      return false;
+    const res = await fetch(`http://127.0.0.1:${port}/api/version`, { signal: ctrl.signal });
+    let body = null;
+    try {
+      body = await res.json();
+    } catch (e) {
+      // 正文被截断 / 不是 JSON：abort 造成的不算「无效服务」，交给外层按超时判。
+      if (ctrl.signal.aborted) throw e;
+      body = null;
     }
-    const j = await res.json();
-    lastProbeErr = null;
-    return !!(j && j.version);
+    return { port, ...PROBE.classifyProbe({ ms: Date.now() - started, status: res.status, body }) };
   } catch (e) {
-    // CORS 拦截、host_permissions 缺失、拒绝连接等都会走到这里
-    lastProbeErr = `net:${(e && e.message) || e}`;
-    return false;
+    const timedOut = ctrl.signal.aborted || (e && e.name === "AbortError");
+    return {
+      port,
+      ...PROBE.classifyProbe({
+        ms: Date.now() - started,
+        timedOut,
+        // 剩下的都是拒连 / CORS / host_permissions 缺失这类立刻失败的错
+        error: timedOut ? null : (e && e.message) || String(e),
+      }),
+    };
   } finally {
     clearTimeout(timer);
   }
 }
 
-/** Sweep 3000-3040 once, return first live port (or null). */
-function sweepPorts() {
-  const attempts = [];
-  for (let port = PORT_MIN; port <= PORT_MAX; port++) {
-    attempts.push(versionOk(`http://127.0.0.1:${port}`).then((ok) => (ok ? port : null)));
-  }
-  return Promise.all(attempts).then((found) => found.find((p) => p != null) ?? null);
+/** 已缓存端口的复核（返回布尔：这次是否仍然通）。 */
+async function versionOk(port) {
+  const r = await probeVersion(port, PROBE.PROBE_TIMEOUT_MS);
+  return r.ok;
+}
+
+/** 备选区间 3001-3040 并发短扫（只为 dev 实例）。 */
+function sweepAltPorts() {
+  return Promise.all(PROBE.altPorts().map((port) => probeVersion(port, PROBE.ALT_PROBE_TIMEOUT_MS)));
 }
 
 /**
- * First live port in 3000-3040 (all probed concurrently, first ok wins).
- * 冷启动时 Chromium 对私有地址首次连接有预热延迟，第一轮可能整体超时；
- * 等预热完成再重扫一轮，避免把"刚启动的 web 服务"误判为未运行。
+ * 采集一次：3000 主探 → 备选区间短扫 → 3000 二次复探（兜住冷启动的预热延迟）。
+ * 三段结果一起交给 decideProbe 定端口，并留在 lastProbe 里供诊断。
  */
+async function discoverPort() {
+  const primary = await probeVersion(PRIMARY_PORT, PROBE.PROBE_TIMEOUT_MS);
+  const alt = primary.ok ? [] : await sweepAltPorts();
+  let retry = null;
+  if (!primary.ok && !alt.some((o) => o.ok)) {
+    retry = await probeVersion(PRIMARY_PORT, PROBE.RETRY_TIMEOUT_MS);
+  }
+  const d = PROBE.decideProbe({ primary, alt, retry });
+  lastProbe = {
+    at: Date.now(),
+    port: d.port,
+    reason: d.reason,
+    table: PROBE.diagOf({ primary, alt, retry }),
+  };
+  return d.port;
+}
+
 function probePort() {
   if (cachedPort) return Promise.resolve(cachedPort);
   if (probing) return probing;
-  probing = sweepPorts().then(async (port) => {
-    if (port == null) {
-      await new Promise((r) => setTimeout(r, 250));
-      port = await sweepPorts();
-    }
-    probing = null;
-    cachedPort = port;
-    return cachedPort;
-  });
+  probing = discoverPort().then(
+    (port) => {
+      probing = null;
+      cachedPort = port;
+      return cachedPort;
+    },
+    (err) => {
+      // discoverPort 内部已吞掉所有网络错，这里只是不让 probing 卡在非 null 上。
+      probing = null;
+      throw err;
+    },
+  );
   return probing;
 }
 
@@ -95,7 +136,9 @@ function invalidatePort() {
 
 async function needPort() {
   const port = await probePort();
-  if (port == null) throw new Error("本地 web 服务未运行（扫描 127.0.0.1:3000-3040 未命中）");
+  if (port == null) {
+    throw new Error(`本地 web 服务未运行（${PRIMARY_PORT} 未应答，已放宽扫过 3001-3040）`);
+  }
   return port;
 }
 
@@ -106,7 +149,7 @@ async function needPort() {
  */
 async function ensureLivePort() {
   console.log("[bg] ensureLivePort cachedPort=", cachedPort);
-  if (cachedPort && (await versionOk(`http://127.0.0.1:${cachedPort}`))) {
+  if (cachedPort && (await versionOk(cachedPort))) {
     console.log("[bg] cached port live:", cachedPort);
     return cachedPort;
   }
@@ -791,7 +834,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       case "get-state": {
         if (msg && msg.force) invalidatePort();
         const port = await ensureLivePort().catch(() => null);
-        sendResponse({ ok: true, connected: port != null, port });
+        // reason 只在未连通时有意义：timeout=服务在忙 / refused=没起服务 / http|invalid=端口上是别的服务。
+        // popup 靠它把「未检测到本地 web 服务」拆成两句话（否则用户会去重启一个根本没停的服务）。
+        sendResponse({
+          ok: true,
+          connected: port != null,
+          port,
+          reason: port == null ? lastProbe.reason : null,
+          timeoutMs: PROBE.PROBE_TIMEOUT_MS,
+        });
         // 徽章与 popup 读同一状态：复用刚探到的 port 立即重绘（不重复扫描），
         // 并同步节流缓存。force（手动 reprobe）因上方已 invalidatePort 会重扫真值。
         lastBadgeAt = Date.now();
@@ -821,7 +872,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           port,
           cachedPort,
           extensionId: (chrome.runtime && chrome.runtime.id) || null,
-          versionErr: lastProbeErr,
+          // 单值版本错误已退役：它会被最后 settle 的端口覆盖。改成「3000 一句结论
+          // + 逐端口明细表」，下次一眼看出是超时、拒连还是端口上坐着别的服务。
+          versionErr: lastProbe.reason ? `${PRIMARY_PORT}:${lastProbe.reason}` : null,
+          probeDiag: lastProbe.table,
+          probeAt: lastProbe.at || null,
+          probeTimeoutMs: PROBE.PROBE_TIMEOUT_MS,
           evalKeys: Object.keys(evaluated).length,
           contentDiag: lastContentDiag,
         });

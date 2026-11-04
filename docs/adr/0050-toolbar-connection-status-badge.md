@@ -48,3 +48,9 @@ Accepted (2026-09-22)
 - ADR-0002（BOSS 就地评估——`background.js` 端口探测与消息中枢的由来）、ADR-0005/0006/0007（猎聘/智联/探索扫描对同一 background 的续建）。
 - `extension/background.js`（`probePort`/`ensureLivePort`/`cachedPort` 所在，新增 `updateBadge()` 挂载点）、`extension/popup.js`（`get-state` 连接状态渲染，36–50 行，本 ADR 不改动其逻辑）。
 - 术语表：`docs/glossary-browser-extension.md`（「web 端口探测」「background service worker」「popup」词条，本次新增「工具栏连接状态徽章」）。
+
+## 修订（2026-11-04）：徽章仍二值，popup 文案改三态
+
+- 探测口从「区间里谁的 200 先回来」改为「**3000 优先，不通再放宽**」，且主探窗口 3s → 6s；探测归形新增 `timeout`（服务进程在、事件循环被占用）与 `refused`（没起服务）之分。
+- 因此 **popup 文案由二态变三态**：已连接 / **本地服务在忙（探测超时）** / 未检测到本地 web 服务。决策 2「严格版本校验」不变，**工具栏徽章仍二值**（版本校验失败一律按未连处理）——本 ADR 的决策全部不变，只是文案多了一级。详见 ADR-0063 修订三（2026-11-04）。
+- `updateBadge()` 的内部探测从 `ensureLivePort()` 的名字到语义都没变，只是 `ensureLivePort()` 内部的采集顺序换了（见 `extension/probe-pure.js`）。

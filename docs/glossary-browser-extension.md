@@ -33,7 +33,9 @@
 
 ## 本地服务与安全
 
-- **web 端口探测**：background 对 `localhost:3000-3040` 逐个 `GET /api/version` 找本地 web 服务端口（与 launcher `pickFreePort` 区间一致），命中缓存、失活重探。
+- **web 端口探测**：端口自 ADR-0063 起固定为 3000，探测口径随之改为「3000 优先，不通再放宽」——先探 `3000`（6s 窗口），不通再并发短扫 `3001-3040`（1.5s，只为 dev 入口 `node local/dev-web.mjs -p 3101` 留着），最后复探一次 `3000` 兜冷启动预热；常规路径只发 1 个请求。命中缓存、失活重探。判定纯函数在 `extension/probe-pure.js`。决策见 ADR-0063 修订三（2026-11-04）。
+- **探测三态（probe states）**：一次探测的归形是闭集 `ok` / `timeout` / `refused` / `http` / `invalid`。Popup 只呈现三态：**已连接**、**本地服务在忙（探测超时）**、**未检测到本地 web 服务**。`timeout` 与 `refused` 必须分开：前者是服务进程在、事件循环被重路由占住（托盘要连续 30s 答不上才报掉线，所以在 3–25s 这段窗口里托盘绿而扩展红）；后者才是真没起服务。工具栏徽章仍是二值（ADR-0050「版本校验失败按未连处理」）不变。
+- **探测诊断（probe diag）**：`get-diagnostics` 的 `probeDiag` 是逐端口明细表（`{"3000":"timeout 6001ms","3000@retry":"refused 2ms","3101":"ok 8ms","altRefused":40}`）。它取代了原来那个单值 `versionErr`——那玩意儿会被区间扫描里最后 settle 的端口覆盖，永远只剩最慢那个的信息。
 - **工具栏连接状态徽章（connection-status badge）**：`background.js` 用 `chrome.action.setBadgeText`/`setBadgeBackgroundColor` 在插件图标上外显本地 web 服务在线状态——绿底 `✓`=已连接、红底 `!`=未连接，全局常显（不带 `tabId`），事件驱动 + 5s 短缓存刷新。决策见 `docs/adr/0050-toolbar-connection-status-badge.md`。
 - **origin-guard 放行口**：对 loopback + 固定扩展 ID 的 `chrome-extension://{id}` Origin 放行并回 CORS 头；其余跨站请求仍 403。扩展 ID 由 `manifest.json` 的 `key` 固定。
 - **扩展 ID（extension id）**：MV3 由扩展 `key` 派生的稳定标识，后端据此识别可信来源。

@@ -27,6 +27,8 @@ h1 { font-size: 14px; font-weight: 700; margin-right: auto; }
 .state { font-size: 12px; font-weight: 600; padding: 3px 8px; border-radius: 999px; }
 .state.connected { background: #e6f9f1; color: var(--brand-strong); }
 .state.disconnected { background: #fdecea; color: var(--danger); }
+/* 服务进程在、但没在探测窗口内答复（事件循环被重路由占住）：介于绿与红之间。 */
+.state.busy { background: #fff6e5; color: #a96500; }
 .state.probing { background: #f3f4f6; color: var(--muted); }
 button.link { background: none; border: none; color: var(--brand-strong); cursor: pointer; font-size: 12px; text-decoration: underline; }
 
