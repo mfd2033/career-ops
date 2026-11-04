@@ -343,6 +343,11 @@ async function runPipeline({
     kind === "evaluate"
       ? readInbox().find((j) => j.url === input)?.postedAt ?? readScanDates().get(input)
       : undefined;
+  // 采集卡片薪资（2026-11-04 #1217）：与 postedAt 同源（pipeline.md note 尾段，ADR-0023），
+  // 但以前只传了日期。两个提取链路都不保证能拿到本岗薪资（猎聘把标题+薪资区块放在
+  // <main> 之外，实证 #1217 被写成了「未披露」），卡片原文是第三个、早已落盘的事实源。
+  const cardSalary =
+    kind === "evaluate" ? readInbox().find((j) => j.url === input)?.salaryText : undefined;
   // ADR-0056 决议 5：体检 prompt 的技能指针——与 /api/skills 同一个 skill-registry
   // 解析 offer体检 的最高版本副本（绝对路径 + 版本）；找不到 → undefined，prompt 与
   // 旧版逐字节一致（workflow 第 8 条：技能缺失不硬失败）。决议 8：每派发实时扫。
@@ -352,7 +357,7 @@ async function runPipeline({
       ? (resolveSkillCopy(scanSkillRegistry({ extraDirs: readAppConfig().skillDirs ?? [] }), OFFER_CHECKUP_SKILL_NAME) ??
         undefined)
       : undefined;
-  const prompt = buildPrompt({ kind, input, memory: readMemory(), today, postedAt, unknownEmployer: readAppConfig().unknownEmployer, checkupCompany, checkupSkill, jdText, company: employer, reportNum: pdfPaths?.reportNum, reportFile: pdfPaths?.reportFile, marketMode: resolveMarketMode({ raw: readMarketModesDir(), available: listMarketModes() }) });
+  const prompt = buildPrompt({ kind, input, memory: readMemory(), today, postedAt, unknownEmployer: readAppConfig().unknownEmployer, checkupCompany, checkupSkill, jdText, company: employer, cardSalary, reportNum: pdfPaths?.reportNum, reportFile: pdfPaths?.reportFile, marketMode: resolveMarketMode({ raw: readMarketModesDir(), available: listMarketModes() }) });
 
   // Which tools each kind gets, and the whole argv for every runtime that HAS an
   // audited scope, live with those runtimes: claude-invocation.mjs (declared on

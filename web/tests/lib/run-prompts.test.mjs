@@ -9,7 +9,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildPrompt, buildBatchPrompt, isShellSafeCompanyName, clampInlineJd, INLINE_JD_MAX } from "../../src/lib/run-prompts.mjs";
+import { buildPrompt, buildBatchPrompt, isShellSafeCompanyName, clampInlineJd, clampCardSalary, INLINE_JD_MAX } from "../../src/lib/run-prompts.mjs";
 import { OPEN_MARK, CLOSE_MARK } from "../../src/lib/cv-envelope.mjs";
 import { grantsWriteCapability, toolScopeFor } from "../../src/lib/claude-invocation.mjs";
 
@@ -476,6 +476,35 @@ test("buildBatchPrompt: a literal {num} inside the inline JD survives number pin
   assert.ok(p.includes(jd), "inline JD body must reach the prompt verbatim");
   // 而模板自己的 {num} 仍然被钉住
   assert.match(p, /reports\/042-\{company-slug\}-2026-08-14\.md/);
+});
+
+test("buildPrompt: the collected card salary is handed over as a third, subordinate source", () => {
+  // 2026-11-04 #1217 的回归锁：两个提取链路都可能拿不到本岗薪资（猎聘把标题+薪资
+  // 区块放在 <main> 之外），而扫码阶段早就把卡片原文写进了 pipeline.md。卡片必须
+  // 进 prompt，且口径写得清楚：正文优先、绝不当作检索估值。
+  const p = buildPrompt({ kind: "evaluate", input: "https://acme.com/jobs/7", memory: "", today: "2026-08-14", cardSalary: "20-30k" });
+  assert.match(p, /COLLECTED CARD SALARY/);
+  assert.match(p, /「20-30k」/);
+  assert.match(p, /use THIS figure verbatim as `advertised_comp`/);
+  assert.match(p, /posting itself wins/i);
+  // 无卡片 → 不多出一个空段标题
+  const plain = buildPrompt({ kind: "evaluate", input: "https://acme.com/jobs/7", memory: "", today: "2026-08-14" });
+  assert.ok(!plain.includes("COLLECTED CARD SALARY"));
+});
+
+test("buildBatchPrompt: the collected card salary survives number pinning", () => {
+  const p = buildBatchPrompt("042", { input: "https://acme.com/jobs/7", memory: "", today: "2026-08-14", cardSalary: "20-30k·13薪" });
+  assert.match(p, /COLLECTED CARD SALARY/);
+  assert.match(p, /「20-30k·13薪」/);
+  assert.match(p, /reports\/042-\{company-slug\}-2026-08-14\.md/);
+});
+
+test("clampCardSalary: collapses to one line, caps the length, tolerates junk", () => {
+  assert.equal(clampCardSalary("  20-30k\n·13薪 "), "20-30k ·13薪");
+  assert.equal(clampCardSalary("x".repeat(500)).length, 120);
+  for (const junk of [undefined, null, 42, {}, []]) {
+    assert.equal(clampCardSalary(junk), "", `junk input ${JSON.stringify(junk)} must yield ""`);
+  }
 });
 
 test("clampInlineJd: clamps to the extension's own budget and tolerates junk", () => {

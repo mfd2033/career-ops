@@ -121,6 +121,14 @@ export async function POST(req: Request) {
   const inbox = readInbox();
   const inboxLabels = pipelineUrlLabels(inbox);
   const inboxPostedAt = new Map(inbox.filter((j) => j.url).map((j) => [j.url as string, j.postedAt]));
+  // 采集卡片薪资（2026-11-04 #1217）：scan 阶段早把卡片原文写进了 pipeline.md 的 note
+  // 尾段（ADR-0023），但评估 prompt 从来没传过它 —— 而两个提取链路都不保证能拿到本岗
+  // 薪资（猎聘把标题+薪资区块放在 <main> 之外）。这里作为第三事实源交给 worker。
+  const inboxSalary = new Map(
+    inbox
+      .filter((j) => j.url && j.salaryText)
+      .map((j) => [j.url as string, j.salaryText as string]),
+  );
   const scanDates = readScanDates();
   const reportsDir = path.join(root, "reports");
   const reportEntries = () => {
@@ -308,6 +316,9 @@ export async function POST(req: Request) {
               unknownEmployer: readAppConfig().unknownEmployer,
               jdText: jdText.trim() || undefined,
               company: company.trim() || undefined,
+              // 卡片薪资按 URL 取（每个 worker 拿自己那一条），与 jdText/company
+              // 不同 —— 后者只对唯一 URL 有意义，卡片是 URL-keyed 的。
+              cardSalary: inboxSalary.get(url),
               // 评估模式（CO-65）：同一份解析逻辑，批量与单条不能给出不同口径。
               marketMode: resolveMarketMode({ raw: readMarketModesDir(), available: listMarketModes() }),
             });

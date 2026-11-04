@@ -88,6 +88,42 @@ try {
     fail(`normalizeJd textCap => raised=${raised.text.length} default=${defaulted.text.length}`);
   }
 
+  // normalizeJd — 本岗标题/薪资置顶（2026-11-04 #1217）：中文招聘站的标题+薪资标签
+  // 常在正文容器之外，提取端定点拿到 heading/salary 后必须排在正文前，否则评估员
+  // 会写「薪资未披露」，或者更糟——把推荐位里别的岗位的薪资当成这一条。
+  const withPosting = normalizeJd(
+    { title: '【郑州 数字化项目经理招聘】-猎聘', heading: '数字化项目经理', salary: '20-30k', text: '黄先生 猎头顾问… 职位介绍 …' },
+    'https://x/1',
+  );
+  if (
+    withPosting.text === 'Title: 数字化项目经理\nAdvertised salary: 20-30k\n\n黄先生 猎头顾问… 职位介绍 …' &&
+    withPosting.title === '【郑州 数字化项目经理招聘】-猎聘'
+  ) {
+    pass('normalizeJd puts the posting heading + salary above the body');
+  } else {
+    fail(`normalizeJd posting banner => ${JSON.stringify(withPosting)}`);
+  }
+
+  // 去重只看正文是否**以它开头**：推荐位里另一个岗位也叫“数字化项目经理/20-30k”时，
+  // 拿正文 includes 去重会把本岗事实又吞掉一次（#1217 的正文后段就是这样）。
+  const withRail = normalizeJd(
+    { heading: '数字化项目经理', salary: '20-30k', text: '黄先生 职位介绍 … 猜你喜欢 数字化项目经理 20-30k' },
+    'https://x/1',
+  );
+  if (withRail.text.startsWith('Title: 数字化项目经理\nAdvertised salary: 20-30k')) {
+    pass('normalizeJd keeps the banner even when the same strings appear later (recommendation rail)');
+  } else {
+    fail(`normalizeJd rail dedupe => ${JSON.stringify(withRail.text.slice(0, 80))}`);
+  }
+
+  // 正文本身就开头就有 → 不重复拼一遍（Playwright 链路可能本来就在）
+  const alreadyThere = normalizeJd({ heading: 'Role', text: 'Role\nAdvertised salary: 20-30k\nbody' }, 'https://x/1');
+  if (!alreadyThere.text.includes('Title: Role')) {
+    pass('normalizeJd does not re-prepend a heading the body already opens with');
+  } else {
+    fail(`normalizeJd duplicate banner => ${JSON.stringify(alreadyThere.text)}`);
+  }
+
   // normalizeListing — resolve relatives, drop nav/short labels, dedup, cap
   const anchors = [
     { href: '/jobs/1', label: 'Staff Engineer' },

@@ -208,10 +208,12 @@
 表格的**第一行永远是 JD 自己的数字，逐字**，排在所有检索数据之前：
 
 ```markdown
-| Advertised (JD) | {verbatim figure or "not stated"} | JD |
+| Advertised (posting) | {verbatim figure or "not stated"} | posting page |
 ```
 
 绝不把 JD 数字与研究估值混在一起，也不要用研究值替换它 —— 市场数据行一律排在它下面。同一个逐字数字要写进 Machine Summary 的 `advertised_comp` 字段（见报告格式）。
+
+**这个数字可以从哪来（命中即止）。**（1）**岗位页面自身的标题/头部薪资标签** —— 猎聘标题下的 `20-30k·13薪`、BOSS/智联岗位名旁的 `10-20K`。**它就是本岗位自己的数字**，哪怕它通常不在职位描述正文里；在这几个平台上它恰恰是最可靠的一处，正文不复述薪资**不构成「岗位没写薪资」的证据**（实证 2026-11-04 #1217：截图里明明是 `20-30k`，报告却写了「未披露」）。（2）prompt 里带了 `COLLECTED CARD SALARY` 段时，采集卡片的原文（扫码阶段就存进 `pipeline.md` 的卡片）—— 仅当（1）与正文都没有时才用它。（3）职位描述正文。三处都沉默时才写 `null`；而 `null` 只支持「需核实」，**绝不**同时写 `salary_too_low` 这种对数字的结论。**绝不**从「推荐位 / 相似岗位 / 猜你喜欢」里取数字：那是**别的岗位**，引用它是这个字段唯一会从「空」变成「错」的方式。数字取自（1）而正文与之矛盾、或取自（2）时，在本节用一行说明来源。
 
 ## 维度 E — 针对性定制方案 (Customization Plan)
 
@@ -656,7 +658,7 @@
 （JD 中 15-20 个关键词，供 ATS 优化）
 ```
 
-**Machine Summary（必填）：** 每份报告都在头部之后携带一个 `## Machine Summary` YAML fence —— 与 `batch/batch-prompt.md` 的 "Machine Summary" 块同一 schema、同样的字段名与规则（不要把 schema 抄一份到这里；那个文件是事实源）。其中包含 `advertised_comp`：JD 自己的薪资金额**逐字**（如 `"20-30K CNY/月"`），JD 没写时为 `null` —— 绝不估算、绝不用检索到的市场数据替换。该键给 `node salary-gap.mjs` 提供广告薪资观察。另含 `risk_summary`：Risk Summary 块的映射形式（schema 与枚举值见 `batch/batch-prompt.md`）。
+**Machine Summary（必填）：** 每份报告都在头部之后携带一个 `## Machine Summary` YAML fence —— 与 `batch/batch-prompt.md` 的 "Machine Summary" 块 同一 schema、同样的字段名与规则（不要把 schema 抄一份到这里；那个文件是事实源） 。其中包含 `advertised_comp`：**本岗位自己显示的**薪资**逐字**（如 `"20-30K CNY/月"`）—— 标题/头部薪资标签、采集卡片、正文三处按此优先级取第一处；三处都没有时才 `null` —— 绝不估算、绝不用检索到的市场数据替换、绝不取推荐位的数字。该键给 `node salary-gap.mjs` 提供广告薪资观察。另含 `risk_summary`：Risk Summary 块的映射形式（schema 与枚举值见 `batch/batch-prompt.md`）。
 
 ### 2. 登记到 Tracker
 

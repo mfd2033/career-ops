@@ -82,14 +82,30 @@ export function compactText(s, cap = JD_TEXT_CAP) {
 
 /**
  * Shape a JD-mode result from the raw DOM read. Pure — exported for tests.
- * @param {{ title?: string, text?: string }} raw
+ *
+ * 本岗事实置顶（ADR 级修正，实证 2026-11-04 猎聘 #1217）：中文招聘站把岗位标题 +
+ * 薪资标签放在 <main> 之外的独立区块（猎聘 `.job-apply-container .name-box`），
+ * 正文提取命中 main 时这块不在 text 里——而右侧「推荐位」其他岗位的薪资反而在。
+ * 不置顶的话，评估员要么写「薪资未披露」（#1217），要么把别人的数字当本岗的。
+ * 只有提取端确实拿到 heading/salary（raw 为 bsk 链路）时前缀才出现。去重只看正文
+ * **是否以它开头**：任何「正文里出现过」式的 contains 都会被右侧推荐位里「别的
+ * 岗位」撞掉——#1217 的正文后段就有推荐位别的职位的 20-30k/25-40k，拿它去重会让
+ * 本岗事实又被吞掉一次。
+ * @param {{ title?: string, heading?: string, salary?: string, text?: string }} raw
  * @param {string} finalUrl
  */
 export function normalizeJd(raw, finalUrl, textCap = JD_TEXT_CAP) {
+  const heading = compactText(raw?.heading || '', 300);
+  const salary = compactText(raw?.salary || '', 120);
+  const body = compactText(raw?.text || '', textCap);
+  const banner = [];
+  if (heading && !body.startsWith(heading)) banner.push(`Title: ${heading}`);
+  if (salary && !body.startsWith(salary)) banner.push(`Advertised salary: ${salary}`);
+  const text = banner.length ? compactText(`${banner.join('\n')}\n\n${body}`, textCap) : body;
   return {
     url: finalUrl,
-    title: compactText(raw?.title || '', 300),
-    text: compactText(raw?.text || '', textCap),
+    title: compactText(raw?.title || heading || '', 300),
+    text,
   };
 }
 
@@ -227,6 +243,18 @@ export function pickExtractor(extractor, url) {
 async function readDom(page) {
   return page.evaluate(() => {
     const title = (document.querySelector('h1')?.innerText || document.title || '').trim();
+    // 本岗标题/薪资定点提取：中文招聘站把标题区放在 <main> 之外，正文里往往没有
+    // 薪资标签（与 bsk READ_DOM_JS 同口径，两处同改）。
+    const pickText = (sels) => {
+      for (const s of sels) {
+        const el = document.querySelector(s);
+        const v = el ? (el.innerText || '').trim() : '';
+        if (v) return v;
+      }
+      return '';
+    };
+    const heading = pickText(['h1', '.name-box span.name', '[class*="name-box"] [class*="name"]']);
+    const salary = pickText(['span.salary', '.name-box [class*="salary"]', '[class*="job-salary"]', '[class*="job-price"]']);
 
     // Main text: prefer <main>/[role=main]/<article>, else body; strip nav chrome.
     const root =
@@ -247,7 +275,7 @@ async function readDom(page) {
       })
       .map((el) => ({ href: el.getAttribute('href') || '', label: (el.innerText || '').trim() }));
 
-    return { title, text, anchors };
+    return { title: title || heading, heading, salary, text, anchors };
   });
 }
 

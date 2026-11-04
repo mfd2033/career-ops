@@ -108,6 +108,26 @@ const READ_DOM_JS = `(() => {
   ${extractCityFromText.toString()}
   ${extractSalaryFromText.toString()}
   const title = (document.querySelector('h1')?.innerText || document.title || '').trim();
+  // 本岗标题 / 薪资**定点**提取（实证 2026-11-04 猎聘 #1217）：猎聘把标题区块
+  // .job-apply-container（含 .name-box 与 span.salary）放在 <main> 之外，root 命中
+  // main 时 text 里只剩招聘者卡 + 职位介绍 + 右侧推荐位——本岗的「20-30k」整块缺失，
+  // 而**推荐位里其他岗位**的 20-30k / 25-40k 反而进了 text，worker 极易张冠李戴。
+  // 这里不赌容器，定点取一次，交由 normalizeJd 置顶成「本岗事实」前缀。
+  // 注：本文件是模板字符串，注释里不能出现反引号或美元大括号。
+  const pickText = (sels) => {
+    for (const s of sels) {
+      const el = document.querySelector(s);
+      const v = el ? (el.innerText || '').trim() : '';
+      if (v) return v;
+    }
+    return '';
+  };
+  const heading = pickText(['h1', '.name-box span.name', '[class*="name-box"] [class*="name"]']);
+  let salary = pickText(['span.salary', '.name-box [class*="salary"]', '[class*="job-salary"]', '[class*="job-price"]']);
+  if (!salary) {
+    const nb = document.querySelector('.name-box');
+    if (nb) salary = extractSalaryFromText(nb.innerText || '');
+  }
   // Prefer a semantic container, then a Chinese board's job-body class, then body.
   const root =
     document.querySelector('main, [role="main"], article, [class*="job-detail"], [class*="jobDetail"], [class*="job-intro"], [class*="job-intro-container"]') ||
@@ -180,7 +200,7 @@ const READ_DOM_JS = `(() => {
         .filter((a) => a.label && a.href);
     }
   } catch (e) { /* a state read must never sink the DOM read */ }
-  return JSON.stringify({ title, text, anchors: anchors.concat(synth), url: location.href });
+  return JSON.stringify({ title: title || heading, heading, salary, text, anchors: anchors.concat(synth), url: location.href });
 })()`;
 
 // ── bsk plumbing ─────────────────────────────────────────────────────────

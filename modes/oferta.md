@@ -196,10 +196,12 @@ When a salary figure exists, include a table with data and cited sources. If the
 The table's **first row is always the JD's own advertised figure, verbatim** — before any researched market data:
 
 ```markdown
-| Advertised (JD) | {verbatim figure or "not stated"} | JD |
+| Advertised (posting) | {verbatim figure or "not stated"} | posting page |
 ```
 
 Never blend the advertised figure with researched estimates or replace it with them — market research rows follow below it. This same verbatim figure goes into the Machine Summary `advertised_comp` key (see the report format).
+
+**Where that figure may come from (first hit wins).** (1) The posting page's own title/header salary badge — 猎聘 `20-30k·13薪` under the job title, BOSS/智联 `10-20K` next to it. That IS the posting's figure even though it usually sits outside the description body, and on those boards it is the most reliable one there is; a description that never repeats it is not evidence of a silent posting. (2) A COLLECTED CARD SALARY section, when the prompt carries one (the scanner captured the card when the row was collected) — use it only when (1) and the body state nothing. (3) The description body. Only when all three are silent is the figure `null`, and a `null` figure supports "needs confirming", never a `salary_too_low` verdict. **Never** read a figure out of a recommendation rail / "similar jobs" / 猜你喜欢 strip: those are other postings, and citing one is the only way this field can end up actively wrong rather than merely empty. When the figure came from (1) but the body disagrees, or from (2) at all, name the source in one line here.
 
 ## Block E — Customization Plan
 

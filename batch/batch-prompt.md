@@ -322,7 +322,7 @@ discard_reasons:
   - "{predicted reason if final_decision is Skip/Consider, e.g. salary_too_low, hybrid_required, tech_stack_mismatch, seniority_mismatch, geo_restriction, size_mismatch, company_culture, or other specific reason}"
 via: {agency/recruiter firm as a quoted string, or null for direct applications}
 company_confidential: {true when the end employer is unknown (company is "?"), else false}
-advertised_comp: {verbatim JD salary/range as a quoted string (e.g. "80-90k EUR"), or null when the JD states nothing}
+advertised_comp: {verbatim salary this posting itself shows — title/header badge, collected card, or body — as a quoted string (e.g. "80-90k EUR", "20-30k·13薪"), or null when none of them states one}
 reports_to: {the JD's stated reporting line as a quoted string (e.g. "VP of Marketing"), or null when the JD names none}
 risk_summary:
   legitimacy: "{high_confidence | proceed_with_caution | suspicious}"
@@ -337,7 +337,9 @@ Rules:
 - Use `[]` for `hard_stops`, `soft_gaps`, `top_strengths`, or `discard_reasons` when empty.
 - `score` is numeric only, without `/5`.
 - `final_decision` must reflect the full evaluation, not only the CV match.
-- `advertised_comp` is the JD's **own** figure, verbatim; `null` when the JD states nothing — never estimate it and never substitute researched market data (Block D research stays in Block D). Batch workers never write `data/salary-observations.tsv` — the report itself is the advertised observation (`salary-gap.mjs` reads it).
+- `advertised_comp` is this posting's **own** figure, verbatim; `null` only when the posting states nothing **anywhere** — never estimate it and never substitute researched market data (Block D research stays in Block D). Batch workers never write `data/salary-observations.tsv` — the report itself is the advertised observation (`salary-gap.mjs` reads it).
+- **Where the posting's figure may come from (in priority order, first hit wins):** (1) the posting page's own title/header salary badge (e.g. 猎聘 `20-30k·13薪` under the title, BOSS/智联 `10-20K` next to the job name) — this is the posting's figure even though it sits outside the description body; (2) the COLLECTED CARD SALARY section, if the prompt carries one (the scanner captured it when the row was collected); (3) the description body text. Only if all three are silent is it `null`. **Never** take a figure from a recommendation rail / "similar jobs" / "猜你喜欢" strip — those are OTHER postings, and quoting them is the one way this field can become actively wrong. Never emit `null` while simultaneously listing `salary_too_low` in `discard_reasons`: a missing figure supports "needs confirming", not a verdict about the number.
+- When the figure's source is not the posting itself in the narrow sense — a header badge that disagrees with the body, or the collected card when the page no longer states one — say which source you used, in one line of Block D (Compensation). The Machine Summary keeps the figure; the report records where it came from.
 - `reports_to` is the reporting line the JD itself states, in the JD's own wording; `null` when the JD names none — never infer it from the title, the team size, or company research. It records the seat's altitude, which the title alone does not: an IC seat reporting to a Head of Marketing and one reporting to the CEO are different roles.
 - Do not invent missing data. If confidence is limited, set `confidence: "Low"` and explain the limitation in the human-readable sections.
 - `work_auth` reflects the Block A work-authorization tier: `no_sponsorship` only when the JD **explicitly** refuses sponsorship for a role outside the candidate's `authorized_in`; `unstated` when the JD is silent (neutral, not a blocker); `not_needed` when the role is within `authorized_in` or sponsorship isn't required; `sponsors` when the JD explicitly offers it.
@@ -393,7 +395,7 @@ discard_reasons:
   - "{predicted reason if final_decision is Skip/Consider, e.g. salary_too_low, hybrid_required, tech_stack_mismatch, seniority_mismatch, geo_restriction, size_mismatch, company_culture, or other specific reason}"
 via: {agency/recruiter firm as a quoted string, or null for direct applications}
 company_confidential: {true when the end employer is unknown (company is "?"), else false}
-advertised_comp: {verbatim JD salary/range as a quoted string (e.g. "80-90k EUR"), or null when the JD states nothing}
+advertised_comp: {verbatim salary this posting itself shows — title/header badge, collected card, or body — as a quoted string (e.g. "80-90k EUR", "20-30k·13薪"), or null when none of them states one}
 reports_to: {the JD's stated reporting line as a quoted string (e.g. "VP of Marketing"), or null when the JD names none}
 risk_summary:
   legitimacy: "{high_confidence | proceed_with_caution | suspicious}"
