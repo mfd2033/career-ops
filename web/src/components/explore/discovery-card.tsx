@@ -6,6 +6,8 @@ import { cn } from "@/lib/cn";
 import { instrumentSerif } from "@/lib/fonts";
 import { ATS_LABEL, isSalaryUnknown, type AtsSource, type DiscoveredOffer } from "@/lib/explore";
 import { isDragGesture, isExemptClickTarget, isTextSelectionActive } from "@/lib/row-click.mjs";
+import { resolveJobReportNum } from "@/lib/report-num.mjs";
+import { useReportIndex } from "@/lib/eval-duration-client";
 import { useJobs } from "@/components/jobs/job-store";
 import { useExplore } from "./explore-provider";
 import { useI18n } from "@/lib/i18n/context";
@@ -61,6 +63,15 @@ function useOfferActions(offer: DiscoveredOffer, inPipeline: boolean) {
   const doneEval = job?.status === "done" && job.kind === "evaluate";
   const statusLabel = WORKER_LABEL[job?.kind ?? ""] ?? t("explore.card.working");
 
+  // 「已评估 · 查看报告」的落点（ADR-0018 同一口径）：报告页 /report/{n}，绝不
+  // 落回工作器任务页 /jobs/{id}。evaluatedN 来自页面加载时的追踪表快照，本次
+  // 会话刚评估完的行不在里面（appsSnapshot 不随 co-job-done 刷新）——此时按
+  // ADR-0018 用任务记录 + /api/report-status 索引凭职位 URL 解析报告号（评估
+  // 落定即失效重拉，缓存纪律见 eval-duration-client）。两处都解析不出 →
+  // 退 /pipeline 列表。
+  const reports = useReportIndex();
+  const doneReportN = resolveJobReportNum(job, reports);
+
   const isAdded = added.has(offer.url) || inPipeline || working || doneEval;
   const isAdding = adding.has(offer.url);
   // 薪资未知（工单 03）：浏览器采集的行没带薪资文本、或文本解析不出月薪时打标。
@@ -76,7 +87,7 @@ function useOfferActions(offer: DiscoveredOffer, inPipeline: boolean) {
     startJob({ title: `${t("explore.card.evaluatePrefix")} ${offer.company}`, subtitle: offer.title, kind: "evaluate", input: offer.url, page: "/explore" });
   };
 
-  return { job, isAdded, isAdding, working, doneEval, statusLabel, salaryUnknown, evaluate, addOne: () => addToPipeline([offer]) };
+  return { job, isAdded, isAdding, working, doneEval, doneReportN, statusLabel, salaryUnknown, evaluate, addOne: () => addToPipeline([offer]) };
 }
 
 // What a running worker is doing on this exact posting → the live CTA label.
@@ -99,7 +110,7 @@ export function DiscoveryCard({
 }) {
   const { t } = useI18n();
   const { removeOffers } = useExplore();
-  const { job, isAdded, isAdding, working, doneEval, statusLabel, salaryUnknown, evaluate, addOne } = useOfferActions(offer, inPipeline);
+  const { isAdded, isAdding, working, doneEval, doneReportN, statusLabel, salaryUnknown, evaluate, addOne } = useOfferActions(offer, inPipeline);
   const unverified = offer.verification === "unconfirmed";
   const fresh = freshness(offer.postedAt) || offer.postedHint || "";
 
@@ -193,7 +204,7 @@ export function DiscoveryCard({
       <div className="mt-0.5">
         {evaluatedN || doneEval ? (
           <a
-            href={evaluatedN ? `/pipeline/${evaluatedN}` : job ? `/jobs/${job.id}` : "/pipeline"}
+            href={evaluatedN ? `/report/${evaluatedN}` : doneReportN ? `/report/${doneReportN}` : "/pipeline"}
             className="inline-flex w-full items-center justify-center gap-1.5 rounded-md bg-brand-soft px-2.5 py-2 text-xs font-medium text-brand max-sm:min-h-[44px]"
           >
             <Check className="size-3.5" /> {t("explore.card.evaluatedView")}
@@ -257,7 +268,7 @@ export function DiscoveryRow({
 }) {
   const { t } = useI18n();
   const { removeOffers } = useExplore();
-  const { job, isAdded, isAdding, working, doneEval, statusLabel, salaryUnknown, evaluate, addOne } = useOfferActions(offer, inPipeline);
+  const { isAdded, isAdding, working, doneEval, doneReportN, statusLabel, salaryUnknown, evaluate, addOne } = useOfferActions(offer, inPipeline);
   const unverified = offer.verification === "unconfirmed";
   const fresh = freshness(offer.postedAt) || offer.postedHint || "";
 
@@ -347,7 +358,7 @@ export function DiscoveryRow({
         <div className="flex items-center justify-end gap-1.5">
           {evaluatedN || doneEval ? (
             <a
-              href={evaluatedN ? `/pipeline/${evaluatedN}` : job ? `/jobs/${job.id}` : "/pipeline"}
+              href={evaluatedN ? `/report/${evaluatedN}` : doneReportN ? `/report/${doneReportN}` : "/pipeline"}
               className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-md bg-brand-soft px-2.5 py-1.5 text-xs font-medium text-brand"
             >
               <Check className="size-3.5" /> {t("explore.card.evaluatedView")}
