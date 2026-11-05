@@ -94,7 +94,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               右缘，收起态滑到 logo 下方居中——位置随宽度过渡一起滑动而非跳位。
               文字常驻挂载，收起时 max-width 收到 0 + 淡出（宽度的延迟拍之前退完），
               展开时延迟随宽度打开后擦入。 */}
-          <div className="relative mb-8 flex items-center">
+          <div
+            className={cn(
+              "relative flex items-center transition-[margin] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]",
+              collapsed ? "mb-12" : "mb-8",
+            )}
+          >
             <Link href="/" className="flex items-center gap-2.5 px-1">
               <CoMark size={32} />
               <span
@@ -114,7 +119,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               aria-label={t(collapsed ? "nav.expandSidebar" : "nav.collapseSidebar")}
               className={cn(
                 "absolute flex size-8 items-center justify-center rounded-md text-muted transition-[left,top,background-color,color] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] hover:bg-surface-hover hover:text-foreground",
-                collapsed ? "left-[calc(50%-1rem)] top-10" : "left-[calc(100%-2rem)] top-0",
+                collapsed ? "left-[calc(50%-1rem)] top-11" : "left-[calc(100%-2rem)] top-0",
               )}
             >
               {/* key 重挂载让图标重放轻缩放入场；按钮全程在动（折叠时先沿右缘下落、
