@@ -118,6 +118,14 @@ html {
 }
 .animate-terminal-popup { animation: terminal-popup-in 300ms ease both; }
 
+/* 配置页目录跳转：目标区段一次轻入场（fade + 上移），只由点击目录触发，
+   滚轮路过不重放（config-form.tsx 的 goToSection 摘挂类控制）。 */
+@keyframes section-enter {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.section-enter { animation: section-enter 420ms cubic-bezier(0.22, 0.61, 0.36, 1) both; }
+
 /* Worker-pill indeterminate progress bar — a brand sweep (hero aesthetic). */
 @keyframes job-progress {
   0% { transform: translateX(-110%); }

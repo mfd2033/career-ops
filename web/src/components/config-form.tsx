@@ -164,6 +164,27 @@ export function ConfigForm() {
   const [unifiedVisible, setUnifiedVisible] = useState(false);
   const visibleUnified = useRef<Set<string>>(new Set());
 
+  // 目录切换动效：点击目录后目标区段做一次轻入场（fade + 上移），滚轮路过不重放。
+  // 同区连点也重放（先摘类、下一帧再挂，动画从头播）。定时器只负责摘类。
+  const [flashId, setFlashId] = useState<string | null>(null);
+  const flashTimer = useRef<number | null>(null);
+
+  // 目录跳转：平滑滚动替代默认锚点的瞬时跳转（scroll-mt 由 Section 自带的
+  // scroll-mt-24 兜住窄屏芯片栏）；哈希只同步不跳转。尊重系统的减少动态偏好。
+  const goToSection = useCallback((id: string) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    el.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
+    history.replaceState(null, "", `#${id}`);
+    if (flashTimer.current !== null) window.clearTimeout(flashTimer.current);
+    setFlashId(null);
+    requestAnimationFrame(() => {
+      setFlashId(id);
+      flashTimer.current = window.setTimeout(() => setFlashId(null), 600);
+    });
+  }, []);
+
   // Load saved prefs
   useEffect(() => {
     try {
@@ -540,6 +561,7 @@ export function ConfigForm() {
       navIo.disconnect();
       uniIo.disconnect();
       window.removeEventListener("scroll", onScroll);
+      if (flashTimer.current !== null) window.clearTimeout(flashTimer.current);
     };
   }, []);
 
@@ -557,6 +579,10 @@ export function ConfigForm() {
           <a
             key={s.id}
             href={`#${s.id}`}
+            onClick={(e) => {
+              e.preventDefault();
+              goToSection(s.id);
+            }}
             className={cn(
               "flex-none rounded-full border px-3 py-1.5 text-xs whitespace-nowrap transition-colors",
               activeId === s.id
@@ -576,6 +602,10 @@ export function ConfigForm() {
             <a
               key={s.id}
               href={`#${s.id}`}
+              onClick={(e) => {
+                e.preventDefault();
+                goToSection(s.id);
+              }}
               className={cn(
                 "flex items-center gap-2 rounded-[10px] border-l-[3px] px-2.5 py-2 text-[13.5px] transition-colors",
                 activeId === s.id
@@ -591,7 +621,7 @@ export function ConfigForm() {
 
       <div className="min-w-0">
         {/* ① AI 引擎（● 统一保存） */}
-        <Section id="engine" title={t("config.navEngine")} desc={t("config.secEngineDesc")}>
+        <Section id="engine" title={t("config.navEngine")} desc={t("config.secEngineDesc")} enter={flashId === "engine"}>
           <div className="mb-4 grid gap-2.5 sm:grid-cols-3">
             <RadioChoice
               selected={mode === "cli"}
@@ -964,7 +994,7 @@ export function ConfigForm() {
         </Section>
 
         {/* ② 扫描采集（● 统一保存） */}
-        <Section id="scan" title={t("config.navScan")} desc={t("config.secScanDesc")}>
+        <Section id="scan" title={t("config.navScan")} desc={t("config.secScanDesc")} enter={flashId === "scan"}>
           <div className="grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(min(320px,100%),1fr))]">
             <div className="rounded-xl border border-border bg-surface p-4">
               <span className="block text-[13px] font-semibold text-foreground">{t("config.scanSourceTitle")}</span>
@@ -1041,7 +1071,7 @@ export function ConfigForm() {
         </Section>
 
         {/* ③ 界面与交互（● 统一保存）——含从旧「申请与跟进」区迁入的未知雇主、申请按钮行为 */}
-        <Section id="ui" title={t("config.navUi")} desc={t("config.secUiDesc")}>
+        <Section id="ui" title={t("config.navUi")} desc={t("config.secUiDesc")} enter={flashId === "ui"}>
           <div className="mb-4 flex items-center justify-between gap-4 rounded-xl border border-border bg-surface px-4 py-3">
             <span className="min-w-0">
               <span className="block text-sm font-medium text-foreground">{t("config.companyLogos")}</span>
@@ -1160,7 +1190,7 @@ export function ConfigForm() {
         </Section>
 
         {/* ④ 定向规则（▣ 卡片内保存）：求职意向 + 薪资目标 + JD 评估规则 + 评估模式 */}
-        <Section id="target" title={t("config.navTarget")} desc={t("config.secTargetDesc")}>
+        <Section id="target" title={t("config.navTarget")} desc={t("config.secTargetDesc")} enter={flashId === "target"}>
           {/* 四张卡固定两两并排：求职意向｜薪资目标，JD 评估规则｜评估模式。
               JD 评估规则与评估模式都直接决定评估怎么跑，并排便于对照着改。
               列数必须跟着内容区的实际宽度走，不能用视口断点——1100px 以下侧栏隐藏、
@@ -1181,17 +1211,17 @@ export function ConfigForm() {
         </Section>
 
         {/* ⑤ 跟进节奏（▣ 卡片内保存）：6 天数字段两组并排 */}
-        <Section id="followup" title={t("config.navFollowup")} desc={t("config.secFollowupDesc")}>
+        <Section id="followup" title={t("config.navFollowup")} desc={t("config.secFollowupDesc")} enter={flashId === "followup"}>
           <CadenceSettings />
         </Section>
 
         {/* ⑥ Agent 技能（— 只读）：知情展示，不拦截任何功能 */}
-        <Section id="skills" title={t("config.navSkills")} desc={t("config.skillsDesc")}>
+        <Section id="skills" title={t("config.navSkills")} desc={t("config.skillsDesc")} enter={flashId === "skills"}>
           <SkillsPanel />
         </Section>
 
         {/* ⑦ 关于（— 只读）：版本信息 + 报告问题入口，从旧的左下角悬浮胶囊迁入 */}
-        <Section id="about" title={t("config.navAbout")} desc={t("config.secAboutDesc")}>
+        <Section id="about" title={t("config.navAbout")} desc={t("config.secAboutDesc")} enter={flashId === "about"}>
           <AboutPanel />
         </Section>
       </div>
@@ -1228,20 +1258,23 @@ export function ConfigForm() {
 }
 
 /** 区段容器：id 供目录导航锚点 + IntersectionObserver 观察；serif 标题 + 简介。
- *  scroll-mt 让锚点跳转避开顶部（窄屏芯片栏 sticky）。 */
+ *  scroll-mt 让锚点跳转避开顶部（窄屏芯片栏 sticky）。`enter` 由目录点击触发：
+ *  挂一次 section-enter 入场动画（globals.css），动画结束摘类，滚轮路过不重放。 */
 function Section({
   id,
   title,
   desc,
+  enter,
   children,
 }: {
   id: string;
   title: string;
   desc?: string;
+  enter?: boolean;
   children: React.ReactNode;
 }) {
   return (
-    <section id={id} className="scroll-mt-24 pt-11 first:pt-0">
+    <section id={id} className={cn("scroll-mt-24 pt-11 first:pt-0", enter && "section-enter")}>
       <h2 className="font-display text-[22px] font-medium tracking-tight text-landing">{title}</h2>
       {desc ? <p className="mb-3.5 mt-1 text-xs leading-relaxed text-faint">{desc}</p> : null}
       {children}
