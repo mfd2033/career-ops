@@ -171,7 +171,8 @@ _Avoid_: 全部评估、一键评估（不区分作用域时易与管道页批�
 **薪资下限（salary floor）**:
 browser 模式薪酬条件的唯一输入（探索页），收件箱（`/pipeline` INBOX tab）的同名数字输入也复用此概念与文案——但两者判定语义自 2026-09 起**分叉**：一个「最低月薪（K）」数字，岗位薪资区间与之比较后决定保留或丢弃；留空即不过滤。内部口径一律为月薪（千元/月），与输入一致。**探索页**（采集落地门 `matchesBrowserSalary`/`applyBrowserSalaryGate`）取区间重叠（区间上限 ≥ 下限即保留）、薪资未知放行并打标，被过滤掉的岗位直接不进结果；**收件箱**（展示过滤 `passesInboxSalaryFloor`）取严格下限（区间下限 ≥ 下限才保留）、薪资未知过滤掉。
 代码里的名字：探索页契约字段 `ExploreFilters.zhSalaryMin`、纯函数形参 `salaryMinK`（`browser-search.mjs`）、分享链接参数 `smin`；收件箱侧是 FacetChips 的数字输入（复用探索页 i18n 文案，状态存 localStorage）+「按薪资」排序切换（ADR-0023；默认开，ADR-0024）。同一个概念，改动时勿再另起名。
-_Avoid_: 薪资条件（泛）、薪资区间（那是站点的展示区间，不是条件）、salary_filter（那是 CLI ATS 扫描的年薪口径配置，语义无关）
+探索页的**默认值**由 `seedExploreFilters` 从 `portals.yml` 的 `salary_filter.min` 播种：那是 CLI 扫描器的**年薪**口径，换算成月薪 K（÷12÷1000，1 位小数）填进 `zhSalaryMin`，非人民币或只有 max 时不播种（`salary-floor.mjs`）。播种只是初值——清空输入框即这一次门关，运行时始终以 `zhSalaryMin` 为准。
+_Avoid_: 薪资条件（泛）、薪资区间（那是站点的展示区间，不是条件）、salary_filter（那是 CLI ATS 扫描的年薪口径配置；它只在**播种**时被换算成月薪 K 作为 `zhSalaryMin` 的初值，运行期判定不看它）
 
 **采集门（discovery gate）**:
 探索页 browser 模式在结果集生成前套用的三道确定性过滤——城市门、薪资门、标题门，都实现为 `browser-search.mjs` 的纯函数，由 bsk 服务端与扩展页侧两条 driver 共用。三道的共同语义是「被过滤掉的岗位直接不进结果」；共同取向是「条件缺省或数据缺失即放行，不误删」。

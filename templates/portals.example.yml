@@ -148,6 +148,11 @@
 #   - Partial ranges (min only or max only) work correctly
 #   - If this entire block is absent, salary is not filtered (default behavior)
 #
+# The web Explorer SEEDS its browser-hunt salary floor from `min` (annual ÷ 12
+# months, in CNY thousands — 240000 → 20 = ≥20K/month). The gate itself reads
+# that monthly figure, not this annual one: a non-CNY currency or a max-only
+# block is not seeded, and the Explorer's own "salary floor" box stays authoritative.
+#
 # Example: target roles paying at least $100k, no upper limit
 # salary_filter:
 #   min: 100000

@@ -7,6 +7,7 @@ import { careerOpsRoot } from "@/lib/career-ops";
 import { DEFAULT_FILTERS, cleanChips, type ExploreFilters } from "@/lib/explore";
 import { profileTargetKeywords } from "@/lib/profile-keywords.mjs";
 import { extractBrowserQuery, browserCityValue } from "../browser-search.mjs";
+import { monthlyFloorKFromSalaryFilter } from "../salary-floor.mjs";
 
 /**
  * ACL for portals.yml — the core's scan-filter config (a CONTRACT entry-point,
@@ -105,6 +106,16 @@ export function seedExploreFilters(): { filters: ExploreFilters; seededFrom: str
     } else if (browserCityValue("zhipin", allowCity)) {
       filters.zhCityPreference = allowCity;
       seededFrom.push("portals.yml");
+    }
+    // 薪资门的种子（采集门第二道）。salary_filter 是 CLI 扫描器的**年薪**口径，
+    // 探索页的 zhSalaryMin 是**月薪 K**：不换算就等于「配置写了年薪 24 万（月薪
+    // 20K），采集时门却是关的」——5-6K 的卡片照样进结果区，也照样落进
+    // scan-history，最后堆在今日页「本周新匹配」里（用户报的那 31 条）。
+    // 换算与不播种的边界（无 min / 非人民币）见 salary-floor.mjs。
+    const seededSalaryFloor = monthlyFloorKFromSalaryFilter(portals.salary_filter);
+    if (seededSalaryFloor != null) {
+      filters.zhSalaryMin = seededSalaryFloor;
+      if (!seededFrom.includes("portals.yml")) seededFrom.push("portals.yml");
     }
   }
 
