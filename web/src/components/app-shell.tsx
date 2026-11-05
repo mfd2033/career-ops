@@ -140,7 +140,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             归零——内容比可用宽度宽时 main 会被 min-content 顶大，整页跟着横向溢出（798px 窗口
             实测 scrollWidth 958 vs clientWidth 783，多出的 175px 全从这里来）。min-w-0 允许
             它收缩到可用宽度，clip 再把真的放不下的部分裁掉。 */}
-        <main className="min-w-0 flex-1 overflow-x-clip">{children}</main>
+        <main className="min-w-0 flex-1 overflow-x-clip">
+          {/* 目录切换特效：pathname 变化时重挂载包装层，重放 page-enter 入场动画
+              （globals.css）。软导航下 AppShell 不重挂载，动画只随路由重放。 */}
+          <div key={pathname} className="page-enter">
+            {children}
+          </div>
+        </main>
         <AssistantConsole />
         <FirstScoreView />
       </div>

@@ -126,6 +126,14 @@ html {
 }
 .section-enter { animation: section-enter 420ms cubic-bezier(0.22, 0.61, 0.36, 1) both; }
 
+/* 目录（页面）切换：内容区一次轻入场（fade + 上移），由路由切换触发——
+   app-shell.tsx 用 key={pathname} 重挂载内容包装层来重放；侧栏/顶栏不动。 */
+@keyframes page-enter {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.page-enter { animation: page-enter 360ms cubic-bezier(0.22, 0.61, 0.36, 1) both; }
+
 /* Worker-pill indeterminate progress bar — a brand sweep (hero aesthetic). */
 @keyframes job-progress {
   0% { transform: translateX(-110%); }
