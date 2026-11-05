@@ -28,8 +28,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   // 桌面侧栏收起态：先按展开渲染避免 SSR/水合不一致，挂载后再读 localStorage 恢复。
   const [collapsed, setCollapsed] = useState(false);
+  // 收起/展开动效开关：挂载后先按 localStorage 直接就位（此时 transition 未放开，
+  // 恢复收起态不会播一段从展开滑过去的动画），下一帧再放开过渡。
+  const [sidebarReady, setSidebarReady] = useState(false);
   useEffect(() => {
     if (localStorage.getItem("career-ops:sidebar-collapsed") === "1") setCollapsed(true);
+  }, []);
+  useEffect(() => {
+    const id = requestAnimationFrame(() => setSidebarReady(true));
+    return () => cancelAnimationFrame(id);
   }, []);
   const toggleCollapsed = () => {
     setCollapsed((c) => {
@@ -77,32 +84,44 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             被困在侧栏这个层叠上下文里。给侧栏一个正 z-index 把整列抬到 main 的
             定位层之上；弹窗/控制台等 z-40+ 的固定层仍在其上。 */}
         <aside
+          data-sidebar-ready={sidebarReady}
           className={cn(
-            "sticky top-0 z-30 hidden h-screen shrink-0 flex-col border-r border-border bg-surface/30 [overflow-anchor:none] transition-[width,padding] duration-200 md:flex",
-            collapsed ? "w-16 overflow-visible px-2 py-4" : "w-60 overflow-y-auto p-4",
+            "sticky top-0 z-30 hidden h-screen shrink-0 flex-col border-r border-border bg-surface/30 [overflow-anchor:none] transition-[width,padding] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] md:flex",
+            collapsed ? "w-16 overflow-visible px-2 py-4 delay-100" : "w-60 overflow-y-auto p-4",
           )}
         >
-          {/* 顶栏：logo 左、收起/展开开关右上角。收起态宽度放不下两列，
-              退化为纵向：logo 在上，展开按钮在其下居中。 */}
-          <div className={cn("mb-8 flex items-center", collapsed && "flex-col")}>
-            <Link href="/" className={cn("flex items-center gap-2.5 px-1", collapsed && "px-0")}>
+          {/* 顶栏：logo 左、收起/展开开关右上角。开关改为绝对定位：展开态贴顶栏
+              右缘，收起态滑到 logo 下方居中——位置随宽度过渡一起滑动而非跳位。
+              文字常驻挂载，收起时 max-width 收到 0 + 淡出（宽度的延迟拍之前退完），
+              展开时延迟随宽度打开后擦入。 */}
+          <div className="relative mb-8 flex items-center">
+            <Link href="/" className="flex items-center gap-2.5 px-1">
               <CoMark size={32} />
-              {!collapsed && (
+              <span
+                className={cn(
+                  "overflow-hidden whitespace-nowrap transition-[max-width,opacity] duration-200",
+                  collapsed ? "max-w-0 opacity-0" : "max-w-[10rem] opacity-100 delay-100",
+                )}
+              >
                 <span className={`${instrumentSerif.className} relative -top-px text-2xl font-normal tracking-tight text-landing`}>
                   career-ops
                 </span>
-              )}
+              </span>
             </Link>
             <button
               type="button"
               onClick={toggleCollapsed}
               aria-label={t(collapsed ? "nav.expandSidebar" : "nav.collapseSidebar")}
               className={cn(
-                "flex size-8 items-center justify-center rounded-md text-muted transition-colors hover:bg-surface-hover hover:text-foreground",
-                collapsed ? "mt-1" : "ml-auto",
+                "absolute flex size-8 items-center justify-center rounded-md text-muted transition-[left,top,background-color,color] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] hover:bg-surface-hover hover:text-foreground",
+                collapsed ? "left-[calc(50%-1rem)] top-10" : "left-[calc(100%-2rem)] top-0",
               )}
             >
-              {collapsed ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}
+              {/* key 重挂载让图标重放轻缩放入场；按钮全程在动（折叠时先沿右缘下落、
+                  宽度收拢后再带到居中位），图标换新不落在静止画面里，不会显得卡顿 */}
+              <span key={String(collapsed)} className="sidebar-toggle-icon grid place-items-center">
+                {collapsed ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}
+              </span>
             </button>
           </div>
           <nav className="relative shrink-0 flex flex-col gap-1">
@@ -122,16 +141,27 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   ref={(el) => { navRefs.current[i] = el; }}
                   href={href}
                   className={cn(
-                    "group relative flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors",
-                    collapsed && "justify-center px-0",
+                    "group relative flex items-center gap-3 rounded-md py-2 text-sm transition-[padding,background-color,color] duration-200",
+                    collapsed ? "px-4" : "px-3",
                     active
                       ? "text-brand-text"
                       : "text-muted hover:bg-surface-hover hover:text-foreground",
                   )}
                 >
-                  {/* key={pathname}：路由切换时重挂载图标，让新活动项重放轻弹动画 */}
-                  <Icon key={pathname} className={cn("size-4", active && "nav-icon-pop")} />
-                  {!collapsed && t(labelKey)}
+                  {/* key={pathname}：路由切换时重挂载图标，让新活动项重放轻弹动画。
+                      shrink-0：收起态行内容 = 图标16 + gap12 + label(0)，超出 px-4 后
+                      的 16px 内容盒，不锁死最小宽度的话 flex 会把图标挤瘪成小点。 */}
+                  <Icon key={pathname} className={cn("size-4 shrink-0", active && "nav-icon-pop")} />
+                  {/* 文字常驻挂载：收起时 max-width 收 0 + 淡出（先于侧栏宽度退场），
+                      展开时延迟随宽度打开后擦入；padding 过渡让图标平滑滑向居中位 */}
+                  <span
+                    className={cn(
+                      "overflow-hidden whitespace-nowrap transition-[max-width,opacity] duration-200",
+                      collapsed ? "max-w-0 opacity-0" : "max-w-[10rem] opacity-100 delay-100",
+                    )}
+                  >
+                    {t(labelKey)}
+                  </span>
                   {/* 收起态 tooltip：hover（或键盘 focus）图标 300ms 后浮现，随点击目标导航 */}
                   {collapsed && (
                     <span
@@ -146,14 +176,26 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             })}
           </nav>
 
-          {!collapsed && <WorkerPills fitToHeight />}
+          {/* 托盘卡与底部控件常驻挂载：收起时快速淡出并移出焦点序（visibility），
+              宽度延迟收窄后不会看到内容溢出侧栏边缘；展开时延迟随宽度打开后淡入 */}
+          <div
+            className={cn(
+              "flex min-h-0 flex-1 flex-col transition-[opacity,visibility]",
+              collapsed ? "invisible opacity-0 duration-150" : "opacity-100 delay-150 duration-300",
+            )}
+          >
+            <WorkerPills fitToHeight />
+          </div>
 
-          {!collapsed && (
-            <div className="mt-auto shrink-0 space-y-3 pt-4">
-              <UsageMeter />
-              <LanguageToggle trailing={<ThemeToggle />} />
-            </div>
-          )}
+          <div
+            className={cn(
+              "mt-auto shrink-0 space-y-3 pt-4 transition-[opacity,visibility]",
+              collapsed ? "invisible opacity-0 duration-150" : "opacity-100 delay-150 duration-300",
+            )}
+          >
+            <UsageMeter />
+            <LanguageToggle trailing={<ThemeToggle />} />
+          </div>
         </aside>
         {/* overflow-x-clip（非 hidden）：hidden 会把 overflow-y 计算值强制成 auto，使 main
             变成滚动容器，从而破坏页内 sticky 侧栏（配置页 TOC）——clip 同样裁剪横向溢出

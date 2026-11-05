@@ -143,6 +143,21 @@ html {
 }
 .nav-icon-pop { animation: nav-icon-pop 300ms cubic-bezier(0.22, 0.61, 0.36, 1) both; }
 
+/* 侧栏收起/展开开关图标：切换时（app-shell.tsx key 重挂载）重放一次轻缩放淡入，
+   与导航活动项的 nav-icon-pop 同一视觉语言，不做旋转。 */
+@keyframes sidebar-toggle-in {
+  from { opacity: 0; transform: scale(0.75); }
+  to { opacity: 1; transform: scale(1); }
+}
+.sidebar-toggle-icon { animation: sidebar-toggle-in 200ms cubic-bezier(0.22, 0.61, 0.36, 1) both; }
+
+/* 侧栏首帧恢复 localStorage 收起态时不播动效：挂载后先就位，下一帧（rAF 置
+   sidebarReady）再放开过渡，避免打开页面看到侧栏从展开宽度滑过去一遍。 */
+[data-sidebar-ready="false"],
+[data-sidebar-ready="false"] * {
+  transition: none !important;
+}
+
 /* Worker-pill indeterminate progress bar — a brand sweep (hero aesthetic). */
 @keyframes job-progress {
   0% { transform: translateX(-110%); }
@@ -173,6 +188,8 @@ html {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+    /* 侧栏编排用了分拍 delay；降级下延迟同样无意义，一律归零保证瞬时切换。 */
+    transition-delay: 0s !important;
   }
 }
 
