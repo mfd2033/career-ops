@@ -169,14 +169,34 @@ export function ConfigForm() {
   const [flashId, setFlashId] = useState<string | null>(null);
   const flashTimer = useRef<number | null>(null);
 
+  // 目录滑动高亮（宽屏左侧目录栏，与桌面侧栏同一套动效）：活动项底色不再是各链接
+  // 上的静态 bg-brand-soft，而是一个共享绝对定位块，随 activeId 平滑滑动。位置实测
+  // offsetTop/offsetHeight；目录栏在 <1101px 是 display:none（尺寸为 0），只在宽屏
+  // 量程内更新，断点跨越时由 matchMedia 变化重测。
+  const tocRefs = useRef<(HTMLAnchorElement | null)[]>([]);
+  const [tocIndicator, setTocIndicator] = useState<{ top: number; height: number } | null>(null);
+  useEffect(() => {
+    const measure = () => {
+      const idx = SECTIONS.findIndex((s) => s.id === activeId);
+      const el = tocRefs.current[idx];
+      if (el && el.offsetHeight > 0) setTocIndicator({ top: el.offsetTop, height: el.offsetHeight });
+    };
+    measure();
+    const mq = window.matchMedia("(min-width: 1101px)");
+    mq.addEventListener("change", measure);
+    return () => mq.removeEventListener("change", measure);
+  }, [activeId]);
+
   // 目录跳转：平滑滚动替代默认锚点的瞬时跳转（scroll-mt 由 Section 自带的
   // scroll-mt-24 兜住窄屏芯片栏）；哈希只同步不跳转。尊重系统的减少动态偏好。
+  // 高亮即时点亮（不等 IntersectionObserver 追上滚动），滑动高亮块随点击起滑。
   const goToSection = useCallback((id: string) => {
     const el = document.getElementById(id);
     if (!el) return;
     const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     el.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
     history.replaceState(null, "", `#${id}`);
+    setActiveId(id);
     if (flashTimer.current !== null) window.clearTimeout(flashTimer.current);
     setFlashId(null);
     requestAnimationFrame(() => {
@@ -597,19 +617,28 @@ export function ConfigForm() {
 
       {/* 宽屏：左侧 220px sticky 目录栏（档位只靠分组顺序表达，不加标记） */}
       <aside className="sticky top-9 hidden self-start max-[1100px]:hidden min-[1101px]:block">
-        <nav className="flex flex-col gap-0.5">
-          {SECTIONS.map((s) => (
+        <nav className="relative flex flex-col gap-0.5">
+          {/* 滑动高亮块：画在链接下层（DOM 在前），随 activeId 平滑滑动 */}
+          {tocIndicator && (
+            <div
+              aria-hidden
+              className="absolute left-0 right-0 rounded-[10px] bg-brand-soft transition-[transform,height] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]"
+              style={{ transform: `translateY(${tocIndicator.top}px)`, height: tocIndicator.height }}
+            />
+          )}
+          {SECTIONS.map((s, i) => (
             <a
               key={s.id}
+              ref={(el) => { tocRefs.current[i] = el; }}
               href={`#${s.id}`}
               onClick={(e) => {
                 e.preventDefault();
                 goToSection(s.id);
               }}
               className={cn(
-                "flex items-center gap-2 rounded-[10px] border-l-[3px] px-2.5 py-2 text-[13.5px] transition-colors",
+                "relative flex items-center gap-2 rounded-[10px] border-l-[3px] px-2.5 py-2 text-[13.5px] transition-colors",
                 activeId === s.id
-                  ? "border-brand bg-brand-soft font-semibold text-foreground"
+                  ? "border-brand font-semibold text-foreground"
                   : "border-transparent text-muted hover:bg-surface-hover hover:text-foreground",
               )}
             >

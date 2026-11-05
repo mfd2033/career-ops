@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { cn } from "@/lib/cn";
@@ -43,6 +43,18 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     pushNavHistory(window.location.pathname + window.location.search);
   }, [pathname]);
+
+  // 目录切换特效：活动项高亮块不再是各自链接上的静态底色，而是一个共享的绝对定
+  // 位块，随路由切换平滑滑动到新活动项（transform 过渡）。位置用 offsetTop/Height
+  // 实测而非硬编码（条目高度虽一致，但收起态/字体加载仍可能微移）；collapsed 也进
+  // 依赖——收起/展开后重测，指示块跟着滑到新几何位置。首测前不渲染，避免闪错位。
+  const navRefs = useRef<(HTMLAnchorElement | null)[]>([]);
+  const [indicator, setIndicator] = useState<{ top: number; height: number } | null>(null);
+  useEffect(() => {
+    const idx = NAV_ITEMS.findIndex(({ href }) => isActivePath(href, pathname));
+    const el = navRefs.current[idx];
+    if (el) setIndicator({ top: el.offsetTop, height: el.offsetHeight });
+  }, [pathname, collapsed]);
   return (
     <JobsProvider>
       <PipelineProvider>
@@ -93,22 +105,32 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               {collapsed ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}
             </button>
           </div>
-          <nav className="shrink-0 flex flex-col gap-1">
-            {NAV_ITEMS.map(({ href, labelKey, icon: Icon }) => {
+          <nav className="relative shrink-0 flex flex-col gap-1">
+            {/* 滑动高亮块：画在链接下层（DOM 在前），随 pathname/collapsed 平滑滑动 */}
+            {indicator && (
+              <div
+                aria-hidden
+                className="absolute left-0 right-0 rounded-md bg-brand-soft transition-[transform,height] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]"
+                style={{ transform: `translateY(${indicator.top}px)`, height: indicator.height }}
+              />
+            )}
+            {NAV_ITEMS.map(({ href, labelKey, icon: Icon }, i) => {
               const active = isActivePath(href, pathname);
               return (
                 <Link
                   key={href}
+                  ref={(el) => { navRefs.current[i] = el; }}
                   href={href}
                   className={cn(
                     "group relative flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors",
                     collapsed && "justify-center px-0",
                     active
-                      ? "bg-brand-soft text-brand-text"
+                      ? "text-brand-text"
                       : "text-muted hover:bg-surface-hover hover:text-foreground",
                   )}
                 >
-                  <Icon className="size-4" />
+                  {/* key={pathname}：路由切换时重挂载图标，让新活动项重放轻弹动画 */}
+                  <Icon key={pathname} className={cn("size-4", active && "nav-icon-pop")} />
                   {!collapsed && t(labelKey)}
                   {/* 收起态 tooltip：hover（或键盘 focus）图标 300ms 后浮现，随点击目标导航 */}
                   {collapsed && (

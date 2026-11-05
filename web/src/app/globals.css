@@ -134,6 +134,15 @@ html {
 }
 .page-enter { animation: page-enter 360ms cubic-bezier(0.22, 0.61, 0.36, 1) both; }
 
+/* 侧栏导航活动项图标轻弹：路由切换时（app-shell.tsx key={pathname} 重挂载图标）
+   在新活动项上重放一次，非活动项不挂类不受影响。 */
+@keyframes nav-icon-pop {
+  0% { transform: scale(0.75); }
+  60% { transform: scale(1.15); }
+  100% { transform: scale(1); }
+}
+.nav-icon-pop { animation: nav-icon-pop 300ms cubic-bezier(0.22, 0.61, 0.36, 1) both; }
+
 /* Worker-pill indeterminate progress bar — a brand sweep (hero aesthetic). */
 @keyframes job-progress {
   0% { transform: translateX(-110%); }
