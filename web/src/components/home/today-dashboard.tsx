@@ -299,16 +299,6 @@ export function TodayDashboard({
           )}
         </Section>
       </div>
-
-
-      {allClear && (
-        <div className="shrink-0 rounded-2xl border border-border bg-surface/30 px-6 py-10 text-center">
-          <Sparkles className="mx-auto size-6 text-brand" />
-          <p className="mx-auto mt-3 max-w-md text-sm text-muted">
-             {t("home.nothingNeedsYou1")} <Link href="/explore" className="text-brand hover:underline">{t("home.freeScanLink")}</Link> {t("home.nothingNeedsYou2")} <Link href="/pipeline" className="text-brand hover:underline">{t("nav.pipeline")}</Link>{t("home.nothingNeedsYou3")}
-          </p>
-        </div>
-      )}
     </div>
   );
 }
