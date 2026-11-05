@@ -100,7 +100,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               collapsed ? "mb-12" : "mb-8",
             )}
           >
-            <Link href="/" className="flex items-center gap-2.5 px-1">
+            <Link
+              href="/"
+              className={cn(
+                "flex items-center gap-2.5 transition-[padding] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]",
+                collapsed ? "px-2" : "px-1",
+              )}
+            >
               <CoMark size={32} />
               <span
                 className={cn(
