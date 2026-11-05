@@ -190,12 +190,27 @@ export function ConfigForm() {
   // 目录跳转：平滑滚动替代默认锚点的瞬时跳转（scroll-mt 由 Section 自带的
   // scroll-mt-24 兜住窄屏芯片栏）；哈希只同步不跳转。尊重系统的减少动态偏好。
   // 高亮即时点亮（不等 IntersectionObserver 追上滚动），滑动高亮块随点击起滑。
+  // 程序滚动期间给 scroll-spy 上锁：平滑滚动途中各区段会依次穿过观察带，若不锁，
+  // 高亮会被逐区抢回、再逐区滑到目标（与“点击直达”打架）。解锁有两路：
+  //   1) 滚动停稳 160ms（onScroll 里重置兜底定时器）——覆盖平滑滚动与用户中途接管；
+  //   2) 1.2s 绝对兜底——目标就在当前位置等不触发滚动事件时也能解锁。
+  const spyLocked = useRef(false);
+  const spyUnlockTimer = useRef<number | null>(null);
+  const armSpyUnlock = (delay: number) => {
+    if (spyUnlockTimer.current !== null) window.clearTimeout(spyUnlockTimer.current);
+    spyUnlockTimer.current = window.setTimeout(() => {
+      spyLocked.current = false;
+      spyUnlockTimer.current = null;
+    }, delay);
+  };
   const goToSection = useCallback((id: string) => {
     const el = document.getElementById(id);
     if (!el) return;
     const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     el.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
     history.replaceState(null, "", `#${id}`);
+    spyLocked.current = true;
+    armSpyUnlock(1200);
     setActiveId(id);
     if (flashTimer.current !== null) window.clearTimeout(flashTimer.current);
     setFlashId(null);
@@ -547,6 +562,7 @@ export function ConfigForm() {
     const byId = (id: string) => document.getElementById(id);
     const navIo = new IntersectionObserver(
       (entries) => {
+        if (spyLocked.current) return; // 程序滚动期间不抢高亮（见 goToSection 的锁说明）
         for (const e of entries) if (e.isIntersecting) setActiveId(e.target.id);
       },
       { rootMargin: "-25% 0px -65% 0px", threshold: 0 },
@@ -573,6 +589,12 @@ export function ConfigForm() {
     // 离开页底向上滚时，navIo 会随各区重新进入观察带而纠正高亮。
     const lastId = SECTIONS[SECTIONS.length - 1].id;
     const onScroll = () => {
+      // 锁定期间每次滚动都把解锁兜底定时器顺延到 160ms：滚动停稳即解锁恢复 spy；
+      // 页底兜底同样不抢（goToSection 已把高亮直达目标）。
+      if (spyLocked.current) {
+        armSpyUnlock(160);
+        return;
+      }
       const el = document.scrollingElement || document.documentElement;
       if (el.scrollTop + window.innerHeight >= el.scrollHeight - 4) setActiveId(lastId);
     };
@@ -582,6 +604,7 @@ export function ConfigForm() {
       uniIo.disconnect();
       window.removeEventListener("scroll", onScroll);
       if (flashTimer.current !== null) window.clearTimeout(flashTimer.current);
+      if (spyUnlockTimer.current !== null) window.clearTimeout(spyUnlockTimer.current);
     };
   }, []);
 
