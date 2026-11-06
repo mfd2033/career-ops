@@ -127,12 +127,27 @@ html {
 .section-enter { animation: section-enter 420ms cubic-bezier(0.22, 0.61, 0.36, 1) both; }
 
 /* 目录（页面）切换：内容区一次轻入场（fade + 上移），由路由切换触发——
-   app-shell.tsx 用 key={pathname} 重挂载内容包装层来重放；侧栏/顶栏不动。 */
+   app-shell.tsx 用 key={pathname} 重挂载内容包装层来重放；侧栏/顶栏不动。
+
+   填充只能是 `backwards`，绝不能是 `both`/`forwards`：`.page-enter` 常驻挂载（只在
+   路由切换时重挂），forwards 填充会把最后一帧的 transform 永久留在这一层上——即使
+   末帧写成 `translateY(0)` 或 `none`，计算值都会归一成单位矩阵而非 none（实测
+   Chrome）。而任何一个 transform 不为 none 的元素，都会成为所有 `position: fixed`
+   后代的包含块。报告页动辄几千 px 高，页内弹窗（如「状态记录」）于是按整页内容居中，
+   落到视口下方一两屏处，看上去就是「弹窗没弹在正确位置」。`backwards` 只填充延迟段
+   （这里没有 delay），动画结束后不再贡献样式，计算值回到 none，包含块回到视口。 */
 @keyframes page-enter {
   from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: translateY(0); }
 }
-.page-enter { animation: page-enter 360ms cubic-bezier(0.22, 0.61, 0.36, 1) both; }
+/* position:relative + isolation:isolate 顶替 transform 原本顺手提供的那两件事——
+   成为页内绝对定位后代的包含块、自成层叠上下文（页内 z-index 不外溢去和侧栏
+   z-30 抢层）。这两条都不会让 fixed 认这层当包含块，实测 fixed 子元素仍贴视口。 */
+.page-enter {
+  animation: page-enter 360ms cubic-bezier(0.22, 0.61, 0.36, 1) backwards;
+  position: relative;
+  isolation: isolate;
+}
 
 /* 侧栏导航活动项图标轻弹：路由切换时（app-shell.tsx key={pathname} 重挂载图标）
    在新活动项上重放一次，非活动项不挂类不受影响。 */
