@@ -317,6 +317,33 @@ export function fatalStopMessage(hit, maxChars = 240) {
   return detail ? `${hit.reason}. The CLI said: ${detail}` : hit.reason;
 }
 
+/**
+ * 单任务 run 的静默阈值（毫秒）。
+ *
+ * 与批量路径的 `WORKER_SILENCE_MS` 同口径、同理由：这是「进程还活着但一个字节都不出」
+ * 的兜底停机点，任何 stdout/stderr 字节都会重置它，所以只有真的停在原地才会触发。
+ * 15 分钟留足了慢速 CLI（codebuddy/hy3 的工具间隔实测 1-4 分钟）的余量——比它更短的
+ * 阈值会杀掉正在正常思考的评估。
+ *
+ * 2026-11-09 实测：opencode 免费额度耗尽后正是这个形态（子进程 26 分钟零输出、零 token），
+ * 而单任务路径此前只有 30 分钟总阀，于是卡片一直显示「执行中」。真正让它秒级结案的是
+ * 派发侧的 `--print-logs --log-level ERROR`（clis.ts），本阈值兜的是「连日志都不写」的引擎。
+ */
+export const RUN_SILENCE_MS = 900_000;
+
+/**
+ * 静默看门狗触发后的停机原因（一句话，进终态文案与台账）。
+ *
+ * 只说事实与死法，不猜「装没装 / 登没登」——那句猜测会把人带去错误的排查方向
+ * （ADR-0094 决议 4 同一个理由）。
+ *
+ * @param {number} [ms]
+ * @returns {string}
+ */
+export function silenceStopMessage(ms = RUN_SILENCE_MS) {
+  return `The CLI produced no output for ${Math.round(ms / 60000)} minutes — it appears hung`;
+}
+
 const GENERIC_FATAL_STDERR_RE =
   /\berror\b|\bdenied\b|\bfatal\b|not found|\bunauthorized\b|\bforbidden\b|not authenticated|authentication failed|\blogin\b|log in|\bcredentials?\b|api[ -]?key|\bquota\b|rate limit/i;
 

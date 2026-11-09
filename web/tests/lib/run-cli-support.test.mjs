@@ -26,6 +26,8 @@ import {
   parseClaudeEvent,
   parseCodexEvent,
   persistRunOutcome,
+  RUN_SILENCE_MS,
+  silenceStopMessage,
   withModelFlag,
 } from "../../src/lib/run-cli-support.mjs";
 import { createCvEnvelopeFilter } from "../../src/lib/cv-envelope.mjs";
@@ -94,6 +96,19 @@ test("fatalStopMessage：一句结论 + 引擎原文，压成单行供台账", (
   assert.match(msg, /quota\/usage limit/i);
   assert.match(msg, /Free usage limit reached\. Subscribe to keep going\./);
   assert.doesNotMatch(msg, /\n/);
+});
+
+// 2026-11-09 实测：opencode 额度耗尽后进程不退出、错误只写它自己的日志文件，子进程
+// 根本没有任何字节可判 —— 派发侧 `--print-logs --log-level ERROR` 把 ERROR 行镜像到
+// stderr（7 秒内可见），静默看门狗兜住「错误连日志都不写」的其它引擎。文案同样不许
+// 把人带去「查装没装 CLI」的方向。
+test("静默看门狗的文案：报出几分钟没输出、只说挂死，不提安装/登录", () => {
+  const msg = silenceStopMessage();
+  assert.match(msg, /15 minutes/);
+  assert.match(msg, /hung/);
+  assert.doesNotMatch(msg, /install|authenticat/i);
+  // 与批量路径的 WORKER_SILENCE_MS 同口径：慢速 CLI 的工具间隔实测可达 1-4 分钟。
+  assert.equal(RUN_SILENCE_MS, 900_000);
 });
 
 test("persistRunOutcome：死因**替掉**「装没装/登没登」的猜测文案，而不是拼在前面", () => {

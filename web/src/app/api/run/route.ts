@@ -10,7 +10,7 @@ import { after } from "next/server";
 import { resolveCli, dropCrossEngineModel } from "@/lib/clis";
 import { cliDisplayName } from "@/lib/cli-labels.mjs";
 import { resolveWorkerInvocation } from "@/lib/worker-invocation.mjs";
-import { accumulateTokens, authExpiredHint, blacklistGateLedgerFields, checkupArtifactRowCount, checkupArtifactTodayForTracker, classifyFatalStderr, fatalStopMessage, makeCheckupHtmlProbe, detectBlacklistGate, failureEvidence, failureLedgerMsg, hasNewCompletedReport, isFatalGenericStderr, persistRunOutcome, PERSISTENCE_GATED_KINDS, withModelFlag } from "@/lib/run-cli-support.mjs";
+import { accumulateTokens, authExpiredHint, blacklistGateLedgerFields, checkupArtifactRowCount, checkupArtifactTodayForTracker, classifyFatalStderr, fatalStopMessage, makeCheckupHtmlProbe, detectBlacklistGate, failureEvidence, failureLedgerMsg, hasNewCompletedReport, isFatalGenericStderr, persistRunOutcome, PERSISTENCE_GATED_KINDS, RUN_SILENCE_MS, silenceStopMessage, withModelFlag } from "@/lib/run-cli-support.mjs";
 import { spawnHeadlessCli, terminateCli } from "@/lib/spawn-cli.mjs";
 import { careerOpsRoot, readMemory, findReportFile, readInbox, readScanDates, findCheckupTarget, readApplications, rootScript, readMarketModesDir, listMarketModes } from "@/lib/career-ops";
 import { checkupDispatchText } from "@/lib/checkup-request.mjs";
@@ -496,6 +496,10 @@ async function runPipeline({
   let runSettled: (() => void) | null = null;
   const settle = () => { runSettled?.(); runSettled = null; };
   let killer: ReturnType<typeof setTimeout> | undefined;
+  // 静默看门狗（ADR-0094 的第二道阀）：总阀只管「最久能跑多久」，管不了「一个字节都不出」。
+  // 2026-11-09：opencode 额度耗尽后子进程 26 分钟零输出、零 token，卡片一直「执行中」，
+  // 直到 30 分钟总阀才落成一条误导性的 timeout。任何 stdout/stderr 字节都会重臂它。
+  let silenceTimer: ReturnType<typeof setTimeout> | undefined;
   // 本地 kill 定时器是否已经开火（超时终态的判据，ADR-0030 跟进决议 2026-09-17）。
   // 没有它，被定时器杀掉的 run 会以「无 stdout + 非 0 退出」落进安装/登录误诊分支。
   let timedOut = false;
@@ -561,6 +565,7 @@ async function runPipeline({
     terminal = true;
     clearInterval(keepalive);
     if (killer) clearTimeout(killer);
+    if (silenceTimer) clearTimeout(silenceTimer);
     releaseWriteTokenOnce();
     releasePoolOnce();
     clearCheckupLiveOnce();
@@ -577,6 +582,7 @@ async function runPipeline({
     recordEnd("error", "cancelled by user");
     clearInterval(keepalive);
     if (killer) clearTimeout(killer);
+    if (silenceTimer) clearTimeout(silenceTimer);
     if (child) {
       // 必须按进程树终止：单杀 CLI 主进程会让它派生的子进程（如 Git find.exe）
       // 残留成孤儿，持续空转占 CPU。
@@ -635,6 +641,18 @@ async function runPipeline({
       if (!isFatalStderr(line)) return;
       sawError = true;
       send({ type: "error", msg: line.trim().slice(0, 200) });
+    };
+    // 静默看门狗的复位与触发（ADR-0094 第二道阀）：任何一字节输出都重臂，
+    // 所以只有「进程还在、但真的停在原地」才会走到这里。停机原因走 stoppedReason，
+    // 与致命行同一条出口——不先发 error，终态文案才不会被通用门文案挤掉。
+    const armSilence = () => {
+      if (silenceTimer) clearTimeout(silenceTimer);
+      silenceTimer = setTimeout(() => {
+        if (terminal || stoppedReason) return;
+        stoppedReason = silenceStopMessage(RUN_SILENCE_MS);
+        sawError = true;
+        if (child) terminateCli(child);
+      }, RUN_SILENCE_MS);
     };
     let lastTokens = 0; // per-run token cost from the CLI's structured usage event (#6) — local only
     let lastCostUsd: number | null = null;
@@ -810,9 +828,12 @@ async function runPipeline({
         timedOut = true;
         if (child) terminateCli(child);
       }, killMs);
+      // 与总阀同时上膛：两个计时器量的是两件不同的事（最久多久 / 多久没动静）。
+      armSilence();
 
       child.stdout.on("data", (chunk: string) => {
         if (terminal) return;
+        armSilence();
         if (!spec.parseEvent) {
           emittedText = true;
           sendAgentText(chunk);
@@ -827,6 +848,7 @@ async function runPipeline({
         }
       });
       child.stderr.on("data", (chunk: string) => {
+        armSilence();
         // Match on COMPLETE lines. A chunk boundary can fall mid-word, so testing a
         // raw chunk both misses an error split across two of them and can match a
         // fragment that is not the word it looks like. sawError feeds pdfRunOutcome,

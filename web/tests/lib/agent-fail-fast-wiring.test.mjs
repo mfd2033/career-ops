@@ -10,6 +10,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { resolveWorkerInvocation } from "../../src/lib/worker-invocation.mjs";
 
 const read = (rel) => readFileSync(new URL(rel, import.meta.url), "utf8");
 const BATCH_EVAL = read("../../src/app/api/batch-evaluate/route.ts");
@@ -66,4 +67,34 @@ test("单任务 /api/run：stderr 与结构化 error 事件都触发停机", () 
 test("单任务 /api/run：死因随终态落账（含 pdf 分支）", () => {
   assert.match(RUN, /fatalReason: stoppedReason/);
   assert.match(RUN, /stoppedReason \? `\$\{stoppedReason\} — \$\{outcome\.message\}` : outcome\.message/);
+});
+
+// 2026-11-09 实测：opencode 免费额度耗尽时，`stream error … Free usage limit reached`
+// 只写进 ~/.local/share/opencode/log/opencode.log，子进程的 stdout/stderr 始终为空，
+// 进程又不退出。判定链再准也没原料可用 —— 单任务 run 就这么干等了 30 分钟总阀。
+// `--print-logs --log-level ERROR` 是 opencode 自己文档里的 flag，把 ERROR 行镜像到
+// stderr（实测 7 秒），于是既有的 classifyFatalStderr 立刻停机。
+test("OpenCode 派发把 ERROR 日志镜像到 stderr（否则额度错误无人可判）", () => {
+  const inv = resolveWorkerInvocation({ id: "opencode", args: (p) => ["run", p] }, { kind: "evaluate", prompt: "PROMPT" });
+  assert.deepEqual(inv.args, ["run", "PROMPT", "--print-logs", "--log-level", "ERROR"]);
+  // stdout 契约不变：仍是纯文本通道，不能被误标成结构化引擎。
+  assert.equal(inv.structured, false);
+});
+
+test("日志镜像只作用于 opencode：其它引擎的 argv 一个字节都不多", () => {
+  const claude = resolveWorkerInvocation(
+    { id: "claude", args: (p) => ["-p", p], streamArgsFor: ({ prompt }) => ["-p", prompt], parseEvent: () => null },
+    { kind: "evaluate", prompt: "PROMPT" },
+  );
+  assert.deepEqual(claude.args, ["-p", "PROMPT"]);
+  const unknown = resolveWorkerInvocation({ id: "gemini", args: (p) => ["-p", p] }, { kind: "evaluate", prompt: "P" });
+  assert.deepEqual(unknown.args, ["-p", "P"]);
+});
+
+test("单任务 /api/run：静默看门狗（此前只有 30 分钟总阀，挂死一次就等满）", () => {
+  assert.match(RUN, /RUN_SILENCE_MS/);
+  assert.match(RUN, /const armSilence = \(\) => \{/);
+  assert.match(RUN, /clearTimeout\(silenceTimer\)/);
+  // stdout 与 stderr 的每个 chunk 都要喂它，否则「有一点输出」就永远不算挂死。
+  assert.equal((RUN.match(/armSilence\(\);/g) ?? []).length >= 3, true);
 });
