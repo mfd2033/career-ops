@@ -54,6 +54,29 @@ export function sessionResumeArgv(cliId, binPath, sessionId) {
 }
 
 /**
+ * 「查看 CLI 会话」按钮的自守卫：什么时候给出这个入口。
+ *
+ * 纯逻辑放这里而不是组件里，好让 node --test 直接覆盖（组件里只剩委托）。
+ *
+ * - 排队中永不给：进程都没起，没有会话可恢复。
+ * - 有 sessionId（claude/qoder-cn 的 init 帧、终态 opencode 的反查结果）→ 给。
+ * - 运行中的 opencode 卡还没有 sessionId（它要等终态才 `session list` 反查），
+ *   但派发时已埋 `--title career-ops-<runId>`，服务端可凭 runId 现场解析，
+ *   所以只要有 runId 也给。其余引擎运行中缺 id 一律不给：那是 init 帧还没到，
+ *   给了也点不开。
+ *
+ * @param {{status?: string, cliId?: string, sessionId?: string, runId?: string}} job
+ * @returns {boolean}
+ */
+export function canViewSession(job) {
+  const status = job?.status;
+  if (status !== "running" && status !== "done" && status !== "error") return false;
+  if (!canResumeSession(job.cliId)) return false;
+  if (typeof job.sessionId === "string" && job.sessionId) return true;
+  return status === "running" && job.cliId === "opencode" && isValidSessionId(job.runId);
+}
+
+/**
  * 从 claude 系 stream-json 的 `system/init` 帧提取 session_id。
  * 非 JSON、其他帧、缺字段、格式不合法一律 null——调用方拿 null 就当「无会话」，
  * 不重试、不猜（同一 run 只有一帧 init，提取不到就是引擎没给）。

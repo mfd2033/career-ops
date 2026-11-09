@@ -2,7 +2,13 @@ import { spawn } from "node:child_process";
 import { NextResponse } from "next/server";
 import { careerOpsRoot } from "@/lib/career-ops";
 import { resolveCli } from "@/lib/clis";
-import { canResumeSession, isValidSessionId, sessionResumeArgv } from "@/lib/cli-session.mjs";
+import {
+  canResumeSession,
+  isValidSessionId,
+  sessionResumeArgv,
+  findOpencodeSessionByTitle,
+  opencodeRunTitle,
+} from "@/lib/cli-session.mjs";
 
 export const runtime = "nodejs";
 
@@ -16,10 +22,15 @@ export const runtime = "nodejs";
 // 一律 400（argv 逐元素传 spawn 不经 shell，本无注入面；白名单是终端包装器
 // 二次解析那道防线的第二把锁）。
 //
+// 运行中的 opencode 卡片没有落盘的 sessionId（它要等终态才 `session list`），
+// 前端退而带 runId 来：派发时已埋 `--title career-ops-<runId>`，这里现场按标题
+// 精确反查。查不到（会话还没建出来 / 老 run 没有标题）回 404，前端据此给「稍后
+// 再试」的短暂回执——不当作错误弹窗。
+//
 // cwd 必须是仓库根（careerOpsRoot）：claude/qoder 的会话按项目目录存档，与
 // headless run（/api/run 的 spawn cwd）同一目录才能恢复到同一份会话。
 export async function POST(req: Request) {
-  let body: { sessionId?: unknown; cliId?: unknown };
+  let body: { sessionId?: unknown; cliId?: unknown; runId?: unknown };
   try {
     body = await req.json();
   } catch {
@@ -27,10 +38,14 @@ export async function POST(req: Request) {
   }
   const cliId = typeof body.cliId === "string" ? body.cliId : "";
   const sessionId = typeof body.sessionId === "string" ? body.sessionId : "";
+  const runId = typeof body.runId === "string" ? body.runId : "";
   if (!canResumeSession(cliId)) {
     return NextResponse.json({ error: `Engine does not support session resume: ${cliId || "(none)"}` }, { status: 400 });
   }
-  if (!isValidSessionId(sessionId)) {
+  // 只有 opencode 能按 runId 现场解析（标题埋在派发 argv 里）；其他引擎没有
+  // runId 这条路，缺 id 就是缺 id。
+  const canResolveByRunId = cliId === "opencode" && isValidSessionId(runId);
+  if (!isValidSessionId(sessionId) && !canResolveByRunId) {
     return NextResponse.json({ error: "Invalid session id" }, { status: 400 });
   }
   if (process.platform !== "win32") {
@@ -42,7 +57,20 @@ export async function POST(req: Request) {
   if (!resolved) {
     return NextResponse.json({ error: `Engine not installed: ${cliId}` }, { status: 409 });
   }
-  const argv = sessionResumeArgv(cliId, resolved.binPath, sessionId);
+  let targetSessionId = sessionId;
+  if (!isValidSessionId(targetSessionId)) {
+    const found = await findOpencodeSessionByTitle({
+      binPath: resolved.binPath,
+      title: opencodeRunTitle(runId),
+    });
+    if (!found) {
+      // 会话尚未创建（运行中头几秒）或老 run 没埋标题：让前端显示「稍后再试」，
+      // 而不是当成 400 这类参数错误。
+      return NextResponse.json({ error: "Session not created yet", code: "session-not-ready" }, { status: 404 });
+    }
+    targetSessionId = found;
+  }
+  const argv = sessionResumeArgv(cliId, resolved.binPath, targetSessionId);
   if (!argv) {
     // resolveCli 与 argv 构造之间不可能分叉（同一清单），落到这里说明清单漂移
     return NextResponse.json({ error: "Could not build resume command" }, { status: 500 });

@@ -11,6 +11,7 @@ import { isValidSessionId, OPENCODE_TITLE_PREFIX } from "./cli-session-shared.mj
 
 export {
   SESSION_RESUME_ARGS,
+  canViewSession,
   canResumeSession,
   isValidSessionId,
   sessionResumeArgv,

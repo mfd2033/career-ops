@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   SESSION_RESUME_ARGS,
+  canViewSession,
   canResumeSession,
   isValidSessionId,
   sessionResumeArgv,
@@ -24,6 +25,44 @@ describe("canResumeSession", () => {
     assert.equal(canResumeSession(""), false);
     // Object.hasOwn 防原型链：constructor 这类键不算支持
     assert.equal(canResumeSession("constructor"), false);
+  });
+});
+
+describe("canViewSession（按钮自守卫）", () => {
+  const UUID = "a1b2c3d4-e5f6-7890-abcd-ef1234567890";
+  const RUN_ID = "5b0f1e2a-9c3d-4e5f-8a1b-2c3d4e5f6a7b";
+
+  it("终态 + 有 sessionId → 显示（原有行为不变）", () => {
+    for (const status of ["done", "error"]) {
+      assert.equal(canViewSession({ status, cliId: "claude", sessionId: UUID }), true);
+      assert.equal(canViewSession({ status, cliId: "opencode", sessionId: "ses_e405af519ffeZanSoMNrAmtzc4" }), true);
+    }
+  });
+  it("运行中 + 已有 sessionId（claude/qoder-cn 的 init 帧）→ 显示", () => {
+    assert.equal(canViewSession({ status: "running", cliId: "claude", sessionId: UUID }), true);
+    assert.equal(canViewSession({ status: "running", cliId: "qoder-cn", sessionId: UUID }), true);
+  });
+  it("运行中 opencode 无 sessionId 但有合法 runId → 显示（服务端按标题反查）", () => {
+    assert.equal(canViewSession({ status: "running", cliId: "opencode", runId: RUN_ID }), true);
+  });
+  it("运行中 opencode 缺 runId / runId 非法 → 不显示", () => {
+    assert.equal(canViewSession({ status: "running", cliId: "opencode" }), false);
+    assert.equal(canViewSession({ status: "running", cliId: "opencode", runId: "short" }), false);
+    assert.equal(canViewSession({ status: "running", cliId: "opencode", runId: "abc;rm -rf" }), false);
+  });
+  it("运行中但其他引擎缺 sessionId → 不显示（init 帧还没到，给了也点不开）", () => {
+    assert.equal(canViewSession({ status: "running", cliId: "claude", runId: RUN_ID }), false);
+    assert.equal(canViewSession({ status: "running", cliId: "qoder-cn", runId: RUN_ID }), false);
+  });
+  it("排队中永不给：进程都没起", () => {
+    assert.equal(canViewSession({ status: "queued", cliId: "claude", sessionId: UUID }), false);
+    assert.equal(canViewSession({ status: "queued", cliId: "opencode", runId: RUN_ID }), false);
+  });
+  it("引擎不支持 / 状态缺失 → 不显示", () => {
+    assert.equal(canViewSession({ status: "done", cliId: "codex", sessionId: UUID }), false);
+    assert.equal(canViewSession({ status: undefined, cliId: "claude", sessionId: UUID }), false);
+    assert.equal(canViewSession({}), false);
+    assert.equal(canViewSession(undefined), false);
   });
 });
 

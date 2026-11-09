@@ -76,6 +76,8 @@ export const en: Dict = {
   "jobs.viewSession": "View CLI session",
   "jobs.viewSessionHint":
     "Opens a terminal resuming this run's CLI session. The interactive session is NOT bound by the headless run's audited permission flags.",
+  // 运行中的 opencode 卡可能还没建出会话：给一句“稍后再试”，不是错误。
+  "jobs.viewSessionNotReady": "Session not created yet — try again in a moment",
   "jobs.phaseRunning": "Running",
   "jobs.phaseFinalizing": "Finalizing",
   "jobs.interrupted": "Interrupted",
@@ -193,6 +195,8 @@ export const zh: Dict = {
   // 「查看 CLI 会话」：与 en 一一对应；权限差异照说。
   "jobs.viewSession": "查看 CLI 会话",
   "jobs.viewSessionHint": "在终端窗口恢复本次运行的 CLI 会话。交互式会话不受无头运行的审计权限约束。",
+  // 运行中的 opencode 卡可能还没建出会话：给一句“稍后再试”，不是错误。
+  "jobs.viewSessionNotReady": "会话尚未创建，稍后再试",
   "jobs.phaseRunning": "运行中",
   "jobs.phaseFinalizing": "收尾中",
   "jobs.interrupted": "已中断",
