@@ -79,11 +79,7 @@ export function FollowUpCard({ followup, onLogged }: { followup: CadenceEntry; o
           onClick={log}
           title={state === "error" && errorMsg ? errorMsg : t("home.markFollowedUp")}
           aria-label={state === "error" && errorMsg ? errorMsg : t("home.markFollowedUp")}
-          className={cn(
-            iconCls,
-            "bg-surface-hover hover:bg-brand-soft",
-            state === "error" && "text-red-500 hover:text-red-400",
-          )}
+          className={cn(iconCls, state === "error" && "text-red-500 hover:text-red-400")}
         >
           {state === "logging" ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}
         </button>
