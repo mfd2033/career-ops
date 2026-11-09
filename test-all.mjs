@@ -8476,6 +8476,49 @@ try {
     } else {
       fail(`resolveAppliedDate malformed-case got ${JSON.stringify(malformed)}`);
     }
+
+    // #CO-bug135: the real submission date is often only in data/status-log.tsv
+    // (SKIP → Applied via set-status/web), while the tracker's Date column keeps
+    // the evaluation date and the notes carry no "applied" marker. The cadence
+    // must consult the ledger before degrading to the evaluation-date proxy, or
+    // follow-up drafts quote the wrong apply date as fact.
+    {
+      const r = cadence.resolveAppliedDate(
+        { num: 906, date: '2026-09-07', notes: '学历不满足（大专vs本科）；PMP+16年经验可弥补' },
+        'num\tdate\tfrom\tto\tsource\tnote\n906\t2026-11-06\tSKIP\tApplied\tweb\t'
+      );
+      if (r.appliedDate === '2026-11-06' && r.appDateSource === 'status-log') {
+        pass('resolveAppliedDate reads the apply date from the status log when notes carry none');
+      } else {
+        fail(`resolveAppliedDate status-log case got ${JSON.stringify(r)}`);
+      }
+    }
+    {
+      // Notes stay the most specific statement of intent: a recorded apply note
+      // wins over the ledger (first-wins preserved).
+      const r = cadence.resolveAppliedDate(
+        { num: 907, date: '2026-06-01', notes: 'Applied 2026-06-09 via Personio' },
+        'num\tdate\tfrom\tto\tsource\tnote\n907\t2026-06-12\tSKIP\tApplied\tweb\t'
+      );
+      if (r.appliedDate === '2026-06-09' && r.appDateSource === 'notes') {
+        pass('resolveAppliedDate keeps notes precedence over the status log');
+      } else {
+        fail(`resolveAppliedDate notes-vs-log precedence got ${JSON.stringify(r)}`);
+      }
+    }
+    {
+      // An impossible ledger date must not be adopted — parseDate() would reject
+      // it and silently drop the whole row. Degrade to the labelled fallback.
+      const r = cadence.resolveAppliedDate(
+        { num: 908, date: '2026-06-01', notes: '' },
+        'num\tdate\tfrom\tto\tsource\tnote\n908\t2026-06-31\tSKIP\tApplied\tweb\t'
+      );
+      if (r.appliedDate === '2026-06-01' && r.appDateSource === 'evaluation-date-fallback') {
+        pass('resolveAppliedDate ignores an impossible status-log date');
+      } else {
+        fail(`resolveAppliedDate bad-ledger-date case got ${JSON.stringify(r)}`);
+      }
+    }
   }
 
   // analyze() output contract: every emitted entry must carry appDateSource, and
@@ -8508,6 +8551,9 @@ try {
       // ...and followup-cadence resolves report links through the shared
       // tracker-links.mjs scanner, so the fixture carries that import too.
       copyFileSync(join(ROOT, 'tracker-links.mjs'), join(e2eTmp, 'tracker-links.mjs'));
+      // ...and (#CO-bug135) the apply date now falls back to the status-log
+      // ledger before the evaluation date, so the fixture carries that parser.
+      copyFileSync(join(ROOT, 'status-log.mjs'), join(e2eTmp, 'status-log.mjs'));
       mkdirSync(join(e2eTmp, 'templates'), { recursive: true });
       copyFileSync(join(ROOT, 'templates', 'states.yml'), join(e2eTmp, 'templates', 'states.yml'));
       // 'junction' on Windows, not 'dir': a directory symlink needs
@@ -8531,6 +8577,15 @@ try {
         '| 902 | 2026-06-02 | EstimateCo | Head of AI | 4.4/5 | Applied | ✅ | [902](reports/902-estimateco-2026-06-02.md) | Applied ~2026-06-10 (date estimated) |',
         '| 903 | 2026-06-03 | FallbackCo | Head of AI | 4.3/5 | Applied | ✅ | [903](reports/903-fallbackco-2026-06-03.md) | On-archetype fit; no apply date recorded |',
         '| 904 | 2026-06-04 | TypoCo | Head of AI | 4.2/5 | Applied | ✅ | [904](reports/904-typoco-2026-06-04.md) | Applied 2026-06-091 typo in the tracker |',
+        '| 905 | 2026-06-05 | LedgerCo | Head of AI | 4.1/5 | Applied | ✅ | [905](reports/905-ledgerco-2026-06-05.md) | PMP matches; applied a week after evaluation |',
+        '',
+      ].join('\n'), 'utf-8');
+      // The ledger is the only place 905's real submission date lives: its Date
+      // column is the evaluation day and its notes carry no "applied" marker —
+      // the exact shape that produced the #CO-bug135 wrong-date draft.
+      writeFileSync(join(e2eTmp, 'data', 'status-log.tsv'), [
+        'num\tdate\tfrom\tto\tsource\tnote',
+        '905\t2026-06-12\tSKIP\tApplied\tweb\t',
         '',
       ].join('\n'), 'utf-8');
 
@@ -8548,6 +8603,7 @@ try {
         [902, '2026-06-10', 'notes', 'an estimated "Applied ~YYYY-MM-DD" note'],
         [903, '2026-06-03', 'evaluation-date-fallback', 'notes with no apply date'],
         [904, '2026-06-04', 'evaluation-date-fallback', 'a malformed apply date in the notes'],
+        [905, '2026-06-12', 'status-log', 'a SKIP→Applied transition only the status log records'],
       ];
       for (const [num, expectedDate, expectedSource, label] of e2eCases) {
         const entry = byNum.get(num);
@@ -8558,8 +8614,8 @@ try {
         }
       }
 
-      const missingSource = (e2e.entries || []).filter(entry => !['notes', 'evaluation-date-fallback'].includes(entry.appDateSource));
-      if ((e2e.entries || []).length === 4 && missingSource.length === 0) {
+      const missingSource = (e2e.entries || []).filter(entry => !['notes', 'status-log', 'evaluation-date-fallback'].includes(entry.appDateSource));
+      if ((e2e.entries || []).length === 5 && missingSource.length === 0) {
         pass('analyze() stamps every emitted entry with a known appDateSource');
       } else {
         fail(`analyze() emitted ${(e2e.entries || []).length} entries, ${missingSource.length} without a known appDateSource`);

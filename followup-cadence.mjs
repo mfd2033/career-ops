@@ -18,6 +18,7 @@ import * as yaml from 'js-yaml';
 import { loadCanonicalStates, foldStatusInput } from './tracker-utils.mjs';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import { extractReportLinkTargets } from './tracker-links.mjs';
+import { submittedDatesFromStatusLog } from './status-log.mjs';
 import { localToday } from './lib/local-today.mjs';
 import { flagValue, validateFlags } from './lib/cli-flags.mjs';
 
@@ -26,6 +27,7 @@ const APPS_FILE = existsSync(join(CAREER_OPS, 'data/applications.md'))
   ? join(CAREER_OPS, 'data/applications.md')
   : join(CAREER_OPS, 'applications.md');
 const FOLLOWUPS_FILE = join(CAREER_OPS, 'data/follow-ups.md');
+const STATUS_LOG_FILE = join(CAREER_OPS, 'data/status-log.tsv');
 const PROFILE_FILE = process.env.CAREER_OPS_PROFILE || join(CAREER_OPS, 'config/profile.yml');
 
 
@@ -372,15 +374,28 @@ export function isRealCalendarDate(iso) {
 // cannot otherwise tell a real application date from the evaluation-date proxy,
 // so an inferred age reads exactly like a measured one — and acting on that
 // silently-wrong number is what pushes a live application into "cold".
-export function resolveAppliedDate(app) {
+//
+// Resolution order: notes ("Applied YYYY-MM-DD", the user's own statement) →
+// status-log ledger (the earliest recorded transition into a submitted state —
+// set-status/web write the real event date there, even when the tracker's Date
+// column still holds the evaluation day, #CO-bug135) → labelled evaluation-date
+// fallback. An impossible ledger date is ignored rather than adopted, since
+// parseDate() would reject it downstream and drop the whole row.
+const SUBMITTED_TOKENS = ['APPLIED', 'RESPONDED', 'INTERVIEW', 'OFFER', 'HIRED', 'REJECTED'];
+export function resolveAppliedDate(app, statusLogText = '') {
   // requireValidCalendarDate: an impossible date in the notes must degrade to
   // the labelled fallback rather than be reported as a measured date. One bad
   // row must not fail the whole report, so this skips rather than throws —
   // unlike followup-seed.mjs, which refuses to pin a follow-up off a bad date.
   const fromNotes = parseAppliedDate(app?.notes, { requireValidCalendarDate: true });
-  return fromNotes
-    ? { appliedDate: fromNotes, appDateSource: 'notes' }
-    : { appliedDate: app?.date ?? null, appDateSource: 'evaluation-date-fallback' };
+  if (fromNotes) return { appliedDate: fromNotes, appDateSource: 'notes' };
+  if (statusLogText) {
+    const fromLedger = submittedDatesFromStatusLog(statusLogText, SUBMITTED_TOKENS).get(app?.num);
+    if (fromLedger && isRealCalendarDate(fromLedger)) {
+      return { appliedDate: fromLedger, appDateSource: 'status-log' };
+    }
+  }
+  return { appliedDate: app?.date ?? null, appDateSource: 'evaluation-date-fallback' };
 }
 
 export function daysBetween(d1, d2) {
@@ -764,7 +779,7 @@ export function computeNextFollowupDate(status, appDate, lastFollowupDate, follo
 // requires followupCount >= applied_max_followups) simply never triggers —
 // no error, no guessing, matching the same "absent optional file = pass
 // through" convention used elsewhere in this project.
-export function analyzeFromContent(trackerContent, followupsContent = '') {
+export function analyzeFromContent(trackerContent, followupsContent = '', statusLogContent = '') {
   const apps = parseTrackerContent(trackerContent);
   if (apps.length === 0) {
     return { error: 'No applications found in tracker.' };
@@ -788,10 +803,11 @@ export function analyzeFromContent(trackerContent, followupsContent = '') {
     const normalized = normalizeStatus(app.status);
     if (!ACTIONABLE_STATUSES.includes(normalized)) continue;
 
-    // Prefer the "Applied YYYY-MM-DD" date from notes; fall back to the column.
-    // appDateSource travels with the entry so a consumer can tell a measured
-    // age from one inferred off the evaluation date.
-    const { appliedDate, appDateSource } = resolveAppliedDate(app);
+    // Prefer the "Applied YYYY-MM-DD" date from notes; then the status-log
+    // ledger's real submission event; fall back to the column. appDateSource
+    // travels with the entry so a consumer can tell a measured age from one
+    // inferred off the evaluation date.
+    const { appliedDate, appDateSource } = resolveAppliedDate(app, statusLogContent);
     const appDate = parseDate(appliedDate);
     if (!appDate) continue;
 
@@ -921,7 +937,8 @@ export function analyzeFromContent(trackerContent, followupsContent = '') {
 function analyze() {
   const trackerContent = existsSync(APPS_FILE) ? readFileSync(APPS_FILE, 'utf-8') : '';
   const followupsContent = existsSync(FOLLOWUPS_FILE) ? readFileSync(FOLLOWUPS_FILE, 'utf-8') : '';
-  return analyzeFromContent(trackerContent, followupsContent);
+  const statusLogContent = existsSync(STATUS_LOG_FILE) ? readFileSync(STATUS_LOG_FILE, 'utf-8') : '';
+  return analyzeFromContent(trackerContent, followupsContent, statusLogContent);
 }
 
 // --- Summary mode ---
