@@ -8,6 +8,7 @@ import { X, History } from "lucide-react";
 import { useJobs } from "@/components/jobs/job-store";
 import { WorkerCard, pillTone, TONE } from "@/components/jobs/worker-card";
 import { RetryJobButton } from "@/components/jobs/retry-job-button";
+import { CliSessionButton } from "@/components/jobs/cli-session-button";
 import { pickTrayJobs } from "@/lib/tray-jobs.mjs";
 import { useI18n } from "@/lib/i18n/context";
 import { cn } from "@/lib/cn";
@@ -123,6 +124,9 @@ export function WorkerPills({ fitToHeight = false }: { fitToHeight?: boolean }) 
               // 故这里无条件挂上，只在可重试时占位。onClick 内部已 preventDefault
               // 阻止外层 Link 跳详情。
               <span className="flex items-center gap-0.5">
+                {/* 「查看 CLI 会话」：hover 图标排与重试同排；组件自守卫渲染 null，
+                    onClick 内部已 preventDefault 阻止外层 Link 跳详情。 */}
+                <CliSessionButton job={j} className="opacity-0 transition-opacity group-hover:opacity-100" />
                 <RetryJobButton job={j} className="opacity-0 transition-opacity group-hover:opacity-100" />
                 <button
                   onClick={(e) => {

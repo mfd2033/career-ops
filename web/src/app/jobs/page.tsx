@@ -16,6 +16,7 @@ import { batchSummary } from "@/lib/batch-summary.mjs";
 import { mergeBatchItems, shouldPollBatch } from "@/lib/batch-live.mjs";
 import { BatchItemList } from "@/components/jobs/batch-item-list";
 import { RetryJobButton } from "@/components/jobs/retry-job-button";
+import { CliSessionButton } from "@/components/jobs/cli-session-button";
 import type { Job, JobItem } from "@/components/jobs/job-store";
 
 const TONE_CHIP = {
@@ -213,6 +214,10 @@ function JobsRow({ job: j }: { job: Job }) {
         )}
         <span className="hidden shrink-0 text-xs capitalize text-faint sm:block">{t(STATUS_LABEL[j.status] ?? j.status)}</span>
       </Link>
+      {/* 「查看 CLI 会话」与重试同为 Link 的行外兄弟节点（同一不劫持行点击的
+          模式）；组件自守卫（canViewSession：终态 + 有会话 id + 引擎支持恢复），
+          不通过时渲染 null，无数据不占位。 */}
+      <CliSessionButton job={j} className="shrink-0 self-center" />
       {/* ADR-0061 决议 7：重试做 Link 的兄弟节点（沿用展开 chevron 的行外模式），
           不劫持行点击跳详情；canRetryJob 不通过时组件自身渲染 null。 */}
       <RetryJobButton job={j} className="mr-2 shrink-0 self-center" />

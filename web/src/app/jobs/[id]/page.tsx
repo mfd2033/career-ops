@@ -21,6 +21,7 @@ import { fmtDuration } from "@/lib/format";
 import { BatchItemList } from "@/components/jobs/batch-item-list";
 import { StepTimeline } from "@/components/jobs/step-timeline";
 import { RetryJobButton } from "@/components/jobs/retry-job-button";
+import { CliSessionButton, canViewSession } from "@/components/jobs/cli-session-button";
 import { canRetryJob } from "@/lib/job-retry.mjs";
 
 type RunLedgerEntry = {
@@ -43,6 +44,8 @@ type RunLedgerEntry = {
   // ADR-0047：单任务终结时折叠落盘的步骤流（工具/状态行）；旧行/批量行无此
   // 字段，按「无步骤流」处理，不回填。
   steps?: { kind: "tool" | "status"; label: string; ts?: number }[];
+  // 「查看 CLI 会话」：recordEnd 落盘的 CLI 会话 id；旧行无此字段 = 按钮不渲染。
+  sessionId?: string;
   // ADR-0046：批量子任务行的归属与报告目标。parentId 存在 = 这是一条子行，
   // 列表隐藏、详情页可解析；reportNum（evaluate）/trackerN（checkup）二选一。
   parentId?: string;
@@ -207,13 +210,18 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
             )}
             {/* ADR-0061 修订 1：ledger-only 单次 error 卡也可重试——本浏览器无本地卡，
                 点重试会种子一张全新本地卡重发。批量子任务行（isChild）语义特殊，不提供。
-                组件按 canRetryJob 自守卫（done / 无 kind+input 一律渲染 null）。 */}
-            {!isChild && e.status === "error" && (
-              <div className="mt-3">
-                <RetryJobButton
-                  job={{ id: e.id, title: display.title, subtitle: e.input, page: display.page, input: e.input, kind: e.kind, status: e.status, steps: [], text: "", startedAt: e.startedAt }}
-                  withLabel
-                />
+                组件按 canRetryJob 自守卫（done / 无 kind+input 一律渲染 null）。
+                「查看 CLI 会话」同一行操作区，凭 canViewSession 自守卫（终态 + 台账带
+                sessionId + 引擎支持恢复）。 */}
+            {!isChild && (
+              <div className="mt-3 flex flex-wrap items-center gap-2.5">
+                {e.status === "error" && (
+                  <RetryJobButton
+                    job={{ id: e.id, title: display.title, subtitle: e.input, page: display.page, input: e.input, kind: e.kind, status: e.status, steps: [], text: "", startedAt: e.startedAt }}
+                    withLabel
+                  />
+                )}
+                <CliSessionButton job={{ sessionId: e.sessionId, cliId: e.cliId, status: e.status }} withLabel />
               </div>
             )}
             {/* ADR-0045：UI 外发起的批量终结后，ledger-only 视图不再只有状态+
@@ -374,12 +382,14 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
           )}
           {/* ADR-0061 决议 3/7：attempt 徽章（第 2 次起显示，done/error 均可）+
               手动重试按钮——组件按 canRetryJob 自守卫，批量先弹确认（决议 6）；
-              ledger-only 视图在上方提前 return，到不了这里。 */}
-          {((job.attempt != null && job.attempt > 1) || canRetryJob(job)) && (
+              ledger-only 视图在上方提前 return，到不了这里。
+              「查看 CLI 会话」同一行操作区，凭 canViewSession 自守卫。 */}
+          {((job.attempt != null && job.attempt > 1) || canRetryJob(job) || canViewSession(job)) && (
             <div className="mt-3 flex items-center gap-2.5">
               {job.attempt != null && job.attempt > 1 && (
                 <span className="text-xs text-faint">{t("jobs.retryAttempt", { n: job.attempt })}</span>
               )}
+              <CliSessionButton job={job} withLabel />
               <RetryJobButton job={job} withLabel />
             </div>
           )}

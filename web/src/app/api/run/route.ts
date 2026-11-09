@@ -27,8 +27,11 @@ import { deriveRunReportNum, buildReconcileArgs } from "@/lib/run-reconcile.mjs"
 import { acquireTrackerWrite, releaseTrackerWrite } from "@/lib/core/run-registry";
 import { acquire, release, __setSizeSource, DEFAULT_POOL_SIZE } from "@/lib/core/concurrency-pool";
 import { registerRun, setCancelHandler, publish, completeRun, getRunBuffer } from "@/lib/core/run-events";
-import { appendRunRecord } from "@/lib/run-ledger.mjs";
+import { appendRunRecord, updateRunRecord } from "@/lib/run-ledger.mjs";
 import { buildRunLedgerSteps } from "@/lib/run-steps.mjs";
+// 「查看 CLI 会话」（工作器卡片）：init 帧 session_id 提取（claude/qoder-cn）与
+// opencode 的 --title 反查。
+import { extractClaudeSessionId, findOpencodeSessionByTitle, opencodeRunTitle, canResumeSession } from "@/lib/cli-session.mjs";
 
 // Feed the global concurrency pool the live configured size (app-config), re-read
 // on every dispatch so a config-page edit takes effect without restart.
@@ -164,6 +167,11 @@ export async function POST(req: Request) {
     ? `公司体检：${checkupTarget.company}`
     : `${kind} ${input}`;
   let endRecorded = false;
+  // 「查看 CLI 会话」：本次 run 的 CLI 会话 id。claude 系（claude/qoder-cn）在
+  // runPipeline 的 init 帧解析时写入；opencode 在终态后凭 --title 异步反查写入。
+  // holder 跨函数边界：runPipeline 是独立函数（写），recordEnd 读它落台账。
+  // 缺失 = 引擎没给，卡片按钮不渲染。
+  const sessionRef: { current?: string } = {};
   // ADR-0089：报告号由 runPipeline 捕获或推得后作为第三参传入——pdf / checkup
   // 的 input 就是号本身；evaluate 的号只有收尾 reconcile 推得出（见
   // finishAfterReconcile），推不出就留空。台账行显式携带它，读取端（ledger-only
@@ -193,6 +201,9 @@ export async function POST(req: Request) {
         // 没这两个字段，读取端按「未记录」处理，不回填、不猜测。
         cliId,
         model: knownModel || undefined,
+        // 「查看 CLI 会话」：本次 run 的 CLI 会话 id。老记录无此字段，读取端按
+        // 「无会话」处理——按钮不渲染，与「无数据不占位」同口径。
+        sessionId: sessionRef.current,
         // ADR-0089：报告号（捕获值优先，否则收尾推得）；凑不出即不占位。
         reportNum: capturedNum ?? reconciledNum,
         // 800（原 300）：门禁那一句 checkup 文案就 175 字，300 会把 ADR-0034 的证据
@@ -204,6 +215,19 @@ export async function POST(req: Request) {
         ...blacklistGateLedgerFields(blacklistGate),
         steps: steps.length ? steps : undefined,
       });
+      // opencode：stdout 无会话 id，终态后凭派发时埋的 --title 反查，原地补进
+      // 台账行（绝不追加第二行同 id 记录——读取端按首行权威处理，重复行会让
+      // ledger-only 卡重复出现）并补发一次 session 事件。失败（未登录/无该子
+      // 命令/超时）按无会话处理：台账行没有 sessionId，按钮不显示，不重试。
+      if (cliId === "opencode") {
+        void findOpencodeSessionByTitle({ binPath, title: opencodeRunTitle(runId) })
+          .then((found) => {
+            if (!found) return;
+            publish(runId, { type: "session", sessionId: found });
+            updateRunRecord(careerOpsRoot(), runId, { sessionId: found });
+          })
+          .catch(() => {});
+      }
     } catch (e) {
       console.error("[run-ledger] append failed:", e instanceof Error ? e.message : e);
     }
@@ -234,6 +258,7 @@ export async function POST(req: Request) {
         spec,
         binPath,
         recordEnd,
+        sessionRef,
         // ADR-0051：内联 JD/雇主名（扩展从已登录页 DOM 提取）随任务进 prompt。
         jdText,
         employer,
@@ -290,6 +315,7 @@ async function runPipeline({
   spec,
   binPath,
   recordEnd,
+  sessionRef,
   checkupCompany,
   jdText,
   employer,
@@ -301,6 +327,10 @@ async function runPipeline({
   model?: string;
   spec: import("@/lib/clis").CliSpec;
   binPath: string;
+  /** 「查看 CLI 会话」的会话 id holder：init 帧解析时写入（claude/qoder-cn），
+   *  recordEnd（POST 作用域）读它落台账。opencode 的写入在 recordEnd 自身的
+   *  异步反查里，不经过这里。 */
+  sessionRef: { current?: string };
   /** ADR-0035: the checkup's resolved target company (absent when the dispatch
    *  bypassed the report-page pre-flight — the prompt then self-resolves). */
   checkupCompany?: string;
@@ -382,6 +412,19 @@ async function runPipeline({
   // model (or a CLI with no model flag), withModelFlag returns the args untouched
   // and the CLI keeps its own default.
   const args = withModelFlag(baseArgs, spec.model, model);
+  // 会话持久化（「查看 CLI 会话」的前置）：headless `-p` 运行的会话默认不落盘
+  // （实测 2026-11-09：无 --session-id 的 run 在 ~/.claude/projects 无 jsonl，
+  // --resume 报 No conversation found）。显式指定服务端生成的 uuid 后会话落盘、
+  // 终态后的 init 帧 session_id 与之一致，交互终端凭它 --resume / -r 恢复。
+  // opencode 走另一条路：stdout 纯文本（无 init 帧），埋 `--title career-ops-<runId>`
+  // 供终态后 `session list` 反查——只改 argv，不碰 stdout 契约；标题也落在
+  // opencode 自己的会话列表里，用户在 TUI 里同样可辨认。
+  let dispatchArgs = args;
+  if (cliId === "opencode") {
+    dispatchArgs = [...args, "--title", opencodeRunTitle(runId)];
+  } else if (canResumeSession(cliId)) {
+    dispatchArgs = [...args, "--session-id", randomUUID()];
+  }
 
   // For write-needing kinds, snapshot reports/ so we can verify the worker
   // actually persisted (non-Claude CLIs lack Write auth and silently no-op).
@@ -666,6 +709,13 @@ async function runPipeline({
     // it carries.
     const processParsedLine = (line: string) => {
       if (!spec.parseEvent) return;
+      // 会话 id 先于事件解析：init 帧每 run 只有一帧，提取到就定值并即时广播，
+      // 让本页签的卡片在终态前就带上 sessionId（终态才显示按钮，此处只是备好）。
+      const sid = extractClaudeSessionId(line);
+      if (sid && sessionRef.current !== sid) {
+        sessionRef.current = sid;
+        publish(runId, { type: "session", sessionId: sid });
+      }
       const ev = spec.parseEvent(line);
       if (ev?.text) {
         emittedText = true;
@@ -734,7 +784,7 @@ async function runPipeline({
       // Codex's `exec` blocks reading stdin, hangs until the kill timer, then
       // reports a generic auth-flavoured error (#1973 fixed it via an inline
       // stdio:["ignore",…], generalized into spawnHeadlessCli).
-      child = spawnHeadlessCli(binPath, args, { cwd: careerOpsRoot(), env: process.env });
+      child = spawnHeadlessCli(binPath, dispatchArgs, { cwd: careerOpsRoot(), env: process.env });
       // 子进程真的不在了的信号：'close'（stdio 全关，不可能再写文件——替换路径等的
       // 就是它）与 'error'（spawn 失败，进程从未存在）。体检把它交给在跑登记表当等死
       // 信号（ADR-0033 决议 6）；childClosed 同时供 clearCheckupLiveOnce 区分

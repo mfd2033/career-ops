@@ -71,6 +71,11 @@ export const en: Dict = {
   "jobs.runEngineHint":
     "Requested when this worker was dispatched — not a claim about which model actually ran.",
   "jobs.viewReport": "View report",
+  // 「查看 CLI 会话」：悬停提示必须带上权限差异——交互式会话是全权限的，不受
+  // 无头运行 per-kind 审计权限约束（clis.ts 头部的权限红线）。
+  "jobs.viewSession": "View CLI session",
+  "jobs.viewSessionHint":
+    "Opens a terminal resuming this run's CLI session. The interactive session is NOT bound by the headless run's audited permission flags.",
   "jobs.phaseRunning": "Running",
   "jobs.phaseFinalizing": "Finalizing",
   "jobs.interrupted": "Interrupted",
@@ -185,6 +190,9 @@ export const zh: Dict = {
   "jobs.runEngineNotRecorded": "运行引擎：未记录（早于该功能）",
   "jobs.runEngineHint": "派发该工作器时请求的值 —— 不代表实际执行所用的模型。",
   "jobs.viewReport": "查看报告",
+  // 「查看 CLI 会话」：与 en 一一对应；权限差异照说。
+  "jobs.viewSession": "查看 CLI 会话",
+  "jobs.viewSessionHint": "在终端窗口恢复本次运行的 CLI 会话。交互式会话不受无头运行的审计权限约束。",
   "jobs.phaseRunning": "运行中",
   "jobs.phaseFinalizing": "收尾中",
   "jobs.interrupted": "已中断",

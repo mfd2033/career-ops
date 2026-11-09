@@ -109,6 +109,10 @@ export type Job = {
   retryKept?: string[];
   // ADR-0061 任务重试：尝试次数（缺省 = 1）；重试时 +1，>1 时列表/详情展示。
   attempt?: number;
+  // 「查看 CLI 会话」：本次 run 的 CLI 会话 id（服务端 init 帧捕获 / opencode
+  // 反查，经 session 事件或台账行到达）。缺失 = 未记录（老任务、无会话恢复能力
+  // 的引擎）——按钮不渲染，与「无数据不占位」同口径。
+  sessionId?: string;
   steps: JobStep[];
   text: string;
   result?: JobResult;
@@ -147,6 +151,8 @@ type RunLedgerRow = {
   parentId?: string;
   // ADR-0089：台账行显式携带的报告号（捕获值）；ledger-only 卡凭它跳报告。
   reportNum?: number | string;
+  // 「查看 CLI 会话」：服务端 recordEnd 落盘的 CLI 会话 id；旧行无此字段。
+  sessionId?: string;
 };
 
 type Ctx = {
@@ -465,6 +471,14 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
         acc.text = full.slice(-8000);
         const tail = acc.text;
         setJobs((js) => js.map((j) => (j.id === jobId ? { ...j, text: tail } : j)));
+      } else if (ev.type === "session") {
+        // 「查看 CLI 会话」：服务端 init 帧捕获（claude/qoder-cn）或 opencode 终态
+        // 反查后补发。只写卡片的 sessionId 字段，不入步骤流、不触发状态变化；
+        // 重放去重由 seq 保证，重复到达同值幂等。
+        const sid = typeof ev.sessionId === "string" ? ev.sessionId : "";
+        if (sid) {
+          setJobs((js) => js.map((j) => (j.id === jobId && j.sessionId !== sid ? { ...j, sessionId: sid } : j)));
+        }
       } else if (ev.type === "done") {
         if (typeof ev.tokens === "number") acc.doneTokens = ev.tokens;
         if (typeof ev.costUsd === "number") acc.doneCostUsd = ev.costUsd;
@@ -656,7 +670,26 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
             doneLabel: t("jobs.stepDone"),
             errorLabel: t("jobs.stepError"),
           });
-          return r.healed.length ? r.jobs : js; // no heal → no re-render
+          let next = r.healed.length ? r.jobs : js;
+          // 「查看 CLI 会话」兜底：本地卡若从未收到 session 事件（页签重载、断流、
+          // opencode 终态后补发落在 acc 清理之后），台账行带 sessionId 就补上——
+          // 缺 sessionId 的终态卡不显示按钮，宁可这里多补一次也不漏。
+          const sidByRunId = new Map<string, string>();
+          for (const row of runs as RunLedgerRow[]) {
+            if (row?.id && typeof row.sessionId === "string" && row.sessionId) sidByRunId.set(row.id, row.sessionId);
+          }
+          if (sidByRunId.size > 0) {
+            let sidChanged = false;
+            next = next.map((j) => {
+              if (j.sessionId || !j.runId) return j;
+              const sid = sidByRunId.get(j.runId);
+              if (!sid) return j;
+              sidChanged = true;
+              return { ...j, sessionId: sid };
+            });
+            if (sidChanged) return next;
+          }
+          return next; // no heal → no re-render
         });
       } catch {
         /* transient — the next tick retries */
