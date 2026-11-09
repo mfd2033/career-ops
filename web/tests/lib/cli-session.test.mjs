@@ -12,6 +12,7 @@ import {
   opencodeRunTitle,
   OPENCODE_TITLE_PREFIX,
   findOpencodeSessionByTitle,
+  SESSION_LAUNCHER_CMD,
 } from "../../src/lib/cli-session.mjs";
 
 describe("canResumeSession", () => {
@@ -63,6 +64,28 @@ describe("canViewSession（按钮自守卫）", () => {
     assert.equal(canViewSession({ status: undefined, cliId: "claude", sessionId: UUID }), false);
     assert.equal(canViewSession({}), false);
     assert.equal(canViewSession(undefined), false);
+  });
+});
+
+describe("SESSION_LAUNCHER_CMD（失败留窗的启动器）", () => {
+  const lines = SESSION_LAUNCHER_CMD.split("\r\n");
+
+  it("CRLF 行尾、以 @echo off 开头", () => {
+    assert.ok(SESSION_LAUNCHER_CMD.includes("\r\n"), "cmd 脚本必须用 CRLF");
+    assert.equal(lines[0], "@echo off");
+  });
+  it("整串参数原样传给 CLI", () => {
+    assert.ok(lines.includes("call %*"));
+  });
+  it("成功关窗（errorlevel < 1 时 exit），失败留窗（echo + pause）", () => {
+    const exitAt = lines.indexOf("if not errorlevel 1 exit");
+    const pauseAt = lines.indexOf("pause");
+    assert.ok(exitAt > 0, "缺少成功分支的 exit");
+    assert.ok(pauseAt > exitAt, "pause 必须在 exit 分支之后，否则成功也会被留住");
+    assert.ok(lines.some((l) => l.includes("session resume failed")), "失败时要打印原因");
+  });
+  it("纯 ASCII：控制台代码页不保证是 UTF-8", () => {
+    assert.equal(/[^\x00-\x7F]/.test(SESSION_LAUNCHER_CMD), false);
   });
 });
 

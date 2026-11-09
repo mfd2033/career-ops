@@ -1,4 +1,6 @@
 import { spawn } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
 import { NextResponse } from "next/server";
 import { careerOpsRoot } from "@/lib/career-ops";
 import { resolveCli } from "@/lib/clis";
@@ -8,7 +10,26 @@ import {
   sessionResumeArgv,
   findOpencodeSessionByTitle,
   opencodeRunTitle,
+  SESSION_LAUNCHER_CMD,
 } from "@/lib/cli-session.mjs";
+
+/**
+ * 恢复窗口的启动器（.career-ops-web/open-session.cmd）：成功关窗、失败留窗显示
+ * 退出码。内容随代码走，首次使用写入、内容变了就覆盖（幂等，不动其他文件）。
+ * 每次写都是同一份常量，不存在并发写坏文件的问题（最坏是两次写入同样内容）。
+ */
+function launcherPath(): string {
+  const dir = path.join(careerOpsRoot(), ".career-ops-web");
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, "open-session.cmd");
+  try {
+    if (fs.readFileSync(file, "utf8") === SESSION_LAUNCHER_CMD) return file;
+  } catch {
+    /* 不存在 → 下面写 */
+  }
+  fs.writeFileSync(file, SESSION_LAUNCHER_CMD, "utf8");
+  return file;
+}
 
 export const runtime = "nodejs";
 
@@ -76,10 +97,16 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Could not build resume command" }, { status: 500 });
   }
   // cmd start：新控制台窗口跑交互 TUI（TUI 常驻，直到用户退出）。第一个带引号
-  // 参数是窗口标题；参数引用由 Node 的 cmd.exe 规则处理（含空格的 binPath 会被
-  // 加引号）。不优先 wt：它的命令行对 `;`/引号有自己的二次解析，嵌套转义得不偿失。
+  // 参数是窗口标题——标题必须含空格，否则 start 会把它当成程序名（实测踩过）；
+  // 参数引用由 Node 的 cmd.exe 规则处理（含空格的 binPath 会被加引号）。
+  // 不优先 wt：它的命令行对 `;`/引号有自己的二次解析，嵌套转义得不偿失。
+  //
+  // 程序和参数交给启动器 .cmd 转一手，而不是直接交给 start：start 用
+  // `%COMSPEC% /K` 跑 .cmd，配合启动器里的 `exit`（成功）/`pause`（失败），
+  // 才能做到「成功即关窗、失败把报错留在屏幕上」。直接把程序交给 start 时，
+  // 失败同样是一闪而过，用户看不到任何原因。
   const cwd = careerOpsRoot();
-  const child = spawn("cmd.exe", ["/c", "start", "career-ops session", ...argv], {
+  const child = spawn("cmd.exe", ["/c", "start", "career-ops session", launcherPath(), ...argv], {
     cwd,
     detached: true,
     stdio: "ignore",
