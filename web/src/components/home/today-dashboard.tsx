@@ -7,10 +7,11 @@ import { Bell, CalendarDays, CircleHelp, Sparkles, ArrowRight } from "lucide-rea
 import { instrumentSerif } from "@/lib/fonts";
 import { HeroGlow } from "@/components/hero-glow";
 import type { Application, InboxJob } from "@/lib/career-ops";
+import type { CadenceEntry } from "@/lib/followups";
 import type { DiscoveredOffer } from "@/lib/explore";
 import { DiscoveryCard } from "@/components/explore/discovery-card";
 import { CompanyLogo } from "@/components/company-logo";
-import { FollowUpCard, type FollowUp } from "@/components/home/follow-up-card";
+import { FollowUpCard } from "@/components/home/follow-up-card";
 import { DecisionCard } from "@/components/home/decision-card";
 import { QuickEvaluate } from "@/components/quick-evaluate";
 import { useExplore } from "@/components/explore/explore-provider";
@@ -47,7 +48,9 @@ export function TodayDashboard({
   inbox: InboxJob[];
   inBetween: boolean;
 }) {
-  const [followups, setFollowups] = useState<FollowUp[]>([]);
+  // /api/followups 的 entries 本就是完整 CadenceEntry（弹窗需要 contacts 等
+  // 全量字段），直接按真实类型持有，不在组件边界收窄成展示子集。
+  const [followups, setFollowups] = useState<CadenceEntry[]>([]);
   const [overdue, setOverdue] = useState(0);
   const [fresh, setFresh] = useState<DiscoveredOffer[]>([]);
   // explore 结果区「移除」的记录（removed 集合，显示层处置）。供应回路是服务端

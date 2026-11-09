@@ -6,12 +6,23 @@ import { LogDialog } from "@/components/followups/log-dialog";
 import type { CadenceEntry } from "@/lib/followups";
 import { useI18n } from "@/lib/i18n/context";
 
-// 报告页的「记录跟进」入口（ADR-0075）：entry 由路由从 core 同源输出装配
-// （存在 = 本行可跟进；判定与联系人建议都来自这一份），弹窗原样复用
+// 报告页与首页待跟进卡片共用的「记录跟进」入口（ADR-0075）：entry 由路由从 core
+// 同源输出装配（存在 = 本行可跟进；判定与联系人建议都来自这一份），弹窗原样复用
 // /followups 的 LogDialog。成功后：关闭 + 页内轻提示（复制收件箱 toast 的
 // 样式与 5 秒自动消失；重复成功以 seq 递增重置计时）；失败由弹窗自身保持
-// 打开并显示错误（既有逻辑）。
-export function LogFollowupButton({ entry }: { entry: CadenceEntry }) {
+// 打开并显示错误（既有逻辑）。首页卡片场景传 iconOnly 出纯图标按钮，
+// onLogged 供卡片在记录成功后刷新列表。
+export function LogFollowupButton({
+  entry,
+  onLogged,
+  iconOnly = false,
+}: {
+  entry: CadenceEntry;
+  /** 记录成功后的额外回调（首页卡片用它触发列表刷新）。 */
+  onLogged?: () => void;
+  /** 纯图标形态：首页待跟进卡片的四个操作统一为图标按钮。 */
+  iconOnly?: boolean;
+}) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const [toast, setToast] = useState<{ text: string; seq: number } | null>(null);
@@ -28,15 +39,24 @@ export function LogFollowupButton({ entry }: { entry: CadenceEntry }) {
         type="button"
         onClick={() => setOpen(true)}
         title={t("followups.logTitle")}
-        className="inline-flex items-center justify-center gap-1.5 rounded-full border border-border px-3 py-1 text-xs font-medium text-muted transition-colors hover:border-brand/40 hover:text-brand max-sm:min-h-[44px]"
+        aria-label={t("followups.logTitle")}
+        className={
+          iconOnly
+            ? "inline-flex size-8 shrink-0 items-center justify-center rounded-lg text-faint transition-colors hover:bg-brand-soft hover:text-brand max-sm:min-h-[44px] max-sm:min-w-[44px]"
+            : "inline-flex items-center justify-center gap-1.5 rounded-full border border-border px-3 py-1 text-xs font-medium text-muted transition-colors hover:border-brand/40 hover:text-brand max-sm:min-h-[44px]"
+        }
       >
-        <Send className="size-3.5" /> {t("followups.logDialogTitle")}
+        <Send className={iconOnly ? "size-4" : "size-3.5"} />
+        {!iconOnly && t("followups.logDialogTitle")}
       </button>
       {open && (
         <LogDialog
           entry={entry}
           onClose={() => setOpen(false)}
-          onLogged={() => setToast((prev) => ({ text: t("followups.loggedToast"), seq: (prev?.seq ?? 0) + 1 }))}
+          onLogged={() => {
+            onLogged?.();
+            setToast((prev) => ({ text: t("followups.loggedToast"), seq: (prev?.seq ?? 0) + 1 }));
+          }}
         />
       )}
       {toast && (

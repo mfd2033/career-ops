@@ -1,21 +1,28 @@
 "use client";
 
 import { useState } from "react";
-import { Check, Clock, FileText, Loader2 } from "lucide-react";
+import { BellOff, Check, Clock, FileText, Loader2 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { CompanyLogo } from "@/components/company-logo";
+import { LogFollowupButton } from "@/components/followups/log-followup-button";
+import type { CadenceEntry } from "@/lib/followups";
 import { useI18n } from "@/lib/i18n/context";
-
-export type FollowUp = { num?: number; company: string; role?: string; status?: string; appliedDate?: string; notes?: string };
 
 // One-tap overdue follow-up row (demand loop). "Mark followed up" appends a
 // table row to data/follow-ups.md (append-only) so the core cadence advances;
 // "Snooze" is a client dismiss. The cadence is the core's — we just surface + record.
-export function FollowUpCard({ followup, onLogged }: { followup: FollowUp; onLogged?: () => void }) {
+// followup 直接用 /api/followups 的完整 CadenceEntry：「记录跟进」弹窗（报告页
+// 同一枚 LogDialog）需要 contacts / followups 等全量字段，首页本来就拿得到。
+export function FollowUpCard({ followup, onLogged }: { followup: CadenceEntry; onLogged?: () => void }) {
   const [state, setState] = useState<"idle" | "logging" | "done" | "snoozed" | "error">("idle");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const { t } = useI18n();
   if (state === "snoozed" || state === "done") return null;
+
+  // 四个操作统一为图标按钮（原型 2026-11-09）：定尺寸、hover 变色不改布局，
+  // 名称走 title/aria-label；窄屏放大触控区到 44px。
+  const iconCls =
+    "inline-flex size-8 shrink-0 items-center justify-center rounded-lg text-faint transition-colors hover:bg-brand-soft hover:text-brand max-sm:min-h-[44px] max-sm:min-w-[44px]";
 
   const log = async () => {
     setState("logging");
@@ -63,28 +70,30 @@ export function FollowUpCard({ followup, onLogged }: { followup: FollowUp; onLog
           </p>
         </div>
       </div>
-      <div className="ml-auto flex shrink-0 items-center gap-2">
+      <div className="ml-auto flex shrink-0 items-center gap-1.5">
+        {/* 「记录跟进」（报告页同款弹窗）：记录成功后通知父级刷新待跟进列表 */}
+        <LogFollowupButton entry={followup} iconOnly onLogged={() => onLogged?.()} />
         <button
           type="button"
           disabled={state === "logging"}
           onClick={log}
-          title={state === "error" && errorMsg ? errorMsg : undefined}
+          title={state === "error" && errorMsg ? errorMsg : t("home.markFollowedUp")}
+          aria-label={state === "error" && errorMsg ? errorMsg : t("home.markFollowedUp")}
           className={cn(
-            "inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md bg-surface-hover px-2.5 py-1.5 text-xs font-medium text-foreground transition hover:bg-brand-soft hover:text-brand max-sm:min-h-[44px]",
+            iconCls,
+            "bg-surface-hover hover:bg-brand-soft",
             state === "error" && "text-red-500 hover:text-red-400",
           )}
         >
-          {state === "logging" ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}{" "}
-          <span className="hidden max-w-48 truncate sm:inline">{state === "error" ? `${errorMsg ?? t("home.failed")} — ${t("home.retry")}` : t("home.markFollowedUp")}</span>
-          <span className="sm:hidden">{state === "error" ? t("home.retry") : t("home.followedUp")}</span>
+          {state === "logging" ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}
         </button>
         {followup.num != null && (
-          <a href={`/pipeline/${followup.num}`} title={t("home.openReport")} className="inline-flex shrink-0 items-center justify-center rounded p-1 text-faint transition hover:text-brand max-sm:min-h-[44px] max-sm:min-w-[44px]">
+          <a href={`/pipeline/${followup.num}`} title={t("home.openReport")} aria-label={t("home.openReport")} className={iconCls}>
             <FileText className="size-4" />
           </a>
         )}
-        <button type="button" onClick={() => setState("snoozed")} className="inline-flex shrink-0 items-center justify-center text-[11px] text-faint transition hover:text-foreground max-sm:min-h-[44px] max-sm:min-w-[44px]">
-          {t("home.snooze")}
+        <button type="button" onClick={() => setState("snoozed")} title={t("home.snooze")} aria-label={t("home.snooze")} className={iconCls}>
+          <BellOff className="size-4" />
         </button>
       </div>
     </div>
