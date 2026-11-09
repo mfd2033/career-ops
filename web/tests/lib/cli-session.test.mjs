@@ -97,12 +97,12 @@ describe("sessionResumeArgv", () => {
       "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
     ]);
   });
-  it("opencode → run -i -s（交互式继续该会话）", () => {
+  // 回归：`run -i -s <id>` 不带 message 时初始化完即退出（窗口一闪而过），
+  // 顶层 `--session` 才是驻留 TUI 的恢复入口。
+  it("opencode → --session（顶层 TUI 继续该会话）", () => {
     assert.deepEqual(sessionResumeArgv("opencode", BIN, "ses_e405af519ffeZanSoMNrAmtzc4"), [
       BIN,
-      "run",
-      "-i",
-      "-s",
+      "--session",
       "ses_e405af519ffeZanSoMNrAmtzc4",
     ]);
   });

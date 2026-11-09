@@ -14,13 +14,17 @@
  *                 派发必须带 `--session-id <uuid>` 会话才落盘（/api/run 负责）。
  *   - qoder-cn:   `-r, --resume [id]`（TUI，与 claude 同形）；同样需要派发时
  *                 `--session-id`（同一次实测闭环验证）。
- *   - opencode:   `run -i -s <id>`（-i 交互分屏模式，-s 指定会话）
+ *   - opencode:   `--session <id>`（顶层 TUI 直接继续该会话）。
+ *                 **不要用 `run -i -s <id>`**：`run` 子命令没有 message 时初始化完即
+ *                 退出（2026-11-09 实测 exit 0，约 1.5s，窗口一闪而过）；`-i` 是
+ *                 「在 run 里开分屏」而不是「打开 TUI」。顶层 `-s/--session` 才是
+ *                 与 claude `--resume` 同义的入口，实测窗口驻留。
  * 恢复 cwd 必须与 headless run 相同（仓库根）：claude/qoder 的会话按项目目录存。
  */
 export const SESSION_RESUME_ARGS = Object.freeze({
   claude: (sessionId) => ["--resume", sessionId],
   "qoder-cn": (sessionId) => ["-r", sessionId],
-  opencode: (sessionId) => ["run", "-i", "-s", sessionId],
+  opencode: (sessionId) => ["--session", sessionId],
 });
 
 /** 该引擎是否支持恢复会话（前端按钮自守卫与后端 API 校验共用）。 */

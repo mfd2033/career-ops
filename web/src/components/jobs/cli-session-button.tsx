@@ -9,7 +9,7 @@ import { cn } from "@/lib/cn";
 
 // 「查看 CLI 会话」按钮（工作器卡）：点击后服务端开一个终端窗口，在该次 headless
 // run 的同一工作目录里恢复对应 CLI 会话（claude --resume / qoderclicn -r /
-// opencode run -i -s，见 lib/cli-session.mjs 的单一事实源）。
+// opencode --session，见 lib/cli-session.mjs 的单一事实源）。
 //
 // 自守卫口径见 lib/cli-session-shared.mjs 的 canViewSession（纯逻辑，单测覆盖）：
 // 排队中 / 引擎不支持 / 无会话线索一律渲染 null，无数据不占位。运行中的卡片也
