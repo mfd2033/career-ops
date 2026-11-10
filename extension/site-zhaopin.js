@@ -32,7 +32,7 @@
   //
   // 「我的收藏」（i.zhaopin.com/position/collect）是另一套骨架：
   // DIV.joblist-box__item，职位锚点是 a.joblist-box__iteminfo（指向
-  // jobs.zhaopin.com/CC…J….htm），右侧原生操作列 DIV.joblist-box__item__jobbtn。
+  // jobs.zhaopin.com/CC…J….htm），整卡链接包住信息区。
   // 两种容器互斥（各自页面只出现一种），并列进选择器 —— 在此之前收藏页整页匹配 0，
   // 插件在那里完全不生效。
   const COLLECT_CARD_SELECTOR = "div.joblist-box__item";
@@ -520,15 +520,17 @@
   // 形状、按钮与评估/快评的派发全在 core（三站共用一份），这里只给挂载点与素材。
   // 智联两种骨架的挂法不同：
   //   • 搜索卡 div.job-card：整行接在 .job-card__company-row 之后；
-  //   • 收藏卡 div.joblist-box__item：左右分栏 —— 胶囊仍在左侧信息区
-  //     (.joblist-box__iteminfo) 末尾，按钮进右侧原生操作列
-  //     (.joblist-box__item__jobbtn) 底部，与「已收藏 / 申请职位」同列同右缘。
-  //     原生两颗按钮不动。
+  //   • 收藏卡 div.joblist-box__item：胶囊和按钮同一行挂进左侧信息区
+  //     (.joblist-box__iteminfo，即整卡链接 <a>) 末尾 —— core 的行内布局保证
+  //     胶囊居左、按钮 margin-left:auto 居右，永远同排对齐。
+  //     曾挂在右侧原生操作列 .joblist-box__item__jobbtn：该列是 absolute 定位
+  //     (top:50px 固定高 76px、padding-top:21px)，display:block 下 margin-top:auto
+  //     不生效，按钮悬在卡中部、与左侧胶囊/内容错位 —— 已废弃该挂点。
+  //     按钮点击自带 preventDefault/stopPropagation（core onCardQuick/onCardEval），
+  //     落在 <a> 内不会触发整卡跳转。
   function cardActionMounts(card) {
     if (isCollectCard(card)) {
       const info = card.querySelector(".joblist-box__iteminfo, [class*='iteminfo']");
-      const ops = card.querySelector(".joblist-box__item__jobbtn, [class*='jobbtn']");
-      if (info && ops) return { chips: { parent: info, before: null }, buttons: { parent: ops, before: null } };
       return info ? { row: { parent: info, before: null } } : null;
     }
     const row = card.querySelector(".job-card__company-row");

@@ -246,9 +246,6 @@
     "display:flex;gap:8px;align-items:center;justify-content:space-between;flex-wrap:wrap;margin-top:8px;";
   const CARD_INFO_CSS = "display:flex;gap:4px;align-items:center;flex-wrap:wrap;";
   const CARD_OPS_CSS = "display:flex;gap:6px;align-items:center;margin-left:auto;";
-  // 左右分栏卡（智联收藏）：操作列纵向撑满卡高，按钮沉到底与左侧胶囊同一排。
-  const CARD_SPLIT_OPS_CSS =
-    "display:flex;gap:6px;align-items:center;justify-content:flex-end;flex-wrap:wrap;margin-top:auto;";
   const CARD_CHIP_CSS =
     "padding:4px 8px;border-radius:999px;font-size:12px;font-weight:600;line-height:1;color:#fff;" +
     "white-space:nowrap;font-family:system-ui,sans-serif;";
@@ -268,38 +265,21 @@
     if (cached && card.contains(cached.info) && card.contains(cached.ops)) return cached;
     const mounts = typeof site.cardActionMounts === "function" ? site.cardActionMounts(card) : null;
     if (!mounts) return null;
-    let refs;
-    if (mounts.chips || mounts.buttons) {
-      // 左右分栏：胶囊进左栏信息区末尾，按钮进右栏原生操作列。
-      const info = document.createElement("div");
-      info.setAttribute(CARD_ACTIONS_ATTR, "chips");
-      info.style.cssText = CARD_INFO_CSS + "margin-top:8px;";
-      const ops = document.createElement("div");
-      ops.setAttribute(CARD_ACTIONS_ATTR, "buttons");
-      ops.style.cssText = CARD_SPLIT_OPS_CSS;
-      if (!mountElement(mounts.chips, info)) return null;
-      if (!mountElement(mounts.buttons, ops)) {
-        info.remove();
-        return null;
-      }
-      refs = { info, ops };
-    } else {
-      const row = document.createElement("div");
-      row.setAttribute(CARD_ACTIONS_ATTR, "row");
-      row.style.cssText = CARD_ROW_CSS;
-      const info = document.createElement("div");
-      info.style.cssText = CARD_INFO_CSS;
-      const ops = document.createElement("div");
-      ops.style.cssText = CARD_OPS_CSS;
-      row.appendChild(info);
-      row.appendChild(ops);
-      if (!mountElement(mounts.row, row)) return null;
-      refs = { info, ops };
-    }
+    // 单一行内挂载：胶囊（info）居左、按钮（ops）margin-left:auto 居右，永远同排。
+    const row = document.createElement("div");
+    row.setAttribute(CARD_ACTIONS_ATTR, "row");
+    row.style.cssText = CARD_ROW_CSS;
+    const info = document.createElement("div");
+    info.style.cssText = CARD_INFO_CSS;
+    const ops = document.createElement("div");
+    ops.style.cssText = CARD_OPS_CSS;
+    row.appendChild(info);
+    row.appendChild(ops);
+    if (!mountElement(mounts.row, row)) return null;
+    const refs = { info, ops };
     card.__careerActions = refs;
     return refs;
   }
-
   /** 把一个节点插到 mount 指定的位置（before 已失效就退化成 append，幂等）。 */
   function mountElement(mount, el) {
     if (!mount || !mount.parent) return false;
