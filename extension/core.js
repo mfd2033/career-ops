@@ -410,7 +410,7 @@
     cardEvalsInFlight.add(key);
     cardEvalBtns.set(key, btn);
     btn.disabled = true;
-    btn.textContent = "评估中…";
+    btn.textContent = "评估中…"; // 乐观态（进池前）；进池后由快照接管（排队→排队中…）
     const fail = (errMsg) => {
       cardEvalPolls.delete(key);
       settleCardEval(key, null);
@@ -431,6 +431,27 @@
     } catch (err) {
       fail(err && err.message ? err.message : String(err));
     }
+  }
+
+  /**
+   * 把「评估」按钮的禁用/文案归到与胶囊同一份快照（CHIPS.evalButtonState）：
+   * 快照 running → 禁用+评估中…、queued → 禁用+排队中…、页内在飞 → 乐观评估中…、
+   * 其余可点「评估」。刷新后 ensureCardButtons 重建的全新按钮靠这一步恢复在跑态，
+   * 排队中的任务也不再永远挂在「评估中…」。
+   */
+  function applyEvalButtonState(card, evalBtn) {
+    if (!evalBtn) return;
+    const url = site.cardUrl(card);
+    const key = url ? normalizeUrl(url) : "";
+    const st = CHIPS && CHIPS.evalButtonState
+      ? CHIPS.evalButtonState({
+          run: (key && activeRunsByKey[key]) || null,
+          inFlight: !!key && cardEvalsInFlight.has(key),
+        })
+      : null;
+    if (!st) return;
+    evalBtn.disabled = st.disabled;
+    evalBtn.textContent = st.text;
   }
 
   /** 建/复用那一排按钮。站点重渲染摘掉操作区后由 sweep 重新走到这里。 */
@@ -465,6 +486,12 @@
     }
     document.querySelectorAll('button[data-career-action]').forEach((btn) => {
       if (inFlightBtns.has(btn)) return;
+      // 快照里该卡还有在跑/在排队的任务：按钮态归快照管（评估中…/排队中…），
+      // 不能重置回可点的「评估」——否则收尾别的任务时会把在跑按钮一起解锁。
+      const card = btn.closest(site.cardSelector);
+      const url = card ? site.cardUrl(card) : null;
+      const key = url ? normalizeUrl(url) : "";
+      if (key && activeRunsByKey[key]) return;
       btn.disabled = false;
       btn.textContent = btn.dataset.careerAction === "quick" ? "快评" : "评估";
     });
@@ -491,6 +518,8 @@
     if (!refs) return false;
     renderCardChips(refs.info, state);
     ensureCardButtons(card, refs.ops);
+    // 按钮态与胶囊同源：每次重画都按快照归一（幂等），刷新/站点重渲染后自动恢复。
+    applyEvalButtonState(card, refs.ops.querySelector('button[data-career-action="eval"]'));
     return true;
   }
 

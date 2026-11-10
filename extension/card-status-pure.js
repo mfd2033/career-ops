@@ -181,6 +181,32 @@
     return { stop: false, settle: false, toast: null };
   }
 
+  // 评估按钮的乐观态与终态文案（与状态胶囊同源不同件：胶囊说这张卡在跑/在排队，
+  // 按钮说自己不可再点）。
+  const BTN_EVAL_TEXT = "评估";
+  const BTN_EVAL_RUNNING_TEXT = "评估中…";
+  const BTN_EVAL_QUEUED_TEXT = "排队中…";
+
+  /**
+   * 卡片「评估」按钮的状态派生：与状态胶囊同源（/api/active-runs 快照 + 页内在飞）。
+   * 2026-11-10 个人中心「感兴趣」列表实测出第二组真缺陷 —— 按钮态只活在页内内存：
+   *   • 第一份评估在跑时刷新页面，按钮回到可点的「评估」，看起来什么都没发生；
+   *   • 点击时按钮硬编码「评估中…」，任务进池排队后也永远不跟着改成「排队中…」。
+   * 修法：按钮态从胶囊同一份 run 快照派生（running → 评估中…、queued → 排队中…），
+   * 页内在飞（点击后、进池前的窗口）保留乐观「评估中…」。快照优先于在飞 —— 排队
+   * 不能被乐观态盖回「评估中…」。
+   * @param {{run?: {status?: string}|null, inFlight?: boolean}|null} [p]
+   * @returns {{disabled: boolean, text: string}}
+   */
+  function evalButtonState(p) {
+    const run = p && p.run;
+    const state = isRunState(run && run.status);
+    if (state === "running") return { disabled: true, text: BTN_EVAL_RUNNING_TEXT };
+    if (state === "queued") return { disabled: true, text: BTN_EVAL_QUEUED_TEXT };
+    if (p && p.inFlight) return { disabled: true, text: BTN_EVAL_RUNNING_TEXT };
+    return { disabled: false, text: BTN_EVAL_TEXT };
+  }
+
   const api = {
     RUN_RUNNING_COLOR,
     RUN_QUEUED_COLOR,
@@ -193,6 +219,7 @@
     chipFingerprint,
     cardEvalGate,
     evalPollVerdict,
+    evalButtonState,
   };
 
   // content script（页面全局）：挂 self。

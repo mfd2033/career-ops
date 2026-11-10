@@ -27,6 +27,7 @@ const {
   chipFingerprint,
   cardEvalGate,
   evalPollVerdict,
+  evalButtonState,
 } = mod.default ?? mod;
 
 const RUN_ID = "3f2b8c1e-9d4a-4c77-8f10-2a5b6c7d8e9f";
@@ -262,4 +263,53 @@ test("evalPollVerdict：脏 tries 不误停", () => {
 test("evalPollVerdict：上限可覆盖（测试注入小上限即可验证到期分支）", () => {
   assert.deepEqual(evalPollVerdict(3, 3).stop, true);
   assert.deepEqual(evalPollVerdict(2, 3).stop, false);
+});
+
+// ---- 评估按钮状态派生（2026-11-10 个人中心实测第二组缺陷） ------------------
+//
+// 胶囊吃 /api/active-runs 快照（刷新可重建），按钮却只吃页内内存 —— 实测出两条：
+//   • 第一份评估在跑时刷新页面，按钮回到可点的「评估」，看起来什么都没发生；
+//   • 点击时按钮硬编码「评估中…」，任务进池排队后也永远不跟着改成「排队中…」。
+// 修法与胶囊同源：按钮态从同一份 run 快照派生，纯层钉住。
+
+test("evalButtonState：快照 running → 禁用 + 评估中…（刷新后按钮恢复在跑态）", () => {
+  assert.deepEqual(evalButtonState({ run: { status: "running", runId: RUN_ID } }), {
+    disabled: true,
+    text: "评估中…",
+  });
+});
+
+test("evalButtonState：快照 queued → 禁用 + 排队中…（按钮跟胶囊同口径）", () => {
+  assert.deepEqual(evalButtonState({ run: { status: "queued", runId: RUN_ID } }), {
+    disabled: true,
+    text: "排队中…",
+  });
+});
+
+test("evalButtonState：无 run 且不在飞 → 可点「评估」", () => {
+  assert.deepEqual(evalButtonState({}), { disabled: false, text: "评估" });
+  assert.deepEqual(evalButtonState(null), { disabled: false, text: "评估" });
+  assert.deepEqual(evalButtonState({ run: null, inFlight: false }), { disabled: false, text: "评估" });
+});
+
+test("evalButtonState：页内在飞（点击后、进池前）→ 乐观评估中…", () => {
+  assert.deepEqual(evalButtonState({ inFlight: true }), { disabled: true, text: "评估中…" });
+});
+
+test("evalButtonState：快照优先于页内在飞（queued 不能被乐观态盖回评估中…）", () => {
+  assert.deepEqual(
+    evalButtonState({ run: { status: "queued", runId: RUN_ID }, inFlight: true }),
+    { disabled: true, text: "排队中…" },
+  );
+});
+
+test("evalButtonState：run 状态认不出（done 之类）→ 退回在飞/空闲口径", () => {
+  assert.deepEqual(evalButtonState({ run: { status: "done", runId: RUN_ID }, inFlight: true }), {
+    disabled: true,
+    text: "评估中…",
+  });
+  assert.deepEqual(evalButtonState({ run: { status: "done", runId: RUN_ID } }), {
+    disabled: false,
+    text: "评估",
+  });
 });
