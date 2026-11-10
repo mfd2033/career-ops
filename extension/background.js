@@ -914,7 +914,12 @@ async function fetchDetailHtml(rawUrl) {
     const res = await fetch(u.toString(), { credentials: "include", signal: ctrl.signal });
     const html = await res.text();
     if (!res.ok) return { ok: false, error: `详情页抓取失败：HTTP ${res.status}` };
-    if (html.length > FETCH_HTML_MAX_CHARS) return { ok: false, error: "详情页返回内容异常（过大），可能被拦到验证页" };
+    if (html.length > FETCH_HTML_MAX_CHARS) {
+      return {
+        ok: false,
+        error: `详情页返回内容异常（过大）：${html.length} 字符（上限 ${FETCH_HTML_MAX_CHARS}），可能被拦到验证页。请打开该职位链接确认是否出现登录/验证页`,
+      };
+    }
     return { ok: true, html };
   } catch (err) {
     const aborted = err && (err.name === "AbortError" || err.code === 20);

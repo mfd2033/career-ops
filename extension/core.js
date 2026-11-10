@@ -118,32 +118,38 @@
   // ---- DOM 工具 ------------------------------------------------------------
 
   function showToast(text, isError) {
+    // 错误一律改走持久错误框：自动消失的气泡来不及看清/复制错误信息，且停留到
+    // 用户手动关闭是明确要求。成功提示保留 2.6s 自动消失的轻量气泡。
+    if (isError) {
+      showErrorBox(text, "操作出错");
+      return;
+    }
     const t = document.createElement("div");
     t.textContent = text;
     t.style.cssText =
       "position:fixed;right:16px;bottom:16px;z-index:2147483647;" +
       "padding:10px 14px;border-radius:8px;color:#fff;font-size:13px;" +
-      `background:${isError ? "#d93026" : "#00c68d"};box-shadow:0 4px 12px rgba(0,0,0,.3);` +
+      "background:#00c68d;box-shadow:0 4px 12px rgba(0,0,0,.3);" +
       "font-family:system-ui,sans-serif;";
     document.body.appendChild(t);
     setTimeout(() => t.remove(), 2600);
   }
 
-  const QUICK_ERR_ID = "career-ext-quick-error";
+  const ERR_BOX_ID = "career-ext-error-box";
   // 持久错误框（非气泡）：气泡自动消失太快，来不及复制错误信息。此框带「复制」
-  // 和「关闭」，停留到用户处理完，可选中文本。
-  function showQuickError(text) {
-    let box = document.getElementById(QUICK_ERR_ID);
+  // 和「关闭」，停留到用户处理完，可选中文本。title 用于区分出错场景。
+  function showErrorBox(text, title = "操作出错") {
+    let box = document.getElementById(ERR_BOX_ID);
     if (box) box.remove();
     box = document.createElement("div");
-    box.id = QUICK_ERR_ID;
+    box.id = ERR_BOX_ID;
     box.style.cssText =
       // 避开右上角的详情页浮窗（top:80/right:20）与右下角的 toast：落到左下角。
       "position:fixed;left:16px;bottom:16px;z-index:2147483647;max-width:420px;" +
       "background:#d93026;color:#fff;border-radius:8px;box-shadow:0 6px 18px rgba(0,0,0,.35);" +
       "font-family:system-ui,sans-serif;font-size:12px;padding:10px 12px;line-height:1.5;";
     const label = document.createElement("div");
-    label.textContent = "快评出错（点击复制）";
+    label.textContent = `${title}（点击复制）`;
     label.style.cssText = "font-weight:700;margin-bottom:6px;font-size:11px;opacity:.9;";
     const pre = document.createElement("pre");
     pre.textContent = text;
@@ -174,6 +180,11 @@
     box.appendChild(pre);
     box.appendChild(btnRow);
     document.body.appendChild(box);
+  }
+
+  /** 快评错误沿用独立标题，便于与「评估」等其他操作的错误区分。 */
+  function showQuickError(text) {
+    showErrorBox(text, "快评出错");
   }
 
   /** 创建统一风格按钮（site 文件组装右栏面板按钮时复用）。 */
