@@ -13,7 +13,11 @@
   // BOSS /web/geek/jobs list card container. The job-name anchor sits in
   // DIV.job-title > DIV.job-info > LI.job-card-box (older .job-card-wrapper is
   // gone after BOSS' list revamp). One LI per posting.
-  const CARD_SELECTOR = "li.job-card-box";
+  //
+  // 个人中心「感兴趣」列表（/web/geek/recommend，tab 切到「感兴趣」）是另一套骨架：
+  // UL.user-jobs-ul > LI.item-boss，卡片同样带 /job_detail/ 锚点（实证 2026-11-10）。
+  // 两种容器并列进选择器 —— 互斥（各自页面只出现一种），任一命中即可。
+  const CARD_SELECTOR = "li.job-card-box, li.item-boss";
   const LINK_SELECTOR = 'a[href*="/job_detail/"]';
 
   function isDetailPath(pathname) {
@@ -56,10 +60,12 @@
       return el ? (el.innerText || el.textContent || "").trim() : "";
     };
     const salary = text('[class*="salary"],[class*="job-price"],[class*="price"],.job-area') || extractSalaryFromCardText(card.innerText || "");
-    const company = text('[class*="company-name"],[class*="company"] .name,.company-info .name,[class*="brand"]');
+    const company = text('[class*="company-name"],[class*="company"] .name,.company-info .name,.company-info .text b,.company-info b,[class*="brand"]');
     return {
       url: cardUrl(card),
-      title: text(LINK_SELECTOR),
+      // .job-name-text 是个人中心列表卡片的标题节点：那里锚点的 innerText 还裹着
+      // 「[城市·区域]」，直接取会把城市拼进标题。先取标题节点，落空再回退锚点。
+      title: text(".job-name-text") || text(LINK_SELECTOR),
       company,
       salary,
       city: undefined, // BOSS 无卡片城市 class —— 城市过滤走 web 侧 title 匹配
@@ -185,6 +191,8 @@
       if (stale) stale.remove();
       return;
     }
+    // 个人中心列表没有右栏，但有每卡操作区：站点重渲染可能把它摘掉，顺路补一遍。
+    if (document.querySelector(".user-jobs-area")) sweepPersonalCards();
     const opBar = document.querySelector(".job-detail-op");
     if (!opBar) return; // pane not rendered yet — observer will retry
     if (document.getElementById(LIST_EVAL_BTN_ID)) return;
@@ -250,6 +258,253 @@
     opBar.insertBefore(qbtn, (share && share.nextSibling) || btn.nextSibling);
   }
 
+  // ---- 个人中心「感兴趣」列表：每卡评分 + 快评/评估 ------------------------
+  //
+  // 该列表（/web/geek/recommend，tab 切到「感兴趣」）是
+  // UL.user-jobs-ul > LI.item-boss，卡片里只有标题/城市/薪资/公司，没有
+  // /web/geek/jobs 那个右栏详情面板（.job-detail-op 在这里不存在），所以
+  // 「评估本职位」那套右栏按钮无处安放 —— 改成每卡一排按钮，由 core 在给卡片
+  // 画评分时回调 ensureCardActions 挂上去（core 只管「该不该画」，形状归本站）。
+  //
+  // 快评与完整评估都需要 JD 正文，而列表卡没有：由卡片锚点**站内 fetch**详情页
+  // HTML 再解析（实证 2026-11-10：带 cookie 的站内 fetch 返回完整 SSR HTML，
+  // .job-sec-text 可读，不触发验证页）。这条路必须走 —— 服务端抓 BOSS 会被风控
+  // 拦成空页，不带 JD 的评估会让 agent 落到 browser-extract 卡死。
+
+  const CARD_ACTIONS_ATTR = "data-career-actions";
+  const CARD_ACTIONS_GROUP_CSS = "display:flex;gap:6px;align-items:center;margin-top:6px;";
+  const CARD_QUICK_BTN_CSS =
+    "padding:3px 10px;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;" +
+    "background:#7c5cff;color:#fff;font-family:system-ui,sans-serif;box-shadow:0 1px 3px rgba(0,0,0,.18);";
+  const CARD_EVAL_BTN_CSS =
+    "padding:3px 10px;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;" +
+    "background:#00c68d;color:#fff;font-family:system-ui,sans-serif;box-shadow:0 1px 3px rgba(0,0,0,.18);";
+
+  // 完整评估是全局单飞：轮询收尾只有一个 evalPollUrl，两张卡同时发起会互相覆盖。
+  let evalInFlight = false;
+
+  /** 个人中心列表的卡片？只有这片区域要每卡按钮，其他页保持原有徽章/右栏口径。 */
+  function isPersonalJobsCard(card) {
+    return !!(card && typeof card.closest === "function" && card.closest(".user-jobs-area"));
+  }
+
+  /** 卡片上的公司名（个人中心卡片里是 b > a[href*="/gongsi/"]）。 */
+  function cardCompany(card) {
+    const el =
+      card.querySelector('a[href*="/gongsi/"]') ||
+      card.querySelector('.company-info .text b, .company-info b, [class*="company-name"]');
+    const t = el ? (el.innerText || el.textContent || "").trim() : "";
+    return (t.split("\n")[0] || "").trim().slice(0, 40);
+  }
+
+  /**
+   * 解析详情页 HTML → { title, text }。desc 取职位描述区（.job-sec-text 为主）；
+   * 不足 80 字视为没抓到（多半是验证页/骨架页），此时 text 只剩标题+薪资，
+   * 由 fetchCardJd 按长度判失败 —— 这里不抛错，便于区分「HTML 能读但没描述」
+   * 与「网络就失败」两种成因，报错文案不同。
+   */
+  function parseDetailHtml(html) {
+    const doc = new DOMParser().parseFromString(String(html || ""), "text/html");
+    const pick = (sel) => {
+      const el = doc.querySelector(sel);
+      if (!el) return "";
+      return (el.textContent || "").replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+    };
+    const title = pick("h1, .job-banner .name h1, [class*='job-name']");
+    const price = pick(".job-banner .salary, [class*='job-salary'], [class*='salary']");
+    const desc = pick(".job-sec-text, .job-detail-section .text, [class*='job-sec'] .text");
+    const parts = [title];
+    if (price) parts.push(price);
+    if (desc.length >= 80) parts.push(desc);
+    return { title, text: parts.filter(Boolean).join("\n").trim().slice(0, 12000) };
+  }
+
+  /** 站内抓详情页并解析出 JD；失败一律抛带原因的 Error（调用方 toast）。 */
+  async function fetchCardJd(url) {
+    let res;
+    try {
+      res = await fetch(url, { credentials: "include" });
+    } catch (err) {
+      throw new Error(`详情页抓取失败：${err && err.message ? err.message : err}`);
+    }
+    if (!res.ok) throw new Error(`详情页抓取失败：HTTP ${res.status}`);
+    const jd = parseDetailHtml(await res.text());
+    if (jd.text.length < 80) throw new Error("详情页没返回职位描述（可能需要验证）");
+    return jd;
+  }
+
+  /** 卡片操作区（快评 / 评估 / 分数徽章），建一次；站点重渲染摘掉后由 sweep 补回。 */
+  function cardActionsGroup(card) {
+    const existing = card.querySelector(`[${CARD_ACTIONS_ATTR}]`);
+    if (existing) return existing;
+    const host = card.querySelector(".job-info") || card.querySelector(".item-content") || card;
+    const group = document.createElement("div");
+    group.setAttribute(CARD_ACTIONS_ATTR, "1");
+    group.style.cssText = CARD_ACTIONS_GROUP_CSS;
+
+    const quickBtn = C.makeButton({ text: "快评", css: CARD_QUICK_BTN_CSS });
+    quickBtn.dataset.careerAction = "quick";
+    quickBtn.title = "快评：抓取本职位 JD 秒出分数，不生成报告";
+    const evalBtn = C.makeButton({ text: "评估", css: CARD_EVAL_BTN_CSS });
+    evalBtn.dataset.careerAction = "eval";
+    evalBtn.title = "完整评估：生成报告与状态";
+
+    quickBtn.addEventListener("click", async (ev) => {
+      // 卡片本身可能挂了整卡跳转的监听：按钮的点击不许冒泡出去，否则点「快评」
+      // 会顺手把用户带到详情页。
+      ev.preventDefault();
+      ev.stopPropagation();
+      if (quickBtn.disabled || C.isQuickEvaluating()) return;
+      const url = cardUrl(card);
+      if (!url) {
+        C.toast("未能识别该职位的链接", true);
+        return;
+      }
+      quickBtn.disabled = true;
+      quickBtn.textContent = "快评中…";
+      C.setQuickEvaluating(true);
+      const reset = () => {
+        quickBtn.disabled = false;
+        quickBtn.textContent = "快评";
+      };
+      try {
+        const jd = await fetchCardJd(url);
+        // url 传归一后的键：background 的 quickScores 用它当快评徽章的键，不归一
+        // （securityId/ka 留在 URL 里）就只有本页能命中，详情页浮窗认不出来。
+        C.sendQuickEval(
+          { url: C.normalizeUrl(url), title: jd.title, text: jd.text, poster: cardCompany(card) },
+          (err) => {
+            C.setQuickEvaluating(false);
+            reset();
+            C.showQuickError(err);
+          }
+        );
+      } catch (err) {
+        C.setQuickEvaluating(false);
+        reset();
+        C.showQuickError(err && err.message ? err.message : String(err));
+      }
+    });
+
+    evalBtn.addEventListener("click", async (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      if (evalBtn.disabled || evalInFlight) return;
+      const url = cardUrl(card);
+      if (!url) {
+        C.toast("未能识别该职位的链接", true);
+        return;
+      }
+      evalInFlight = true;
+      evalBtn.disabled = true;
+      evalBtn.textContent = "评估中…";
+      const reset = () => {
+        evalInFlight = false;
+        evalBtn.disabled = false;
+        evalBtn.textContent = "评估";
+      };
+      try {
+        const jd = await fetchCardJd(url);
+        // 内联 JD 全文 + 雇主名：与服务端抓取同样绕开风控，且省一次网络往返。
+        C.beginEval(C.normalizeUrl(url)); // 收尾轮询按归一 URL 比对
+        C.sendSingleEvaluate(
+          url,
+          (err) => {
+            reset();
+            C.endEval();
+            C.toast(err, true);
+          },
+          { jdText: jd.text, company: cardCompany(card) }
+        );
+      } catch (err) {
+        reset();
+        C.toast(err && err.message ? err.message : String(err), true);
+      }
+    });
+
+    group.appendChild(quickBtn);
+    group.appendChild(evalBtn);
+    host.appendChild(group);
+    return group;
+  }
+
+  /** 分数徽章（完整评估优先，其次快评）：并进操作区那一行，不在卡片右上角再飘一个。 */
+  function renderInlineScore(group, scores) {
+    const full = scores && scores.full;
+    const quick = scores && !full ? scores.quick : null;
+    const entry = full || quick;
+    const fingerprint = entry ? `${full ? "full" : "quick"}:${entry.score}:${entry.reportNum || ""}` : "";
+    let badge = group.querySelector("span[data-career-badge]");
+    if (!fingerprint) {
+      if (badge) badge.remove();
+      return;
+    }
+    if (badge && badge.dataset.careerFp === fingerprint) return;
+    if (badge) badge.remove();
+
+    badge = document.createElement("span");
+    badge.dataset.careerBadge = "1";
+    badge.dataset.careerFp = fingerprint;
+    badge.style.cssText =
+      "margin-left:2px;padding:4px 8px;border-radius:999px;font-size:12px;font-weight:600;" +
+      "line-height:1;color:#fff;font-family:system-ui,sans-serif;";
+    if (full) {
+      badge.textContent = `已评估 ${entry.score || ""}`.trim();
+      badge.title = `点击打开报告 #${entry.reportNum}`;
+      badge.style.background = C.scoreColor(entry.score);
+      badge.style.cursor = "pointer";
+      badge.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        C.openReport(entry.reportNum);
+      });
+    } else {
+      badge.textContent = `快评 ${entry.score}/5`.trim();
+      badge.title = entry.grade
+        ? `快评：${entry.grade}${entry.reason ? ` — ${entry.reason}` : ""}`
+        : "快评分数";
+      badge.style.background = "#7c5cff";
+    }
+    group.appendChild(badge);
+  }
+
+  /**
+   * core 的卡片评分回调：返回 true = 本站接管了评分渲染（并入操作区），core 不再往
+   * 右上角飘徽章；返回 false = 本站不管（其他页面/卡片），core 走默认悬浮徽章。
+   */
+  function ensureCardActions(card, scores) {
+    if (!isPersonalJobsCard(card) || !cardIsList(card)) return false;
+    renderInlineScore(cardActionsGroup(card), scores);
+    return true;
+  }
+
+  /**
+   * 解锁所有每卡按钮。core 在评估/快评收尾时统一调用（settleButtons /
+   * quick-eval-result / quick-eval-error），否则按钮永远停在「评估中…」。
+   */
+  function resetCardActions() {
+    evalInFlight = false;
+    document.querySelectorAll(`[${CARD_ACTIONS_ATTR}]`).forEach((group) => {
+      const quick = group.querySelector('button[data-career-action="quick"]');
+      if (quick) {
+        quick.disabled = false;
+        quick.textContent = "快评";
+      }
+      const evalBtn = group.querySelector('button[data-career-action="eval"]');
+      if (evalBtn) {
+        evalBtn.disabled = false;
+        evalBtn.textContent = "评估";
+      }
+    });
+  }
+
+  /** 站点重渲染可能摘掉操作区：每批 DOM 变更后补一遍（幂等，core 内部按指纹短路）。 */
+  function sweepPersonalCards() {
+    document.querySelectorAll(CARD_SELECTOR).forEach((card) => {
+      if (isPersonalJobsCard(card) && cardIsList(card)) C.refreshCard(card);
+    });
+  }
+
   const BOSS_SITE = {
     hostMatch: /(^|\.)zhipin\.com$/i,
     // scan mode 上报的 source 根:web 侧按 browser-{source} 归属平台(BROWSER_SOURCES)。
@@ -269,6 +524,9 @@
     extractPosterName,
     extractListPaneJd,
     ensureRightPaneButton,
+    // 个人中心「感兴趣」列表：每卡评分 + 快评/评估按钮（无右栏可用）。
+    ensureCardActions,
+    resetCardActions,
     // 声明详情页评估内联 DOM 提取的 JD 全文 + 雇主名,绕开服务端 WebFetch
     // (BOSS 被风控拦截返回空,会导致 agent 落 browser-extract 卡死)。
     evaluateInlineJd: true,

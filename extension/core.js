@@ -208,9 +208,28 @@
     return "#8a8f98";
   }
 
-  function injectBadge(card, entry) {
+  const CARD_BADGE_SEL = "span[data-career-badge]";
+
+  /**
+   * 构造悬浮在卡片右上角的评分徽章。isFull=true 是完整评估徽章（点击打开报告），
+   * false 是快评分徽章（只有分数与等级，不可点）。
+   * 快评用紫色 #7c5cff —— 与「快评」按钮同色，两种徽章一眼区分谁是谁。
+   */
+  function buildCardBadge(entry, isFull) {
     const badge = document.createElement("span");
     badge.dataset.careerBadge = "1";
+    if (!isFull) {
+      badge.textContent = `快评 ${entry.score}/5`.trim();
+      badge.title = entry.grade
+        ? `快评：${entry.grade}${entry.reason ? ` — ${entry.reason}` : ""}`
+        : "快评分数";
+      badge.style.cssText =
+        "position:absolute;top:56px;right:8px;z-index:50;" +
+        "font-size:12px;line-height:1;padding:4px 8px;border-radius:999px;" +
+        "background:#7c5cff;color:#fff;font-weight:600;" +
+        "box-shadow:0 2px 6px rgba(0,0,0,.25);font-family:system-ui,sans-serif;";
+      return badge;
+    }
     badge.textContent = `已评估 ${entry.score || ""}`.trim();
     badge.title = `点击打开报告 #${entry.reportNum}`;
     badge.style.cssText =
@@ -223,6 +242,38 @@
       e.stopPropagation();
       openReport(entry.reportNum);
     });
+    return badge;
+  }
+
+  /**
+   * 卡片评分的唯一渲染入口：完整评估优先，其次快评，两者皆无则移除徽章。
+   * 幂等 —— 以「数据指纹」判断是否重绘：MutationObserver 在懒加载页打得很密，
+   * 分数没变就不该重建节点，否则每批变更都摘一次重插一次。
+   *
+   * 站点若提供 ensureCardActions（BOSS 个人中心「感兴趣」列表），由它把分数并进
+   * 卡片自己的按钮排，返回 true 表示已接管 —— 此时不再往右上角飘第二个徽章，
+   * 两处并存的观感是「同一个分数贴了两遍」。
+   */
+  function renderCardBadge(card, key) {
+    const full = key ? evaluated[key] : undefined;
+    const quick = !full && key ? quickMap[key] : undefined;
+    if (
+      typeof site.ensureCardActions === "function" &&
+      site.ensureCardActions(card, { full: full || null, quick: quick || null })
+    ) {
+      return;
+    }
+    const entry = full || quick;
+    const fingerprint = entry ? `${full ? "full" : "quick"}:${entry.score}:${entry.reportNum || ""}` : "";
+    const existing = card.querySelector(CARD_BADGE_SEL);
+    if (!fingerprint) {
+      if (existing) existing.remove();
+      return;
+    }
+    if (existing && existing.dataset.careerFp === fingerprint) return;
+    if (existing) existing.remove();
+    const badge = buildCardBadge(entry, !!full);
+    badge.dataset.careerFp = fingerprint;
     ensurePositioned(card);
     card.appendChild(badge);
   }
@@ -951,6 +1002,9 @@
       listBtn.disabled = false;
       listBtn.textContent = "评估本职位";
     }
+    // 每卡按钮（BOSS 个人中心列表）也要一并解锁，否则评估完成后那一排按钮
+    // 永远停在「评估中…」。
+    if (typeof site.resetCardActions === "function") site.resetCardActions();
   }
 
   function stopEvalPoll() {
@@ -1065,24 +1119,21 @@
       // Batch-evaluation checkboxes are disabled for now (feature dormant);
       // keep only the evaluated badge on list cards. Skeleton (injectCheckbox /
       // selectedKeys / syncSelection) stays for reinstating batch eval later.
-      const entry = evaluated[key];
-      if (entry) injectBadge(card, entry);
+      renderCardBadge(card, key);
     }
   }
 
   function applyAllInjections() {
     document.querySelectorAll(site.cardSelector).forEach((card) => {
       if (!card.__careerExt) processCard(card);
-      else {
-        // Re-render badge when the entry (newly evaluated) appeared after init.
-        if (site.cardIsList(card)) {
-          const url = site.cardUrl(card);
-          const key = url ? normalizeUrl(url) : "";
-          const entry = key ? evaluated[key] : undefined;
-          let badge = card.querySelector("span[data-career-badge]");
-          if (entry && !badge) injectBadge(card, entry);
-          else if (!entry && badge) badge.remove();
-        }
+      // 每次地图刷新都重画一遍：新评估/新快评要落徽章，重评估改了分数要更新，
+      // 站点（如 BOSS 个人中心）重渲染摘掉操作区/徽章也要补回来。内部按指纹短路。
+      if (site.cardIsList(card)) {
+        const url = site.cardUrl(card);
+        renderCardBadge(card, url ? normalizeUrl(url) : "");
+      } else {
+        const stale = card.querySelector(CARD_BADGE_SEL);
+        if (stale) stale.remove();
       }
     });
     // 详情页浮窗：四行读数 + 两个动作，取代过去的四个独立固定元素。
@@ -1467,6 +1518,7 @@
         lqbtn.textContent = `快评 ${msg.score}/5`;
         lqbtn.title = msg.reason ? `快评：${msg.grade} — ${msg.reason}` : `快评：${msg.grade}`;
       }
+      if (typeof site.resetCardActions === "function") site.resetCardActions();
       showToast(`快评 ${msg.score}/5 · ${msg.grade}`);
       sendResponse({ ok: true });
       return;
@@ -1483,6 +1535,7 @@
         lqbtn.disabled = false;
         lqbtn.textContent = "快评";
       }
+      if (typeof site.resetCardActions === "function") site.resetCardActions();
       showQuickError(msg.error || "快评不可用：本地 web 服务/接口异常");
       sendResponse({ ok: true });
       return;
@@ -1683,6 +1736,15 @@
     showQuickError,
     makeButton,
     openReport,
+    // 分数分色（>=4 绿 / >=3 橙 / 其余红）：站点自绘评分徽章时复用同一套阈值，
+    // 免得两处各写一份色标，分数一样颜色却不同。
+    scoreColor,
+    // 站点重渲染后补回卡片上的评分/操作区（幂等，内部按数据指纹短路）。
+    refreshCard: (card) => {
+      if (!card || !site) return;
+      const url = site.cardUrl(card);
+      renderCardBadge(card, url ? normalizeUrl(url) : "");
+    },
     sendSingleEvaluate,
     sendQuickEval,
     // 通用消息通道(带回调):site 文件可用它向 background 发请求并取回(structured
