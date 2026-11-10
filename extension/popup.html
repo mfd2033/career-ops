@@ -31,11 +31,27 @@
 
       <footer>
         <span id="footTip"></span>
-        <div class="diag-copy-row">
-          <button id="copyDiag" type="button" class="copy-btn">一键复制诊断</button>
+        <div class="diag-entry-row">
+          <button id="diagBtn" type="button" class="diag-entry">诊断</button>
         </div>
-        <pre id="diag" class="diag" hidden></pre>
       </footer>
+    </div>
+
+    <!-- 诊断浮层：默认隐藏，点「诊断」弹出；fixed 覆盖整个 popup -->
+    <div id="diagOverlay" class="overlay" hidden>
+      <div class="sheet" role="dialog" aria-label="诊断数据">
+        <div class="sheet-head">
+          <h2>诊断数据</h2>
+          <button id="diagClose" type="button" class="sheet-close" aria-label="关闭">×</button>
+        </div>
+        <div class="sheet-body">
+          <pre id="diag" class="diag"></pre>
+        </div>
+        <div class="sheet-foot">
+          <button id="copyDiag" type="button" class="copy-btn">一键复制诊断</button>
+          <button id="diagDismiss" type="button" class="dismiss">关闭</button>
+        </div>
+      </div>
     </div>
     <script src="popup.js"></script>
   </body>

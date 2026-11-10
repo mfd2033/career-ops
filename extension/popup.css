@@ -65,8 +65,30 @@ p-state.failed .p-dot { background: var(--danger); }
 .p-score { flex: 0 0 auto; font-weight: 700; }
 
 footer { font-size: 11px; color: var(--muted); text-align: center; }
-.diag { margin-top: 6px; padding: 6px; background: #1d1f23; color: #9fe8d0; border-radius: 6px; font-size: 10px; text-align: left; white-space: pre-wrap; word-break: break-all; }
-.diag-copy-row { margin-top: 6px; }
+.diag { padding: 6px; background: #1d1f23; color: #9fe8d0; border-radius: 6px; font-size: 10px; text-align: left; white-space: pre-wrap; word-break: break-all; }
+/* 诊断入口：footer 里的低调胶囊按钮 */
+.diag-entry-row { display: flex; justify-content: center; }
+.diag-entry {
+  background: var(--card); border: 1px solid var(--line); color: var(--muted);
+  border-radius: 999px; padding: 4px 14px; font-size: 11px; cursor: pointer;
+}
+.diag-entry:hover { color: var(--ink); border-color: #d8dce2; }
+/* 诊断浮层：底部上滑面板，JSON 超长时 sheet 内部滚动 */
+.overlay { position: fixed; inset: 0; background: rgba(29,31,35,.45); display: flex; align-items: flex-end; z-index: 10; }
+.overlay[hidden] { display: none; }
+.sheet { background: var(--card); width: 100%; max-height: 78%; border-radius: 12px 12px 0 0; display: flex; flex-direction: column; box-shadow: 0 -6px 20px rgba(0,0,0,.18); }
+.sheet-head { display: flex; align-items: center; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+.sheet-head h2 { font-size: 12px; font-weight: 700; margin-right: auto; }
+.sheet-close { background: none; border: none; font-size: 16px; color: var(--muted); cursor: pointer; padding: 2px 6px; line-height: 1; }
+.sheet-close:hover { color: var(--ink); }
+.sheet-body { padding: 10px 12px; overflow-y: auto; flex: 1; }
+.sheet-foot { display: flex; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--line); }
+.sheet-foot .copy-btn { flex: 1; padding: 7px 0; font-size: 12px; }
+.sheet-foot .dismiss {
+  flex: 1; padding: 7px 0; font-size: 12px; border-radius: 6px; cursor: pointer;
+  background: var(--card); border: 1px solid var(--line); color: var(--ink);
+}
+.sheet-foot .dismiss:hover { background: var(--bg); }
 .copy-btn { background: #2a2e35; color: #cfd6e4; border: 1px solid #3a3f4a; border-radius: 6px; padding: 4px 10px; font-size: 11px; cursor: pointer; }
 .copy-btn:hover { background: #343a44; }
 

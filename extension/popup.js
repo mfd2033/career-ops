@@ -14,6 +14,10 @@ const progressSummaryEl = $("#progressSummary");
 const footTipEl = $("#footTip");
 const diagEl = $("#diag");
 const copyDiagBtn = $("#copyDiag");
+const diagOverlay = $("#diagOverlay");
+const diagBtn = $("#diagBtn");
+const diagCloseBtn = $("#diagClose");
+const diagDismissBtn = $("#diagDismiss");
 
 let activeTabId = null;
 let worker = null; // chrome.runtime.connect({name:"eval"})
@@ -41,7 +45,6 @@ async function paintState(s) {
     stateEl.textContent = `已连接 localhost:${s.port}`;
     stateEl.className = "state connected";
     reprobeBtn.hidden = true;
-    footTipEl.textContent = `本地 web：localhost:${s.port}`;
     await paintSelection();
     return;
   }
@@ -67,11 +70,11 @@ async function init() {
   await paintDiag();
 }
 
-/** Show background-side state (eval map key count, resolved port) for debugging. */
+/** Show background-side state (eval map key count, resolved port) for debugging.
+ * 诊断数据只进 lastDiagJson，不再常驻展开；浮层打开时才可见。 */
 let lastDiagJson = "";
 async function paintDiag() {
   const d = await msg("get-diagnostics");
-  diagEl.hidden = false;
   const base = {
     connected: d.connected,
     port: d.port,
@@ -218,11 +221,20 @@ reprobeBtn.addEventListener("click", () => {
 
 document.addEventListener("DOMContentLoaded", () => init());
 
+// 诊断浮层开关：打开时先拉一份最新诊断（popup 每次点开都重建，保证 contentDiag 是当前的）
+function closeDiag() { diagOverlay.hidden = true; }
+diagBtn.addEventListener("click", async () => {
+  await paintDiag();
+  diagOverlay.hidden = false;
+});
+diagCloseBtn.addEventListener("click", closeDiag);
+diagDismissBtn.addEventListener("click", closeDiag);
+diagOverlay.addEventListener("click", (e) => { if (e.target === diagOverlay) closeDiag(); });
+
 // One-click copy of the last diagnostic snapshot (popup re-opens each click,
-// so diagEl.textContent may be empty until init/paintDiag runs; refresh it
-// on demand and copy the freshest values).
+// so lastDiagJson may be stale until paintDiag runs; refresh it on demand and
+// copy the freshest values).
 copyDiagBtn.addEventListener("click", async () => {
-  diagEl.hidden = false;
   await paintDiag(); // re-pull so contentDiag is current
   try {
     await navigator.clipboard.writeText(lastDiagJson);
