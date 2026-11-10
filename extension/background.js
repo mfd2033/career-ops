@@ -159,6 +159,30 @@ async function ensureLivePort() {
   return p;
 }
 
+// 本 SW 发往本机服务的普通请求统一走这里：fetch 没有默认超时，一个永远不回的响应
+// 会一直占着浏览器对该源的连接（HTTP/1.1 同源上限 6 条），后面连 /api/version 探针
+// 都只能在队尾等自己的 abort 计时 —— popup 就报「本地服务在忙」，而服务其实活着。
+// ADR-0098 治的是服务端事件循环，治不了浏览器连接池。长连接（事件流 / NDJSON 批评估）
+// 不走这里，它们的时长由评估本身决定。
+const LOCAL_FETCH_TIMEOUT_MS = 15000;
+
+async function localFetch(url, { timeoutMs = LOCAL_FETCH_TIMEOUT_MS, ...init } = {}) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: ctrl.signal });
+  } catch (err) {
+    if (ctrl.signal.aborted) {
+      // 这次端口没答上来：丢掉缓存，让下一次探针重新发现（服务可能刚换端口/重启）。
+      invalidatePort();
+      throw new Error(`本地服务 ${timeoutMs}ms 未响应：${url}`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // ---- toolbar connection-status badge (ADR-0050) ---------------------------
 //
 // 把「本地 web 服务是否在线」外显到工具栏图标，不用点开 popup。连接状态是全局
@@ -227,7 +251,7 @@ async function resolveEvalConfig(base) {
   let model = null;
   let unknownEmployer = null;
   try {
-    const cfg = await (await fetch(`${base}/api/config`)).json();
+    const cfg = await (await localFetch(`${base}/api/config`, { timeoutMs: 5000 })).json();
     if (cfg && typeof cfg.cliId === "string" && cfg.cliId) cliId = cfg.cliId;
     if (cfg && typeof cfg.model === "string" && cfg.model) model = cfg.model;
     if (cfg && cfg.unknownEmployer === "agency") unknownEmployer = "agency";
@@ -236,7 +260,8 @@ async function resolveEvalConfig(base) {
   }
   if (!cliId) {
     try {
-      const d = await (await fetch(`${base}/api/clis`)).json();
+      // /api/clis 冷启动要探一遍已装 CLI（ADR-0098 后约 3s），给 10s 上限。
+      const d = await (await localFetch(`${base}/api/clis`, { timeoutMs: 10000 })).json();
       const installed = (d && d.clis ? d.clis : []).filter((c) => c.installed);
       // No single installed CLI to fall back to → pick a sensible default (the
       // career-ops flagship CLI first, else the first installed) instead of
@@ -297,19 +322,31 @@ async function notifyQuickUpdated() {
   }
 }
 
+let evaluatedLoading = null;
+
 async function loadEvaluated(base) {
+  // 并发合并：多个 tab / 多轮刷新会同时要这份索引，/api/report-status 体积大，并发几份
+  // 就把同源连接池占满，连探针都没位置。一次只跑一份，其余等同一次结果。
+  if (evaluatedLoading) return evaluatedLoading;
+  evaluatedLoading = (async () => {
+    try {
+      const res = await localFetch(`${base}/api/report-status`);
+      console.log("[bg] loadEvaluated", base, "status=", res.status);
+      const j = await res.json();
+      evaluated = j && typeof j === "object" ? j : {};
+      console.log("[bg] report-status keys=", Object.keys(evaluated).length);
+      return evaluated;
+    } catch (err) {
+      // 保留上一次成功的索引：瞬时超时不该把全站徽章抹成空白，下一轮刷新会再来。
+      console.log("[bg] loadEvaluated error:", err.message);
+      return evaluated;
+    }
+  })();
   try {
-    const res = await fetch(`${base}/api/report-status`);
-    console.log("[bg] loadEvaluated", base, "status=", res.status);
-    const j = await res.json();
-    evaluated = j && typeof j === "object" ? j : {};
-    console.log("[bg] report-status keys=", Object.keys(evaluated).length);
-    return evaluated;
-  } catch (err) {
-    console.log("[bg] loadEvaluated error:", err.message);
-    evaluated = {};
+    return await evaluatedLoading;
+  } finally {
+    evaluatedLoading = null;
   }
-  return evaluated;
 }
 
 // ---- extension-driven explore scan (ADR-0007 E2/E5) -----------------------
@@ -712,7 +749,7 @@ async function driveScan(msg, sender) {
  */
 async function relayScanBatch(scanId, offers) {
   const base = `http://127.0.0.1:${await ensureLivePort()}`;
-  const res = await fetch(`${base}/api/explore/seen`, {
+  const res = await localFetch(`${base}/api/explore/seen`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ scanId, offers }),
@@ -858,7 +895,8 @@ async function loadActiveRuns() {
     payload = { ok: false, connected: false, running: [], queued: [] };
   } else {
     try {
-      const res = await fetch(`http://127.0.0.1:${port}/api/active-runs`);
+      // 「评估中/排队中」胶囊每 3s 轮询一次，读不到就该尽快回落，不能无限挂着占连接。
+      const res = await localFetch(`http://127.0.0.1:${port}/api/active-runs`, { timeoutMs: 5000 });
       const j = res.ok ? await res.json().catch(() => null) : null;
       payload = j
         ? { ok: true, connected: true, ...normalizeActiveRuns(j) }
@@ -1551,7 +1589,9 @@ async function runSingleViaApi({ base, url, cliId, model, jdText, company, role,
   const ctrl = new AbortController();
   let state = SINGLE.createRunState(url);
   try {
-    const res = await fetch(`${base}/api/run`, {
+    // 派发只建 run 拿 runId，正常毫秒级；单给它一个超时，别让「派发卡住」长期占着
+    // 同源连接。下面的事件流才是长连接，不能用这个预算。
+    const res = await localFetch(`${base}/api/run`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -1565,7 +1605,7 @@ async function runSingleViaApi({ base, url, cliId, model, jdText, company, role,
         company: company || undefined,
         role: role || undefined,
       }),
-      signal: ctrl.signal,
+      timeoutMs: 30000,
     });
     const j = await res.json().catch(() => ({}));
     if (!res.ok || !j || !j.runId) throw new Error((j && j.error) || `评估接口返回 ${res.status}`);

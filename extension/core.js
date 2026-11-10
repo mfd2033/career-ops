@@ -2109,6 +2109,10 @@
       __diag.pathname = location.pathname;
       __diag.badges = document.querySelectorAll("span[data-career-badge]").length;
       __diag.boxes = document.querySelectorAll("input[type=checkbox][title^=选择]").length;
+      // 智联/猎聘走行内实现，不画悬浮 badge —— 上面两个计数恒为 0。真正反映「卡片 UI
+      // 有没有注入」的是行内胶囊与按钮行的数量。
+      __diag.chips = document.querySelectorAll("span[data-career-chip]").length;
+      __diag.actionRows = document.querySelectorAll('[data-career-actions="row"]').length;
       // BOSS changed its list markup (pathname=/web/geek/jobs); .job-card-wrapper
       // no longer matches. Snapshot the REAL card container's class chain from the
       // first job_detail anchor so we can fix the site's cardSelector.
