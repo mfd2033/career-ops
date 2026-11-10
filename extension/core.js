@@ -105,6 +105,31 @@
         /* ignore */
       }
     }
+    purgeInjectedUi();
+  }
+
+  // 孤儿清理：扩展重载后本上下文已死，注入的 UI 不再有任何事件通道——留在页面上
+  // 只会展示冻结的过期状态（2026-11-10 猎聘页实测：评估任务早已完成，胶囊永远停在
+  // 「评估中 / 排队中」，刷新页面才恢复）。统一摘除：每卡操作区/悬浮徽章/勾选框按
+  // data 属性与 title 前缀定位，浮窗/阅读弹窗/错误框等固定 UI 一律挂 career-ext-
+  // id 前缀（见各段定义处），按前缀一把抓。瞬时 toast 不在清单（自清理，留着把
+  // 「请刷新」说完）。本函数是 DOM 胶水且 content script 无法在 node 导入，无可
+  // 单测的缝——靠 lint + 现有纯层单测兜回归。
+  function purgeInjectedUi() {
+    try {
+      showToast("职位评估插件已重载，请刷新本页");
+    } catch {
+      /* ignore */
+    }
+    try {
+      document
+        .querySelectorAll(
+          '[data-career-actions], span[data-career-badge], input[type="checkbox"][title^="选择"], [id^="career-ext-"]',
+        )
+        .forEach((el) => el.remove());
+    } catch {
+      /* 上下文已死，尽力而为 */
+    }
   }
   function sendMsg(msg, cb) {
     if (invalidated) return;
