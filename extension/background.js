@@ -1138,16 +1138,18 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         }
         sendResponse({ ok: true });
         const tabId = sender.tab ? sender.tab.id : null;
-        // 内联 JD/雇主名(详情页 DOM 提取,猎聘等登录墙站点绕开服务端抓取)。
+        // 内联 JD/雇主名/职位标题(详情页 DOM 提取,猎聘等登录墙站点绕开服务端抓取)。
+        // role 只用于服务端任务卡标题——被门禁拦下的评估没有报告可回填职位名。
         const jdText = typeof msg.jdText === "string" && msg.jdText.trim() ? msg.jdText.trim() : "";
         const company = typeof msg.company === "string" && msg.company.trim() ? msg.company.trim() : "";
+        const role = typeof msg.role === "string" && msg.role.trim() ? msg.role.trim() : "";
         (async () => {
           const base = `http://127.0.0.1:${await ensureLivePort()}`;
           const cfg = await resolveEvalConfig(base);
           const cliId = msg.cliId || cfg.cliId;
           const model = msg.model || cfg.model || null;
           if ((await probeEvalRoute(base)) === "run") {
-            await runSingleViaApi({ base, url, cliId, model, jdText, company, tabId });
+            await runSingleViaApi({ base, url, cliId, model, jdText, company, role, tabId });
             return;
           }
           // 回落路径逐字保留：老 exe / 老 dev 服务上这个按钮的行为与 ADR-0051 之前一致。
@@ -1517,7 +1519,7 @@ async function probeEvalRoute(base) {
  * 对详情页而言这与批量路无差异：收尾靠 evaluated-updated 与 3s 轮询，失败靠
  * `single-eval-error`。popup 也只认它已有的 stage 形状（事件由纯函数折叠而来）。
  */
-async function runSingleViaApi({ base, url, cliId, model, jdText, company, tabId }) {
+async function runSingleViaApi({ base, url, cliId, model, jdText, company, role, tabId }) {
   announce({ stage: "start", total: 1, url });
   const failToTab = (message) => {
     announce({ stage: "error", error: message });
@@ -1538,9 +1540,11 @@ async function runSingleViaApi({ base, url, cliId, model, jdText, company, tabId
         input: url,
         cliId,
         model: model || undefined,
-        // 内联 JD/雇主名（详情页 DOM 提取）：登录墙站靠它绕开服务端抓取。
+        // 内联 JD/雇主名/职位标题（详情页 DOM 提取）：登录墙站靠它绕开服务端抓取；
+        // role 只用于任务卡标题，老服务不认这个字段也无碍。
         jdText: jdText || undefined,
         company: company || undefined,
+        role: role || undefined,
       }),
       signal: ctrl.signal,
     });

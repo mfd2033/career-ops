@@ -112,6 +112,21 @@ test("evaluateDisplayTitle: 报告标签最权威，其次 pipeline 行，最后
   assert.equal(evaluateDisplayTitle({ company: "熙牛医疗" }), "熙牛医疗");
 });
 
+test("evaluateDisplayTitle: 报告/pipeline 行都缺时，扩展详情页的 company+role 拼成「公司 · 岗位」", () => {
+  // 黑名单门禁拦下的评估没有报告可回填，职位名只能来自派发时的扩展 payload。
+  assert.equal(evaluateDisplayTitle({ company: "中犇科技", role: "全栈技术经理" }), "中犇科技 · 全栈技术经理");
+  // 只有一边时退化为单字段，不编造另一边。
+  assert.equal(evaluateDisplayTitle({ company: "中犇科技", role: "" }), "中犇科技");
+  assert.equal(evaluateDisplayTitle({ company: "", role: "全栈技术经理" }), "全栈技术经理");
+});
+
+test("evaluateDisplayTitle: 报告标签仍优先于扩展传的 company+role", () => {
+  assert.equal(
+    evaluateDisplayTitle({ reportLabel: "报告落定公司 · 报告落定岗位", company: "扩展公司", role: "扩展岗位" }),
+    "报告落定公司 · 报告落定岗位",
+  );
+});
+
 test("evaluateDisplayTitle: 都拼不出返回空串（调用方保留原兜底形状，不编造）", () => {
   assert.equal(evaluateDisplayTitle({}), "");
   assert.equal(evaluateDisplayTitle({ reportLabel: "", inboxLabel: null, company: undefined }), "");

@@ -639,6 +639,9 @@
     const msg = { type: "single-evaluate", url };
     if (extra && extra.jdText) msg.jdText = extra.jdText;
     if (extra && extra.company) msg.company = extra.company;
+    // 职位标题（详情页 DOM 提取）：服务端任务卡标题「公司 · 岗位」的后半段——
+    // 黑名单门禁拦下的评估没有报告可回填，职位名只有派发时带上这一条路。
+    if (extra && extra.role) msg.role = extra.role;
     sendMsg(msg, (res) => {
       if (chrome.runtime.lastError || !res || !res.ok) {
         onFail((res && res.error) || "评估发起失败：本地 web 服务未运行?");
@@ -813,6 +816,8 @@
       if (text) {
         extra.jdText = [title, text].filter(Boolean).join("\n").trim().slice(0, 12000);
         extra.company = site.extractPosterName();
+        // 职位标题随 payload 一并带出，任务卡/台账标题才拼得出「公司 · 岗位」。
+        if (title) extra.role = title;
       }
     }
     sendSingleEvaluate(

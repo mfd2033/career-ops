@@ -76,7 +76,7 @@ export const maxDuration = 800; // a real oferta evaluation / pdf-mode CV tailor
 // through POST /api/run/cancel (the worker card's X button).
 
 export async function POST(req: Request) {
-  let body: { kind?: string; input?: string; cliId?: string; model?: string; jdText?: string; company?: string };
+  let body: { kind?: string; input?: string; cliId?: string; model?: string; jdText?: string; company?: string; role?: string };
   try {
     body = await req.json();
   } catch {
@@ -90,6 +90,10 @@ export async function POST(req: Request) {
   // the user's tokens. Kinds that do not score an offer ignore both fields.
   const jdText = clampInlineJd(body.jdText);
   const employer = clampInlineEmployer(body.company);
+  // 扩展详情页随 JD 一并传来的职位标题（DOM 提取）：只用于任务卡标题——被黑名单
+  // 门禁拦下的评估没有报告可回填，职位名只有派发时带上这一条路。同一规范化函数
+  // （单行、120 上限），绝不进 prompt（JD 全文本就含标题，评估员自己落定）。
+  const role = clampInlineEmployer(body.role);
   if (!input || !cliId) {
     return new Response(JSON.stringify({ error: "input and cliId required" }), { status: 400 });
   }
@@ -175,7 +179,7 @@ export async function POST(req: Request) {
   // 一次派发把 pipeline.md 反复读上几遍。
   const inboxRow = kind === "evaluate" ? inbox.find((j) => j.url === input) : undefined;
   const inboxLabel = jobLabel(inboxRow?.company, inboxRow?.role);
-  const dispatchLabel = kind === "evaluate" ? evaluateDisplayTitle({ inboxLabel, company: employer }) : "";
+  const dispatchLabel = kind === "evaluate" ? evaluateDisplayTitle({ inboxLabel, company: employer, role }) : "";
   const ledgerTitle = checkupTarget?.ok
     ? `公司体检：${checkupTarget.company}`
     : dispatchLabel || `${kind} ${input}`;
@@ -200,10 +204,11 @@ export async function POST(req: Request) {
   };
   // 完成态的「公司 · 岗位」（evaluate）：报告 Machine Summary 是唯一能给出岗位的诚实
   // 来源——扩展发起的单次评估没有本地卡，池快照里只有 URL 或雇主名。done 事件把它
-  // 带给卡片、台账写同一份，两处同一个口径。拼不出返回 ""，调用方保留原兜底形状。
+  // 带给卡片、台账写同一份，两处同一个口径。报告读不到（门禁拦截/失败）时退回派发
+  // 时的 company+role；都拼不出返回 ""，调用方保留原兜底形状。
   const finishedLabel = (reportNum?: string): string =>
     kind === "evaluate"
-      ? evaluateDisplayTitle({ reportLabel: reportLabelFor(reportNum), inboxLabel, company: employer })
+      ? evaluateDisplayTitle({ reportLabel: reportLabelFor(reportNum), inboxLabel, company: employer, role })
       : "";
   // ADR-0089：报告号由 runPipeline 捕获或推得后作为第三参传入——pdf / checkup
   // 的 input 就是号本身；evaluate 的号只有收尾 reconcile 推得出（见
