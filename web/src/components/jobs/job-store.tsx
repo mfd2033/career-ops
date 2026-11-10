@@ -482,6 +482,13 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
       } else if (ev.type === "done") {
         if (typeof ev.tokens === "number") acc.doneTokens = ev.tokens;
         if (typeof ev.costUsd === "number") acc.doneCostUsd = ev.costUsd;
+        // 接管卡（招聘站扩展发起的单次评估）运行期间标题只有 URL 或雇主名：报告落盘后
+        // 服务端随 done 发来「公司 · 岗位」，就地升级，列表不必等刷新。/jobs 列表与
+        // 侧栏托盘吃同一个 Job，两处一起变。本地派发卡有自己的标题，不动。
+        if (typeof ev.title === "string" && ev.title && jobId.startsWith(ADOPT_PREFIX)) {
+          const title = ev.title;
+          setJobs((js) => js.map((j) => (j.id === jobId ? { ...j, title } : j)));
+        }
         finishJob(jobId, "done", t("jobs.stepDone"));
       } else if (ev.type === "error") {
         finishJob(jobId, "error", (ev.msg as string) || t("jobs.stepError"));

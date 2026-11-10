@@ -138,6 +138,9 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
     const isChild = !!e.parentId;
     const kindLabel = isChild ? t("jobs.subtaskKind") : e.kind;
     const checkupHref = e.trackerN ? `/api/checkup-report?n=${encodeURIComponent(e.trackerN)}` : null;
+    // 职位链接（evaluate/批量评估的 input 是招聘站 URL）：新标签页打开原帖。非 http
+    // 的 input（pdf 的报告号、体检的 tracker 号）保持纯文本，不做假链接。
+    const postingUrl = /^https?:\/\//i.test(e.input ?? "") ? e.input : null;
     return (
       <div className="mx-auto max-w-3xl px-6 py-8">
         <button
@@ -159,7 +162,21 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
             </p>
             <h1 className="mt-2 font-display text-2xl tracking-tight text-landing">{display.title}</h1>
             <p className="mt-1 text-sm text-muted">
-              {kindLabel} · {t("jobs.ledgerInput")}: {e.input} · {fmtDuration(Math.round((e.finishedAt - e.startedAt) / 1000))}
+              {kindLabel} · {t("jobs.ledgerInput")}:{" "}
+              {postingUrl ? (
+                // 职位链接可点：台账只存了 URL 字符串，读者常常要回原文核对 JD。
+                <a
+                  href={postingUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="break-all text-brand transition-colors hover:underline"
+                >
+                  {postingUrl}
+                </a>
+              ) : (
+                e.input
+              )}{" "}
+              · {fmtDuration(Math.round((e.finishedAt - e.startedAt) / 1000))}
             </p>
             {/* ADR-0044：台账行无排队信息，只说始于/止于（与本地卡视图口径一致）。 */}
             {(fmtStartedAt(e.startedAt) || fmtStartedAt(e.finishedAt)) && (

@@ -36,6 +36,20 @@ export function jobLabel(company, role) {
   return c || r || "";
 }
 
+/**
+ * 单次 evaluate 任务卡的标题：报告（完成后唯一权威）> pipeline 行 > 扩展详情页
+ * 传来的雇主名。三处都拼不出就返回 ""，调用方保留原有兜底形状（不猜、不编造）。
+ *
+ * 招聘站扩展发起的评估没有本地卡，台账标题就是 /jobs 列表上那行字——以前一律是
+ * `evaluate <url>`，于是列表只能印「评估」。这里给出与批量评估同口径的可读标题。
+ *
+ * @param {{reportLabel?: unknown, inboxLabel?: unknown, company?: unknown}} sources
+ * @returns {string}
+ */
+export function evaluateDisplayTitle({ reportLabel, inboxLabel, company } = {}) {
+  return cleanFieldValue(reportLabel) || cleanFieldValue(inboxLabel) || cleanFieldValue(company);
+}
+
 /** 报告 Markdown 里 `## Machine Summary` 之后的片段（无该标题时退回全文）。 */
 function machineSummarySection(md) {
   const m = md.match(/^##\s+Machine Summary\s*$/m);

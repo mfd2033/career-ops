@@ -5,7 +5,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { jobLabel, reportJobLabel, pipelineUrlLabels } from "../../src/lib/job-label.mjs";
+import { jobLabel, reportJobLabel, pipelineUrlLabels, evaluateDisplayTitle } from "../../src/lib/job-label.mjs";
 
 // ── jobLabel ─────────────────────────────────────────────────────────────────
 
@@ -95,4 +95,26 @@ test("pipelineUrlLabels: URL → 标签，跳过缺字段/空 URL，同 URL 保�
 test("pipelineUrlLabels: 非数组输入安全", () => {
   assert.equal(pipelineUrlLabels(null).size, 0);
   assert.equal(pipelineUrlLabels(undefined).size, 0);
+});
+
+// ── evaluateDisplayTitle ────────────────────────────────────────────────────
+
+test("evaluateDisplayTitle: 报告标签最权威，其次 pipeline 行，最后才是雇主名", () => {
+  assert.equal(
+    evaluateDisplayTitle({
+      reportLabel: "上海融达信息科技有限公司 · 项目经理（医疗软件项目）",
+      inboxLabel: "上海融达 · 项目经理",
+      company: "上海融达信息科技有限公司",
+    }),
+    "上海融达信息科技有限公司 · 项目经理（医疗软件项目）",
+  );
+  assert.equal(evaluateDisplayTitle({ inboxLabel: "熙牛医疗 · 大数据项目经理", company: "熙牛医疗" }), "熙牛医疗 · 大数据项目经理");
+  assert.equal(evaluateDisplayTitle({ company: "熙牛医疗" }), "熙牛医疗");
+});
+
+test("evaluateDisplayTitle: 都拼不出返回空串（调用方保留原兜底形状，不编造）", () => {
+  assert.equal(evaluateDisplayTitle({}), "");
+  assert.equal(evaluateDisplayTitle({ reportLabel: "", inboxLabel: null, company: undefined }), "");
+  assert.equal(evaluateDisplayTitle({ reportLabel: "null", inboxLabel: "n/a" }), "");
+  assert.equal(evaluateDisplayTitle(), "");
 });

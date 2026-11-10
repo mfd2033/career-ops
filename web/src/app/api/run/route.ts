@@ -12,7 +12,7 @@ import { cliDisplayName } from "@/lib/cli-labels.mjs";
 import { resolveWorkerInvocation } from "@/lib/worker-invocation.mjs";
 import { accumulateTokens, authExpiredHint, blacklistGateLedgerFields, checkupArtifactRowCount, checkupArtifactTodayForTracker, classifyFatalStderr, fatalStopMessage, makeCheckupHtmlProbe, detectBlacklistGate, failureEvidence, failureLedgerMsg, hasNewCompletedReport, isFatalGenericStderr, persistRunOutcome, PERSISTENCE_GATED_KINDS, RUN_SILENCE_MS, silenceStopMessage, withModelFlag } from "@/lib/run-cli-support.mjs";
 import { spawnHeadlessCli, terminateCli } from "@/lib/spawn-cli.mjs";
-import { careerOpsRoot, readMemory, findReportFile, readInbox, readScanDates, findCheckupTarget, readApplications, rootScript, readMarketModesDir, listMarketModes } from "@/lib/career-ops";
+import { careerOpsRoot, readMemory, findReportFile, readInbox, readScanDates, findCheckupTarget, readApplications, rootScript, readMarketModesDir, listMarketModes, type InboxJob } from "@/lib/career-ops";
 import { checkupDispatchText } from "@/lib/checkup-request.mjs";
 import { registerCheckup, markCheckupRunning, clearCheckup, attachCheckupExit } from "@/lib/checkup-live.mjs";
 import { OFFER_CHECKUP_SKILL_NAME, resolveSkillCopy, scanSkillRegistry } from "@/lib/skill-registry.mjs";
@@ -21,6 +21,9 @@ import { resolvePdfPaths, type PdfPaths } from "@/lib/pdf-paths.mjs";
 import { renderAndMarkPdf, writeCvHtml, pdfRunOutcome } from "@/lib/pdf-render.mjs";
 import { createCvEnvelopeFilter, type CvEnvelope } from "@/lib/cv-envelope.mjs";
 import { buildPrompt, isShellSafeCompanyName, clampInlineJd, clampInlineEmployer } from "@/lib/run-prompts.mjs";
+// 任务卡可读标题（「公司 · 岗位」）：派发时从 pipeline 行/扩展雇主名带，完成后从
+// 报告 Machine Summary 回填（与 /api/batch-evaluate 同一份函数）。
+import { jobLabel, reportJobLabel, evaluateDisplayTitle } from "@/lib/job-label.mjs";
 // 评估模式（CO-65）：profile.yml 的 language.modes_dir → 实际评估模式文件。
 import { resolveMarketMode } from "@/lib/market-modes.mjs";
 import { deriveRunReportNum, buildReconcileArgs } from "@/lib/run-reconcile.mjs";
@@ -163,20 +166,52 @@ export async function POST(req: Request) {
   // visible even when no UI card exists (API-dispatched runs, another tab).
   // Recorded once per run at the terminal send/cancel/crash — see recordEnd.
   const checkupTarget = kind === "checkup" ? findCheckupTarget(String(input)) : null;
+  // 任务卡可读标题（「公司 · 岗位」，与批量评估同口径）：招聘站扩展发起的单次评估
+  // 没有本地卡，台账标题就是 /jobs 列表上那行字，以前一律是 `evaluate <url>`。
+  // 派发时能带的就带（pipeline 行写着 `URL | 公司 | 岗位`，扩展另带详情页雇主名），
+  // 完成后再由报告 Machine Summary 覆盖（recordEnd）；都拼不出就保留原兜底形状。
+  const inbox = kind === "evaluate" ? readInbox() : [];
+  // 本 run 的 inbox 行（同源同 URL）：派发标题、发布日期、卡片薪资共用它，避免
+  // 一次派发把 pipeline.md 反复读上几遍。
+  const inboxRow = kind === "evaluate" ? inbox.find((j) => j.url === input) : undefined;
+  const inboxLabel = jobLabel(inboxRow?.company, inboxRow?.role);
+  const dispatchLabel = kind === "evaluate" ? evaluateDisplayTitle({ inboxLabel, company: employer }) : "";
   const ledgerTitle = checkupTarget?.ok
     ? `公司体检：${checkupTarget.company}`
-    : `${kind} ${input}`;
+    : dispatchLabel || `${kind} ${input}`;
   let endRecorded = false;
   // 「查看 CLI 会话」：本次 run 的 CLI 会话 id。claude 系（claude/qoder-cn）在
   // runPipeline 的 init 帧解析时写入；opencode 在终态后凭 --title 异步反查写入。
   // holder 跨函数边界：runPipeline 是独立函数（写），recordEnd 读它落台账。
   // 缺失 = 引擎没给，卡片按钮不渲染。
   const sessionRef: { current?: string } = {};
+  // 报告号 → 「公司 · 岗位」：报告 Machine Summary 里的 company/role 是评估员落定
+  // 的事实，完成态卡片标题以它为准（与批量评估 labelForNum 同口径）。读不到就退回
+  // 派发时的标签，绝不猜。
+  const reportLabelFor = (num?: string): string => {
+    if (!num) return "";
+    const file = findReportFile(String(num));
+    if (!file) return "";
+    try {
+      return reportJobLabel(fs.readFileSync(file, "utf8"));
+    } catch {
+      return "";
+    }
+  };
+  // 完成态的「公司 · 岗位」（evaluate）：报告 Machine Summary 是唯一能给出岗位的诚实
+  // 来源——扩展发起的单次评估没有本地卡，池快照里只有 URL 或雇主名。done 事件把它
+  // 带给卡片、台账写同一份，两处同一个口径。拼不出返回 ""，调用方保留原兜底形状。
+  const finishedLabel = (reportNum?: string): string =>
+    kind === "evaluate"
+      ? evaluateDisplayTitle({ reportLabel: reportLabelFor(reportNum), inboxLabel, company: employer })
+      : "";
   // ADR-0089：报告号由 runPipeline 捕获或推得后作为第三参传入——pdf / checkup
   // 的 input 就是号本身；evaluate 的号只有收尾 reconcile 推得出（见
   // finishAfterReconcile），推不出就留空。台账行显式携带它，读取端（ledger-only
   // 卡）不必再靠 URL join / kind 猜。
-  const recordEnd = (status: "done" | "error", msg?: string, reconciledNum?: string, blacklistGate?: { company: string }) => {
+  // 第五参 doneLabel：终态标题已在 send() 里算过一次（随 done 事件发出去），传进来
+  // 复用，免得为同一份报告再读一遍磁盘。
+  const recordEnd = (status: "done" | "error", msg?: string, reconciledNum?: string, blacklistGate?: { company: string }, doneLabel?: string) => {
     if (endRecorded) return;
     endRecorded = true;
     try {
@@ -188,11 +223,15 @@ export async function POST(req: Request) {
       // evaluate 的号由收尾 reconcile 推得。两者都过数字校验，凑不出就留空。
       const bareInput = String(input).trim();
       const capturedNum = (kind === "pdf" || kind === "checkup") && /^\d+$/.test(bareInput) ? bareInput : undefined;
+      const reportNum = capturedNum ?? reconciledNum;
+      // 完成态标题：报告给出的「公司 · 岗位」最权威（扩展发起的任务唯有它能拼出岗位），
+      // 拼不出就沿用派发时的标题——那是「公司名」或原兜底形状，不编造。
+      const label = doneLabel ?? finishedLabel(reportNum);
       appendRunRecord(careerOpsRoot(), {
         id: runId,
         kind,
         input,
-        title: ledgerTitle,
+        title: label || ledgerTitle,
         page: kind === "checkup" ? `/pipeline/${input}` : undefined,
         status,
         startedAt,
@@ -205,7 +244,7 @@ export async function POST(req: Request) {
         // 「无会话」处理——按钮不渲染，与「无数据不占位」同口径。
         sessionId: sessionRef.current,
         // ADR-0089：报告号（捕获值优先，否则收尾推得）；凑不出即不占位。
-        reportNum: capturedNum ?? reconciledNum,
+        reportNum,
         // 800（原 300）：门禁那一句 checkup 文案就 175 字，300 会把 ADR-0034 的证据
         // 段整段截掉——上限不抬，补丁等于没打。
         msg: msg ? String(msg).slice(0, 800) : undefined,
@@ -265,6 +304,13 @@ export async function POST(req: Request) {
         // ADR-0035：体检的目标公司在派发时已解析（同一份就是审计行用的那个），
         // 直接带进 prompt，省掉 worker 自解析 tracker 的那一步易错查表。
         checkupCompany: checkupTarget?.ok ? checkupTarget.company : undefined,
+        // 已解析的 pipeline 收件箱：发布日期与卡片薪资都从它取，不在 runPipeline
+        // 里把同一份 pipeline.md 再读两遍。
+        inbox,
+        // 卡片标题（「公司 · 岗位」）：派发时那一份给池快照，完成时那一份给 done 事件
+        // 与台账——两处同源，列表上那行字不会因为卡片来源不同而两副面孔。
+        poolTitle: dispatchLabel || input,
+        finishedLabel,
       });
     } catch (e) {
       // Nothing else catches this promise — a crash here must still terminate
@@ -319,6 +365,9 @@ async function runPipeline({
   checkupCompany,
   jdText,
   employer,
+  inbox,
+  poolTitle,
+  finishedLabel,
 }: {
   runId: string;
   kind: string;
@@ -338,12 +387,22 @@ async function runPipeline({
   jdText?: string;
   /** ADR-0051: DOM-extracted employer name, already clamped at the edge. */
   employer?: string;
+  /** 已解析的 pipeline 收件箱（非 evaluate 为空数组）：派发作用域读一次，供
+   *  发布日期 / 卡片薪资与任务卡标题共用。 */
+  inbox: InboxJob[];
+  /** 并发池快照上的标题（「公司 · 岗位」，拼不出时就是 URL）：扩展/CLI 发起的
+   *  单次评估没有本地卡，/jobs 上那行字只能来自这里。 */
+  poolTitle: string;
+  /** 完成态的「公司 · 岗位」（evaluate）：报告 Machine Summary 给出，拼不出返回 ""。 */
+  finishedLabel: (reportNum?: string) => string;
   /** Server run-ledger recorder (once per run; passed in from POST scope).
    *  ADR-0089: the third arg is the report number the run resolved to (evaluate's
    *  is known only after the closing reconcile), recorded on the ledger row.
    *  ADR-0084: the fourth is the blacklist gate that stopped the run — written as
-   *  structured fields so the blacklist page can count stops without reading prose. */
-  recordEnd: (status: "done" | "error", msg?: string, reportNum?: string, blacklistGate?: { company: string }) => void;
+   *  structured fields so the blacklist page can count stops without reading prose.
+   *  The fifth is the finished title already resolved for the done event, reused so
+   *  the same report isn't read twice. */
+  recordEnd: (status: "done" | "error", msg?: string, reportNum?: string, blacklistGate?: { company: string }, doneLabel?: string) => void;
 }) {
   const today = new Date().toISOString().slice(0, 10);
 
@@ -369,15 +428,13 @@ async function runPipeline({
   // explicit that a guessed date is worse than an absent one (the POSTED column
   // renders absent as `—`, a wrong date as a fresh req). Unknown URL → undefined
   // → the prompt writes no segment at all.
+  const inboxRow = kind === "evaluate" ? inbox.find((j) => j.url === input) : undefined;
   const postedAt =
-    kind === "evaluate"
-      ? readInbox().find((j) => j.url === input)?.postedAt ?? readScanDates().get(input)
-      : undefined;
+    kind === "evaluate" ? inboxRow?.postedAt ?? readScanDates().get(input) : undefined;
   // 采集卡片薪资（2026-11-04 #1217）：与 postedAt 同源（pipeline.md note 尾段，ADR-0023），
   // 但以前只传了日期。两个提取链路都不保证能拿到本岗薪资（猎聘把标题+薪资区块放在
   // <main> 之外，实证 #1217 被写成了「未披露」），卡片原文是第三个、早已落盘的事实源。
-  const cardSalary =
-    kind === "evaluate" ? readInbox().find((j) => j.url === input)?.salaryText : undefined;
+  const cardSalary = kind === "evaluate" ? inboxRow?.salaryText : undefined;
   // ADR-0056 决议 5：体检 prompt 的技能指针——与 /api/skills 同一个 skill-registry
   // 解析 offer体检 的最高版本副本（绝对路径 + 版本）；找不到 → undefined，prompt 与
   // 旧版逐字节一致（workflow 第 8 条：技能缺失不硬失败）。决议 8：每派发实时扫。
@@ -465,7 +522,9 @@ async function runPipeline({
   // ADR-0043：cliId/model 随任务入池，扩展派发的卡片凭 /api/active-runs 也能显示引擎。
   // 影子卡片接通：runId 同步入池——别的页签/刷新后的前端凭快照里的这个 UUID
   // 把 /api/events 的帧接到接管卡片上，否则单任务永远只显示「处理中」占位。
-  const poolHandle = acquire({ url: input, title: input, source: "run", cliId, model: model || undefined, runId, kind });
+  // 池卡片的标题就是要显示在列表上的那行字：能带出「公司 · 岗位」就带（扩展发起的
+  // 单次评估没有本地卡，快照之外没有别的标题来源），拼不出仍回退 URL（poolTitle）。
+  const poolHandle = acquire({ url: input, title: poolTitle, source: "run", cliId, model: model || undefined, runId, kind });
 
   // Spawned/guarded only AFTER the pool grants a slot. `child`/`writeToken` are
   // outer lets so cancel() can reach them whether the run is queued
@@ -552,9 +611,17 @@ async function runPipeline({
         else if (!base) obj = { ...obj, msg: hint };
       }
     }
+    if (obj.type === "done") {
+      // 终态标题随 done 一起发：接管卡（扩展发起的任务）运行期间只有 URL 或雇主名，
+      // 报告落盘后这里补上「公司 · 岗位」，列表不必等刷新才变得可读。
+      const label = finishedLabel(reconciledReportNum);
+      if (label) obj = { ...obj, title: label };
+      publish(runId, obj);
+      recordEnd("done", undefined, reconciledReportNum, blacklistGateHit, label);
+      return;
+    }
     publish(runId, obj);
-    if (obj.type === "done") recordEnd("done", undefined, reconciledReportNum, blacklistGateHit);
-    else if (obj.type === "error")
+    if (obj.type === "error")
       // 证据组装抽成纯函数（ADR-0034 决议 3）：一句话原因 ｜ stderr ｜ 输出尾部。
       recordEnd("error", failureLedgerMsg(String(obj.msg ?? ""), { stderrTail, stdoutTail: failureEvidence(stdoutTail) }));
   };
