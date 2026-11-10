@@ -197,16 +197,35 @@ export async function quickEvaluate(
     );
   }
   const parsed = parseQuickResult(content);
-  if (!parsed.raw) throw new Error(`快评失败：模型没按格式作答（${String(content).trim().slice(0, 120)}）`);
+  // 分数解析不出（模型换了写法，如「2.5 out of 5」）时同样不能落 0 分：
+  // 0 不在打分刻度上（下限 0.5），出现 0 一定是解析失败而不是真实评价。
+  if (parsed.score <= 0) {
+    const snippet = String(parsed.raw || content).trim().slice(0, 120);
+    throw new Error(`快评失败：模型没按格式给出分数（${snippet}）`);
+  }
   return parsed;
+}
+
+/**
+ * 全角数字/句点/斜杠/冒号归一。中文模型时常把「2.5/5」写成「２.５／５」，
+ * 不归一的话 score 正则整条落空、分数静默变 0。
+ */
+function normalizeScalars(raw: string): string {
+  return String(raw ?? "")
+    .replace(/[０-９]/g, (d) => String.fromCharCode(d.charCodeAt(0) - 0xfee0))
+    .replace(/[．。]/g, ".")
+    .replace(/／/g, "/")
+    .replace(/：/g, ":");
 }
 
 /** 解析 LLM 输出的单行，宽容处理：提取 grade/score/reason，失败回退空值。 */
 export function parseQuickResult(raw: string): QuickResult {
-  const line = String(raw ?? "").trim().split("\n").find((l) => /score\s*[:：]\s*\d/.test(l)) || "";
-  const gradeMatch = line.match(/grade\s*[:：]\s*(\w+)/i);
-  const scoreMatch = line.match(/score\s*[:：]\s*(\d+(?:\.\d+)?)\s*\/\s*5/i);
-  const reasonMatch = line.match(/reason\s*[:：]\s*(.+)$/i);
+  const text = normalizeScalars(raw).trim();
+  const line = text.split("\n").find((l) => /score\s*:\s*\d/.test(l)) || "";
+  const gradeMatch = line.match(/grade\s*:\s*(\w+)/i);
+  // 分母写法不固定：`2.5/5`、`2.5 out of 5`、`2.5 of 5`、只给 `2.5` 都要认。
+  const scoreMatch = line.match(/score\s*:\s*(\d+(?:\.\d+)?)\s*(?:\/\s*5|out\s+of\s+5|of\s+5)?/i);
+  const reasonMatch = line.match(/reason\s*:\s*(.+)$/i);
   const score = scoreMatch ? clampScore(parseFloat(scoreMatch[1])) : 0;
   return {
     grade: gradeMatch ? gradeMatch[1] : "",

@@ -57,8 +57,23 @@ test("解析不出分数时同样抛错，不静默返回 0 分", () => {
   const callIdx = EVAL.indexOf("parseQuickResult(content)");
   assert.ok(callIdx >= 0, "找不到 parseQuickResult 调用");
   const after = EVAL.slice(callIdx);
+  const guardIdx = after.search(/if\s*\(\s*parsed\.score\s*<=\s*0\s*\)/);
+  assert.ok(guardIdx >= 0, "缺少 score<=0 的兜底判断");
+  const guardBlock = after.slice(guardIdx, after.indexOf("return parsed", guardIdx));
   assert.ok(
-    /if\s*\(\s*!\s*parsed\.raw\s*\)\s*\{?\s*throw new Error\(/.test(after),
-    "解析结果 raw 为空时（模型没按格式作答）必须抛错，不能把 0 分当成打分落地",
+    /throw new Error\(/.test(guardBlock),
+    "score<=0（0 不在 0.5~5 的打分刻度上，必是解析失败）必须抛错，不能把 0 分当成打分落地",
+  );
+});
+
+test("分数解析容忍全角与『out of 5』写法", () => {
+  assert.ok(
+    /replace\(\/\[０-９\]\/g/.test(EVAL),
+    "缺少全角数字归一：中文模型输出「２.５／５」时 score 正则整条落空",
+  );
+  assert.ok(/replace\(\/／\/g/.test(EVAL), "缺少全角斜杠归一");
+  assert.ok(
+    /out\\s\+of\\s\+5/.test(EVAL),
+    "score 正则不认「2.5 out of 5」这类分母写法",
   );
 });
