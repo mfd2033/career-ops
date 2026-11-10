@@ -1162,7 +1162,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             // detail tab instead so the page can toast it and reset the button.
             if (tabId != null) {
               try {
-                await chrome.tabs.sendMessage(tabId, { type: "single-eval-error", error: err.message });
+                await chrome.tabs.sendMessage(tabId, { type: "single-eval-error", url, error: err.message });
               } catch {
                 /* tab closed or content not injected — ignore */
               }
@@ -1173,7 +1173,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           // silently and leave the button stuck on "评估中".
           announce({ stage: "error", error: err instanceof Error ? err.message : String(err) });
           if (tabId != null) {
-            chrome.tabs.sendMessage(tabId, { type: "single-eval-error", error: err instanceof Error ? err.message : String(err) }).catch(() => {});
+            chrome.tabs.sendMessage(tabId, { type: "single-eval-error", url, error: err instanceof Error ? err.message : String(err) }).catch(() => {});
           }
         });
         break;
@@ -1524,7 +1524,7 @@ async function runSingleViaApi({ base, url, cliId, model, jdText, company, role,
   const failToTab = (message) => {
     announce({ stage: "error", error: message });
     if (tabId != null) {
-      chrome.tabs.sendMessage(tabId, { type: "single-eval-error", error: message }).catch(() => {});
+      chrome.tabs.sendMessage(tabId, { type: "single-eval-error", url, error: message }).catch(() => {});
     }
   };
   // SW 保活：读流不算活动事件，空闲 30s 就被 Chrome 终止（同 runBatch 里那段教训）。

@@ -256,8 +256,14 @@
     "padding:3px 10px;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;" +
     "background:#00c68d;color:#fff;font-family:system-ui,sans-serif;box-shadow:0 1px 3px rgba(0,0,0,.18);";
 
-  // 完整评估是全局单飞：轮询收尾只有一个 evalPollUrl，两张卡同时发起会互相覆盖。
-  let cardEvalInFlight = false;
+  // 完整评估不再全局单飞：服务端全局并发池满员时 FIFO 入队（ADR-0014），第二张
+  // 卡的「评估」照常派发，卡片凭 /api/active-runs 出「评估中 / 排队中」胶囊。
+  // 这里只挡同一 URL 重复派发，并按 URL 登记在飞任务与按钮 —— 收尾按 URL 逐个
+  // 进行，互不覆盖（收尾轮询曾只有单槽 evalPollUrl，这是当年单飞的根本原因）。
+  const cardEvalsInFlight = new Set(); // 归一 URL
+  const cardEvalBtns = new Map(); // 归一 URL → 该卡的「评估」按钮
+  const cardEvalPolls = new Map(); // 归一 URL → 已轮询次数
+  let cardEvalPollTimer = null;
 
   /** 卡片操作区的挂载：若站点给了 mounts 就插进去，返回 refs；站点不接管返回 null。 */
   function ensureCardMount(card) {
@@ -386,47 +392,44 @@
     ev.preventDefault();
     ev.stopPropagation();
     if (btn.disabled) return;
-    // 全局单飞挡下的点击必须说话（否则像按钮坏了）；决策在纯层。CHIPS 缺失
-    // （异常注入顺序）时退回放行 —— 与旧的无声行为相比不更糟，不因纯层缺失新增死路。
-    if (cardEvalInFlight) {
-      const gate = CHIPS && CHIPS.cardEvalGate ? CHIPS.cardEvalGate({ inFlight: true }) : { allow: true, toast: null };
-      if (!gate.allow) {
-        if (gate.toast) showToast(gate.toast, true);
-        return;
-      }
-    }
     const url = site.cardUrl(card);
+    const key = url ? normalizeUrl(url) : "";
+    // 闸门决策在纯层：按钮自身禁用或同 URL 已在飞才挡下（CHIPS 缺失时退回放行
+    // —— 与旧的无声行为相比不更糟）；其余放行，交给服务端并发池排队（ADR-0014）。
+    const gate = CHIPS && CHIPS.cardEvalGate
+      ? CHIPS.cardEvalGate({ btnDisabled: btn.disabled, urlInFlight: !!key && cardEvalsInFlight.has(key) })
+      : { allow: true, toast: null };
+    if (!gate.allow) {
+      if (gate.toast) showToast(gate.toast, true);
+      return;
+    }
     if (!url) {
       showToast("未能识别该职位的链接", true);
       return;
     }
-    cardEvalInFlight = true;
+    cardEvalsInFlight.add(key);
+    cardEvalBtns.set(key, btn);
     btn.disabled = true;
     btn.textContent = "评估中…";
-    const reset = () => {
-      cardEvalInFlight = false;
-      btn.disabled = false;
-      btn.textContent = "评估";
+    const fail = (errMsg) => {
+      cardEvalPolls.delete(key);
+      settleCardEval(key, null);
+      showToast(errMsg, true);
     };
     try {
       const jd = await site.fetchCardJd(url);
       // 内联 JD 全文 + 雇主名：与服务端抓取同样绕开风控，且省一次网络往返。
-      startEvalPoll(normalizeUrl(url)); // 收尾轮询按归一 URL 比对
+      startCardEvalPoll(key); // 收尾轮询按归一 URL 比对
       sendSingleEvaluate(
         url,
-        (err) => {
-          reset();
-          stopEvalPoll();
-          showToast(err, true);
-        },
+        fail,
         { jdText: jd.text, company: cardCompanyOf(card) },
       );
-      // 任务进池需要一点时间，先问一次让「评估中」胶囊尽快出现（拿不到也无所谓，
-      // 3s 轮询会补上）。
+      // 任务进池需要一点时间，先问一次让「评估中 / 排队中」胶囊尽快出现（拿不到
+      // 也无所谓，3s 轮询会补上）。
       refreshActiveRuns();
     } catch (err) {
-      reset();
-      showToast(err && err.message ? err.message : String(err), true);
+      fail(err && err.message ? err.message : String(err));
     }
   }
 
@@ -452,11 +455,16 @@
 
   /**
    * 解锁所有每卡按钮。评估/快评收尾时统一调用（settleButtons / quick-eval-result /
-   * quick-eval-error），否则按钮永远停在「评估中…」。
+   * quick-eval-error），否则按钮永远停在「评估中…」。仍在飞的完整评估按钮除外
+   * —— 它们的收尾由 finalizeCardEval 按 URL 各自负责（并发池排队时可多个在飞）。
    */
   function resetCardButtons() {
-    cardEvalInFlight = false;
+    const inFlightBtns = new Set();
+    for (const [key, b] of cardEvalBtns) {
+      if (cardEvalsInFlight.has(key)) inFlightBtns.add(b);
+    }
     document.querySelectorAll('button[data-career-action]').forEach((btn) => {
+      if (inFlightBtns.has(btn)) return;
       btn.disabled = false;
       btn.textContent = btn.dataset.careerAction === "quick" ? "快评" : "评估";
     });
@@ -1341,6 +1349,84 @@
     evalPollUrl = null;
   }
 
+  // ---- 卡片评估收尾（按 URL 逐个，支持并发池排队） ---------------------------
+  //
+  // 详情页/右栏按钮仍走上面的单槽 evalPollUrl（detailEvaluating 一次一个）；卡片
+  // 评估允许多个在飞（ADR-0014 排队），收尾按 URL 逐个裁决，互不覆盖。
+
+  function stopCardEvalPollTimer() {
+    if (cardEvalPollTimer) {
+      clearInterval(cardEvalPollTimer);
+      cardEvalPollTimer = null;
+    }
+  }
+
+  /** 单张卡的按钮收尾：出在飞集合、恢复按钮。toast 可选（轮询到期用）。 */
+  function settleCardEval(key, toast) {
+    cardEvalsInFlight.delete(key);
+    const btn = cardEvalBtns.get(key);
+    cardEvalBtns.delete(key);
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = "评估";
+    }
+    if (toast) showToast(toast, true);
+  }
+
+  /**
+   * 一张卡的评估完成：解锁按钮 + 刷临时态 + 开报告（与 finalizeDetail 列表页分支
+   * 同一手势：完成后直接看报告，不再多问一次）。
+   */
+  function finalizeCardEval(key) {
+    cardEvalPolls.delete(key);
+    settleCardEval(key, null);
+    refreshActiveRuns();
+    const entry = evaluated[key];
+    if (entry) {
+      openReport(
+        entry.reportNum,
+        (res) => {
+          const where = res.mode === "created" ? "已在新标签页打开" : "已在本地 web 端打开";
+          showToast(`已评估 ${entry.score || ""}，报告 #${entry.reportNum}，${where}`.trim());
+        },
+        "report"
+      );
+    }
+  }
+
+  /**
+   * 卡片评估的收尾轮询（多 URL）。与详情页轮询同教训：evaluated-updated 消息路径
+   * 依赖 background SW 存活，SW 被终止后消息永不送达 → 按钮卡「评估中」；此轮询
+   * 每 3s 拉一次评估地图，命中即 finalizeCardEval 收尾。240 次（12min）到期裁决
+   * 在纯层：必须解锁该卡按钮并告知，不能只停轮询。
+   */
+  function startCardEvalPoll(key) {
+    cardEvalPolls.set(key, 0);
+    if (cardEvalPollTimer) return;
+    cardEvalPollTimer = trackTimer(setInterval(async () => {
+      if (!cardEvalPolls.size) {
+        stopCardEvalPollTimer();
+        return;
+      }
+      await refreshEvaluated();
+      for (const [url, tries] of [...cardEvalPolls]) {
+        if (evaluated[url]) {
+          finalizeCardEval(url);
+          continue;
+        }
+        const n = tries + 1;
+        const verdict = CHIPS && CHIPS.evalPollVerdict ? CHIPS.evalPollVerdict(n) : null;
+        if (verdict && verdict.stop) {
+          cardEvalPolls.delete(url);
+          settleCardEval(url, verdict.toast);
+        } else {
+          cardEvalPolls.set(url, n);
+        }
+      }
+      if (!cardEvalPolls.size) stopCardEvalPollTimer();
+    }, 3000));
+  }
+
   /**
    * 评估中轮询收尾兜底。evaluated-updated 消息路径依赖 background SW 存活,
    * SW 被 Chrome 终止(空闲 30s)后消息永不送达 → 按钮卡"评估中";此轮询每 3s
@@ -1363,7 +1449,7 @@
         finalizeDetail();
         return;
       }
-      // 到期裁决在纯层：只停轮询不解锁的话，cardEvalInFlight 永久为 true，之后
+      // 到期裁决在纯层：只停轮询不解锁的话，按钮永远停在「评估中」，之后
       // 所有卡片的「评估」点击永远无反应（2026-11-10 个人中心感兴趣列表实测）。
       const verdict = CHIPS && CHIPS.evalPollVerdict ? CHIPS.evalPollVerdict(tries) : null;
       if (verdict && verdict.stop) {
@@ -1812,18 +1898,30 @@
     }
     if (msg && msg.type === "evaluated-updated") {
       // 快速路径:消息能到说明 SW 活着;refreshEvaluated 完成后 map 已新,立即
-      // 收尾(toast/confirm + 重置)。轮询兜底仍在 —— finalizeDetail 内部会停。
-      // 若 SW 已死,此消息不会到,按钮收尾交给 startEvalPoll 的 3s 轮询。
+      // 收尾。卡片评估按 URL 逐个收尾(并发池排队时可多个在飞);详情页仍走
+      // finalizeDetail。若 SW 已死,消息不会到,按钮收尾交给 3s 轮询兜底。
       refreshEvaluated().then(() => {
-        if (detailEvaluating || evalPollUrl) finalizeDetail();
+        for (const url of [...cardEvalPolls.keys()]) {
+          if (evaluated[url]) finalizeCardEval(url);
+        }
+        if (detailEvaluating) finalizeDetail();
       });
       sendResponse({ ok: true });
       return;
     }
     if (msg && msg.type === "single-eval-error") {
       // Evaluation failed (background routed it back because the popup auto-closes).
-      stopEvalPoll();
-      settleButtons();
+      // 带 URL(本版 background)→ 只收尾那张卡,不打扰仍在飞的其他任务;不带
+      // (老 background)→ 维持全量收尾,宁可多恢复不可漏恢复。
+      const errKey = msg.url ? normalizeUrl(msg.url) : "";
+      if (errKey && cardEvalsInFlight.has(errKey)) {
+        cardEvalPolls.delete(errKey);
+        settleCardEval(errKey, null);
+        refreshActiveRuns();
+      } else {
+        stopEvalPoll();
+        settleButtons();
+      }
       showToast((msg.error || "评估失败"), true);
       sendResponse({ ok: true });
       return;

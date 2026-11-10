@@ -200,19 +200,20 @@ test("指纹不纳入 title 之类提示文案（不可见变化不必重绘）"
   );
 });
 
-// ---- 点击闸门：完整评估全局单飞（2026-11-10 个人中心感兴趣列表实测） --------
+// ---- 点击闸门：完整评估同 URL 单飞（2026-11-10 改版） ----------------------
 //
-// 第一份评估在跑时，第二张卡的「评估」点击会被单飞闸门挡下。回归点：
-//   • 挡下必须给 toast —— 无声 return 让用户以为按钮坏了；
-//   • 按钮自身已禁用（文案就是「评估中…」）时不重复吵。
+// 服务端全局并发池满员时 FIFO 入队（ADR-0014），卡片凭 /api/active-runs 出
+// 「排队中」胶囊 —— 扩展不再全局单飞，第二张卡的「评估」必须放行。闸门只挡：
+//   • 按钮自身禁用（文案就是「评估中…」）—— 静默，可见状态已足够；
+//   • 同一 URL 已在评估（另一张卡 / 按钮被站点重渲染重建后 disabled 丢失）—— 必须开口。
 
-test("cardEvalGate：评估进行中 → 挡下并给可读 toast", () => {
-  const gate = cardEvalGate({ inFlight: true });
+test("cardEvalGate：同 URL 已在飞 → 挡下并给可读 toast", () => {
+  const gate = cardEvalGate({ urlInFlight: true });
   assert.equal(gate.allow, false);
   assert.ok(gate.toast && gate.toast.includes("评估"), "toast 必须解释为什么点不动");
 });
 
-test("cardEvalGate：空闲 → 放行、不说话", () => {
+test("cardEvalGate：空闲 → 放行、不说话（其他卡在飞也不再挡）", () => {
   assert.deepEqual(cardEvalGate({}), { allow: true, toast: null });
   assert.deepEqual(cardEvalGate(null), { allow: true, toast: null });
 });
@@ -223,16 +224,16 @@ test("cardEvalGate：按钮自身禁用 → 挡下但不再 toast（按钮已显
   assert.equal(gate.toast, null);
 });
 
-test("cardEvalGate：按钮禁用优先于单飞（都挡下，安静）", () => {
-  const gate = cardEvalGate({ btnDisabled: true, inFlight: true });
+test("cardEvalGate：按钮禁用优先于同 URL 在飞（都挡下，安静）", () => {
+  const gate = cardEvalGate({ btnDisabled: true, urlInFlight: true });
   assert.equal(gate.allow, false);
   assert.equal(gate.toast, null);
 });
 
 test("cardEvalGate：脏值按布尔归一，truthy 即挡下", () => {
-  assert.equal(cardEvalGate({ inFlight: 1 }).allow, false);
-  assert.equal(cardEvalGate({ inFlight: "yes" }).allow, false);
-  assert.equal(cardEvalGate({ inFlight: 0 }).allow, true);
+  assert.equal(cardEvalGate({ urlInFlight: 1 }).allow, false);
+  assert.equal(cardEvalGate({ urlInFlight: "yes" }).allow, false);
+  assert.equal(cardEvalGate({ urlInFlight: 0 }).allow, true);
 });
 
 // ---- 收尾轮询裁决：到期必须解锁按钮（不能只停轮询） -------------------------

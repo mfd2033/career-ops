@@ -133,31 +133,33 @@
     return `${one(chips && chips.status)}|${one(chips && chips.score)}`;
   }
 
-  // ---- 点击闸门与收尾轮询裁决（完整评估的全局单飞配套） ----------------------
+  // ---- 点击闸门与收尾轮询裁决（完整评估同 URL 单飞配套） ----------------------
   //
-  // 完整评估全局单飞（core.js 的 cardEvalInFlight + 收尾轮询只有一个 evalPollUrl）。
+  // 扩展不再全局单飞：服务端全局并发池满员时 FIFO 入队（ADR-0014），第二张卡的
+  // 「评估」照常派发，卡片凭 /api/active-runs 出「评估中 / 排队中」胶囊。闸门只挡
+  // 同一 URL 重复派发（另一张同职位卡 / 按钮被站点重渲染重建后 disabled 丢失）。
   // 2026-11-10 个人中心「感兴趣」列表实测出两个真缺陷：
-  //   • 第一份评估在跑时点第二张卡的「评估」被无声吞掉 —— 像按钮坏了；
+  //   • 第一份评估在跑时点第二张卡的「评估」被全局单飞无声吞掉 —— 像按钮坏了；
   //   • 收尾轮询 12min 到期只停轮询不解锁 —— 单飞锁永久卡死，之后所有「评估」
   //     点击永远无反应。
   // 两处决策都在真实页面上无法稳定复现（要等评估真在跑/真超时），故抽到这里钉住。
 
   // 收尾轮询上限（次）。3s/次 × 240 = 12min，与 core.js 原有上限同值。
   const EVAL_POLL_MAX_TRIES = 240;
-  const EVAL_BUSY_TOAST = "已有评估在进行中，请等它完成后再评估下一个";
+  const EVAL_BUSY_TOAST = "该职位的评估已在进行中，请等它完成";
   const EVAL_POLL_EXPIRED_TOAST = "等待评估结果超时，按钮已恢复；任务可能仍在后台运行";
 
   /**
    * 卡片「评估」点击闸门：这次点击放不放行、要不要说话。
    * 按钮自身禁用（文案就是「评估中…」）时不重复 toast —— 可见状态已足够；
-   * 只有「这张卡闲着但全局有评估在跑」这一种被挡下的情形必须开口。
-   * @param {{btnDisabled?: boolean, inFlight?: boolean}} [p]
+   * 同一 URL 已在评估（跨卡/重建按钮）时挡下并开口；其余一律放行交给并发池排队。
+   * @param {{btnDisabled?: boolean, urlInFlight?: boolean}} [p]
    * @returns {{allow: boolean, toast: string|null}}
    */
   function cardEvalGate(p) {
     const btnDisabled = !!(p && p.btnDisabled);
-    const inFlight = !!(p && p.inFlight);
-    if (btnDisabled || inFlight) {
+    const urlInFlight = !!(p && p.urlInFlight);
+    if (btnDisabled || urlInFlight) {
       return { allow: false, toast: btnDisabled ? null : EVAL_BUSY_TOAST };
     }
     return { allow: true, toast: null };
