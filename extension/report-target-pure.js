@@ -8,6 +8,8 @@
 //                          同 URL 幂等 / 无候选兜底 / 端口探测失败的报错分支）；
 //   • pickWebTarget     —— 浮窗面板级 🌐 的落点解析（ADR-0078）：同一套候选规则，
 //                          落点是 /pipeline 收件箱，没有报告号参与；
+//   • pickJobTarget     —— 列表卡「评估中 / 排队中」胶囊的落点解析：同一套候选规则，
+//                          落点是工作器任务页 /jobs/adopt-{runId}，同样没有报告号参与；
 //   • reportPath / reportUrl —— 报告页的客户端路由与整页 URL（家规：打开给用户看的
 //                               页面一律用 localhost）。
 //
@@ -30,8 +32,17 @@
   const WEB_HOSTS = ["localhost", "127.0.0.1"];
   // 端口探测失败时的用户可见文案：与 core.js 的兜底 toast 同文（维持今天的报错口径）。
   // 浮窗面板级 🌐 走 WEB_SERVICE_ERROR —— 那条链路上没有「报告」可打不开（ADR-0078）。
+  // 「评估中 / 排队中」胶囊走 JOB_SERVICE_ERROR —— 落点是工作器任务页，也不叫报告。
   const NO_SERVICE_ERROR = "本地报告打不开：本地 web 服务可能未运行";
   const WEB_SERVICE_ERROR = "Web 端打不开：本地 web 服务可能未运行";
+  const JOB_SERVICE_ERROR = "任务页打不开：本地 web 服务可能未运行";
+  // 工作器卡片 id 的接管前缀，与 web/src/lib/job-adopt.mjs 的 ADOPT_PREFIX 同值。
+  // 扩展发起的 run 在 web 端接管后卡片 id 是 adopt-{runId}，/jobs/[id] 按这个 id 找卡。
+  // 两边是不同运行时（扩展纯 JS / web TS），只能靠这行注释 + 单测钉住，勿单改一处。
+  const ADOPT_PREFIX = "adopt-";
+  // runId 是 /api/run 的 UUID（crypto.randomUUID）。只收 UUID 形态：它直接拼进路由
+  // path 再交给 web 端 router.push，任何斜杠/点段/编码字符都不该走到那里。
+  const RUN_ID_RE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 
   /** 报告页在 web 端里的客户端路由（扩展→web 前端路由跳转用，ADR-0055 修订）。 */
   function reportPath(reportNum) {
@@ -64,6 +75,24 @@
   /** 体检报告 URL（同一条 localhost 家规，只是 path 不同）。 */
   function checkupUrl(port, reportNum) {
     return `http://localhost:${port}${checkupPath(reportNum)}`;
+  }
+
+  /**
+   * 工作器任务页在 web 端里的客户端路由：`/jobs/adopt-{runId}`。
+   * 列表卡上「评估中 / 排队中」胶囊点开的就是这条 —— 扩展发起的 run 被 web 端接管后
+   * 卡片 id 是 `adopt-{runId}`（web/src/lib/job-adopt.mjs 的 ADOPT_PREFIX）。
+   * runId 非法时返回空串（调用方据此报错，不拼一个必然 404 的路由）。
+   */
+  function jobPath(runId) {
+    const id = typeof runId === "string" ? runId.trim() : "";
+    if (!RUN_ID_RE.test(id)) return "";
+    return `/jobs/${ADOPT_PREFIX}${id}`;
+  }
+
+  /** 工作器任务页 URL（一律 localhost，家规）。 */
+  function jobUrl(port, runId) {
+    const path = jobPath(runId);
+    return path ? `http://localhost:${port}${path}` : "";
   }
 
   /**
@@ -212,21 +241,58 @@
     };
   }
 
+  /**
+   * 解析一次 open-job 的跳转目标：列表卡上「评估中 / 排队中」胶囊的落点。
+   *
+   * 与 pickWebTarget 同一套候选规则（pickWebTab），落点是工作器任务页 `/jobs/adopt-{runId}`
+   * —— 同样没有报告号参与，所以独立成函数而不是往 pickReportTarget 塞第三个 kind。
+   *
+   * @param {object}  [p]
+   * @param {?number} p.livePort          ensureLivePort() 的结果（null = 端口探测失败）
+   * @param {Array}   p.tabs              chrome.tabs.query({}) 的结果
+   * @param {?number} p.currentWindowId   「当前窗口」（同 pickReportTarget 口径）
+   * @param {string}  p.runId             任务 runId（UUID）
+   * @returns {{action:"error", error:string}
+   *          |{action:"create", url:string, path:string}
+   *          |{action:"reuse", tabId:number, windowId:(number|null), url:string, path:string, navigate:boolean}}
+   */
+  function pickJobTarget({ livePort, tabs, currentWindowId, runId } = {}) {
+    const path = jobPath(runId);
+    if (!path) return { action: "error", error: "无效任务号" };
+    if (livePort == null) return { action: "error", error: JOB_SERVICE_ERROR };
+    const url = `http://localhost:${livePort}${path}`;
+    const tab = pickWebTab({ livePort, tabs, currentWindowId });
+    if (!tab) return { action: "create", url, path };
+    return {
+      action: "reuse",
+      tabId: tab.id,
+      windowId: tab.windowId,
+      url,
+      path,
+      navigate: tab.key !== urlKey(url),
+    };
+  }
+
   const api = {
     WEB_PORT_MIN,
     WEB_PORT_MAX,
     NO_SERVICE_ERROR,
     WEB_SERVICE_ERROR,
+    JOB_SERVICE_ERROR,
+    ADOPT_PREFIX,
     reportPath,
     reportUrl,
     pipelinePath,
     pipelineUrl,
     checkupPath,
     checkupUrl,
+    jobPath,
+    jobUrl,
     urlKey,
     parseWebTab,
     pickReportTarget,
     pickWebTarget,
+    pickJobTarget,
   };
 
   // service worker（经典脚本，background.js 经 importScripts 引入）：挂 self。

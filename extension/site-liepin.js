@@ -221,6 +221,63 @@
     );
   }
 
+  // ---- 每卡操作区（快评 / 评估 + 状态胶囊）--------------------------------
+  //
+  // 形状、按钮与评估/快评的派发全在 core（三站共用一份），这里只给挂载点与素材：
+  //   • 搜索页与「我的收藏」（c.liepin.com/job/record/favorite）的卡片容器同属
+  //     jobCardPcContainer 一族，内容区都在 .jobDetailBox 里，操作行接在它末尾；
+  //   • 列表卡没有现成 JD，需要按卡片锚点站内 fetch 详情页再解析（实证 2026-11-10：
+  //     c.liepin.com 抓 www.liepin.com 详情页 200 / 171KB / 正文 403 字，不被 CORS 挡）。
+  /** 卡片操作行挂载点。找不到内容区就不接管（core 退回悬浮徽章）。 */
+  function cardActionMounts(card) {
+    const host = card.querySelector(".jobDetailBox") || card.querySelector('[class*="jobDetailBox"]');
+    return host ? { row: { parent: host, before: null } } : null;
+  }
+
+  /** 卡片上的公司名（收藏卡与搜索卡的公司块 class 都在漂，逐候选校验）。 */
+  function cardCompany(card) {
+    return pickPosterName(
+      Array.from(
+        card.querySelectorAll('[class*="company-name"], .item-company, [class*="company"] .name, a[href*="/company/"]'),
+      ).map((el) => ({ text: el.innerText || el.textContent || "", href: (el.getAttribute && el.getAttribute("href")) || "" })),
+    );
+  }
+
+  /**
+   * 解析详情页 HTML → { title, text }。选择器与 extractDetailJd 同一套（标题在
+   * .name-box span.name、正文在 dd[data-selector=job-intro-content]），只是数据源换成
+   * 站内 fetch 回来的 HTML 文本。不足 80 字视为没抓到（登录墙/骨架页）。
+   */
+  function parseDetailHtml(html) {
+    const doc = new DOMParser().parseFromString(String(html || ""), "text/html");
+    const pick = (sel) => {
+      const el = doc.querySelector(sel);
+      if (!el) return "";
+      return (el.textContent || "").replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+    };
+    const title = pick(".name-box span.name, [class*='name-box'] .name");
+    const price = pick("span.salary, [class*='salary']");
+    const desc = pick('dd[data-selector="job-intro-content"], [data-selector="job-intro-content"]');
+    const parts = [title];
+    if (price) parts.push(price);
+    if (desc.length >= 80) parts.push(desc);
+    return { title, text: parts.filter(Boolean).join("\n").trim().slice(0, 12000) };
+  }
+
+  /** 站内抓详情页并解析出 JD；失败一律抛带原因的 Error（core 侧 toast）。 */
+  async function fetchCardJd(url) {
+    let res;
+    try {
+      res = await fetch(url, { credentials: "include" });
+    } catch (err) {
+      throw new Error(`详情页抓取失败：${err && err.message ? err.message : err}`);
+    }
+    if (!res.ok) throw new Error(`详情页抓取失败：HTTP ${res.status}`);
+    const jd = parseDetailHtml(await res.text());
+    if (jd.text.length < 80) throw new Error("详情页没返回职位描述（可能需要登录）");
+    return jd;
+  }
+
   const LIEPIN_SITE = {
     hostMatch: /(^|\.)liepin\.com$/i,
     source: "liepin",
@@ -249,6 +306,10 @@
     cardMeta,
     extractDetailJd,
     extractPosterName,
+    // 每卡操作区（快评 / 评估 + 状态胶囊）的挂载点与素材来源。
+    cardActionMounts,
+    cardCompany,
+    fetchCardJd,
   };
 
   // 浏览器环境: 交给 core 启动站点注入; 非浏览器(node 单元测试)只导出纯函数,

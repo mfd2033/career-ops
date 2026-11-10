@@ -22,17 +22,17 @@
     },
     {
       "matches": ["https://*.zhipin.com/*"],
-      "js": ["scan-pure.js", "detail-panel-pure.js", "core.js", "site-boss.js"],
+      "js": ["scan-pure.js", "detail-panel-pure.js", "card-status-pure.js", "core.js", "site-boss.js"],
       "run_at": "document_idle"
     },
     {
       "matches": ["https://*.liepin.com/*"],
-      "js": ["scan-pure.js", "detail-panel-pure.js", "core.js", "site-liepin.js"],
+      "js": ["scan-pure.js", "detail-panel-pure.js", "card-status-pure.js", "core.js", "site-liepin.js"],
       "run_at": "document_idle"
     },
     {
       "matches": ["https://*.zhaopin.com/*"],
-      "js": ["scan-pure.js", "detail-panel-pure.js", "core.js", "site-zhaopin.js"],
+      "js": ["scan-pure.js", "detail-panel-pure.js", "card-status-pure.js", "core.js", "site-zhaopin.js"],
       "run_at": "document_idle"
     }
   ],

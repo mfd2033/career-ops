@@ -21,11 +21,21 @@
   // detail-panel-pure.js 的纯逻辑层（同样先于本文件加载）：详情页浮窗「显示什么」
   // 的全景判断在那边，core 只做 DOM 胶水。缺失时浮窗静默不提供。
   let PANEL = null;
+  // card-status-pure.js 的纯逻辑层（同样先于本文件加载）：列表卡「状态胶囊 + 分数
+  // 胶囊 + 临时态」的组合规则在那边。缺失时不画胶囊（按钮照常可用）。
+  let CHIPS = null;
 
   // The evaluated map lives in the background; this mirrors it locally on refresh.
-  let evaluated = {}; // normalizedUrl → { score, reportNum }
+  let evaluated = {}; // normalizedUrl → { score, reportNum, status, checkupStar }
   let quickMap = {}; // normalizedUrl → { score, grade, reason } (快评持久化徽章)
   let inited = false;
+
+  // 服务端此刻在跑 / 在排队的评估（/api/active-runs），按归一 URL 索引：
+  // normalizedUrl → { status: "running"|"queued", runId, position? }。
+  // 卡片据此显示临时态胶囊「评估中 / 排队中」，点开跳 web 端工作器任务页。
+  let activeRunsByKey = {};
+  let activeRunsPollTimer = null;
+  const ACTIVE_RUNS_POLL_MS = 3000;
 
   // Canonical posting-URL key — mirrors web/src/lib/core/url-key.mjs `normalizeUrl`
   // (the same key that /api/report-status uses) so a badge matches an evaluation.
@@ -189,6 +199,18 @@
     });
   }
 
+  /**
+   * 「评估中 / 排队中」胶囊的落点：web 端工作器里这条任务（/jobs/adopt-{runId}）。
+   * 与 openReport 同一套「复用已开的 web 端 / 没有就新开」编排，落在 background。
+   */
+  function openJob(runId) {
+    sendMsg({ type: "open-job", runId }, (res) => {
+      if (chrome.runtime.lastError || !res || !res.ok) {
+        showToast(res && res.error ? res.error : "任务页打不开：本地 web 服务可能未运行", true);
+      }
+    });
+  }
+
   // ---- badge / checkbox injection (list cards) ------------------------------
 
   // Make the card a positioned context so absolutely-annexed badges/checkboxes
@@ -210,9 +232,349 @@
 
   const CARD_BADGE_SEL = "span[data-career-badge]";
 
+  // ---- 列表卡每卡操作区（快评 / 评估 + 状态胶囊 + 分数胶囊）------------------
+  //
+  // 这一套原先是 BOSS 个人中心「感兴趣」列表的私有实现（site-boss.js）。猎聘搜索 /
+  // 收藏、智联搜索 / 收藏、BOSS /web/geek/jobs 都要同一份，于是提到 core：**形状归
+  // core，挂载点归站点**。站点只回答两件事：
+  //   • cardActionMounts(card) —— 那一排（或那两处）插到卡片的哪个位置；
+  //   • fetchCardJd(url) / cardCompany(card) —— 这张卡的 JD 正文与公司名从哪来。
+  // core 负责按钮、胶囊、评估/快评的派发与收尾，站点不复制状态机。
+  const CARD_ACTIONS_ATTR = "data-career-actions";
+  const CARD_CHIP_ATTR = "data-career-chip";
+  const CARD_ROW_CSS =
+    "display:flex;gap:8px;align-items:center;justify-content:space-between;flex-wrap:wrap;margin-top:8px;";
+  const CARD_INFO_CSS = "display:flex;gap:4px;align-items:center;flex-wrap:wrap;";
+  const CARD_OPS_CSS = "display:flex;gap:6px;align-items:center;margin-left:auto;";
+  // 左右分栏卡（智联收藏）：操作列纵向撑满卡高，按钮沉到底与左侧胶囊同一排。
+  const CARD_SPLIT_OPS_CSS =
+    "display:flex;gap:6px;align-items:center;justify-content:flex-end;flex-wrap:wrap;margin-top:auto;";
+  const CARD_CHIP_CSS =
+    "padding:4px 8px;border-radius:999px;font-size:12px;font-weight:600;line-height:1;color:#fff;" +
+    "white-space:nowrap;font-family:system-ui,sans-serif;";
+  const CARD_QUICK_BTN_CSS =
+    "padding:3px 10px;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;" +
+    "background:#7c5cff;color:#fff;font-family:system-ui,sans-serif;box-shadow:0 1px 3px rgba(0,0,0,.18);";
+  const CARD_EVAL_BTN_CSS =
+    "padding:3px 10px;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;" +
+    "background:#00c68d;color:#fff;font-family:system-ui,sans-serif;box-shadow:0 1px 3px rgba(0,0,0,.18);";
+
+  // 完整评估是全局单飞：轮询收尾只有一个 evalPollUrl，两张卡同时发起会互相覆盖。
+  let cardEvalInFlight = false;
+
+  /** 卡片操作区的挂载：若站点给了 mounts 就插进去，返回 refs；站点不接管返回 null。 */
+  function ensureCardMount(card) {
+    const cached = card.__careerActions;
+    if (cached && card.contains(cached.info) && card.contains(cached.ops)) return cached;
+    const mounts = typeof site.cardActionMounts === "function" ? site.cardActionMounts(card) : null;
+    if (!mounts) return null;
+    let refs;
+    if (mounts.chips || mounts.buttons) {
+      // 左右分栏：胶囊进左栏信息区末尾，按钮进右栏原生操作列。
+      const info = document.createElement("div");
+      info.setAttribute(CARD_ACTIONS_ATTR, "chips");
+      info.style.cssText = CARD_INFO_CSS + "margin-top:8px;";
+      const ops = document.createElement("div");
+      ops.setAttribute(CARD_ACTIONS_ATTR, "buttons");
+      ops.style.cssText = CARD_SPLIT_OPS_CSS;
+      if (!mountElement(mounts.chips, info)) return null;
+      if (!mountElement(mounts.buttons, ops)) {
+        info.remove();
+        return null;
+      }
+      refs = { info, ops };
+    } else {
+      const row = document.createElement("div");
+      row.setAttribute(CARD_ACTIONS_ATTR, "row");
+      row.style.cssText = CARD_ROW_CSS;
+      const info = document.createElement("div");
+      info.style.cssText = CARD_INFO_CSS;
+      const ops = document.createElement("div");
+      ops.style.cssText = CARD_OPS_CSS;
+      row.appendChild(info);
+      row.appendChild(ops);
+      if (!mountElement(mounts.row, row)) return null;
+      refs = { info, ops };
+    }
+    card.__careerActions = refs;
+    return refs;
+  }
+
+  /** 把一个节点插到 mount 指定的位置（before 已失效就退化成 append，幂等）。 */
+  function mountElement(mount, el) {
+    if (!mount || !mount.parent) return false;
+    if (mount.before && mount.before.parentNode === mount.parent) mount.parent.insertBefore(el, mount.before);
+    else mount.parent.appendChild(el);
+    return true;
+  }
+
+  /** tracker 状态 → 胶囊字典结果。Evaluated / 空值 / 认不出的码一律不出状态胶囊。 */
+  function statusForChips(full) {
+    if (!full || !PANEL) return null;
+    const raw = typeof full.status === "string" ? full.status.trim() : "";
+    if (!raw) return null;
+    const st = PANEL.statusLabel(raw);
+    if (!st.known) return null;
+    return { raw, text: st.text, color: st.color, title: `状态：${raw}` };
+  }
+
+  /** 分数文本归一：tracker 存的是 `"4.3/5"`，裸数字补 `/5`，别把 `4.3` 当满分 4.3。 */
+  function scoreText(scoreStr) {
+    const s = scoreStr == null ? "" : String(scoreStr).trim();
+    if (!s) return "";
+    return s.includes("/") ? s : `${s}/5`;
+  }
+
+  /** 建一颗胶囊（可点的补手型 + 悬停下划线 + 点击拦截，避免触发整卡跳转）。 */
+  function buildChip(chip) {
+    const el = document.createElement("span");
+    el.setAttribute(CARD_CHIP_ATTR, chip.kind);
+    el.textContent = chip.text;
+    el.title = chip.title || "";
+    el.style.cssText = CARD_CHIP_CSS + `background:${chip.color};`;
+    if (!chip.clickable) return el;
+    el.style.cursor = "pointer";
+    el.addEventListener("mouseenter", () => {
+      el.style.textDecoration = "underline";
+    });
+    el.addEventListener("mouseleave", () => {
+      el.style.textDecoration = "";
+    });
+    el.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (chip.kind === "run" && chip.runId) openJob(chip.runId);
+      else if (chip.kind === "score" && chip.reportNum) openReport(chip.reportNum);
+    });
+    return el;
+  }
+
+  /** 胶囊重绘：按指纹短路（懒加载页的 MutationObserver 打得非常密）。 */
+  function renderCardChips(info, state) {
+    if (!CHIPS) return;
+    const chips = CHIPS.cardChips(state);
+    const fingerprint = CHIPS.chipFingerprint(chips);
+    if (info.dataset.careerFp === fingerprint) return;
+    info.dataset.careerFp = fingerprint;
+    info.textContent = "";
+    for (const chip of [chips.status, chips.score]) {
+      if (chip) info.appendChild(buildChip(chip));
+    }
+  }
+
+  function cardCompanyOf(card) {
+    return typeof site.cardCompany === "function" ? site.cardCompany(card) : "";
+  }
+
+  /** 卡片上的「快评」：抓本卡 JD → 直连 LLM 秒出分，不生成报告、不写 tracker。 */
+  async function onCardQuick(card, btn, ev) {
+    ev.preventDefault();
+    ev.stopPropagation();
+    if (btn.disabled || quickEvaluating) return;
+    const url = site.cardUrl(card);
+    if (!url) {
+      showToast("未能识别该职位的链接", true);
+      return;
+    }
+    btn.disabled = true;
+    btn.textContent = "快评中…";
+    quickEvaluating = true;
+    const reset = () => {
+      quickEvaluating = false;
+      btn.disabled = false;
+      btn.textContent = "快评";
+    };
+    try {
+      const jd = await site.fetchCardJd(url);
+      // url 传归一后的键：background 的 quickScores 用它当快评徽章的键，不归一
+      // （securityId/ka 留在 URL 里）就只有本页能命中，详情页浮窗认不出来。
+      sendQuickEval(
+        { url: normalizeUrl(url), title: jd.title, text: jd.text, poster: cardCompanyOf(card) },
+        (err) => {
+          reset();
+          showQuickError(err);
+        },
+      );
+    } catch (err) {
+      reset();
+      showQuickError(err && err.message ? err.message : String(err));
+    }
+  }
+
+  /** 卡片上的「评估」：内联 JD 全文 + 雇主名派发单任务，收尾由轮询兜住。 */
+  async function onCardEval(card, btn, ev) {
+    ev.preventDefault();
+    ev.stopPropagation();
+    if (btn.disabled || cardEvalInFlight) return;
+    const url = site.cardUrl(card);
+    if (!url) {
+      showToast("未能识别该职位的链接", true);
+      return;
+    }
+    cardEvalInFlight = true;
+    btn.disabled = true;
+    btn.textContent = "评估中…";
+    const reset = () => {
+      cardEvalInFlight = false;
+      btn.disabled = false;
+      btn.textContent = "评估";
+    };
+    try {
+      const jd = await site.fetchCardJd(url);
+      // 内联 JD 全文 + 雇主名：与服务端抓取同样绕开风控，且省一次网络往返。
+      startEvalPoll(normalizeUrl(url)); // 收尾轮询按归一 URL 比对
+      sendSingleEvaluate(
+        url,
+        (err) => {
+          reset();
+          stopEvalPoll();
+          showToast(err, true);
+        },
+        { jdText: jd.text, company: cardCompanyOf(card) },
+      );
+      // 任务进池需要一点时间，先问一次让「评估中」胶囊尽快出现（拿不到也无所谓，
+      // 3s 轮询会补上）。
+      refreshActiveRuns();
+    } catch (err) {
+      reset();
+      showToast(err && err.message ? err.message : String(err), true);
+    }
+  }
+
+  /** 建/复用那一排按钮。站点重渲染摘掉操作区后由 sweep 重新走到这里。 */
+  function ensureCardButtons(card, ops) {
+    let quickBtn = ops.querySelector('button[data-career-action="quick"]');
+    if (!quickBtn) {
+      quickBtn = makeButton({ text: "快评", css: CARD_QUICK_BTN_CSS });
+      quickBtn.dataset.careerAction = "quick";
+      quickBtn.title = "快评：抓取本职位 JD 秒出分数，不生成报告";
+      quickBtn.addEventListener("click", (ev) => onCardQuick(card, quickBtn, ev));
+      ops.appendChild(quickBtn);
+    }
+    let evalBtn = ops.querySelector('button[data-career-action="eval"]');
+    if (!evalBtn) {
+      evalBtn = makeButton({ text: "评估", css: CARD_EVAL_BTN_CSS });
+      evalBtn.dataset.careerAction = "eval";
+      evalBtn.title = "完整评估：生成报告与状态";
+      evalBtn.addEventListener("click", (ev) => onCardEval(card, evalBtn, ev));
+      ops.appendChild(evalBtn);
+    }
+  }
+
   /**
-   * 构造悬浮在卡片右上角的评分徽章。isFull=true 是完整评估徽章（点击打开报告），
-   * false 是快评分徽章（只有分数与等级，不可点）。
+   * 解锁所有每卡按钮。评估/快评收尾时统一调用（settleButtons / quick-eval-result /
+   * quick-eval-error），否则按钮永远停在「评估中…」。
+   */
+  function resetCardButtons() {
+    cardEvalInFlight = false;
+    document.querySelectorAll('button[data-career-action]').forEach((btn) => {
+      btn.disabled = false;
+      btn.textContent = btn.dataset.careerAction === "quick" ? "快评" : "评估";
+    });
+  }
+
+  /**
+   * 站点重渲染可能摘掉整排操作区（卡片节点被换掉/子树上被清空）：每批 DOM 变更后
+   * 补一遍。只对「操作区已不在卡里」的卡重建，其余走幂等短路。
+   */
+  function sweepCardActions() {
+    if (typeof site.cardActionMounts !== "function") return;
+    document.querySelectorAll(site.cardSelector).forEach((card) => {
+      if (!site.cardIsList(card)) return;
+      const refs = card.__careerActions;
+      if (refs && card.contains(refs.ops) && card.contains(refs.info)) return;
+      const url = site.cardUrl(card);
+      renderCardBadge(card, url ? normalizeUrl(url) : "");
+    });
+  }
+
+  /** 把一份 state 画进卡片操作区（挂载 + 胶囊 + 按钮）。挂载点不可用返回 false。 */
+  function renderCardActions(card, state) {
+    const refs = ensureCardMount(card);
+    if (!refs) return false;
+    renderCardChips(refs.info, state);
+    ensureCardButtons(card, refs.ops);
+    return true;
+  }
+
+  /**
+   * 卡片评分/胶囊的唯一渲染入口。站点提供 cardActionMounts 时，core 把状态、分数、
+   * 临时态摊平成一份 state，按站点给的挂载点画成行内胶囊 + 按钮 —— 此时不再往右上角
+   * 飘悬浮徽章（同一个分数贴两遍最难解释）。
+   *
+   * 没有挂载钩子的站点退回旧行为：悬浮徽章，完整评估优先、其次快评。
+   */
+  function renderCardBadge(card, key) {
+    if (typeof site.cardActionMounts === "function") {
+      const full = key ? evaluated[key] : undefined;
+      const quick = !full && key ? quickMap[key] : undefined;
+      const run = key ? activeRunsByKey[key] : undefined;
+      const state = {
+        status: statusForChips(full),
+        score: full ? { text: scoreText(full.score), color: scoreColor(full.score), reportNum: full.reportNum } : null,
+        quick: quick
+          ? { score: quick.score, grade: quick.grade, reason: quick.reason, color: (PANEL && PANEL.QUICK_PURPLE) || "#7c5cff" }
+          : null,
+        run: run || null,
+      };
+      if (renderCardActions(card, state)) return;
+    }
+    const full = key ? evaluated[key] : undefined;
+    const quick = !full && key ? quickMap[key] : undefined;
+    const entry = full || quick;
+    const fingerprint = entry ? `${full ? "full" : "quick"}:${entry.score}:${entry.reportNum || ""}` : "";
+    const existing = card.querySelector(CARD_BADGE_SEL);
+    if (!fingerprint) {
+      if (existing) existing.remove();
+      return;
+    }
+    if (existing && existing.dataset.careerFp === fingerprint) return;
+    if (existing) existing.remove();
+    const badge = buildCardBadge(entry, !!full);
+    badge.dataset.careerFp = fingerprint;
+    ensurePositioned(card);
+    card.appendChild(badge);
+  }
+
+  // ---- 服务端任务快照（评估中 / 排队中）-----------------------------------
+
+  /**
+   * 拉一次 /api/active-runs 并重建 URL → 任务 的索引。读不到就清空索引（临时态胶囊
+   * 收掉）：宁可让用户看不到「评估中」，也不要让一颗早就跑完的任务一直贴着。
+   */
+  function refreshActiveRuns() {
+    return new Promise((resolve) => {
+      sendMsg({ type: "get-active-runs" }, (res) => {
+        if (chrome.runtime.lastError || !res) {
+          resolve(false);
+          return;
+        }
+        const next = {};
+        for (const t of [].concat(res.running || [], res.queued || [])) {
+          const key = normalizeUrl(t && t.url ? t.url : "");
+          if (!key || next[key]) continue;
+          next[key] = { status: t.status, runId: t.runId, position: t.position };
+        }
+        activeRunsByKey = next;
+        applyAllInjections();
+        resolve(!!res.ok);
+      });
+    });
+  }
+
+  /** 页上有列表卡才轮询：详情页/其它页面不必为一份用不上的快照每 3s 醒一次 SW。 */
+  function startActiveRunsPoll() {
+    if (activeRunsPollTimer) return;
+    activeRunsPollTimer = trackTimer(
+      setInterval(() => {
+        if (!invalidated && document.querySelector(site.cardSelector)) refreshActiveRuns();
+      }, ACTIVE_RUNS_POLL_MS),
+    );
+  }
+
+  /**
+   * 构造悬浮在卡片右上角的评分徽章（仅无挂载钩子的站点走这里）。isFull=true 是完整
+   * 评估徽章（点击打开报告），false 是快评分徽章（只有分数与等级，不可点）。
    * 快评用紫色 #7c5cff —— 与「快评」按钮同色，两种徽章一眼区分谁是谁。
    */
   function buildCardBadge(entry, isFull) {
@@ -243,39 +605,6 @@
       openReport(entry.reportNum);
     });
     return badge;
-  }
-
-  /**
-   * 卡片评分的唯一渲染入口：完整评估优先，其次快评，两者皆无则移除徽章。
-   * 幂等 —— 以「数据指纹」判断是否重绘：MutationObserver 在懒加载页打得很密，
-   * 分数没变就不该重建节点，否则每批变更都摘一次重插一次。
-   *
-   * 站点若提供 ensureCardActions（BOSS 个人中心「感兴趣」列表），由它把分数并进
-   * 卡片自己的按钮排，返回 true 表示已接管 —— 此时不再往右上角飘第二个徽章，
-   * 两处并存的观感是「同一个分数贴了两遍」。
-   */
-  function renderCardBadge(card, key) {
-    const full = key ? evaluated[key] : undefined;
-    const quick = !full && key ? quickMap[key] : undefined;
-    if (
-      typeof site.ensureCardActions === "function" &&
-      site.ensureCardActions(card, { full: full || null, quick: quick || null })
-    ) {
-      return;
-    }
-    const entry = full || quick;
-    const fingerprint = entry ? `${full ? "full" : "quick"}:${entry.score}:${entry.reportNum || ""}` : "";
-    const existing = card.querySelector(CARD_BADGE_SEL);
-    if (!fingerprint) {
-      if (existing) existing.remove();
-      return;
-    }
-    if (existing && existing.dataset.careerFp === fingerprint) return;
-    if (existing) existing.remove();
-    const badge = buildCardBadge(entry, !!full);
-    badge.dataset.careerFp = fingerprint;
-    ensurePositioned(card);
-    card.appendChild(badge);
   }
 
   function injectCheckbox(card, key) {
@@ -1002,9 +1331,12 @@
       listBtn.disabled = false;
       listBtn.textContent = "评估本职位";
     }
-    // 每卡按钮（BOSS 个人中心列表）也要一并解锁，否则评估完成后那一排按钮
+    // 每卡按钮（三家列表页 / 收藏页）也要一并解锁，否则评估完成后那一排按钮
     // 永远停在「评估中…」。
-    if (typeof site.resetCardActions === "function") site.resetCardActions();
+    resetCardButtons();
+    // 收尾后任务已出池：立刻问一次，让「评估中」胶囊换成真实状态，而不是等下一轮
+    // 3s 轮询（那 3 秒里卡片会同时没有临时态、也还没有新状态）。
+    refreshActiveRuns();
   }
 
   function stopEvalPoll() {
@@ -1518,7 +1850,7 @@
         lqbtn.textContent = `快评 ${msg.score}/5`;
         lqbtn.title = msg.reason ? `快评：${msg.grade} — ${msg.reason}` : `快评：${msg.grade}`;
       }
-      if (typeof site.resetCardActions === "function") site.resetCardActions();
+      resetCardButtons();
       showToast(`快评 ${msg.score}/5 · ${msg.grade}`);
       sendResponse({ ok: true });
       return;
@@ -1535,7 +1867,7 @@
         lqbtn.disabled = false;
         lqbtn.textContent = "快评";
       }
-      if (typeof site.resetCardActions === "function") site.resetCardActions();
+      resetCardButtons();
       showQuickError(msg.error || "快评不可用：本地 web 服务/接口异常");
       sendResponse({ ok: true });
       return;
@@ -1594,6 +1926,8 @@
     // detail-panel-pure.js 同理：拿不到就不提供浮窗（而不是退回旧的四个固定元素，
     // 两套 UI 同时存在比没有 UI 更难解释）。
     PANEL = (typeof window !== "undefined" && window.__careerOpsDetailPanelPure) || null;
+    // card-status-pure.js 同理：拿不到就不画胶囊（按钮照常可用，不至于整排操作区消失）。
+    CHIPS = (typeof window !== "undefined" && window.__careerOpsCardStatusPure) || null;
 
     // Diag: snapshot + report DOM state to the background (BOSS blocks DevTools
     // by resizing/kicking the page, so the popup reads this instead). Re-sent on
@@ -1710,6 +2044,9 @@
       // The right pane (.job-detail-body) re-renders when the selection changes;
       // re-check it on every mutation batch so the eval button survives the swap.
       if (typeof site.ensureRightPaneButton === "function") site.ensureRightPaneButton();
+      // 每卡操作区同样会被站点重渲染摘掉（换页/切换 tab/懒加载重排）：补一遍，
+      // 只对「排已不在卡里」的重建，其余走指纹短路。
+      sweepCardActions();
       // SPA 换职位 / 离开详情页时浮窗跟着当前 URL 走。视图指纹没变时直接返回，
       // 所以这一行在懒加载页的密集变更里也便宜。
       renderDetailPanel();
@@ -1721,6 +2058,10 @@
     // Also sync the quick-score map so a detail page opened directly still shows
     // a previous list-page quick eval's badge.
     refreshQuick().then(() => snap());
+    // 服务端此刻在跑/排队的任务（评估中 / 排队中胶囊的来源）。先拉一次让首屏就有
+    // 临时态，再起 3s 轮询（页上没有列表卡时每跳空转，不打扰服务端）。
+    if (document.querySelector(site.cardSelector)) refreshActiveRuns();
+    startActiveRunsPoll();
   }
 
   function start(siteDef) {
@@ -1745,6 +2086,8 @@
       const url = site.cardUrl(card);
       renderCardBadge(card, url ? normalizeUrl(url) : "");
     },
+    // 站点重渲染后扫一遍所有卡，补回被摘掉的每卡操作区（幂等）。
+    sweepCards: () => sweepCardActions(),
     sendSingleEvaluate,
     sendQuickEval,
     // 通用消息通道(带回调):site 文件可用它向 background 发请求并取回(structured

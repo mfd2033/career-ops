@@ -12,7 +12,9 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 const mod = await import(pathToFileURL(join(ROOT, "web", "src", "lib", "ext-nav-paths.mjs")).href);
-const { isExtNavPath, REPORT_PATH_RE, PIPELINE_PATH_RE } = mod.default ?? mod;
+const { isExtNavPath, REPORT_PATH_RE, PIPELINE_PATH_RE, JOB_ADOPT_PATH_RE } = mod.default ?? mod;
+
+const RUN_ID = "3f2b8c1e-9d4a-4c77-8f10-2a5b6c7d8e9f";
 
 test("放行：评估报告页 /report/{1-6位数字}（ADR-0055 既有口径不变）", () => {
   assert.equal(isExtNavPath("/report/1"), true);
@@ -47,7 +49,25 @@ test("拒绝：危险 scheme 与协议相对路径", () => {
   assert.equal(isExtNavPath("https://localhost:3000/pipeline"), false, "只收 path，不收完整 URL");
 });
 
-test("两条正则导出保持各自独立（TSX 与单测消费同一真值）", () => {
+test("放行：工作器任务页 /jobs/adopt-{uuid}（列表卡「评估中 / 排队中」的落点）", () => {
+  assert.equal(isExtNavPath(`/jobs/adopt-${RUN_ID}`), true);
+  assert.equal(JOB_ADOPT_PATH_RE.test(`/jobs/adopt-${RUN_ID}`), true);
+  assert.equal(isExtNavPath(`/jobs/adopt-${RUN_ID.toUpperCase()}`), true, "UUID 大小写不敏感");
+});
+
+test("拒绝：任务页 path 的形近变体（白名单只放接管前缀 + 标准 UUID）", () => {
+  assert.equal(isExtNavPath("/jobs"), false);
+  assert.equal(isExtNavPath("/jobs/adopt-"), false, "缺 runId");
+  assert.equal(isExtNavPath(`/jobs/${RUN_ID}`), false, "没有 adopt- 前缀");
+  assert.equal(isExtNavPath(`/jobs/adopt-${RUN_ID}/extra`), false, "尾巴不放行");
+  assert.equal(isExtNavPath(`/jobs/adopt-${RUN_ID}?x=1`), false, "query 不放行");
+  assert.equal(isExtNavPath("/jobs/adopt-..%2F..%2Fsettings"), false, "路径穿越形态");
+  assert.equal(isExtNavPath("/jobs/adopt-not-a-uuid"), false);
+  assert.equal(isExtNavPath("/jobs/adopt-3f2b8c1e9d4a4c778f102a5b6c7d8e9f"), false, "无连字符不是 UUID");
+});
+
+test("三条正则导出保持各自独立（TSX 与单测消费同一真值）", () => {
   assert.equal(REPORT_PATH_RE instanceof RegExp, true);
   assert.equal(PIPELINE_PATH_RE instanceof RegExp, true);
+  assert.equal(JOB_ADOPT_PATH_RE instanceof RegExp, true);
 });

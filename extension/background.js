@@ -824,6 +824,106 @@ async function resolveReportJump(msg, sender) {
   return { ok: true, reportUrl: target.url, mode };
 }
 
+// ---- 列表卡「评估中 / 排队中」------------------------------------------------
+//
+// 扩展发起的评估经 web 端 /api/run 进全局并发池，池里此刻在跑 / 在排队的任务由
+// /api/active-runs 统一给出（running + queued 两段，都带 runId 与 url）。列表卡靠它
+// 知道自己这一条是不是正在评估、以及在排队第几位 —— 卡片本身收不到任何任务事件。
+//
+// 轮询频率由 content script 决定（3s）。这里再加 2s 的短缓存：同一屏上十几种卡片
+// 一次 applyAllInjections 会各自问一次，没有缓存就等于一次批量打十六七个请求。
+const ACTIVE_RUNS_TTL_MS = 2000;
+let activeRunsCache = { at: 0, payload: null };
+
+/** 只把卡片需要的字段透出去：runId / url / 状态 / 排队位次。 */
+function normalizeActiveRuns(snapshot) {
+  const pick = (t, status) => {
+    if (!t || typeof t !== "object") return null;
+    if (typeof t.runId !== "string" || !t.runId) return null;
+    const out = { runId: t.runId, url: typeof t.url === "string" ? t.url : "", status };
+    if (status === "queued" && Number.isFinite(Number(t.position))) out.position = Number(t.position);
+    return out;
+  };
+  const running = (snapshot && Array.isArray(snapshot.running) ? snapshot.running : []).map((t) => pick(t, "running")).filter(Boolean);
+  const queued = (snapshot && Array.isArray(snapshot.queued) ? snapshot.queued : []).map((t) => pick(t, "queued")).filter(Boolean);
+  return { running, queued };
+}
+
+async function loadActiveRuns() {
+  const now = Date.now();
+  if (activeRunsCache.payload && now - activeRunsCache.at < ACTIVE_RUNS_TTL_MS) return activeRunsCache.payload;
+  let payload;
+  const port = await ensureLivePort().catch(() => null);
+  if (port == null) {
+    payload = { ok: false, connected: false, running: [], queued: [] };
+  } else {
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/api/active-runs`);
+      const j = res.ok ? await res.json().catch(() => null) : null;
+      payload = j
+        ? { ok: true, connected: true, ...normalizeActiveRuns(j) }
+        : { ok: false, connected: true, error: `任务列表读不出来（${res.status}）`, running: [], queued: [] };
+    } catch (err) {
+      payload = { ok: false, connected: true, error: `任务列表读取失败：${(err && err.message) || err}`, running: [], queued: [] };
+    }
+  }
+  activeRunsCache = { at: now, payload };
+  return payload;
+}
+
+/** 「评估中 / 排队中」胶囊的落点解析与跳转（同 resolveReportJump 的编排）。 */
+async function resolveJobJump(msg, sender) {
+  const port = await ensureLivePort().catch(() => null);
+  const { tabs, currentWindowId } = await collectWebTabContext(sender);
+  const target = REPORT_TARGET.pickJobTarget({ livePort: port, tabs, currentWindowId, runId: msg && msg.runId });
+  if (target.action === "error") return { ok: false, error: target.error };
+  if (target.action === "create") {
+    await chrome.tabs.create({ url: target.url });
+    return { ok: true, jobUrl: target.url, mode: "created" };
+  }
+  const mode = await revealWebTab(target, false);
+  return { ok: true, jobUrl: target.url, mode };
+}
+
+// ---- 智联列表卡的 JD 代抓 ----------------------------------------------------
+//
+// 智联搜索页是 i.zhaopin.com / www.zhaopin.com、收藏页是 i.zhaopin.com 抓
+// jobs.zhaopin.com 的详情页，页面上下文被 CORS 挡死（实测 Failed to fetch）。
+// service worker 有 host_permissions（https://*.zhaopin.com/*），由它代抓再把
+// HTML 文本回给 content script，解析仍在站点侧（选择器归 site-*.js）。
+//
+// 只放白名单三站：这条消息的入参是页面给的一个 URL，扩成任意 URL 等于把 SW 变成
+// 一个跳过 CORS 的通用代理。体积上限 400KB —— 智联详情页实测 200KB 上下，超过就是
+// 撞上了登录/验证页或异常膨胀，截断解析没有意义，直接报错。
+const FETCH_HTML_TIMEOUT_MS = 15000;
+const FETCH_HTML_MAX_CHARS = 400000;
+const FETCH_HTML_HOSTS = [/(^|\.)zhaopin\.com$/i, /(^|\.)zhipin\.com$/i, /(^|\.)liepin\.com$/i];
+
+async function fetchDetailHtml(rawUrl) {
+  let u;
+  try {
+    u = new URL(String(rawUrl || ""));
+  } catch {
+    return { ok: false, error: "详情页地址无效" };
+  }
+  if (u.protocol !== "https:" && u.protocol !== "http:") return { ok: false, error: "详情页地址无效" };
+  if (!FETCH_HTML_HOSTS.some((re) => re.test(u.hostname))) return { ok: false, error: "详情页地址不在支持的站点内" };
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), FETCH_HTML_TIMEOUT_MS);
+  try {
+    const res = await fetch(u.toString(), { credentials: "include", signal: ctrl.signal });
+    const html = await res.text();
+    if (!res.ok) return { ok: false, error: `详情页抓取失败：HTTP ${res.status}` };
+    if (html.length > FETCH_HTML_MAX_CHARS) return { ok: false, error: "详情页返回内容异常（过大），可能被拦到验证页" };
+    return { ok: true, html };
+  } catch (err) {
+    const aborted = err && (err.name === "AbortError" || err.code === 20);
+    return { ok: false, error: aborted ? "详情页抓取超时" : `详情页抓取失败：${(err && err.message) || err}` };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // ---- message routing ------------------------------------------------------
 
 const selectionByTab = new Map(); // tabId → string[] (selected posting URLs)
@@ -945,6 +1045,27 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         } catch (err) {
           sendResponse({ ok: false, error: err.message });
         }
+        break;
+      }
+      case "get-active-runs": {
+        // 列表卡轮询这一条判断「本卡是不是正在评估 / 在排队」（2s 缓存，见上方注释）。
+        // 服务没起时回 ok:false 但空数组 —— content script 据此把临时态胶囊全部收掉，
+        // 不会因为读不到任务列表就把旧状态一直贴在那儿。
+        sendResponse(await loadActiveRuns());
+        break;
+      }
+      case "open-job": {
+        // 「评估中 / 排队中」胶囊可点：跳 web 端工作器里对应的那条任务。
+        try {
+          sendResponse(await resolveJobJump(msg, sender));
+        } catch (err) {
+          sendResponse({ ok: false, error: err.message });
+        }
+        break;
+      }
+      case "fetch-detail-html": {
+        // 站点侧被 CORS 挡住的详情页由 SW 代抓（智联跨子域），解析仍在 content script。
+        sendResponse(await fetchDetailHtml(msg && msg.url));
         break;
       }
       case "fetch-report-content": {

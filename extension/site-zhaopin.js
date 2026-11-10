@@ -29,9 +29,37 @@
 
   // 搜索页列表卡片。SPA 渲染，卡片是 DIV.job-card（BEM 块），active 为
   // BEM 修饰符 job-card--active。卡片内无职位 <a>。
-  const CARD_SELECTOR = "div.job-card";
+  //
+  // 「我的收藏」（i.zhaopin.com/position/collect）是另一套骨架：
+  // DIV.joblist-box__item，职位锚点是 a.joblist-box__iteminfo（指向
+  // jobs.zhaopin.com/CC…J….htm），右侧原生操作列 DIV.joblist-box__item__jobbtn。
+  // 两种容器互斥（各自页面只出现一种），并列进选择器 —— 在此之前收藏页整页匹配 0，
+  // 插件在那里完全不生效。
+  const COLLECT_CARD_SELECTOR = "div.joblist-box__item";
+  const CARD_SELECTOR = "div.job-card, div.joblist-box__item";
   // 卡片内唯一 <a> 指向公司详情（留作 diag 参考锚点，非职位锚）。
   const LINK_SELECTOR = 'a[href*="companydetail"]';
+
+  /** 收藏页卡片？两套骨架的挂载点与 URL 来源完全不同，先分流再各自处理。 */
+  function isCollectCard(card) {
+    return !!card && typeof card.matches === "function" && card.matches(COLLECT_CARD_SELECTOR);
+  }
+
+  /**
+   * 职位 URL 统一转写成规范形态 `https://www.zhaopin.com/jobdetail/{id}.htm`。
+   *
+   * 智联的职位 URL 按入口有三种写法：搜索页 positionList 给 www 详情页；收藏页卡片
+   * 锚点给 jobs.zhaopin.com/CC…J….htm；tracker 里存的是 www 形态（isDetailPath 的口径）。
+   * 不转写的话徽章匹配不上已有报告、评估还会重复建行。两种形态实测都 200 且 SSR
+   * 带 describtion-card 正文，所以只是同一职位换了个壳。
+   * 认不出 id 返回 null（调用方据此跳过这张卡，不拼一个必然 404 的 URL）。
+   */
+  function canonicalDetailUrl(raw) {
+    const s = typeof raw === "string" ? raw.trim() : "";
+    if (!s) return null;
+    const m = s.match(/\/jobdetail\/([^/?#]+?)(?:\.htm)?(?:[?#]|$)/i) || s.match(/(CC[0-9A-Za-z]+J[0-9A-Za-z]+)(?:\.htm)?/);
+    return m ? "https://www.zhaopin.com/jobdetail/" + m[1] + ".htm" : null;
+  }
 
   /**
    * 从 window.__INITIAL_STATE__.positionList 读取职位列表。
@@ -123,18 +151,29 @@
     return /^\/jobdetail\/[^/?#]+\.htm$/i.test(pathname);
   }
 
-  /** 列表页 job-card 即列表卡（详情页不存在该容器）。 */
+  /**
+   * 列表页 job-card / 收藏页 joblist-box__item 即列表卡（详情页不存在这两种容器）。
+   * 收藏卡没有 companydetail 锚点，改按「能不能解析出职位 URL」判定。
+   */
   function cardIsList(card) {
-    return !isDetailPath(location.pathname) && !!card && !!card.querySelector(LINK_SELECTOR);
+    if (!card || isDetailPath(location.pathname)) return false;
+    if (isCollectCard(card)) return !!cardUrl(card);
+    return !!card.querySelector(LINK_SELECTOR);
   }
 
   /**
-   * 列表卡片的职位绝对 URL（无法从卡片 DOM 取，须从 positionList[].positionUrl
-   * 按卡片 index 映射）。positionList 数组顺序与 DOM 卡片顺序一致。
-   * 双保险：命中卡片后校验该 index 的 positionUrl 对应职位名与卡片标题一致，
-   * 不一致则回退整表按名称匹配，再失败返回 null。
+   * 列表卡片的职位绝对 URL（一律转写成 www 规范形态，见 canonicalDetailUrl）。
+   *   • 收藏卡：锚点 a.joblist-box__iteminfo 直给 jobs.zhaopin.com/CC…J….htm；
+   *   • 搜索卡：卡片内无职位 <a>，须从 positionList[].positionUrl 按卡片 index 映射
+   *     （数组顺序与 DOM 卡片顺序一致），再按标题文本兜底一次。
    */
   function cardUrl(card) {
+    if (isCollectCard(card)) {
+      const a = card.querySelector(
+        'a[href*="/jobdetail/"], a[href*="jobs.zhaopin.com"], a.joblist-box__iteminfo',
+      );
+      return canonicalDetailUrl(a && a.href);
+    }
     const list = getPositionList();
     if (!list.length) return null;
     // 1) index 映射：找该卡在 DOM 中的位置，对应 positionList[index]。
@@ -142,8 +181,11 @@
     const idx = cards.indexOf(card);
     if (idx >= 0 && idx < list.length) {
       const p = list[idx];
-      const url = p && (p.positionUrl || p.positionURL);
-      if (url) return String(url);
+      // 三种字段名都要认：直读 __INITIAL_STATE__ 是 positionUrl，而经
+      // zp-get-state 写进 html[data-zpstate] 的精简壳用的是 url（同
+      // zhaopinPositionFor 的口径）—— 只认前两种会让搜索卡的分数/状态全部落空。
+      const url = p && (p.positionUrl || p.positionURL || p.url);
+      if (url) return canonicalDetailUrl(String(url)) || String(url);
     }
     // 2) 回退：按卡片标题文本匹配 positionList[].name。
     const titleEl = card && card.querySelector('[class*="job-card__title"], h2, a');
@@ -151,8 +193,8 @@
     if (title) {
       const hit = list.find((p) => p && p.name && p.name === title) || list.find((p) => p && p.name && title.includes(p.name));
       if (hit) {
-        const url = hit.positionUrl || hit.positionURL;
-        if (url) return String(url);
+        const url = hit.positionUrl || hit.positionURL || hit.url;
+        if (url) return canonicalDetailUrl(String(url)) || String(url);
       }
     }
     return null;
@@ -189,12 +231,23 @@
    * （{归一/原始 positionUrl → workCity}），查不到回退 positionList 对应项，再回退 title。
    */
   function cardMeta(card, ctx) {
-    const p = zhaopinPositionFor(card);
-    const url = p ? String(p.positionUrl || p.positionURL || p.url) : null;
     const text = (sel) => {
       const el = card.querySelector(sel);
       return el ? (el.innerText || el.textContent || "").trim() : "";
     };
+    // 收藏页卡片不吃 positionList（那是搜索页的状态）：标题/公司都在 iteminfo 里，
+    // 城市无稳定 class（扫描时城市过滤走 web 侧 title 匹配，同 BOSS/猎聘口径）。
+    if (isCollectCard(card)) {
+      return {
+        url: cardUrl(card),
+        title: text(".joblist-box__iteminfo [class*='title'], [class*='iteminfo'] h3, h3") || text("a.joblist-box__iteminfo"),
+        company: text("[class*='company-name'], [class*='company'] .name, h4"),
+        salary: text("[class*='salary'], [class*='price']"),
+        city: undefined,
+      };
+    }
+    const p = zhaopinPositionFor(card);
+    const url = p ? String(p.positionUrl || p.positionURL || p.url) : null;
     const title = text('[class*="job-card__title"], h2');
     let city;
     if (ctx && ctx.cityMap && url) {
@@ -462,6 +515,70 @@
     if (btn && qbtn) positionPaneButtons(btn, qbtn);
   }
 
+  // ---- 每卡操作区（快评 / 评估 + 状态胶囊）--------------------------------
+  //
+  // 形状、按钮与评估/快评的派发全在 core（三站共用一份），这里只给挂载点与素材。
+  // 智联两种骨架的挂法不同：
+  //   • 搜索卡 div.job-card：整行接在 .job-card__company-row 之后；
+  //   • 收藏卡 div.joblist-box__item：左右分栏 —— 胶囊仍在左侧信息区
+  //     (.joblist-box__iteminfo) 末尾，按钮进右侧原生操作列
+  //     (.joblist-box__item__jobbtn) 底部，与「已收藏 / 申请职位」同列同右缘。
+  //     原生两颗按钮不动。
+  function cardActionMounts(card) {
+    if (isCollectCard(card)) {
+      const info = card.querySelector(".joblist-box__iteminfo, [class*='iteminfo']");
+      const ops = card.querySelector(".joblist-box__item__jobbtn, [class*='jobbtn']");
+      if (info && ops) return { chips: { parent: info, before: null }, buttons: { parent: ops, before: null } };
+      return info ? { row: { parent: info, before: null } } : null;
+    }
+    const row = card.querySelector(".job-card__company-row");
+    if (row && row.parentElement) return { row: { parent: row.parentElement, before: row.nextSibling } };
+    return { row: { parent: card, before: null } };
+  }
+
+  /** 卡片上的公司名（搜索卡与收藏卡的公司块 class 不同，逐候选取第一段）。 */
+  function cardCompany(card) {
+    const el = card.querySelector(
+      '[class*="company-name"], [class*="company"] .name, .joblist-box__item__company, h3, h4',
+    );
+    const t = el ? (el.innerText || el.textContent || "").trim().split("\n")[0] : "";
+    return t.trim().slice(0, 40);
+  }
+
+  /**
+   * 解析详情页 HTML → { title, text }。选择器与 extractDetailJd 同一套（标题 h1、
+   * 薪资 span.summary-planes__salary、正文 div.describtion-card —— 站点拼写 typo
+   * 照用），数据源换成 background 代抓回来的 HTML 文本。
+   */
+  function parseDetailHtml(html) {
+    const doc = new DOMParser().parseFromString(String(html || ""), "text/html");
+    const pick = (sel) => {
+      const el = doc.querySelector(sel);
+      if (!el) return "";
+      return (el.textContent || "").replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+    };
+    const title = pick("h1");
+    const price = pick("span.summary-planes__salary, [class*='salary']");
+    const desc = pick("div.describtion-card, [class*='describtion-card'], [class*='job-description']");
+    const parts = [title];
+    if (price) parts.push(price);
+    if (desc.length >= 80) parts.push(desc);
+    return { title, text: parts.filter(Boolean).join("\n").trim().slice(0, 12000) };
+  }
+
+  /**
+   * 站内抓详情页在页面上下文会被 CORS 挡死（收藏页 i.zhaopin.com 抓
+   * jobs.zhaopin.com 实测 Failed to fetch），必须由 background 代抓
+   * （host_permissions 已覆盖 https://*.zhaopin.com/*），解析仍在本文件。
+   */
+  async function fetchCardJd(url) {
+    const res = await new Promise((resolve) => C.sendMsg({ type: "fetch-detail-html", url }, resolve));
+    if (!res || !res.ok) throw new Error((res && res.error) || "详情页抓取失败");
+    const jd = parseDetailHtml(res.html);
+    if (jd.text.length < 80) throw new Error("详情页没返回职位描述（可能需要验证）");
+    return jd;
+  }
+
   const ZHAOPIN_SITE = {
     hostMatch: /(^|\.)zhaopin\.com$/i,
     source: "zhaopin",
@@ -488,6 +605,10 @@
     extractPosterName,
     extractListPaneJd,
     ensureRightPaneButton,
+    // 每卡操作区（快评 / 评估 + 状态胶囊）的挂载点与素材来源。
+    cardActionMounts,
+    cardCompany,
+    fetchCardJd,
     // 详情页完整评估带 DOM 提取的 JD 全文+雇主名，绕开服务端 WebFetch
     // (智联拦截 WebFetch/Playwright，与 BOSS/猎聘同口径)。
     evaluateInlineJd: true,

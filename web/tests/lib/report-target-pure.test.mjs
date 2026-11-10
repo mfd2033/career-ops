@@ -16,7 +16,7 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 const mod = await import(pathToFileURL(join(ROOT, "extension", "report-target-pure.js")).href);
-const { pickReportTarget, pickWebTarget, parseWebTab, reportPath, reportUrl, pipelinePath, pipelineUrl, checkupPath, checkupUrl, urlKey, NO_SERVICE_ERROR, WEB_SERVICE_ERROR, WEB_PORT_MIN, WEB_PORT_MAX } = mod.default ?? mod;
+const { pickReportTarget, pickWebTarget, pickJobTarget, parseWebTab, reportPath, reportUrl, pipelinePath, pipelineUrl, checkupPath, checkupUrl, jobPath, jobUrl, urlKey, NO_SERVICE_ERROR, WEB_SERVICE_ERROR, JOB_SERVICE_ERROR, ADOPT_PREFIX, WEB_PORT_MIN, WEB_PORT_MAX } = mod.default ?? mod;
 
 /** 造一个 chrome.tabs.query 形状的标签页。 */
 const tab = (url, { id = 1, windowId = 1, active = false } = {}) => ({ id, windowId, active, url });
@@ -293,4 +293,74 @@ test("pickWebTarget：候选池里混着招聘站页与端口越界页，照常�
   const r = pickWebTarget({ livePort: 3000, tabs, currentWindowId: 1 });
   assert.equal(r.action, "reuse");
   assert.equal(r.tabId, 33);
+});
+
+// ---- pickJobTarget：列表卡「评估中 / 排队中」胶囊的落点 ----------------------
+//
+// 规则与 pickWebTarget 同源（pickWebTab），落点是工作器任务页 /jobs/adopt-{runId}。
+// 与报告那两条的区别只有两点：runId 必须是 UUID（它直接进前端路由），落点 path 带
+// web 端的接管前缀 adopt-（改一处而不同改会得到一个必然 404 的页面）。
+
+const RUN_ID = "3f2b8c1e-9d4a-4c77-8f10-2a5b6c7d8e9f";
+
+test("jobPath / jobUrl：/jobs/adopt-{uuid}，origin 仍是 localhost 家规", () => {
+  assert.equal(ADOPT_PREFIX, "adopt-", "必须与 web/src/lib/job-adopt.mjs 的 ADOPT_PREFIX 同值");
+  assert.equal(jobPath(RUN_ID), `/jobs/adopt-${RUN_ID}`);
+  assert.equal(jobUrl(3007, RUN_ID), `http://localhost:3007/jobs/adopt-${RUN_ID}`);
+});
+
+test("jobPath：非 UUID 一律空串（不拼一个必然 404 的路由）", () => {
+  for (const bad of ["", "  ", "abc", "../../etc/passwd", "adopt-" + RUN_ID, RUN_ID + "/x", null, undefined, 42]) {
+    assert.equal(jobPath(bad), "", `runId=${String(bad)}`);
+  }
+});
+
+test("pickJobTarget：端口探测失败 → error，且是「任务页」措辞（不是报告）", () => {
+  const r = pickJobTarget({ livePort: null, tabs: [tab("http://localhost:3000/jobs")], currentWindowId: 1, runId: RUN_ID });
+  assert.equal(r.action, "error");
+  assert.equal(r.error, JOB_SERVICE_ERROR);
+  assert.notEqual(r.error, NO_SERVICE_ERROR);
+  assert.notEqual(r.error, WEB_SERVICE_ERROR);
+});
+
+test("pickJobTarget：runId 非法 → error（不做端口探测之外的任何跳转）", () => {
+  const r = pickJobTarget({ livePort: 3000, tabs: [], currentWindowId: 1, runId: "not-a-uuid" });
+  assert.equal(r.action, "error");
+  assert.equal(r.error, "无效任务号");
+});
+
+test("pickJobTarget：服务活着但没有 web 端标签页 → create，落点 /jobs/adopt-{uuid}", () => {
+  const r = pickJobTarget({ livePort: 3003, tabs: [tab("https://www.zhipin.com/job_detail/x.html")], currentWindowId: 1, runId: RUN_ID });
+  assert.deepEqual(r, {
+    action: "create",
+    url: `http://localhost:3003/jobs/adopt-${RUN_ID}`,
+    path: `/jobs/adopt-${RUN_ID}`,
+  });
+});
+
+test("pickJobTarget：复用同一套候选规则（端口优先 → 当前窗口 → active）", () => {
+  const tabs = [
+    tab("http://localhost:3010/jobs", { id: 11, windowId: 1, active: true }),
+    tab("http://localhost:3000/pipeline", { id: 12, windowId: 2, active: true }),
+    tab("http://localhost:3000/report/3", { id: 13, windowId: 1, active: false }),
+  ];
+  const r = pickJobTarget({ livePort: 3000, tabs, currentWindowId: 1, runId: RUN_ID });
+  assert.equal(r.action, "reuse");
+  assert.equal(r.tabId, 13, "端口命中优先，再按当前窗口收敛");
+  assert.equal(r.navigate, true);
+  assert.equal(r.url, `http://localhost:3000/jobs/adopt-${RUN_ID}`);
+});
+
+test("pickJobTarget：已在同一条任务页 → 只聚焦不重载", () => {
+  const tabs = [tab(`http://localhost:3000/jobs/adopt-${RUN_ID}`, { id: 5, active: true })];
+  const r = pickJobTarget({ livePort: 3000, tabs, currentWindowId: 1, runId: RUN_ID });
+  assert.equal(r.action, "reuse");
+  assert.equal(r.navigate, false);
+});
+
+test("pickJobTarget：停在另一条任务页 → 需要导航", () => {
+  const other = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+  const tabs = [tab(`http://localhost:3000/jobs/adopt-${other}`, { id: 5 })];
+  const r = pickJobTarget({ livePort: 3000, tabs, currentWindowId: 1, runId: RUN_ID });
+  assert.equal(r.navigate, true);
 });

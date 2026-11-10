@@ -13,7 +13,10 @@
  */
 
 /** 接管卡的 id 前缀（id = 前缀 + runId）——job-store 的建卡/同步/免存盘
- *  守卫共用这一个常量，不各自拼字面量。 */
+ *  守卫共用这一个常量，不各自拼字面量。
+ *  扩展侧有一份同值副本：extension/report-target-pure.js 的 ADOPT_PREFIX，
+ *  列表卡「评估中 / 排队中」胶囊按它拼 /jobs/adopt-{runId}。两个运行时
+ *  （web TS/MJS 与 content script）无法共享模块，改一处必须同改另一处。 */
 export const ADOPT_PREFIX = "adopt-";
 
 /**
