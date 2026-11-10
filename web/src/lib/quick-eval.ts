@@ -83,6 +83,14 @@ export type QuickResult = { grade: string; score: number; reason: string; raw: s
 export const QUICK_EVAL_TIMEOUT_MS = 15000;
 
 /**
+ * 单轮快评的输出预算。使用中的密钥可能是推理型模型（如 u2-flash），思考过程同样
+ * 计入 completion token：原写死 300 时实测 reasoning_content 吃掉 1039 token、
+ * finish_reason=length、message.content 为空，解析静默回退成 0 分，用户误当成真实
+ * 打分。1500 给「思考 + 单行答案」都留出余量。
+ */
+export const QUICK_EVAL_MAX_TOKENS = 1500;
+
+/**
  * 连接测试（ADR-0083 工单 04）的内层超时：探测请求只发一条 ping 消息、
  * max_tokens=1，正常端点亚秒级返回；8s 仍无响应即可判定不可达。必须显著
  * 小于前端 fetch 的外层预算（key-vault-card 的 12s），否则外层先 abort、
@@ -154,7 +162,7 @@ export async function quickEvaluate(
       body: JSON.stringify({
         model: cfg.model || "agnes-2.5-flash",
         messages: [{ role: "user", content: prompt }],
-        max_tokens: 300,
+        max_tokens: QUICK_EVAL_MAX_TOKENS,
         temperature: 0.2,
         stream: false,
       }),
@@ -177,9 +185,20 @@ export async function quickEvaluate(
     throw new Error(`quick-eval LLM HTTP ${res.status}`);
   }
   const data = await res.json();
-  const content: string =
-    data?.choices?.[0]?.message?.content ?? data?.content ?? "";
-  return parseQuickResult(content);
+  const choice = data?.choices?.[0];
+  const content: string = choice?.message?.content ?? data?.content ?? "";
+  // 空正文必须抛错，不能落成 0 分：推理型模型把预算烧在 reasoning_content 上时
+  // 正文为空，静默回退会让徽章显示「快评 0/5」，用户误读成真实打分。
+  if (!String(content).trim()) {
+    throw new Error(
+      choice?.finish_reason === "length"
+        ? `快评失败：模型输出被截断（max_tokens=${QUICK_EVAL_MAX_TOKENS} 用尽），请换非推理型模型或调高上限`
+        : "快评失败：模型返回为空，请稍后重试或换模型",
+    );
+  }
+  const parsed = parseQuickResult(content);
+  if (!parsed.raw) throw new Error(`快评失败：模型没按格式作答（${String(content).trim().slice(0, 120)}）`);
+  return parsed;
 }
 
 /** 解析 LLM 输出的单行，宽容处理：提取 grade/score/reason，失败回退空值。 */
