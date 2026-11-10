@@ -40,6 +40,25 @@
   // 卡片内唯一 <a> 指向公司详情（留作 diag 参考锚点，非职位锚）。
   const LINK_SELECTOR = 'a[href*="companydetail"]';
 
+  // 收藏卡专用层级修正：站点悬停操作列 .joblist-box__item__jobbtn 是 absolute
+  // (卡内 top:50px、192x76、白底，实测占 y∈[50,126])，绘制在静态内容之上 ——
+  // 插件操作行（core 挂在 iteminfo 末尾，实测行顶卡内 y=122）顶部 4px 被白块
+  // 盖住、那一条的点击也被拦截。把收藏卡内的操作行提升为定位元素（z-index:1），
+  // 绘制在白块之上；白块本身纯白，视觉无缝。搜索卡 (div.job-card) 不受影响。
+  const COLLECT_ROW_STYLE_ID = "career-ext-zp-collect-row-style";
+  const COLLECT_ROW_CSS =
+    '.joblist-box__item div[data-career-actions="row"]{position:relative;z-index:1;}';
+
+  /** 注入收藏卡操作行层级修正样式（幂等；node 单测无 document 时跳过）。 */
+  function ensureCollectRowStyle() {
+    if (typeof document === "undefined") return;
+    if (document.getElementById(COLLECT_ROW_STYLE_ID)) return;
+    const s = document.createElement("style");
+    s.id = COLLECT_ROW_STYLE_ID;
+    s.textContent = COLLECT_ROW_CSS;
+    (document.head || document.documentElement).appendChild(s);
+  }
+
   /** 收藏页卡片？两套骨架的挂载点与 URL 来源完全不同，先分流再各自处理。 */
   function isCollectCard(card) {
     return !!card && typeof card.matches === "function" && card.matches(COLLECT_CARD_SELECTOR);
@@ -628,5 +647,6 @@
     return;
   }
   C = window.__careerExtCore;
+  ensureCollectRowStyle();
   C.init(ZHAOPIN_SITE);
 })();
