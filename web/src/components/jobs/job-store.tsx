@@ -776,7 +776,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
               }));
               return;
             }
-            const { runId, error } = (await res.json()) as { runId?: string; error?: string };
+            const { runId, error, title } = (await res.json()) as { runId?: string; error?: string; title?: string };
             if (!runId) {
               accs.current.delete(id);
               patch(id, (j) => ({
@@ -798,6 +798,17 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
             // Persist the runId onto the card so /jobs can dedupe this card
             // against the server run ledger (same run, one history row).
             patch(id, (j) => ({ ...j, runId }));
+            // 派发标签（「公司 · 岗位」，/api/run 从 pipeline/tracker 行诚实解析）：
+            // 就地升级「评估 · 粘贴的链接」这类通用标题，评估中就能看出在评谁；
+            // 拼不出时 undefined，保留原兜底形状（不编造）。副标题与标题里的岗位
+            // 重复（探索卡的 role 副标题）时去掉，一行里岗位不出现两遍。
+            if (typeof title === "string" && title) {
+              patch(id, (j) => ({
+                ...j,
+                title,
+                subtitle: j.subtitle && title.endsWith(` · ${j.subtitle}`) ? undefined : j.subtitle,
+              }));
+            }
             // Events (including the tail of anything published between the
             // server registering the run and this map write) are recovered by
             // the channel's buffer replay; `seq` dedup keeps it exactly-once.
@@ -899,13 +910,16 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
                   patch(id, (j) => ({ ...j, serverBatchId: typeof ev.batchId === "string" ? ev.batchId : undefined }));
                 } else if (ev.type === "item-running") {
                   // ADR-0049：worker spawn 即时宣告，建立 reportNum→key 映射并创建占位 item。
+                  // 服务端随事件带来的派发标签（「公司 · 岗位」）优先——运行中逐项行
+                  // 不再是裸 URL；旧服务端无 label 时回退 URL。
                   const rNum = typeof ev.reportNum === "number" ? ev.reportNum : 0;
                   const itemUrl = typeof ev.url === "string" ? ev.url : "";
+                  const itemLabel0 = typeof ev.label === "string" && ev.label ? ev.label : itemUrl;
                   patch(id, (j) => ({
                     ...j,
                     items: [
                       ...(j.items ?? []).filter((it) => it.key !== itemUrl),
-                      { key: itemUrl, label: itemUrl, ok: false, reportNum: rNum, steps: [], ts: Date.now() },
+                      { key: itemUrl, label: itemLabel0, ok: false, reportNum: rNum, steps: [], ts: Date.now() },
                     ].slice(-100),
                   }));
                 } else if (ev.type === "tool") {

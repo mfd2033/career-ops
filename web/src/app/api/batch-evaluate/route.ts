@@ -34,11 +34,12 @@ import { withModelFlag, isFatalGenericStderr, classifyFatalStderr, fatalStopMess
 import { resolveWorkerInvocation } from "@/lib/worker-invocation.mjs";
 import { isReservedReportFile } from "@/lib/report-files.mjs";
 import { spawnHeadlessCli, terminateCli } from "@/lib/spawn-cli.mjs";
-import { careerOpsRoot, readMemory, readInbox, readScanDates, readMarketModesDir, listMarketModes } from "@/lib/career-ops";
+import { careerOpsRoot, readMemory, readInbox, readApplications, readScanDates, readMarketModesDir, listMarketModes } from "@/lib/career-ops";
 import { readAppConfig } from "@/lib/app-config";
 import { buildBatchPrompt } from "@/lib/run-prompts.mjs";
 // 任务卡可读标题（「公司 · 岗位」）：派发时从 pipeline 行带、完成后从报告回填。
-import { pipelineUrlLabels, reportJobLabel } from "@/lib/job-label.mjs";
+import { pipelineUrlLabels, reportJobLabel, trackerUrlLabels } from "@/lib/job-label.mjs";
+import { normalizeUrl } from "@/lib/core/url-key.mjs";
 // 评估模式（CO-65）：profile.yml 的 language.modes_dir → 实际评估模式文件。
 import { resolveMarketMode } from "@/lib/market-modes.mjs";
 import { acquireTrackerWrite, releaseTrackerWrite } from "@/lib/core/run-registry";
@@ -117,9 +118,11 @@ export async function POST(req: Request) {
 
   const today = new Date().toISOString().slice(0, 10);
   // 派发时的可读标签：pipeline.md 待办行写着 `URL | 公司 | 岗位`，批量 URL 与它同源，
-  // 命中即让池卡片一开局就显示「公司 · 岗位」而不是裸链接（拼不出的仍回退 URL）。
+  // 命中即让池卡片一开局就显示「公司 · 岗位」而不是裸链接；pipeline 行没写全的
+  // （如管线页选中的 tracker 行重跑）再查 tracker 行的 URL 列兜底，都拼不出才回退 URL。
   const inbox = readInbox();
   const inboxLabels = pipelineUrlLabels(inbox);
+  const trackerLabels = trackerUrlLabels(readApplications());
   const inboxPostedAt = new Map(inbox.filter((j) => j.url).map((j) => [j.url as string, j.postedAt]));
   // 采集卡片薪资（2026-11-04 #1217）：scan 阶段早把卡片原文写进了 pipeline.md 的 note
   // 尾段（ADR-0023），但评估 prompt 从来没传过它 —— 而两个提取链路都不保证能拿到本岗
@@ -159,9 +162,10 @@ export async function POST(req: Request) {
     }
     return inboxLabels.get(url) || url;
   };
-  // 派发时的池卡片标题：pipeline 行标签 > 扩展详情页传来的公司名（仅单 URL 有效）> URL。
+  // 派发时的池卡片标题：pipeline 行标签 > tracker 行标签（归一化 URL）> 扩展详情页
+  // 传来的公司名（仅单 URL 有效）> URL。
   const dispatchedLabel = (u: string): string =>
-    inboxLabels.get(u) || (urls.length === 1 && company.trim() ? company.trim() : "") || u;
+    inboxLabels.get(u) || trackerLabels.get(normalizeUrl(u)) || (urls.length === 1 && company.trim() ? company.trim() : "") || u;
   const runNode = (script: string, args: string[]) =>
     execFileAsync(process.execPath, [path.join(root, script), ...args], { cwd: root });
 
@@ -358,7 +362,7 @@ export async function POST(req: Request) {
               child.stderr?.setEncoding("utf-8");
               // ADR-0049 决议 5：spawn 后立即宣告 item-running，让客户端建立
               // reportNum→行映射，后续 tool 事件凭 itemKey 路由到正确卡片。
-              send({ type: "item-running", reportNum: num, url });
+              send({ type: "item-running", reportNum: num, url, label: dispatchedLabel(url) });
               // ADR-0094：停机阀。三道触发源（致命错误行 / 静默过久 / 总时长）共用一个出口：
               // 写清原因 → 终止整棵进程树 → 交给 close 收尾（finish 幂等）。
               const stopNow = (reason: string) => {

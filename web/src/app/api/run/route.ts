@@ -17,13 +17,14 @@ import { checkupDispatchText } from "@/lib/checkup-request.mjs";
 import { registerCheckup, markCheckupRunning, clearCheckup, attachCheckupExit } from "@/lib/checkup-live.mjs";
 import { OFFER_CHECKUP_SKILL_NAME, resolveSkillCopy, scanSkillRegistry } from "@/lib/skill-registry.mjs";
 import { readAppConfig } from "@/lib/app-config";
+import { normalizeUrl } from "@/lib/core/url-key.mjs";
 import { resolvePdfPaths, type PdfPaths } from "@/lib/pdf-paths.mjs";
 import { renderAndMarkPdf, writeCvHtml, pdfRunOutcome } from "@/lib/pdf-render.mjs";
 import { createCvEnvelopeFilter, type CvEnvelope } from "@/lib/cv-envelope.mjs";
 import { buildPrompt, isShellSafeCompanyName, clampInlineJd, clampInlineEmployer } from "@/lib/run-prompts.mjs";
 // 任务卡可读标题（「公司 · 岗位」）：派发时从 pipeline 行/扩展雇主名带，完成后从
 // 报告 Machine Summary 回填（与 /api/batch-evaluate 同一份函数）。
-import { jobLabel, reportJobLabel, evaluateDisplayTitle } from "@/lib/job-label.mjs";
+import { jobLabel, reportJobLabel, evaluateDisplayTitle, trackerUrlLabels } from "@/lib/job-label.mjs";
 // 评估模式（CO-65）：profile.yml 的 language.modes_dir → 实际评估模式文件。
 import { resolveMarketMode } from "@/lib/market-modes.mjs";
 import { deriveRunReportNum, buildReconcileArgs } from "@/lib/run-reconcile.mjs";
@@ -179,7 +180,10 @@ export async function POST(req: Request) {
   // 一次派发把 pipeline.md 反复读上几遍。
   const inboxRow = kind === "evaluate" ? inbox.find((j) => j.url === input) : undefined;
   const inboxLabel = jobLabel(inboxRow?.company, inboxRow?.role);
-  const dispatchLabel = kind === "evaluate" ? evaluateDisplayTitle({ inboxLabel, company: employer, role }) : "";
+  // pipeline 行未命中时的第二事实源：tracker 行（applications.md 的 URL 列）。
+  // 键走 normalizeUrl——浏览器粘贴/扩展带来的 URL 常带 tracking 参数，裸串比对会漏。
+  const trackerLabel = kind === "evaluate" ? trackerUrlLabels(readApplications()).get(normalizeUrl(String(input))) ?? "" : "";
+  const dispatchLabel = kind === "evaluate" ? evaluateDisplayTitle({ inboxLabel: inboxLabel || trackerLabel, company: employer, role }) : "";
   const ledgerTitle = checkupTarget?.ok
     ? `公司体检：${checkupTarget.company}`
     : dispatchLabel || `${kind} ${input}`;
@@ -331,7 +335,10 @@ export async function POST(req: Request) {
     }
   });
 
-  return Response.json({ runId });
+  // 本地派发卡（quick-evaluate/重新评估等）在响应里拿到派发标签，就地升级
+  // 「评估 · 粘贴的链接」这类通用标题为「公司 · 岗位」——拼不出时 undefined，
+  // 客户端保留原兜底形状（不编造）。
+  return Response.json({ runId, title: dispatchLabel || undefined });
 }
 
 /** ADR-0076: the flat tailored-CV short name carries the tracker row's Role

@@ -10,6 +10,7 @@
 // 拼不出的字段一律不猜——返回空串，调用方保留原 URL（不编造）。
 //
 // Plain .mjs：node --test 锁定（同 report-salary.mjs）。
+import { normalizeUrl } from "./core/url-key.mjs";
 
 /** Machine Summary 的字段行（YAML 围栏内，行首、可能带缩进与引号）。 */
 const COMPANY_LINE_RE = /^[ \t]*company:[ \t]*(.*)$/m;
@@ -86,6 +87,25 @@ export function pipelineUrlLabels(inbox) {
     if (!url) continue;
     const label = jobLabel(job.company, job.role);
     if (label && !map.has(url)) map.set(url, label);
+  }
+  return map;
+}
+
+/**
+ * tracker 行（data/applications.md，readApplications() 的结果）→ `Map<归一化URL, 标签>`。
+ * 与 pipelineUrlLabels 同构，但键走 normalizeUrl：tracker 行的 URL 列与用户粘贴/
+ * 扩展带来的 URL 常带不同跟踪参数，裸串比对会漏。同键重复时保留首行（tracker
+ * 的行序即新增序，与 URL 去重合并的「旧行胜出」口径一致）。
+ * @param {Array<{url?: string, company?: string, role?: string}>} applications
+ * @returns {Map<string, string>}
+ */
+export function trackerUrlLabels(applications) {
+  const map = new Map();
+  for (const app of Array.isArray(applications) ? applications : []) {
+    const key = normalizeUrl(app?.url);
+    if (!key) continue;
+    const label = jobLabel(app.company, app.role);
+    if (label && !map.has(key)) map.set(key, label);
   }
   return map;
 }

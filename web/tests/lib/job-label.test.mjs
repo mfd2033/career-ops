@@ -5,7 +5,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { jobLabel, reportJobLabel, pipelineUrlLabels, evaluateDisplayTitle } from "../../src/lib/job-label.mjs";
+import { jobLabel, reportJobLabel, pipelineUrlLabels, trackerUrlLabels, evaluateDisplayTitle } from "../../src/lib/job-label.mjs";
 
 // ── jobLabel ─────────────────────────────────────────────────────────────────
 
@@ -103,6 +103,28 @@ test("pipelineUrlLabels: URL → 标签，跳过缺字段/空 URL，同 URL 保�
 test("pipelineUrlLabels: 非数组输入安全", () => {
   assert.equal(pipelineUrlLabels(null).size, 0);
   assert.equal(pipelineUrlLabels(undefined).size, 0);
+});
+
+// ── trackerUrlLabels ─────────────────────────────────────────────────────────
+
+test("trackerUrlLabels: 归一化 URL 为键，跳过缺字段/空 URL，同键保留首行", () => {
+  const map = trackerUrlLabels([
+    { url: "https://www.zhipin.com/job_detail/abc.html?securityId=tok&ka=click", company: "蔚来汽车", role: "数据平台工程师" },
+    { url: "https://www.zhipin.com/job_detail/abc.html", company: "别的公司", role: "别的岗位" },
+    { url: "https://b.com/2", company: "", role: "R" },
+    { url: "", company: "C", role: "R" },
+    { url: "https://c.com/3" },
+  ]);
+  assert.equal(map.size, 2);
+  // 跟踪参数被剥掉：粘贴带 securityId/ka 的 URL 也能命中同一行
+  assert.equal(map.get("https://www.zhipin.com/job_detail/abc.html"), "蔚来汽车 · 数据平台工程师");
+  assert.equal(map.get("https://b.com/2"), "R");
+});
+
+test("trackerUrlLabels: 非 http(s)/坏 URL 与非数组输入安全", () => {
+  assert.equal(trackerUrlLabels([{ url: "javascript:void(0)", company: "X", role: "Y" }]).size, 0);
+  assert.equal(trackerUrlLabels(null).size, 0);
+  assert.equal(trackerUrlLabels(undefined).size, 0);
 });
 
 // ── evaluateDisplayTitle ────────────────────────────────────────────────────
