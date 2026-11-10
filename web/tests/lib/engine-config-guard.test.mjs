@@ -95,7 +95,19 @@ test("key-mode save writes only tier + UI drafts; the vault owns quick-eval fiel
   // 旧的 career-ops:quickeval 镜像与「单密钥整体覆盖」PUT 都不得还魂。
   assert.ok(!keyBranch.includes("QUICK_STORAGE_KEY"), "快评 localStorage 镜像已退役，别再写回去");
   assert.ok(!keyBranch.includes("quick-config"), "save() 不再整体覆盖单密钥——写路径归密钥库卡");
-  assert.ok(keyBranch.includes("STORAGE_KEY") && keyBranch.includes("\n            mode,"), "key 分支没把档位写进主配置");
+  // 写入通道收归共享的合并写入（writeConfigSnapshot → career-ops:config）：档位仍必须
+  // 出现在这份快照里，否则下次打开又回到默认档位。
+  assert.ok(keyBranch.includes("writeConfigSnapshot({") && keyBranch.includes("\n        mode,"), "key 分支没把档位写进主配置");
+});
+
+test("配置页的整包写入只走 writeConfigSnapshot，不得自己重建对象", () => {
+  // Given: career-ops:config 上住着多个模块的字段（scanMaxBySource/scanSource/applyBehavior…）
+  // 白名单重建对象会静默抹掉别人的字段（「每站采集上限改了又回落默认」就是这么来的）
+  // Then: 整包写入只有 writeConfigSnapshot 一个入口，它 spread 合并而非重建
+  assert.ok(
+    !/localStorage\.setItem\(\s*STORAGE_KEY/.test(FORM),
+    "save() 又绕过 writeConfigSnapshot 直接整包写 career-ops:config —— 别的模块的字段会被抹掉",
+  );
 });
 
 // ── 决议 3：写 cliId 的两条路径都带模型校正 ──────────────────────────────────

@@ -41,6 +41,7 @@ import {
   type ScanSource,
 } from "@/lib/scan-mode";
 import { readScanMax, persistScanMax, SCAN_MAX_DEFAULT } from "@/lib/scan-max.mjs";
+import { writeConfigSnapshot } from "@/lib/config-store.mjs";
 import { readClisCache, writeClisCache } from "@/lib/clis-cache.mjs";
 import { useI18n } from "@/lib/i18n/context";
 
@@ -430,26 +431,17 @@ export function ConfigForm() {
     // 只落界面/扫描草稿与档位本身——「单密钥整体覆盖」那条 PUT 路径已随旧面板退役。
     if (mode === "key") {
       // 快评模式下界面/扫描草稿（Logo/申请行为/扫描方式）与引擎无关，也要落库——
-      // 合并写入保留已存的 CLI 引擎字段（cliId/model），避免保存条谎报「已保存 N 项」却丢写。
-      try {
-        const rawUi = localStorage.getItem(STORAGE_KEY);
-        const prevUi = rawUi ? JSON.parse(rawUi) : {};
-        localStorage.setItem(
-          STORAGE_KEY,
-          JSON.stringify({
-            ...prevUi,
-            // 档位本身是唯一真值源在主配置里的那个字段（ADR-0073 决议 1）：不写它，
-            // 下次打开又回到默认档位，快评选择就成了存不住的草稿。
-            mode,
-            logos,
-            applyBehavior,
-            scanSource: cleanScanSources(scanSource),
-            unknownEmployer,
-          }),
-        );
-      } catch {
-        /* ignore */
-      }
+      // 合并写入保留已存的 CLI 引擎字段（cliId/model）与别的模块的字段（scanMaxBySource…），
+      // 避免保存条谎报「已保存 N 项」却丢写。
+      writeConfigSnapshot({
+        // 档位本身是唯一真值源在主配置里的那个字段（ADR-0073 决议 1）：不写它，
+        // 下次打开又回到默认档位，快评选择就成了存不住的草稿。
+        mode,
+        logos,
+        applyBehavior,
+        scanSource: cleanScanSources(scanSource),
+        unknownEmployer,
+      });
       persistApplyBehavior(applyBehavior);
       persistScanSources(scanSource);
       setSaved(true);
@@ -472,19 +464,18 @@ export function ConfigForm() {
       clis: clis ?? [],
     });
     const nextModel = picked.model;
-    localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify({
-        mode,
-        cliId,
-        model: nextModel,
-        modelCliId: nextModel ? picked.modelCliId : "",
-        logos,
-        applyBehavior,
-        scanSource: cleanScanSources(scanSource),
-        unknownEmployer,
-      }),
-    );
+    // 整包写入只覆盖本页负责的字段；scanMaxBySource 等别的模块的字段必须原样保留
+    // （白名单重建对象会把它们删掉——「每站采集上限改了又回落默认」就是这个形状）。
+    writeConfigSnapshot({
+      mode,
+      cliId,
+      model: nextModel,
+      modelCliId: nextModel ? picked.modelCliId : "",
+      logos,
+      applyBehavior,
+      scanSource: cleanScanSources(scanSource),
+      unknownEmployer,
+    });
     // 申请行为 / 扫描方式各自独立读回（persistApplyBehavior/persistScanSources 保持
     // 与整包 STORAGE_KEY 写入同值，兼容只读单字段的消费方）。
     persistApplyBehavior(applyBehavior);
