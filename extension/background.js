@@ -893,8 +893,10 @@ async function resolveJobJump(msg, sender) {
 // HTML 文本回给 content script，解析仍在站点侧（选择器归 site-*.js）。
 //
 // 只放白名单三站：这条消息的入参是页面给的一个 URL，扩成任意 URL 等于把 SW 变成
-// 一个跳过 CORS 的通用代理。体积上限 400KB —— 智联详情页实测 200KB 上下，超过就是
-// 撞上了登录/验证页或异常膨胀，截断解析没有意义，直接报错。
+// 一个跳过 CORS 的通用代理。体积上限针对「剥掉脚本后的净标记」——智联真实详情页
+// 实测可到 1.6MB+（内嵌大量 JSON/脚本，2026-11 实例 1.69MB 仍是正常职位页），
+// 原始体积已无判别力；剥掉 script/style/noscript/注释后正常页远小于 400KB，
+// 超限才是异常膨胀。被拦到验证/登录页由消费端「JD 文本过短」兜住。
 const FETCH_HTML_TIMEOUT_MS = 15000;
 const FETCH_HTML_MAX_CHARS = 400000;
 const FETCH_HTML_HOSTS = [/(^|\.)zhaopin\.com$/i, /(^|\.)zhipin\.com$/i, /(^|\.)liepin\.com$/i];
@@ -914,13 +916,25 @@ async function fetchDetailHtml(rawUrl) {
     const res = await fetch(u.toString(), { credentials: "include", signal: ctrl.signal });
     const html = await res.text();
     if (!res.ok) return { ok: false, error: `详情页抓取失败：HTTP ${res.status}` };
-    if (html.length > FETCH_HTML_MAX_CHARS) {
+    // 剥掉脚本/样式/注释再校验体积：返回给消费端的是瘦身后的标记（消费端只用
+    // DOM 选择器取正文），顺带把 1.6MB+ 的消息回传体积也压下来。
+    const slim = html
+      .replace(/<!--[\s\S]*?-->/g, "")
+      .replace(/<(script|style|noscript)\b[^>]*>[\s\S]*?<\/\1>/gi, "");
+    if (slim.length > FETCH_HTML_MAX_CHARS) {
+      // 净标记仍超限才是真异常：带出页面标题与最终 URL，复制错误信息即可定位。
+      const m = slim.match(/<title[^>]*>([^<]{0,120})/i);
+      const title = m ? m[1].trim() : "";
+      const finalUrl = res.url && res.url !== u.toString() ? `\n最终 URL：${res.url}` : "";
       return {
         ok: false,
-        error: `详情页返回内容异常（过大）：${html.length} 字符（上限 ${FETCH_HTML_MAX_CHARS}），可能被拦到验证页。请打开该职位链接确认是否出现登录/验证页`,
+        error:
+          `详情页返回内容异常（过大）：净内容 ${slim.length} 字符（上限 ${FETCH_HTML_MAX_CHARS}）` +
+          (title ? `\n返回页面标题：${title}` : "") +
+          finalUrl,
       };
     }
-    return { ok: true, html };
+    return { ok: true, html: slim };
   } catch (err) {
     const aborted = err && (err.name === "AbortError" || err.code === 20);
     return { ok: false, error: aborted ? "详情页抓取超时" : `详情页抓取失败：${(err && err.message) || err}` };

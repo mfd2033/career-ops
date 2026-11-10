@@ -121,7 +121,7 @@
     // 错误一律改走持久错误框：自动消失的气泡来不及看清/复制错误信息，且停留到
     // 用户手动关闭是明确要求。成功提示保留 2.6s 自动消失的轻量气泡。
     if (isError) {
-      showErrorBox(text, "操作出错");
+      showErrorBox(text);
       return;
     }
     const t = document.createElement("div");
@@ -144,8 +144,9 @@
     box = document.createElement("div");
     box.id = ERR_BOX_ID;
     box.style.cssText =
-      // 避开右上角的详情页浮窗（top:80/right:20）与右下角的 toast：落到左下角。
-      "position:fixed;left:16px;bottom:16px;z-index:2147483647;max-width:420px;" +
+      // 右下角：与用户习惯一致。成功 toast 也在此处，但二者同时出现的概率低，
+      // 且错误框 z-index 更高、持续存在，覆盖瞬间可接受。
+      "position:fixed;right:16px;bottom:16px;z-index:2147483647;max-width:420px;" +
       "background:#d93026;color:#fff;border-radius:8px;box-shadow:0 6px 18px rgba(0,0,0,.35);" +
       "font-family:system-ui,sans-serif;font-size:12px;padding:10px 12px;line-height:1.5;";
     const label = document.createElement("div");
