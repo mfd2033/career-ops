@@ -19,11 +19,14 @@ const {
   RUN_RUNNING_COLOR,
   RUN_QUEUED_COLOR,
   RUN_LINK_SUFFIX,
+  EVAL_POLL_MAX_TRIES,
   isRunState,
   statusChip,
   scoreChip,
   cardChips,
   chipFingerprint,
+  cardEvalGate,
+  evalPollVerdict,
 } = mod.default ?? mod;
 
 const RUN_ID = "3f2b8c1e-9d4a-4c77-8f10-2a5b6c7d8e9f";
@@ -195,4 +198,67 @@ test("指纹不纳入 title 之类提示文案（不可见变化不必重绘）"
     chipFingerprint({ status: null, score: { ...base, title: "" } }),
     chipFingerprint({ status: null, score: { ...base, title: "换了个提示" } }),
   );
+});
+
+// ---- 点击闸门：完整评估全局单飞（2026-11-10 个人中心感兴趣列表实测） --------
+//
+// 第一份评估在跑时，第二张卡的「评估」点击会被单飞闸门挡下。回归点：
+//   • 挡下必须给 toast —— 无声 return 让用户以为按钮坏了；
+//   • 按钮自身已禁用（文案就是「评估中…」）时不重复吵。
+
+test("cardEvalGate：评估进行中 → 挡下并给可读 toast", () => {
+  const gate = cardEvalGate({ inFlight: true });
+  assert.equal(gate.allow, false);
+  assert.ok(gate.toast && gate.toast.includes("评估"), "toast 必须解释为什么点不动");
+});
+
+test("cardEvalGate：空闲 → 放行、不说话", () => {
+  assert.deepEqual(cardEvalGate({}), { allow: true, toast: null });
+  assert.deepEqual(cardEvalGate(null), { allow: true, toast: null });
+});
+
+test("cardEvalGate：按钮自身禁用 → 挡下但不再 toast（按钮已显示评估中）", () => {
+  const gate = cardEvalGate({ btnDisabled: true });
+  assert.equal(gate.allow, false);
+  assert.equal(gate.toast, null);
+});
+
+test("cardEvalGate：按钮禁用优先于单飞（都挡下，安静）", () => {
+  const gate = cardEvalGate({ btnDisabled: true, inFlight: true });
+  assert.equal(gate.allow, false);
+  assert.equal(gate.toast, null);
+});
+
+test("cardEvalGate：脏值按布尔归一，truthy 即挡下", () => {
+  assert.equal(cardEvalGate({ inFlight: 1 }).allow, false);
+  assert.equal(cardEvalGate({ inFlight: "yes" }).allow, false);
+  assert.equal(cardEvalGate({ inFlight: 0 }).allow, true);
+});
+
+// ---- 收尾轮询裁决：到期必须解锁按钮（不能只停轮询） -------------------------
+//
+// 回归点：轮询 240 次（12min）到期若只 stopEvalPoll，cardEvalInFlight 永久为 true，
+// 之后所有卡片的「评估」点击永远无反应 —— 必须同时 settle（解锁）并告知用户。
+
+test("evalPollVerdict：未到期 → 不停、不解锁", () => {
+  assert.deepEqual(evalPollVerdict(EVAL_POLL_MAX_TRIES - 1), { stop: false, settle: false, toast: null });
+  assert.deepEqual(evalPollVerdict(0), { stop: false, settle: false, toast: null });
+});
+
+test("evalPollVerdict：到期 → 停轮询 + 解锁按钮 + 告知用户", () => {
+  const v = evalPollVerdict(EVAL_POLL_MAX_TRIES);
+  assert.equal(v.stop, true);
+  assert.equal(v.settle, true, "到期必须解锁，否则单飞锁永久卡死");
+  assert.ok(v.toast && v.toast.includes("评估"), "toast 必须解释按钮为什么自己恢复了");
+});
+
+test("evalPollVerdict：脏 tries 不误停", () => {
+  for (const bad of [null, undefined, NaN, -1, "abc"]) {
+    assert.deepEqual(evalPollVerdict(bad), { stop: false, settle: false, toast: null }, String(bad));
+  }
+});
+
+test("evalPollVerdict：上限可覆盖（测试注入小上限即可验证到期分支）", () => {
+  assert.deepEqual(evalPollVerdict(3, 3).stop, true);
+  assert.deepEqual(evalPollVerdict(2, 3).stop, false);
 });

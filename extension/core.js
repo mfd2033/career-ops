@@ -405,7 +405,16 @@
   async function onCardEval(card, btn, ev) {
     ev.preventDefault();
     ev.stopPropagation();
-    if (btn.disabled || cardEvalInFlight) return;
+    if (btn.disabled) return;
+    // 全局单飞挡下的点击必须说话（否则像按钮坏了）；决策在纯层。CHIPS 缺失
+    // （异常注入顺序）时退回放行 —— 与旧的无声行为相比不更糟，不因纯层缺失新增死路。
+    if (cardEvalInFlight) {
+      const gate = CHIPS && CHIPS.cardEvalGate ? CHIPS.cardEvalGate({ inFlight: true }) : { allow: true, toast: null };
+      if (!gate.allow) {
+        if (gate.toast) showToast(gate.toast, true);
+        return;
+      }
+    }
     const url = site.cardUrl(card);
     if (!url) {
       showToast("未能识别该职位的链接", true);
@@ -1369,7 +1378,14 @@
         finalizeDetail();
         return;
       }
-      if (tries >= 240) stopEvalPoll();
+      // 到期裁决在纯层：只停轮询不解锁的话，cardEvalInFlight 永久为 true，之后
+      // 所有卡片的「评估」点击永远无反应（2026-11-10 个人中心感兴趣列表实测）。
+      const verdict = CHIPS && CHIPS.evalPollVerdict ? CHIPS.evalPollVerdict(tries) : null;
+      if (verdict && verdict.stop) {
+        stopEvalPoll();
+        if (verdict.settle) settleButtons();
+        if (verdict.toast) showToast(verdict.toast, true);
+      }
     }, 3000));
   }
 

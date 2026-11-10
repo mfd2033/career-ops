@@ -133,15 +133,64 @@
     return `${one(chips && chips.status)}|${one(chips && chips.score)}`;
   }
 
+  // ---- 点击闸门与收尾轮询裁决（完整评估的全局单飞配套） ----------------------
+  //
+  // 完整评估全局单飞（core.js 的 cardEvalInFlight + 收尾轮询只有一个 evalPollUrl）。
+  // 2026-11-10 个人中心「感兴趣」列表实测出两个真缺陷：
+  //   • 第一份评估在跑时点第二张卡的「评估」被无声吞掉 —— 像按钮坏了；
+  //   • 收尾轮询 12min 到期只停轮询不解锁 —— 单飞锁永久卡死，之后所有「评估」
+  //     点击永远无反应。
+  // 两处决策都在真实页面上无法稳定复现（要等评估真在跑/真超时），故抽到这里钉住。
+
+  // 收尾轮询上限（次）。3s/次 × 240 = 12min，与 core.js 原有上限同值。
+  const EVAL_POLL_MAX_TRIES = 240;
+  const EVAL_BUSY_TOAST = "已有评估在进行中，请等它完成后再评估下一个";
+  const EVAL_POLL_EXPIRED_TOAST = "等待评估结果超时，按钮已恢复；任务可能仍在后台运行";
+
+  /**
+   * 卡片「评估」点击闸门：这次点击放不放行、要不要说话。
+   * 按钮自身禁用（文案就是「评估中…」）时不重复 toast —— 可见状态已足够；
+   * 只有「这张卡闲着但全局有评估在跑」这一种被挡下的情形必须开口。
+   * @param {{btnDisabled?: boolean, inFlight?: boolean}} [p]
+   * @returns {{allow: boolean, toast: string|null}}
+   */
+  function cardEvalGate(p) {
+    const btnDisabled = !!(p && p.btnDisabled);
+    const inFlight = !!(p && p.inFlight);
+    if (btnDisabled || inFlight) {
+      return { allow: false, toast: btnDisabled ? null : EVAL_BUSY_TOAST };
+    }
+    return { allow: true, toast: null };
+  }
+
+  /**
+   * 收尾轮询一次 tick 的到期裁决。到期不能只停轮询：必须同时 settle（解锁按钮）
+   * 并告知用户，否则单飞锁永久卡死（见上方实测记录）。
+   * @param {number} tries 已轮询次数（脏值一律视为未到期）
+   * @param {number} [max] 上限覆盖（测试注入用，缺省 EVAL_POLL_MAX_TRIES）
+   * @returns {{stop: boolean, settle: boolean, toast: string|null}}
+   */
+  function evalPollVerdict(tries, max) {
+    const cap = Number.isFinite(max) && max > 0 ? max : EVAL_POLL_MAX_TRIES;
+    const n = Number(tries);
+    if (Number.isFinite(n) && n >= cap) {
+      return { stop: true, settle: true, toast: EVAL_POLL_EXPIRED_TOAST };
+    }
+    return { stop: false, settle: false, toast: null };
+  }
+
   const api = {
     RUN_RUNNING_COLOR,
     RUN_QUEUED_COLOR,
     RUN_LINK_SUFFIX,
+    EVAL_POLL_MAX_TRIES,
     isRunState,
     statusChip,
     scoreChip,
     cardChips,
     chipFingerprint,
+    cardEvalGate,
+    evalPollVerdict,
   };
 
   // content script（页面全局）：挂 self。
