@@ -168,94 +168,20 @@
     return { title, text: text.trim().slice(0, 12000) };
   }
 
-  // List page "评估本职位" button — pinned to the right-hand detail pane (BOSS
-  // /web/geek/jobs renders the selected job's description beside the list in a
-  // .job-detail-body panel). Clicking it evaluates the currently-selected card
-  // (the .active one), reusing the same engine as the detail-page button.
+  // 列表右栏的「评估本职位」「快评」按钮已下线（用户决策 2026-11-10）：每卡
+  // 操作区与详情页的评估入口保留。ids 仍导出（core.js 的完成回调会按 id 探测
+  // DOM，元素不存在即安全跳过）；ensureRightPaneButton 保留但只做旧按钮清理。
   const LIST_EVAL_BTN_ID = "career-ext-list-eval-btn";
   const LIST_QUICK_BTN_ID = "career-ext-list-quick-btn";
 
-  const BUTTON_CSS =
-    "padding:6px 12px;border:none;border-radius:6px;cursor:pointer;vertical-align:middle;" +
-    "background:#00c68d;color:#fff;font-size:13px;font-weight:600;margin-left:8px;" +
-    "font-family:system-ui,sans-serif;box-shadow:0 2px 6px rgba(0,0,0,.2);";
-  const QUICK_BUTTON_CSS =
-    "padding:6px 12px;border:none;border-radius:6px;cursor:pointer;vertical-align:middle;" +
-    "background:#7c5cff;color:#fff;font-size:13px;font-weight:600;margin-left:8px;" +
-    "font-family:system-ui,sans-serif;box-shadow:0 2px 6px rgba(0,0,0,.2);";
-
+  // 右栏按钮不再注入（用户决策 2026-11-10，见上方 ids 注释）。函数保留并继续
+  // 导出：core.js 的 observer / applyAllInjections 以 typeof 守卫调用它，这里
+  // 只负责清掉升级前已注入 DOM 的旧按钮，避免老版本残留。
   function ensureRightPaneButton() {
-    if (isDetailPath(location.pathname)) {
-      // Detail page — the dedicated full-page button owns this; don't add the pane one.
-      const stale = document.getElementById(LIST_EVAL_BTN_ID);
+    for (const id of [LIST_EVAL_BTN_ID, LIST_QUICK_BTN_ID]) {
+      const stale = document.getElementById(id);
       if (stale) stale.remove();
-      return;
     }
-    // 个人中心列表没有右栏，但有每卡操作区：站点重渲染可能把它摘掉，顺路补一遍。
-    if (document.querySelector(".user-jobs-area")) C.sweepCards();
-    const opBar = document.querySelector(".job-detail-op");
-    if (!opBar) return; // pane not rendered yet — observer will retry
-    if (document.getElementById(LIST_EVAL_BTN_ID)) return;
-    const btn = C.makeButton({ id: LIST_EVAL_BTN_ID, text: "评估本职位", css: BUTTON_CSS });
-    btn.addEventListener("click", () => {
-      const el = document.getElementById(LIST_EVAL_BTN_ID);
-      const url = currentActiveUrl();
-      if (!url) {
-        C.toast("未选中职位，请先在左侧点击一个职位", true);
-        return;
-      }
-      el.disabled = true;
-      el.textContent = "评估中...";
-      // 内联右栏面板 JD 全文 + 发帖公司名:BOSS 的 WebFetch 被风控拦截返回空,
-      // 不带文本会让 agent 落到 browser-extract 卡死;与详情页同口径,免二次抓取。
-      const { title, text } = extractListPaneJd();
-      const extra = {};
-      if (text) {
-        extra.jdText = [title, text].filter(Boolean).join("\n").trim().slice(0, 12000);
-        extra.company = extractPosterName();
-      }
-      // 登记 core 的收尾轮询:评估完成后无论消息路径是否失效(BOSS 评估通常
-      // 跑 20-40s,background SW 可能被 Chrome 空闲终止),按钮都能恢复可点。
-      C.beginEval(url);
-      C.sendSingleEvaluate(url, (err) => {
-        el.disabled = false;
-        el.textContent = "评估本职位";
-        C.endEval();
-        C.toast(err, true);
-      }, extra);
-    });
-    // Sit immediately left of the "微信扫码分享" share button inside the op bar;
-    // fall back to the bar's first child if the share anchor isn't found.
-    const share = Array.from(opBar.querySelectorAll("a,button,span")).find((el) =>
-      /微信|分享/.test(el.textContent || ""),
-    );
-    opBar.insertBefore(btn, share || opBar.firstChild);
-
-    // 快评 — 列表右栏秒出分数徽章，独立于「评估本职位」(完整报告)。
-    const qbtn = C.makeButton({ id: LIST_QUICK_BTN_ID, text: "快评", css: QUICK_BUTTON_CSS });
-    qbtn.addEventListener("click", () => {
-      if (C.isQuickEvaluating() || qbtn.disabled) return;
-      const url = currentActiveUrl();
-      if (!url) {
-        C.toast("未选中职位，请先在左侧点击一个职位", true);
-        return;
-      }
-      const { title, text } = extractListPaneJd();
-      if (!text) {
-        C.toast("快评：未能提取职位描述文本", true);
-        return;
-      }
-      C.setQuickEvaluating(true);
-      qbtn.disabled = true;
-      qbtn.textContent = "快评中...";
-      C.sendQuickEval({ url, title, text, poster: extractPosterName() }, (err) => {
-        C.setQuickEvaluating(false);
-        qbtn.disabled = false;
-        qbtn.textContent = "快评";
-        C.showQuickError(err);
-      });
-    });
-    opBar.insertBefore(qbtn, (share && share.nextSibling) || btn.nextSibling);
   }
 
   // ---- 每卡操作区（快评 / 评估 + 状态胶囊）的挂载点 -----------------------
