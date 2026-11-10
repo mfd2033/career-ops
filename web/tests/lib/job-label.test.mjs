@@ -25,6 +25,14 @@ test("jobLabel: 去 YAML 引号与占位值", () => {
   assert.equal(jobLabel(" n/a ", "none"), "");
 });
 
+test("jobLabel: 未知雇主 sentinel「?」不算有值，退化到另一边", () => {
+  // 评估员拿不到雇主名时 Machine Summary 写 company: "?"（reports/1305 实测），
+  // 展示成「? · 岗位」没有信息量——按无值处理，只剩岗位名。
+  assert.equal(jobLabel("?", "项目经理（智能硬件）"), "项目经理（智能硬件）");
+  assert.equal(jobLabel("？", "项目经理（智能硬件）"), "项目经理（智能硬件）");
+  assert.equal(jobLabel("?", "?"), "");
+});
+
 // ── reportJobLabel ───────────────────────────────────────────────────────────
 
 const REPORT = `# Evaluation: Acme — Senior Engineer

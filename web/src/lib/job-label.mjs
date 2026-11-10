@@ -14,8 +14,9 @@
 /** Machine Summary 的字段行（YAML 围栏内，行首、可能带缩进与引号）。 */
 const COMPANY_LINE_RE = /^[ \t]*company:[ \t]*(.*)$/m;
 const ROLE_LINE_RE = /^[ \t]*role:[ \t]*(.*)$/m;
-/** YAML 里的「没有值」写法——不算有值。 */
-const NO_VALUE_RE = /^(null|~|none|n\/a|-)$/i;
+/** YAML 里的「没有值」写法——不算有值。`?`/`？` 是评估员标「雇主未知」的 sentinel
+ * （reports/13xx 起实测），展示成「? · 岗位」没有信息量，按无值退化到另一边。 */
+const NO_VALUE_RE = /^(null|~|none|n\/a|-|\?|？)$/i;
 
 /** 去 YAML 引号/空白；空值与占位返回 ""。 */
 function cleanFieldValue(raw) {

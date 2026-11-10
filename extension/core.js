@@ -432,10 +432,12 @@
       const jd = await site.fetchCardJd(url);
       // 内联 JD 全文 + 雇主名：与服务端抓取同样绕开风控，且省一次网络往返。
       startCardEvalPoll(key); // 收尾轮询按归一 URL 比对
+      // 职位标题随 payload 一并带出（fetchCardJd 已解析，快评就在用）：与详情页
+      // 路径（onPanelEvalClick）同口径，任务卡/台账标题才拼得出「公司 · 岗位」。
       sendSingleEvaluate(
         url,
         fail,
-        { jdText: jd.text, company: cardCompanyOf(card) },
+        { jdText: jd.text, company: cardCompanyOf(card), role: jd.title },
       );
       // 任务进池需要一点时间，先问一次让「评估中 / 排队中」胶囊尽快出现（拿不到
       // 也无所谓，3s 轮询会补上）。
