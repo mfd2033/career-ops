@@ -4,6 +4,7 @@ import { addOffersToPipeline, loadSeenUrlKeys } from "@/lib/core/pipeline";
 import { partitionNewOffers, loadScanMap, saveScanMap, scanIdempotencyPath } from "@/lib/scan-idempotency.mjs";
 import { careerOpsRoot } from "@/lib/career-ops";
 import { normalizeUrl } from "@/lib/core/url-key.mjs";
+import { logOperation } from "@/lib/op-log-server";
 import type { DiscoveredOffer } from "@/lib/explore";
 
 export const runtime = "nodejs";
@@ -66,6 +67,19 @@ export async function POST(req: NextRequest) {
     if (!map.has(ns)) map.set(ns, new Set());
     for (const k of keysToAdd) map.get(ns)!.add(k);
     saveScanMap(idemPath, map);
+  }
+  // 操作日志：确认入管是手动决定，而 pipeline.md 只会多出一行、不留时间。
+  if (added > 0) {
+    logOperation({
+      trigger: "manual",
+      type: "pipeline-add",
+      meta: [
+        { k: "added", v: String(added) },
+        ...(skipped > 0 ? [{ k: "skipped", v: String(skipped) }] : []),
+      ],
+      status: "done",
+      href: "/pipeline",
+    });
   }
   return Response.json({ added, skipped });
 }

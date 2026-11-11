@@ -1,4 +1,4 @@
-import { LayoutDashboard, Compass, ListChecks, Send, Radar, Ban, BarChart3, FileText, Settings } from "lucide-react";
+import { LayoutDashboard, Compass, ListChecks, Send, Radar, Ban, BarChart3, FileText, Settings, History } from "lucide-react";
 import type { ComponentType, SVGProps } from "react";
 
 // Single source of truth for the app's primary destinations — shared by the
@@ -18,6 +18,7 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/portals", labelKey: "nav.portals", icon: Radar },
   { href: "/blacklist", labelKey: "nav.blacklist", icon: Ban },
   { href: "/analytics", labelKey: "nav.analytics", icon: BarChart3 },
+  { href: "/logs", labelKey: "nav.logs", icon: History },
   { href: "/cv", labelKey: "nav.cv", icon: FileText },
   { href: "/config", labelKey: "nav.config", icon: Settings },
 ];

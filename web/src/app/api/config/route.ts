@@ -1,6 +1,7 @@
 import os from "node:os";
 import { readAppConfig, writeAppConfig, UNKNOWN_EMPLOYER_OPTIONS, type AppConfig, type UnknownEmployerPolicy } from "@/lib/app-config";
 import { sanitizeCliDirs } from "@/lib/cli-dirs.mjs";
+import { logOperation } from "@/lib/op-log-server";
 
 // Config page cliId/model → server-side store. The BOSS直聘 extension reads this
 // to reuse the CLI + model already picked on the config page without asking
@@ -58,5 +59,16 @@ export async function POST(req: Request) {
     else delete next[key];
   }
   writeAppConfig(next);
+  // 操作日志：设置改动（引擎/模型/并发/安装目录…）以前不留痕。只记键名不记值——
+  // 值里可能有本机绝对路径，日志不是装它的地方。
+  const changedKeys = SAFE_KEYS.filter((key) => key in rec);
+  if (changedKeys.length > 0) {
+    logOperation({
+      trigger: "manual",
+      type: "config",
+      meta: [{ k: "fields", v: changedKeys.join(", ") }],
+      status: "done",
+    });
+  }
   return Response.json(next);
 }

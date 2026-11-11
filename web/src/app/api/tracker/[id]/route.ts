@@ -8,6 +8,8 @@ import {
   runTrackerScript,
 } from "@/lib/tracker-api";
 import { editArgv, trackerRowArg } from "@/lib/tracker-cli.mjs";
+import { logOperation, trackerLogTitle } from "@/lib/op-log-server";
+import { localISODate } from "@/lib/followups";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -81,5 +83,33 @@ export async function PATCH(
 
   const run = await runTrackerScript("tracker-edit", [...built.argv, "--json", "--source", "web"]);
   if (run.status !== 200) return failResponse(`/${id}`, run);
+
+  // 操作日志：改状态复用 status-log 的去重键（tracker-edit 也会写那一行），
+  // 改其他字段（备注/分数/日期/PDF…）没有旧台账可比，单独记一行 tracker-edit。
+  const edited = (run.parsed ?? null) as Record<string, unknown> | null;
+  if (edited && edited.changed === true) {
+    const fields = Array.isArray(edited.changedFields) ? edited.changedFields.map(String) : [];
+    const statusChanged = fields.includes("status");
+    const oldStatus = String(edited.oldStatus ?? "");
+    const newStatus = String(edited.newStatus ?? "");
+    const editedNum = String(edited.num ?? id);
+    logOperation({
+      trigger: "manual",
+      type: statusChanged ? "status-change" : "tracker-edit",
+      title: trackerLogTitle(editedNum, edited.company, edited.role),
+      meta: statusChanged
+        ? [
+            ...(oldStatus ? [{ k: "from", v: oldStatus }] : []),
+            { k: "to", v: newStatus },
+            { k: "source", v: "web" },
+          ]
+        : [{ k: "fields", v: fields.join(", ") }],
+      status: "done",
+      href: `/pipeline?q=${id}`,
+      dedupeKey: statusChanged
+        ? `status:${edited.num ?? id}:${localISODate()}:${oldStatus}->${newStatus}`
+        : undefined,
+    });
+  }
   return okResponse(run.parsed);
 }

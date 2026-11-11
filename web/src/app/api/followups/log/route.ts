@@ -4,6 +4,7 @@ import { atomicWrite } from "@/lib/core/safe-write";
 import { CHANNELS, normalizeChannel } from "@/lib/followup-channel.mjs";
 import { isRealISODate, localISODate } from "@/lib/followups";
 import { followupsLogPath, withFollowupsWrite, followupsWriteError } from "@/lib/followups-server";
+import { logOperation, trackerLogTitle } from "@/lib/op-log-server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -102,6 +103,20 @@ export async function POST(req: Request) {
       // 不进 notes 单元格——免得 UI 展示字段里混进机器标记。
       out += `| ${num} | ${appNum} | ${date} | ${company} | ${role} | ${channel} | ${contact} | ${notes} |${body.unread === true ? " [unread]" : ""}\n`;
       fs.appendFileSync(file, out, "utf8");
+      // 操作日志：只有「今天记的跟进」进 op-log。回补日期的那条 follow-ups.md
+      // 已经写清楚了，op-log 无从知道当时的时刻——不编时刻，交给台账页去读。
+      // dedupeKey 与 follow-ups.md 的行同键，页面只保留带时刻的这一条。
+      if (date === localISODate()) {
+        logOperation({
+          trigger: "manual",
+          type: "follow-up",
+          title: trackerLogTitle(appNum, company, role),
+          meta: [{ k: "channel", v: channel }, ...(notes ? [{ k: "note", v: notes }] : [])],
+          status: "done",
+          href: `/pipeline?q=${appNum}`,
+          dedupeKey: `followup:${num}`,
+        });
+      }
       return Response.json({ ok: true, num, appNum, date, channel });
     });
   } catch (e) {
@@ -136,6 +151,12 @@ export async function DELETE(req: Request) {
       if (idx === -1) return Response.json({ error: `follow-up #${num} not found` }, { status: 404 });
       lines.splice(idx, 1);
       atomicWrite(file, lines.join("\n"));
+      logOperation({
+        trigger: "manual",
+        type: "follow-up-delete",
+        meta: [{ k: "num", v: `#${num}` }],
+        status: "done",
+      });
       return Response.json({ ok: true, num });
     });
   } catch (e) {

@@ -1,4 +1,5 @@
 import { readBlacklist, readPreambleAndRows, writeBlacklist, mutators, localTodayStr, type BlacklistRow } from "@/lib/blacklist-store";
+import { logOperation } from "@/lib/op-log-server";
 
 // Company blacklist management (ADR-0084). GET lists entries with joined
 // evidence; POST adds, DELETE removes, PATCH sets/clears the `Exempt until`
@@ -56,6 +57,18 @@ export async function POST(req: Request) {
   } catch (e) {
     return Response.json({ error: e instanceof Error ? e.message : String(e) }, { status: 500 });
   }
+  // 操作日志：黑名单是投递门禁，加一条等于挡住一整家公司，必须留痕。
+  logOperation({
+    trigger: "manual",
+    type: "blacklist",
+    title: company,
+    meta: [
+      { k: "action", v: "add" },
+      ...(exemptUntil ? [{ k: "until", v: exemptUntil }] : []),
+      { k: "note", v: reason },
+    ],
+    status: "done",
+  });
   return Response.json({ ok: true });
 }
 
@@ -72,6 +85,13 @@ export async function DELETE(req: Request) {
   } catch (e) {
     return Response.json({ error: e instanceof Error ? e.message : String(e) }, { status: 500 });
   }
+  logOperation({
+    trigger: "manual",
+    type: "blacklist",
+    title: company,
+    meta: [{ k: "action", v: "remove" }],
+    status: "done",
+  });
   return Response.json({ ok: true });
 }
 
@@ -91,5 +111,15 @@ export async function PATCH(req: Request) {
   } catch (e) {
     return Response.json({ error: e instanceof Error ? e.message : String(e) }, { status: 500 });
   }
+  logOperation({
+    trigger: "manual",
+    type: "blacklist",
+    title: company,
+    meta: [
+      { k: "action", v: exemptUntil ? "exempt" : "clear" },
+      ...(exemptUntil ? [{ k: "until", v: exemptUntil }] : []),
+    ],
+    status: "done",
+  });
   return Response.json({ ok: true });
 }

@@ -12,6 +12,7 @@ import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { careerOpsRoot } from "@/lib/career-ops";
+import { logOperation } from "@/lib/op-log-server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic"; // always read/write fresh pipeline.md
@@ -52,7 +53,21 @@ export async function POST(req: Request) {
       console.warn("[pipeline/remove] stderr:", stderr.trim());
     }
     const parsed = JSON.parse(stdout.trim() || "{\"removed\":0,\"notFound\":0}");
-    return Response.json({ removed: Number(parsed.removed) || 0, notFound: Number(parsed.notFound) || 0 });
+    const removed = Number(parsed.removed) || 0;
+    const notFound = Number(parsed.notFound) || 0;
+    // 操作日志：移出管道只是把行删掉，没有别的痕迹——不记就真的查不到。
+    if (removed > 0) {
+      logOperation({
+        trigger: "manual",
+        type: "pipeline-remove",
+        meta: [
+          { k: "removed", v: String(removed) },
+          ...(notFound > 0 ? [{ k: "not-found", v: String(notFound) }] : []),
+        ],
+        status: "done",
+      });
+    }
+    return Response.json({ removed, notFound });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return Response.json({ error: msg }, { status: 500 });

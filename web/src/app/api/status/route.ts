@@ -4,6 +4,8 @@ import fs from "node:fs";
 import { careerOpsRoot, rootScript } from "@/lib/career-ops";
 import { canonicalizeStatus } from "@/lib/core/states";
 import { parseCliJson, trackerRowArg, clientErrorMessage } from "@/lib/status-cli.mjs";
+import { logOperation, trackerLogTitle } from "@/lib/op-log-server";
+import { localISODate } from "@/lib/followups";
 
 export const runtime = "nodejs"; // delegates to the core CLI via child_process
 
@@ -220,6 +222,29 @@ export async function POST(req: Request) {
 
   if (!parsed) {
     return NextResponse.json({ error: "status update returned no result" }, { status: 500 });
+  }
+
+  // 操作日志（统一写入链）：只在真发生了迁移时记一行——幂等重放不该在日志里占位。
+  // dedupeKey 与 status-log.tsv 的行同键（#·日期·from·to），页面据此只保留一条：
+  // op-log 这条带精确时刻，status-log 那条只有日期。
+  if (parsed.changed === true) {
+    const oldStatus = String(parsed.oldStatus ?? "");
+    const newStatus = String(parsed.newStatus ?? canon);
+    const loggedNum = String(parsed.num ?? row);
+    logOperation({
+      trigger: "manual",
+      type: "status-change",
+      title: trackerLogTitle(loggedNum, parsed.company, parsed.role),
+      meta: [
+        ...(oldStatus ? [{ k: "from", v: oldStatus }] : []),
+        { k: "to", v: newStatus },
+        { k: "source", v: "web" },
+        ...(note ? [{ k: "note", v: note }] : []),
+      ],
+      status: "done",
+      href: `/pipeline?q=${row}`,
+      dedupeKey: `status:${row}:${localISODate()}:${oldStatus}->${newStatus}`,
+    });
   }
 
   // Response shape is unchanged for existing callers; `changed` and

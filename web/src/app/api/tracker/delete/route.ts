@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { careerOpsRoot, rootScript, trackerCanDelete } from "@/lib/career-ops";
 import { isTrackerWriting } from "@/lib/core/run-registry";
+import { logOperation } from "@/lib/op-log-server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -98,7 +99,19 @@ export async function POST(req: Request) {
         { status: notFound ? 404 : 400 },
       );
     }
-    return Response.json({ ok: true, dryRun, orphanReport: parseOrphan(result.err) });
+    // 操作日志：删行不可逆，必须留痕（dry-run 不记——它没改变任何东西）。
+    // 失去归属的报告一并写进去，回看时才知道当时丢的是哪份文件。
+    const orphan = parseOrphan(result.err);
+    if (!dryRun) {
+      logOperation({
+        trigger: "manual",
+        type: "tracker-delete",
+        title: `#${num}`,
+        meta: orphan ? [{ k: "orphan", v: orphan }] : [],
+        status: "done",
+      });
+    }
+    return Response.json({ ok: true, dryRun, orphanReport: orphan });
   } finally {
     if (!dryRun) deleting = false;
   }
