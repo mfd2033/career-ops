@@ -20,6 +20,15 @@ export const dynamic = "force-dynamic";
 
 const DOMAIN_RE = /^[a-z0-9.-]{1,253}\.[a-z]{2,}$/i;
 
+/** Every miss is permanent — the empty on-disk sentinel is never refetched — so
+ *  the 404 can carry a cache header too. Without one the browser treats a 404 as
+ *  uncacheable and re-requests the same dead logos on every page load (a 43-row
+ *  /followups page fired 26 of them). The client's <img onError> monogram is
+ *  unaffected: a cached 404 still errors. */
+const NO_LOGO_HEADERS = { "Cache-Control": "public, max-age=604800" };
+
+const noLogo = () => new Response("no logo", { status: 404, headers: NO_LOGO_HEADERS });
+
 function cacheDir(): string {
   return path.join(careerOpsRoot(), ".career-ops-web", "logo-cache");
 }
@@ -83,10 +92,10 @@ export async function GET(req: NextRequest) {
     // Pure CJK names carry no ASCII to key on (companyCacheKey → null) and no
     // plausible domain either — a guaranteed miss, not a client error. 404 keeps
     // the <img onError> monogram fallback and the console free of false 400s.
-    if (!companyKey) return new Response("no logo", { status: 404 });
+    if (!companyKey) return noLogo();
     key = companyKey;
     candidates = companyDomains(company);
-    if (candidates.length === 0) return new Response("no logo", { status: 404 });
+    if (candidates.length === 0) return noLogo();
   } else {
     return new Response("need domain or company", { status: 400 });
   }
@@ -102,7 +111,7 @@ export async function GET(req: NextRequest) {
     if (buf.byteLength > 0) {
       return new Response(new Uint8Array(buf), { status: 200, headers: { "Content-Type": "image/png", "Cache-Control": "public, max-age=604800" } });
     }
-    return new Response("no logo", { status: 404 });
+    return noLogo();
   } catch {
     /* not cached yet → resolve below */
   }
@@ -121,6 +130,6 @@ export async function GET(req: NextRequest) {
     /* best-effort */
   }
 
-  if (!bytes) return new Response("no logo", { status: 404 });
+  if (!bytes) return noLogo();
   return new Response(bytes, { status: 200, headers: { "Content-Type": "image/png", "Cache-Control": "public, max-age=604800" } });
 }
