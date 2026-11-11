@@ -3,6 +3,7 @@ import path from "node:path";
 import { careerOpsRoot } from "@/lib/career-ops";
 import { atomicWriteWithBackup } from "@/lib/core/safe-write";
 import { upsertYamlList, normalizeWordList } from "@/lib/core/portals-merge.mjs";
+import { logConfigWrite } from "@/lib/op-log-server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -46,6 +47,15 @@ export async function POST(req: Request) {
     } catch (e) {
       return Response.json({ error: e instanceof Error ? e.message : "write failed" }, { status: 500 });
     }
+    // 操作日志：这是「编辑」，删词也算改动，所以要记；只记块名与词条数。
+    logConfigWrite("portals-save", {
+      title: "portals.yml",
+      fields: ["title_filter.positive", "title_filter.negative"],
+      meta: [
+        { k: "positive", v: String(positive.length) },
+        { k: "negative", v: String(negative.length) },
+      ],
+    });
   }
   return Response.json({ ok: true, changed: next !== text, positive: positive.length, negative: negative.length });
 }

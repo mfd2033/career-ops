@@ -6,6 +6,7 @@ import { atomicWriteWithBackup } from "@/lib/core/safe-write";
 import { mergeYamlPatch } from "@/lib/core/profile-merge.mjs";
 import { extractArchetypes, extractCompensation, patchToProfile } from "@/lib/profile-patch.mjs";
 import { extractDealBreakers, replaceCompTargetsSection, replaceDealBreakersSection } from "@/lib/profile-md-sync.mjs";
+import { logConfigWrite } from "@/lib/op-log-server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -253,5 +254,8 @@ export async function POST(req: Request) {
       }
     }
   }
+  // 操作日志：profile.yml 与 modes/_profile.md 都会进评估上下文，改了什么键要能回看。
+  // 只记键名——补丁里可能有邮箱、地点等隐私值。
+  logConfigWrite("profile-save", { title: "config/profile.yml", fields: Object.keys(patch ?? {}) });
   return Response.json({ ok: true, seeded });
 }

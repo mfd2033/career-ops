@@ -9,7 +9,7 @@ import {
 } from "@/lib/tracker-api";
 import { addArgv, queryArgv } from "@/lib/tracker-cli.mjs";
 import { canonicalizeStatus } from "@/lib/core/states";
-import { logOperation, trackerLogTitle } from "@/lib/op-log-server";
+import { logTrackerRowWrite } from "@/lib/op-log-server";
 
 export const runtime = "nodejs";
 // Tracker reads are always fresh: the CLI auto-resyncs its index when the
@@ -92,18 +92,7 @@ export async function POST(req: Request): Promise<Response> {
   if (run.status !== 200) return failResponse("", run);
 
   // 操作日志：新增行以前什么都不留。verdict 一并记下——duplicate 也是「用户试过」
-  // 的事实，回看时能解释为什么当天没多出一行。
-  const added = (run.parsed ?? null) as Record<string, unknown> | null;
-  if (added) {
-    const num = String(added.num ?? "");
-    logOperation({
-      trigger: "manual",
-      type: "tracker-add",
-      title: trackerLogTitle(num, added.company, added.role),
-      meta: added.verdict ? [{ k: "verdict", v: String(added.verdict) }] : [],
-      status: "done",
-      href: /^\d+$/.test(num) ? `/pipeline?q=${num}` : undefined,
-    });
-  }
+  // 的事实，回看时能解释为什么当天没多出一行。构造与 PUT /upsert 共用。
+  logTrackerRowWrite(run.parsed, "tracker-add");
   return okResponse(run.parsed);
 }

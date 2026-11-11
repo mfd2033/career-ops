@@ -3,6 +3,7 @@ import path from "node:path";
 import { careerOpsRoot } from "@/lib/career-ops";
 import { atomicWriteWithBackup } from "@/lib/core/safe-write";
 import { upsertYamlList } from "@/lib/core/portals-merge.mjs";
+import { logConfigWrite } from "@/lib/op-log-server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -76,5 +77,11 @@ export async function POST(req: Request) {
   } catch (e) {
     return Response.json({ error: e instanceof Error ? e.message : "write failed" }, { status: 500 });
   }
+  // 操作日志：只记「哪一块被改了」与新增词条数，词条本身留在 portals.yml 里。
+  logConfigWrite("portals-save", {
+    title: "portals.yml",
+    fields: ["title_filter.positive", ...(cities.length ? ["location_filter.allow"] : [])],
+    meta: [{ k: "added", v: String(titleStep.added.length) }],
+  });
   return Response.json({ ok: true, changed: true, roles: roles.length, added: titleStep.added, skipped: titleStep.skipped });
 }

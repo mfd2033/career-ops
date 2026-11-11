@@ -22,12 +22,27 @@ export const MANUAL_TYPES = [
   "tracker-add",
   "tracker-edit",
   "tracker-delete",
+  // 第二条 tracker 写路径（PUT /api/tracker/upsert）：按 URL 去重后可能更新既有行，
+  // 语义与 tracker-add 不同（后者永不静默改写），所以单独一类。
+  "tracker-upsert",
   "follow-up",
   "follow-up-delete",
+  // 跟进日期的「钉住 / 取消钉住」写的是 follow-ups.md 的 `- next #N` 指令行，
+  // 既不是一条跟进记录，也不影响表格台账，单列一类。
+  "followup-pin",
   "blacklist",
   "pipeline-add",
   "pipeline-remove",
   "config",
+  // 配置类写入：形态相同（改某个用户层文件的某几个键），共用 logConfigWrite()。
+  // 与 config（app-config 的引擎/模型等）分开，回看时才分得清改的是哪一层。
+  "cv-save",
+  "profile-save",
+  "portals-save",
+  "cadence-save",
+  "skill-dirs",
+  "memory-write",
+  "quick-key",
 ];
 
 /** 自动操作类型：由任务台账/扫描台账产生，人只在派发时出现。 */

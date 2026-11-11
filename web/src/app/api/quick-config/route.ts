@@ -15,6 +15,7 @@ import {
   applyVaultAction,
   VaultError,
 } from "@/lib/quick-vault.mjs";
+import { logOperation } from "@/lib/op-log-server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -44,6 +45,15 @@ export async function PUT(req: NextRequest) {
     // 写路径唯一：action 协议。无 action 的旧单密钥 PUT 已收口，不再受理。
     const result = applyVaultAction(vault, body);
     writeVault(root, result.vault);
+    // 操作日志：只记动作（add/update/remove/activate），密钥名与明文都不进日志
+    // （data/quick-eval.json 里存的是明文 key）。
+    const action = typeof body.action === "string" ? body.action : "";
+    logOperation({
+      trigger: "manual",
+      type: "quick-key",
+      meta: action ? [{ k: "action", v: action }] : [],
+      status: "done",
+    });
     // 写盘后只回库视图：不回显任何密钥（连刚写入的那把也只回打码串）。
     return NextResponse.json({ ok: true, ...vaultView(result.vault) });
   } catch (e) {

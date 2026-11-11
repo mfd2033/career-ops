@@ -6,6 +6,7 @@ import { careerOpsRoot, rootScript } from "@/lib/career-ops";
 import { atomicWriteWithBackup } from "@/lib/core/safe-write";
 import { mergeYamlPatch } from "@/lib/core/profile-merge.mjs";
 import { PROFILE_CADENCE_KEYS, type ProfileCadenceKey } from "@/lib/followups";
+import { logConfigWrite } from "@/lib/op-log-server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -155,5 +156,7 @@ export async function POST(req: Request) {
   } catch (e) {
     return Response.json({ error: e instanceof Error ? e.message : "write failed" }, { status: 500 });
   }
+  // 操作日志：节奏参数直接决定 CLI 的跟进判定，改了必须留痕；只记键名。
+  logConfigWrite("cadence-save", { title: "config/profile.yml", fields: Object.keys(cadence) });
   return Response.json({ ok: true, followup_cadence: { ...existing, ...cadence } });
 }

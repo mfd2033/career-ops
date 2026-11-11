@@ -56,6 +56,13 @@ const META_VALUE_KEYS: Record<string, Record<string, string>> = {
     exempt: "logs.action.exempt",
     update: "logs.action.update",
     clear: "logs.action.clear",
+    activate: "logs.action.activate",
+  },
+  verdict: {
+    added: "logs.verdict.added",
+    deduped: "logs.verdict.deduped",
+    duplicate: "logs.verdict.duplicate",
+    updated: "logs.verdict.updated",
   },
 };
 

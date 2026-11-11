@@ -24,6 +24,7 @@ import {
   localDay,
   makeEntry,
   mergeOperationLog,
+  triggerOfType,
   windowDates,
 } from "../../src/lib/op-log.mjs";
 import { appendOpLog, opLogPath, readOpLog } from "../../src/lib/op-log-store.mjs";
@@ -328,4 +329,37 @@ test("类型白名单：手动/自动两组的代表性类型都在，拼错的�
   assert.equal(isOpLogType("follow-up-delete"), true);
   assert.equal(isOpLogType("Status-Change"), false);
   assert.equal(isOpLogType(""), false);
+});
+
+test("配置类与第二条 tracker 路径的类型：都在白名单里且归手动", () => {
+  // 漏一个类型的后果不是报错，而是那条埋点被 appendOpLog 静默拒绝、页面永远看不到——
+  // 所以每个新入口的类型都钉一条断言。
+  const added = [
+    "cv-save",
+    "profile-save",
+    "portals-save",
+    "cadence-save",
+    "skill-dirs",
+    "memory-write",
+    "followup-pin",
+    "quick-key",
+    "tracker-upsert",
+  ];
+  for (const type of added) {
+    assert.equal(isOpLogType(type), true, `${type} 必须在白名单里`);
+    assert.equal(triggerOfType(type), "manual", `${type} 必须归手动`);
+  }
+
+  // 落盘后能被页面消费：makeEntry 收敛出的条目类型不变、日期按本地日。
+  const entry = makeEntry({
+    at: at(2026, 11, 11, 20, 30),
+    type: "quick-key",
+    title: "data/quick-eval.json",
+    meta: [{ k: "action", v: "activate" }],
+    status: "done",
+  });
+  assert.equal(entry.type, "quick-key");
+  assert.equal(entry.trigger, "manual");
+  assert.equal(entry.date, "2026-11-11");
+  assert.deepEqual(entry.meta, [{ k: "action", v: "activate" }]);
 });

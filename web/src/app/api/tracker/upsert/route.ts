@@ -7,6 +7,7 @@ import {
   runTrackerScript,
 } from "@/lib/tracker-api";
 import { upsertArgv } from "@/lib/tracker-cli.mjs";
+import { logTrackerRowWrite } from "@/lib/op-log-server";
 
 export const runtime = "nodejs";
 
@@ -39,5 +40,8 @@ export async function PUT(req: Request): Promise<Response> {
 
   const run = await runTrackerScript("tracker-add", [...built.argv, "--json"]);
   if (run.status !== 200) return failResponse("/upsert", run);
+  // 与 POST /api/tracker 共用同一构造（标题格式只留一处）；类型分开，因为这里
+  // 可能真的改写了既有行（verdict: updated），回看时得和「新增」区分开。
+  logTrackerRowWrite(run.parsed, "tracker-upsert");
   return okResponse(run.parsed);
 }

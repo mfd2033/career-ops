@@ -5,6 +5,7 @@ import { careerOpsRoot } from "@/lib/career-ops";
 import { atomicWriteWithBackup } from "@/lib/core/safe-write";
 import { pruneCvSnapshots } from "@/lib/cv-history.mjs";
 import { MAX_CV_BYTES } from "@/lib/cv/import";
+import { logConfigWrite } from "@/lib/op-log-server";
 
 function cvPath() {
   return path.join(careerOpsRoot(), "cv.md");
@@ -44,6 +45,9 @@ export async function POST(req: Request) {
     try {
       pruneCvSnapshots(careerOpsRoot(), CV_SNAPSHOT_CAP);
     } catch {}
+    // 操作日志：cv.md 是用户层文件，覆盖保存不可逆（只留 .bak 快照）。
+    // 只记文件名，不记内容长度或任何片段。
+    logConfigWrite("cv-save", { title: "cv.md" });
     return NextResponse.json({ ok: true, backedUp: !!bak });
   } catch {
     return NextResponse.json({ error: "write failed" }, { status: 500 });

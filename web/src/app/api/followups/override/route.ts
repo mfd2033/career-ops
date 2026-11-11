@@ -3,6 +3,7 @@ import path from "node:path";
 import { atomicWrite } from "@/lib/core/safe-write";
 import { isRealISODate, localISODate } from "@/lib/followups";
 import { followupsLogPath, withFollowupsWrite, followupsWriteError } from "@/lib/followups-server";
+import { logConfigWrite, trackerLogTitle } from "@/lib/op-log-server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -44,6 +45,11 @@ export async function POST(req: Request) {
       if (!existing.endsWith("\n")) existing += "\n";
       existing += `- next #${appNum} ${date} (set ${localISODate()})\n`;
       atomicWrite(file, existing);
+      // 操作日志：钉住日期会覆盖计算出的节奏（甚至让冷掉的投递复活），必须留痕。
+      logConfigWrite("followup-pin", {
+        title: trackerLogTitle(appNum),
+        meta: [{ k: "action", v: "add" }, { k: "date", v: date }],
+      });
       return Response.json({ ok: true, appNum, date });
     });
   } catch (e) {
@@ -74,6 +80,10 @@ export async function DELETE(req: Request) {
         return Response.json({ error: `no pinned next-date for application #${appNum}` }, { status: 404 });
       }
       atomicWrite(file, kept.join("\n"));
+      logConfigWrite("followup-pin", {
+        title: trackerLogTitle(appNum),
+        meta: [{ k: "action", v: "remove" }],
+      });
       return Response.json({ ok: true, appNum });
     });
   } catch (e) {

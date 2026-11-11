@@ -39,3 +39,39 @@ export function trackerLogTitle(num: string | number, company?: unknown, role?: 
     .join(" · ");
   return rest ? `${head} ${rest}` : head;
 }
+
+/**
+ * 配置类写入的统一埋点：cv / profile / portals / cadence / skills / quick-config
+ * 这些入口形态相同——改某个用户层文件的某几个键。title 只放文件名，meta 只放键名，
+ * 绝不记值：值里可能有本机绝对路径、邮箱或密钥明文，日志不是装它们的地方。
+ */
+export function logConfigWrite(
+  type: string,
+  options: { title?: string; fields?: string[]; meta?: OpLogMeta[] } = {},
+): void {
+  const meta = [...(options.meta ?? [])];
+  const fields = (options.fields ?? []).map((f) => String(f ?? "").trim()).filter(Boolean).slice(0, 12);
+  if (fields.length > 0) meta.push({ k: "fields", v: fields.join(", ") });
+  logOperation({ trigger: "manual", type, title: options.title, meta, status: "done" });
+}
+
+/**
+ * tracker 行的写入埋点，POST /api/tracker（新增）与 PUT /api/tracker/upsert
+ * （按 URL 去重后可能更新既有行）共用——两套标题格式漂移过，构造只留一处。
+ * `parsed` 是 tracker-add.mjs --json 的输出；没有输出就不记（没写成功的猜测没有价值），
+ * 有输出但凑不出数字行号时仍然记标题，只是不给跳转（#N 不是数字就没有对应页面）。
+ */
+export function logTrackerRowWrite(parsed: unknown, type: "tracker-add" | "tracker-upsert"): void {
+  const added = (parsed ?? null) as Record<string, unknown> | null;
+  if (!added) return;
+  const num = String(added.num ?? "").trim();
+  logOperation({
+    trigger: "manual",
+    type,
+    title: trackerLogTitle(num, added.company, added.role),
+    // duplicate 也是「用户试过」的事实，回看时能解释为什么当天没多出一行。
+    meta: added.verdict ? [{ k: "verdict", v: String(added.verdict) }] : [],
+    status: "done",
+    href: /^\d+$/.test(num) ? `/pipeline?q=${num}` : undefined,
+  });
+}

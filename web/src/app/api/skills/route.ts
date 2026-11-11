@@ -2,6 +2,7 @@ import os from "node:os";
 import { NextResponse } from "next/server";
 import { groupSkills, sanitizeSkillDirs, scanSkillRegistry } from "@/lib/skill-registry.mjs";
 import { readAppConfig, writeAppConfig } from "@/lib/app-config";
+import { logConfigWrite } from "@/lib/op-log-server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -39,5 +40,11 @@ export async function POST(req: Request) {
   if (dirs.length > 0) next.skillDirs = dirs;
   else delete next.skillDirs;
   writeAppConfig(next);
+  // 操作日志：目录本身是本机绝对路径，不进日志——只记键名与目录数。
+  logConfigWrite("skill-dirs", {
+    title: "app-config.json",
+    fields: ["skillDirs"],
+    meta: [{ k: "added", v: String(dirs.length) }],
+  });
   return NextResponse.json(scan(dirs));
 }
