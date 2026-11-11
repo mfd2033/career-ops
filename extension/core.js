@@ -387,7 +387,12 @@
       el.addEventListener("click", (e) => {
         e.preventDefault();
         e.stopPropagation();
-        toggleStatusMenu(el, card, chip.raw);
+        toggleStatusMenu(el, chip.raw, (raw) => {
+          const url = site.cardUrl(card);
+          const key = url ? normalizeUrl(url) : "";
+          if (!key) return;
+          writeCardStatus(key, raw, { undoable: true, company: cardCompanyOf(card) });
+        });
       });
       return el;
     }
@@ -416,8 +421,9 @@
     const chips = CHIPS.cardChips(state);
     const fingerprint = CHIPS.chipFingerprint(chips);
     if (info.dataset.careerFp === fingerprint) return;
-    // 本卡重绘会把菜单锚定的胶囊换掉：先收菜单，避免留一颗挂在死节点上的浮层。
-    if (statusMenu && !info.contains(statusMenu.chipEl)) closeStatusMenu();
+    // 本卡重绘会把菜单锚定的胶囊换掉（详情页浮窗的状态行也可能被整块重建）：
+    // 锚点一旦脱离文档就先收菜单，避免留一颗挂在死节点上的浮层。
+    if (statusMenu && !statusMenu.anchorEl.isConnected) closeStatusMenu();
     info.dataset.careerFp = fingerprint;
     info.textContent = "";
     for (const chip of [chips.status, chips.score]) {
@@ -425,17 +431,18 @@
     }
   }
 
-  // ---- 状态菜单：点状态胶囊 → 九个规范状态 → 乐观更新 + 撤销 ------------------
+  // ---- 状态菜单：点状态胶囊 / 浮窗状态行的 ▾ → 九个规范状态 → 乐观更新 + 撤销 ----
   //
   // 菜单挂 body + position:fixed：卡片在懒加载列表里会被站点重渲染，卡片自身的
-  // overflow 也不可控，相对定位的菜单会跟着被摘掉或裁切。打开时按胶囊的
-  // getBoundingClientRect 定位：距胶囊 8px、左缘对齐，下方放不下就翻到上方。
+  // overflow 也不可控，相对定位的菜单会跟着被摘掉或裁切。打开时按锚点（列表卡
+  // 胶囊 / 浮窗 ▾）的 getBoundingClientRect 定位：距锚点 8px、左缘对齐，下方放不
+  // 下就翻到上方，右边放不下就整体左移。两处共用这份菜单，写入谁由 onPick 决定。
   // id 用 career-ext- 前缀，扩展重载时由 purgeInjectedUi 一并摘除。
   const STATUS_MENU_ID = "career-ext-status-menu";
   const UNDO_TOAST_ID = "career-ext-undo-toast";
   const STATUS_MENU_GAP = 8;
   const STATUS_UNDO_MS = 5000;
-  let statusMenu = null; // { el, chipEl, cleanup }
+  let statusMenu = null; // { el, anchorEl, cleanup }
 
   /** 菜单项：直接取浮窗字典的键序（已在 detail-panel-pure 里与 states.yml 对齐）。 */
   function statusOptions() {
@@ -445,24 +452,28 @@
 
   function closeStatusMenu() {
     if (!statusMenu) return;
-    const { el, chipEl, cleanup } = statusMenu;
+    const { el, anchorEl, cleanup } = statusMenu;
     statusMenu = null;
     cleanup();
-    chipEl.setAttribute("aria-expanded", "false");
+    anchorEl.setAttribute("aria-expanded", "false");
     el.remove();
   }
 
-  function toggleStatusMenu(chipEl, card, raw) {
-    if (statusMenu && statusMenu.chipEl === chipEl) {
+  /**
+   * 打开/收起状态菜单。锚点可以是列表卡的胶囊，也可以是详情页浮窗状态行的 ▾ ——
+   * 两处共用同一份选项与同一套定位，差别只在「选中之后写谁」，由 onPick 决定。
+   */
+  function toggleStatusMenu(anchorEl, raw, onPick) {
+    if (statusMenu && statusMenu.anchorEl === anchorEl) {
       closeStatusMenu();
       return;
     }
     closeStatusMenu();
-    openStatusMenu(chipEl, card, raw);
+    openStatusMenu(anchorEl, raw, onPick);
   }
 
-  function positionStatusMenu(el, chipEl) {
-    const rect = chipEl.getBoundingClientRect();
+  function positionStatusMenu(el, anchorEl) {
+    const rect = anchorEl.getBoundingClientRect();
     const menuH = el.offsetHeight;
     const menuW = el.offsetWidth;
     let top = rect.bottom + STATUS_MENU_GAP;
@@ -476,7 +487,7 @@
     el.style.left = `${Math.round(left)}px`;
   }
 
-  function openStatusMenu(chipEl, card, raw) {
+  function openStatusMenu(anchorEl, raw, onPick) {
     const options = statusOptions();
     if (!options.length) return;
     const current = String(raw || "").toLowerCase();
@@ -521,21 +532,18 @@
         e.stopPropagation();
         closeStatusMenu();
         if (selected) return;
-        const url = site.cardUrl(card);
-        const key = url ? normalizeUrl(url) : "";
-        if (!key) return;
-        writeCardStatus(key, opt.raw, { undoable: true, company: cardCompanyOf(card) });
+        if (typeof onPick === "function") onPick(opt.raw);
       });
       el.appendChild(btn);
     }
     document.body.appendChild(el);
-    positionStatusMenu(el, chipEl);
-    chipEl.setAttribute("aria-expanded", "true");
+    positionStatusMenu(el, anchorEl);
+    anchorEl.setAttribute("aria-expanded", "true");
 
     // 外点 / Esc / 滚动或缩放（fixed 定位会跟视口脱钩）一律收起。外点用冒泡：
-    // 胶囊与菜单项都 stopPropagation，自己触发的那一下不会立刻把菜单关掉。
+    // 锚点与菜单项都 stopPropagation，自己触发的那一下不会立刻把菜单关掉。
     const onDocClick = (e) => {
-      if (el.contains(e.target) || chipEl.contains(e.target)) return;
+      if (el.contains(e.target) || anchorEl.contains(e.target)) return;
       closeStatusMenu();
     };
     const onKeydown = (e) => {
@@ -548,7 +556,7 @@
     window.addEventListener("resize", onViewportChange);
     statusMenu = {
       el,
-      chipEl,
+      anchorEl,
       cleanup: () => {
         document.removeEventListener("click", onDocClick);
         document.removeEventListener("keydown", onKeydown, true);
@@ -1027,6 +1035,11 @@
     "padding:2px 4px;border-radius:5px;width:22px;font-family:inherit}",
     `#${DETAIL_PANEL_ID} .ce-link:hover{background:rgba(74,163,255,.16)}`,
     `#${DETAIL_PANEL_ID} .ce-link:focus-visible{outline:2px solid #4aa3ff;outline-offset:1px}`,
+    // 状态行的修改入口：↗ 是「打开报告」的链接语义（蓝），▾ 是「改状态」的动作
+    // 语义（中性灰、hover 才提亮）—— 同一行里两个入口不抢同一种颜色。
+    `#${DETAIL_PANEL_ID} .ce-link-mut{color:#b6bec9;font-size:13px}`,
+    `#${DETAIL_PANEL_ID} .ce-link-mut:hover{background:rgba(255,255,255,.14);color:#eef2f7}`,
+    `#${DETAIL_PANEL_ID} .ce-link-mut:focus-visible{outline:2px solid #4aa3ff;outline-offset:1px}`,
     // 动作区
     `#${DETAIL_PANEL_ID} .ce-acts{display:flex;gap:8px;margin-top:12px}`,
     `#${DETAIL_PANEL_ID} .ce-btn{flex:1;border:0;border-radius:9px;padding:9px 8px;font:inherit;`,
@@ -1066,7 +1079,9 @@
     '<div class="ce-row"><span class="ce-rail" data-r="quick"></span><span class="ce-k">快评</span>',
     '<span class="ce-v" data-v="quick"></span><span></span></div>',
     '<div class="ce-row"><span class="ce-rail" data-r="status"></span><span class="ce-k">状态</span>',
-    '<span class="ce-v" data-v="status"></span><span></span></div>',
+    '<span class="ce-v" data-v="status"></span>',
+    '<button class="ce-link ce-link-mut" type="button" data-link="status" title="修改投递状态"',
+    ' aria-haspopup="listbox" aria-expanded="false" aria-label="修改投递状态">▾</button></div>',
     '<div class="ce-row"><span class="ce-rail" data-r="checkup"></span><span class="ce-k">体检</span>',
     '<span class="ce-v" data-v="checkup"></span>',
     '<button class="ce-link" type="button" data-link="checkup" title="打开体检报告">↗</button></div>',
@@ -1184,7 +1199,7 @@
       btnQuick: el.querySelector(`#${DETAIL_QUICK_BTN_ID}`),
       rails: { report: q('[data-r="report"]'), eval: q('[data-r="eval"]'), quick: q('[data-r="quick"]'), status: q('[data-r="status"]'), checkup: q('[data-r="checkup"]') },
       vals: { report: q('[data-v="report"]'), eval: q('[data-v="eval"]'), quick: q('[data-v="quick"]'), status: q('[data-v="status"]'), checkup: q('[data-v="checkup"]') },
-      links: { eval: q('[data-link="eval"]'), checkup: q('[data-link="checkup"]') },
+      links: { eval: q('[data-link="eval"]'), status: q('[data-link="status"]'), checkup: q('[data-link="checkup"]') },
       pill: { dot: q('[data-pill="dot"]'), status: q('[data-pill="status"]'), score: q('[data-pill="score"]'), expand: q('[data-pill="expand"]') },
     };
 
@@ -1234,6 +1249,19 @@
         openReader(name === "checkup" ? "checkup" : "report", panelReportNum);
       });
     }
+    // 状态行的 ▾：与列表卡胶囊共用同一份选项与写回链路（POST /api/status），
+    // 区别只在写谁 —— 这里按本页 URL 对应的 tracker 行写（即浮窗显示的那一行），
+    // 乐观更新、失败回退和 5s 撤销窗口都复用 writeCardStatus。
+    panelRefs.links.status.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const key = normalizeUrl(location.href);
+      const entry = evaluated[key];
+      if (!entry || entry.reportNum == null) return;
+      toggleStatusMenu(panelRefs.links.status, entry.status || "", (raw) => {
+        writeCardStatus(key, raw, { undoable: true });
+      });
+    });
     setPanelCollapsed(panelCollapsed);
   }
 
@@ -1263,9 +1291,11 @@
     const link = panelRefs.links[name];
     if (link) {
       link.style.visibility = row.openable ? "visible" : "hidden";
-      // 悬停提示落在真正可点的 ↗ 上（而不是只落在读数上），提示与点击目标对齐；
+      // 悬停提示落在真正可点的行尾按钮上（而不是只落在读数上），提示与点击目标对齐；
       // 没给 title 的行（已评估）保留骨架里的静态文案，不拿空串把它抹掉。
-      if (row.title) link.title = row.title;
+      // 状态行的 row.title 是「状态：Applied」这类读数说明，挂到 ▾ 上会把动作提示
+      // 顶掉，所以 ▾ 的「修改投递状态」留在骨架里不动。
+      if (row.title && name !== "status") link.title = row.title;
     }
   }
 

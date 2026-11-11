@@ -189,6 +189,16 @@ test("无 tracker 行 → 状态行占位符「未评估」（即使有快评分
   assert.equal(v.pill.statusText, "未评估");
 });
 
+test("状态行行尾的修改入口：只有真的能写（tracker 行有报告号）时才给", () => {
+  // 写回走 POST /api/status，定位 tracker 行靠的就是报告号（n）；没有 n 就没有
+  // 可写目标，给入口只会点出一句「更新失败」。
+  assert.equal(panelView({ entry: entry({ status: "Applied" }) }).statusRow.openable, true);
+  assert.equal(panelView({ entry: entry() }).statusRow.openable, true, "状态缺值也能改（先写第一次状态）");
+  assert.equal(panelView({ entry: entry({ reportNum: "" }) }).statusRow.openable, false);
+  assert.equal(panelView({ entry: null }).statusRow.openable, false);
+  assert.equal(panelView().statusRow.openable, false);
+});
+
 // ---- 色轨只在有值时上色 ----------------------------------------------------
 
 test("缺值的快评/体检行走中性灰轨；有值才上自己的色，不用颜色宣称结果", () => {

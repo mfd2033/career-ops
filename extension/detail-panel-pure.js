@@ -136,7 +136,9 @@
       dot: !!statusRaw, // 有真实状态才画色点（与收起态药丸同一个信号）
       raw: statusRaw || null,
       title: st.title,
-      openable: false,
+      // 状态行行尾的修改入口：写回按报告号定位 tracker 行（POST /api/status 的 n），
+      // 没有行号就没有可写目标 —— 与其给一个点了报错的入口，不如不给。
+      openable: !!reportNum,
     };
 
     // 体检行：契约只给一个星数（1.0–5.0，或 null = 未体检）。判「有值」的口径与
