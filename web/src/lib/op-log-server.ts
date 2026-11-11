@@ -1,5 +1,6 @@
 import { careerOpsRoot } from "@/lib/career-ops";
 import { appendOpLog } from "@/lib/op-log-store.mjs";
+import { buildConfigMeta } from "@/lib/core/op-log-meta.mjs";
 
 // 操作日志的服务端埋点入口。路由只调 logOperation()，不直接碰文件路径，
 // 也不写 try/catch —— 台账失败绝不能影响用户的操作本身（纪律见 op-log-store.mjs）。
@@ -44,15 +45,21 @@ export function trackerLogTitle(num: string | number, company?: unknown, role?: 
  * 配置类写入的统一埋点：cv / profile / portals / cadence / skills / quick-config
  * 这些入口形态相同——改某个用户层文件的某几个键。title 只放文件名，meta 只放键名，
  * 绝不记值：值里可能有本机绝对路径、邮箱或密钥明文，日志不是装它们的地方。
+ *
+ * meta 的组装本身在 core/op-log-meta.mjs（纯函数，带单测）：那条「只记键名」的
+ * 纪律如果只活在这段 TS 里，node --test 够不着，就只能靠读代码守住。
  */
 export function logConfigWrite(
   type: string,
   options: { title?: string; fields?: string[]; meta?: OpLogMeta[] } = {},
 ): void {
-  const meta = [...(options.meta ?? [])];
-  const fields = (options.fields ?? []).map((f) => String(f ?? "").trim()).filter(Boolean).slice(0, 12);
-  if (fields.length > 0) meta.push({ k: "fields", v: fields.join(", ") });
-  logOperation({ trigger: "manual", type, title: options.title, meta, status: "done" });
+  logOperation({
+    trigger: "manual",
+    type,
+    title: options.title,
+    meta: buildConfigMeta(options.fields, options.meta),
+    status: "done",
+  });
 }
 
 /**
