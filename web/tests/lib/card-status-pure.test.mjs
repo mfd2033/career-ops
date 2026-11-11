@@ -1,9 +1,9 @@
 // card-status-pure 纯逻辑单测：列表卡「状态胶囊 + 分数胶囊」的组合规则。
 //
-// 三站共用一套胶囊，真正会出错的地方只有几条：临时态顶掉状态胶囊、Evaluated 不重复
-// 出状态胶囊、↗ 只出现在可点的临时态上、完整评估压过快评。这些分支在真实招聘站页面
-// 上几乎没法稳定复现（要等评估真进池、又要抢在卡片重渲染的同一帧里观察），所以全在
-// 纯函数上钉住。
+// 三站共用一套胶囊，真正会出错的地方只有几条：临时态顶掉状态胶囊、状态胶囊的
+// 可编辑判定（有 tracker 行号才写回得去）、↗ 只出现在可点的临时态上、完整评估
+// 压过快评。这些分支在真实招聘站页面上几乎没法稳定复现（要等评估真进池、又要抢
+// 在卡片重渲染的同一帧里观察），所以全在纯函数上钉住。
 //
 // Run:  node --test web/tests/lib/card-status-pure.test.mjs
 
@@ -31,7 +31,7 @@ const {
 } = mod.default ?? mod;
 
 const RUN_ID = "3f2b8c1e-9d4a-4c77-8f10-2a5b6c7d8e9f";
-const status = (raw, text, color) => ({ raw, text, color });
+const status = (raw, text, color, reportNum = "42") => ({ raw, text, color, reportNum });
 const score = (text, color = "#00c68d", reportNum = "42") => ({ text, color, reportNum });
 const quick = (score_, color = "#7c5cff") => ({ score: score_, grade: "值得聊", reason: "岗位对口", color });
 
@@ -48,12 +48,13 @@ test("isRunState：只认 running / queued，大小写与空白归一", () => {
 
 // ---- 状态胶囊：临时态优先 ------------------------------------------------
 
-test("评估中：顶掉 tracker 状态、可点、带 ↗ 后缀与 runId", () => {
+test("评估中：顶掉 tracker 状态、可点、带 ↗ 后缀与 runId，且不可改状态", () => {
   const chip = statusChip({ status: status("Applied", "已申请", "#4aa3ff"), run: { status: "running", runId: RUN_ID } });
   assert.equal(chip.kind, "run");
   assert.equal(chip.text, "评估中" + RUN_LINK_SUFFIX);
   assert.equal(chip.color, RUN_RUNNING_COLOR);
   assert.equal(chip.clickable, true);
+  assert.equal(chip.editable, false, "临时态点击去 Worker，不提供改状态");
   assert.equal(chip.runId, RUN_ID);
 });
 
@@ -73,9 +74,25 @@ test("run 状态认不出（finished 之类）→ 退回 tracker 状态，不显
 
 // ---- 状态胶囊：哪些不出 --------------------------------------------------
 
-test("Evaluated 不出状态胶囊（分数胶囊已表达「已评估」）", () => {
-  assert.equal(statusChip({ status: status("Evaluated", "已评估", "#6ea8fe") }), null);
-  assert.equal(statusChip({ status: status("evaluated", "已评估", "#6ea8fe") }), null, "大小写不敏感");
+test("Evaluated 也出状态胶囊，带 raw / reportNum 供菜单写回", () => {
+  for (const raw of ["Evaluated", "evaluated"]) {
+    const chip = statusChip({ status: status(raw, "已评估", "#6ea8fe") });
+    assert.equal(chip.kind, "status", raw);
+    assert.equal(chip.text, "已评估", raw);
+    assert.equal(chip.color, "#6ea8fe", raw);
+    assert.equal(chip.raw, raw, raw);
+    assert.equal(chip.editable, true, raw);
+    assert.equal(chip.reportNum, "42", raw);
+    assert.equal(chip.title, "点击修改状态", raw);
+  }
+});
+
+test("拿不到 tracker 行号 → 状态照显示，但不可编辑", () => {
+  const chip = statusChip({ status: status("Applied", "已申请", "#4aa3ff", null) });
+  assert.equal(chip.text, "已申请");
+  assert.equal(chip.editable, false);
+  assert.equal(chip.reportNum, null);
+  assert.match(chip.title, /状态：Applied/);
 });
 
 test("tracker 行没有状态值 / 没有 tracker 行 → 不出状态胶囊", () => {
@@ -84,7 +101,7 @@ test("tracker 行没有状态值 / 没有 tracker 行 → 不出状态胶囊", (
   assert.equal(statusChip({}), null);
 });
 
-test("其它规范状态：照字典文案取色，不可点", () => {
+test("其它规范状态：照字典文案取色，可编辑但不可点跳转", () => {
   for (const [raw, text, color] of [
     ["Applied", "已申请", "#4aa3ff"],
     ["Responded", "已回复", "#00b8d9"],
@@ -95,9 +112,11 @@ test("其它规范状态：照字典文案取色，不可点", () => {
     const chip = statusChip({ status: status(raw, text, color) });
     assert.equal(chip.text, text, raw);
     assert.equal(chip.color, color, raw);
+    assert.equal(chip.raw, raw, raw);
+    assert.equal(chip.editable, true, raw);
     assert.equal(chip.clickable, false, raw);
-    assert.equal(chip.runId, null, raw);
-    assert.ok(!chip.text.includes("↗"), `${raw} 不可点就不该带 ↗`);
+    assert.equal(chip.runId, undefined, raw);
+    assert.ok(!chip.text.includes("↗"), `${raw} 不可点跳转就不该带 ↗`);
   }
 });
 
@@ -191,6 +210,12 @@ test("指纹把「点了会去哪」纳入：换了 runId 必须重绘", () => {
   const a = cardChips({ run: { status: "running", runId: RUN_ID } });
   const b = cardChips({ run: { status: "running", runId: RUN_ID.replace("3f2b", "aaaa") } });
   assert.notEqual(chipFingerprint(a), chipFingerprint(b));
+});
+
+test("指纹纳入可编辑性：同一文案，有行号与无行号必须区分", () => {
+  const withNum = cardChips({ status: status("Applied", "已申请", "#4aa3ff") });
+  const withoutNum = cardChips({ status: status("Applied", "已申请", "#4aa3ff", null) });
+  assert.notEqual(chipFingerprint(withNum), chipFingerprint(withoutNum));
 });
 
 test("指纹不纳入 title 之类提示文案（不可见变化不必重绘）", () => {

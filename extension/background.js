@@ -1120,6 +1120,41 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         }
         break;
       }
+      case "set-status": {
+        // 列表卡状态胶囊的写回通道：/api/status 只认 tracker 行号 n，content script
+        // 因混合内容不能直连本机服务，统一经这里转发（同 quick-evaluate 的口径）。
+        try {
+          const n = msg && msg.n != null ? String(msg.n).trim() : "";
+          const status = typeof msg.status === "string" ? msg.status.trim() : "";
+          if (!n || !status) {
+            sendResponse({ ok: false, error: "n and status required" });
+            break;
+          }
+          const base = `http://127.0.0.1:${await ensureLivePort()}`;
+          const res = await localFetch(`${base}/api/status`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ n, status }),
+          });
+          const body = await res.json().catch(() => null);
+          if (!res.ok || !body || body.ok !== true) {
+            // 服务端错误串是可操作中文（状态非法 / 行不存在 / 锁被占用），原样透出。
+            sendResponse({ ok: false, error: (body && body.error) || `状态更新失败（HTTP ${res.status}）` });
+            break;
+          }
+          const canon = typeof body.status === "string" ? body.status : status;
+          // 本地索引立即同步：reportNum 就是 tracker 行号，不必等下一次整表重拉。
+          for (const key of Object.keys(evaluated)) {
+            const entry = evaluated[key];
+            if (entry && String(entry.reportNum) === n) entry.status = canon;
+          }
+          sendResponse({ ok: true, status: canon });
+          notifyContentScripts(); // 其他标签页同步；页面已乐观更新，不阻塞本次写入
+        } catch (err) {
+          sendResponse({ ok: false, error: (err && err.message) || String(err) });
+        }
+        break;
+      }
       case "fetch-detail-html": {
         // 站点侧被 CORS 挡住的详情页由 SW 代抓（智联跨子域），解析仍在 content script。
         sendResponse(await fetchDetailHtml(msg && msg.url));

@@ -10,10 +10,12 @@
 //   • 临时态：评估中 / 排队中顶掉状态胶囊、保留分数胶囊，且**可点** —— 点了跳
 //     web 端工作器里对应的那条任务。
 //
-// 两条不重复的口径：
-//   1. `Evaluated` 不出状态胶囊 —— 分数胶囊本身就是「已评估」的结论，再贴一颗
-//      「已评估」等于同一条信息说两遍；
-//   2. tracker 行没有状态值时同样不出状态胶囊（老行/状态列为空），同上。
+// 两条口径：
+//   1. 状态胶囊一律可编辑（点击开九态菜单改 tracker 状态）——包括 `Evaluated`：
+//      分数胶囊只回答「多少分」，不回答「投到哪一步」，而列表里没有第二个改状态
+//      的入口；
+//   2. tracker 行没有状态值时不出状态胶囊（老行/状态列为空）——没有原始码也就
+//      没有能写回的值。
 //
 // 之所以抽成纯函数：胶囊的组合规则（谁顶掉谁、什么时候可点、↗ 后缀跟不跟）在真实
 // 招聘站页面上几乎没法稳定复现 —— 既要等评估真正进池、又要在卡片被站点重渲染时
@@ -34,8 +36,6 @@
   const RUN_LINK_SUFFIX = " ↗";
   const RUN_RUNNING_TEXT = "评估中";
   const RUN_QUEUED_TEXT = "排队中";
-  // 与 tracker/states.yml 的规范码同名，仅用于「别重复贴已评估」这一条判断。
-  const EVALUATED_RAW = "evaluated";
 
   /**
    * 临时态码归一并校验：只认 running / queued，其余（含空值）返回 null。
@@ -57,20 +57,25 @@
         text: (running ? RUN_RUNNING_TEXT : RUN_QUEUED_TEXT) + RUN_LINK_SUFFIX,
         color: running ? RUN_RUNNING_COLOR : RUN_QUEUED_COLOR,
         clickable: true,
+        editable: false,
         runId: (p.run && p.run.runId) || null,
         title: "在 Worker 列表里打开这个任务",
       };
     }
     const st = p.status;
     if (!st || typeof st.raw !== "string" || !st.raw.trim()) return null;
-    if (st.raw.trim().toLowerCase() === EVALUATED_RAW) return null; // 分数胶囊已表达
+    const raw = st.raw.trim();
+    // reportNum 就是 tracker 行号（/api/status 的 n）：拿不到行号就只能显示、不能改。
+    const reportNum = st.reportNum == null ? null : String(st.reportNum).trim();
     return {
       kind: "status",
       text: st.text,
       color: st.color,
       clickable: false,
-      runId: null,
-      title: st.title || `状态：${st.raw}`,
+      editable: !!reportNum,
+      reportNum: reportNum || null,
+      raw,
+      title: reportNum ? "点击修改状态" : st.title || `状态：${raw}`,
     };
   }
 
@@ -113,7 +118,7 @@
   /**
    * 一张卡该显示的两颗胶囊（顺序：状态在前、分数在后）。
    * @param {object} [p]
-   * @param {?{raw:string, text:string, color:string, title?:string}} [p.status] 已 resolve 的 tracker 状态
+   * @param {?{raw:string, text:string, color:string, title?:string, reportNum?:string|number}} [p.status] 已 resolve 的 tracker 状态
    * @param {?{text:string, color:string, reportNum?:string|number}} [p.score] 完整评估分数
    * @param {?{score:number, grade?:string, reason?:string, color:string}} [p.quick] 快评分
    * @param {?{status:string, runId:string}} [p.run] /api/active-runs 里同 URL 的任务
@@ -126,10 +131,16 @@
   /**
    * 幂等指纹：MutationObserver 在懒加载页打得很密，胶囊内容没变就不该重建节点。
    * 只纳入「看得见」与「点了会去哪」两类事实 —— title 之类的提示文案变了不必重绘。
+   * 状态胶囊的 raw 必须进指纹：文案相同而规范码不同（理论上不该发生）仍要重绘，
+   * 否则菜单会在旧码上继续写。
    */
   function chipFingerprint(chips) {
     const one = (c) =>
-      c ? `${c.kind}:${c.text}:${c.color}:${c.clickable ? 1 : 0}:${c.runId || c.reportNum || ""}` : "-";
+      c
+        ? `${c.kind}:${c.text}:${c.color}:${c.clickable ? 1 : 0}:${c.editable ? 1 : 0}:${
+            c.runId || c.reportNum || ""
+          }:${c.raw || ""}`
+        : "-";
     return `${one(chips && chips.status)}|${one(chips && chips.score)}`;
   }
 

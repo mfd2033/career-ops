@@ -60,6 +60,7 @@ test("长连接接口保持流式，不被套上普通超时", () => {
 });
 
 test("诊断快照统计行内胶囊与按钮行", () => {
-  assert.match(CORE, /__diag\.chips = document\.querySelectorAll\("span\[data-career-chip\]"\)\.length;/);
+  // 状态胶囊可编辑后是 <button>（分数/临时态仍是 <span>），按属性计数两种都算。
+  assert.match(CORE, /__diag\.chips = document\.querySelectorAll\("\[data-career-chip\]"\)\.length;/);
   assert.match(CORE, /__diag\.actionRows = document\.querySelectorAll\('\[data-career-actions="row"\]'\)\.length;/);
 });

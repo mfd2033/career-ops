@@ -331,14 +331,17 @@
     return true;
   }
 
-  /** tracker 状态 → 胶囊字典结果。Evaluated / 空值 / 认不出的码一律不出状态胶囊。 */
+  /**
+   * tracker 状态 → 胶囊字典结果。空值 / 认不出的码不出状态胶囊；reportNum（tracker
+   * 行号）一并带出，纯层据此决定这颗胶囊能不能点开改状态。
+   */
   function statusForChips(full) {
     if (!full || !PANEL) return null;
     const raw = typeof full.status === "string" ? full.status.trim() : "";
     if (!raw) return null;
     const st = PANEL.statusLabel(raw);
     if (!st.known) return null;
-    return { raw, text: st.text, color: st.color, title: `状态：${raw}` };
+    return { raw, text: st.text, color: st.color, reportNum: full.reportNum, title: st.title };
   }
 
   /** 分数文本归一：tracker 存的是 `"4.3/5"`，裸数字补 `/5`，别把 `4.3` 当满分 4.3。 */
@@ -349,11 +352,41 @@
   }
 
   /** 建一颗胶囊（可点的补手型 + 悬停下划线 + 点击拦截，避免触发整卡跳转）。 */
-  function buildChip(chip) {
-    const el = document.createElement("span");
+  function buildChip(chip, card) {
+    // 状态胶囊可改状态：用 button 承载（键盘可达），点击开九态菜单。
+    const editable = chip.kind === "status" && chip.editable;
+    const el = document.createElement(editable ? "button" : "span");
     el.setAttribute(CARD_CHIP_ATTR, chip.kind);
-    el.textContent = chip.text;
     el.title = chip.title || "";
+    if (editable) {
+      el.type = "button";
+      el.setAttribute("aria-haspopup", "listbox");
+      el.setAttribute("aria-expanded", "false");
+      el.style.cssText =
+        CARD_CHIP_CSS +
+        "border:0;cursor:pointer;display:inline-flex;align-items:center;gap:3px;" +
+        `background:${chip.color};`;
+      const label = document.createElement("span");
+      label.textContent = chip.text;
+      const caret = document.createElement("span");
+      caret.textContent = "▾";
+      caret.style.cssText = "font-size:9px;opacity:.9;transform:translateY(.5px);";
+      el.appendChild(label);
+      el.appendChild(caret);
+      el.addEventListener("mouseenter", () => {
+        el.style.filter = "brightness(.94)";
+      });
+      el.addEventListener("mouseleave", () => {
+        el.style.filter = "";
+      });
+      el.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        toggleStatusMenu(el, card, chip.raw);
+      });
+      return el;
+    }
+    el.textContent = chip.text;
     el.style.cssText = CARD_CHIP_CSS + `background:${chip.color};`;
     if (!chip.clickable) return el;
     el.style.cursor = "pointer";
@@ -373,16 +406,225 @@
   }
 
   /** 胶囊重绘：按指纹短路（懒加载页的 MutationObserver 打得非常密）。 */
-  function renderCardChips(info, state) {
+  function renderCardChips(info, state, card) {
     if (!CHIPS) return;
     const chips = CHIPS.cardChips(state);
     const fingerprint = CHIPS.chipFingerprint(chips);
     if (info.dataset.careerFp === fingerprint) return;
+    // 本卡重绘会把菜单锚定的胶囊换掉：先收菜单，避免留一颗挂在死节点上的浮层。
+    if (statusMenu && !info.contains(statusMenu.chipEl)) closeStatusMenu();
     info.dataset.careerFp = fingerprint;
     info.textContent = "";
     for (const chip of [chips.status, chips.score]) {
-      if (chip) info.appendChild(buildChip(chip));
+      if (chip) info.appendChild(buildChip(chip, card));
     }
+  }
+
+  // ---- 状态菜单：点状态胶囊 → 九个规范状态 → 乐观更新 + 撤销 ------------------
+  //
+  // 菜单挂 body + position:fixed：卡片在懒加载列表里会被站点重渲染，卡片自身的
+  // overflow 也不可控，相对定位的菜单会跟着被摘掉或裁切。打开时按胶囊的
+  // getBoundingClientRect 定位：距胶囊 8px、左缘对齐，下方放不下就翻到上方。
+  // id 用 career-ext- 前缀，扩展重载时由 purgeInjectedUi 一并摘除。
+  const STATUS_MENU_ID = "career-ext-status-menu";
+  const UNDO_TOAST_ID = "career-ext-undo-toast";
+  const STATUS_MENU_GAP = 8;
+  const STATUS_UNDO_MS = 5000;
+  let statusMenu = null; // { el, chipEl, cleanup }
+
+  /** 菜单项：直接取浮窗字典的键序（已在 detail-panel-pure 里与 states.yml 对齐）。 */
+  function statusOptions() {
+    if (!PANEL || !PANEL.STATUS_DICT) return [];
+    return Object.entries(PANEL.STATUS_DICT).map(([raw, v]) => ({ raw, text: v.zh, color: v.color }));
+  }
+
+  function closeStatusMenu() {
+    if (!statusMenu) return;
+    const { el, chipEl, cleanup } = statusMenu;
+    statusMenu = null;
+    cleanup();
+    chipEl.setAttribute("aria-expanded", "false");
+    el.remove();
+  }
+
+  function toggleStatusMenu(chipEl, card, raw) {
+    if (statusMenu && statusMenu.chipEl === chipEl) {
+      closeStatusMenu();
+      return;
+    }
+    closeStatusMenu();
+    openStatusMenu(chipEl, card, raw);
+  }
+
+  function positionStatusMenu(el, chipEl) {
+    const rect = chipEl.getBoundingClientRect();
+    const menuH = el.offsetHeight;
+    const menuW = el.offsetWidth;
+    let top = rect.bottom + STATUS_MENU_GAP;
+    // 视口底部放不下、上方又放得下 → 翻到胶囊上方，保持同一 8px 间距。
+    if (top + menuH > window.innerHeight - 8 && rect.top - STATUS_MENU_GAP - menuH >= 8) {
+      top = rect.top - STATUS_MENU_GAP - menuH;
+    }
+    let left = rect.left;
+    if (left + menuW > window.innerWidth - 8) left = Math.max(8, window.innerWidth - 8 - menuW);
+    el.style.top = `${Math.round(top)}px`;
+    el.style.left = `${Math.round(left)}px`;
+  }
+
+  function openStatusMenu(chipEl, card, raw) {
+    const options = statusOptions();
+    if (!options.length) return;
+    const current = String(raw || "").toLowerCase();
+    const el = document.createElement("div");
+    el.id = STATUS_MENU_ID;
+    el.setAttribute("role", "listbox");
+    el.setAttribute("aria-label", "修改投递状态");
+    el.style.cssText =
+      "position:fixed;z-index:2147483647;width:168px;padding:6px;background:#fff;" +
+      "border:1px solid rgba(0,0,0,.1);border-radius:10px;box-shadow:0 10px 26px rgba(0,0,0,.18);" +
+      "font-family:system-ui,sans-serif;";
+    for (const opt of options) {
+      const selected = opt.raw.toLowerCase() === current;
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.setAttribute("role", "option");
+      btn.dataset.raw = opt.raw;
+      btn.setAttribute("aria-selected", String(selected));
+      btn.style.cssText =
+        "width:100%;display:flex;align-items:center;gap:8px;border:0;background:none;text-align:left;" +
+        "cursor:pointer;padding:7px 8px;border-radius:7px;font-family:inherit;font-size:12.5px;" +
+        `color:#1f2329;${selected ? "font-weight:700;background:#eaf1ff;" : ""}`;
+      const dot = document.createElement("span");
+      dot.style.cssText = `width:8px;height:8px;border-radius:50%;flex:0 0 auto;background:${opt.color};`;
+      const label = document.createElement("span");
+      label.textContent = opt.text;
+      label.style.cssText = "flex:1;";
+      const check = document.createElement("span");
+      check.textContent = "✓";
+      check.style.cssText = `color:#3370ff;font-weight:700;opacity:${selected ? 1 : 0};`;
+      btn.appendChild(dot);
+      btn.appendChild(label);
+      btn.appendChild(check);
+      btn.addEventListener("mouseenter", () => {
+        if (!selected) btn.style.background = "#eef2f7";
+      });
+      btn.addEventListener("mouseleave", () => {
+        btn.style.background = selected ? "#eaf1ff" : "none";
+      });
+      btn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        closeStatusMenu();
+        if (selected) return;
+        const url = site.cardUrl(card);
+        const key = url ? normalizeUrl(url) : "";
+        if (!key) return;
+        writeCardStatus(key, opt.raw, { undoable: true, company: cardCompanyOf(card) });
+      });
+      el.appendChild(btn);
+    }
+    document.body.appendChild(el);
+    positionStatusMenu(el, chipEl);
+    chipEl.setAttribute("aria-expanded", "true");
+
+    // 外点 / Esc / 滚动或缩放（fixed 定位会跟视口脱钩）一律收起。外点用冒泡：
+    // 胶囊与菜单项都 stopPropagation，自己触发的那一下不会立刻把菜单关掉。
+    const onDocClick = (e) => {
+      if (el.contains(e.target) || chipEl.contains(e.target)) return;
+      closeStatusMenu();
+    };
+    const onKeydown = (e) => {
+      if (e.key === "Escape") closeStatusMenu();
+    };
+    const onViewportChange = () => closeStatusMenu();
+    document.addEventListener("click", onDocClick);
+    document.addEventListener("keydown", onKeydown, true);
+    window.addEventListener("scroll", onViewportChange, true);
+    window.addEventListener("resize", onViewportChange);
+    statusMenu = {
+      el,
+      chipEl,
+      cleanup: () => {
+        document.removeEventListener("click", onDocClick);
+        document.removeEventListener("keydown", onKeydown, true);
+        window.removeEventListener("scroll", onViewportChange, true);
+        window.removeEventListener("resize", onViewportChange);
+      },
+    };
+  }
+
+  /** 深色撤销 toast：5s 自动消失，点「撤销」回到改前的状态。 */
+  function showUndoToast(text, onUndo) {
+    const old = document.getElementById(UNDO_TOAST_ID);
+    if (old) old.remove();
+    const t = document.createElement("div");
+    t.id = UNDO_TOAST_ID;
+    t.style.cssText =
+      "position:fixed;right:16px;bottom:16px;z-index:2147483647;display:flex;align-items:center;" +
+      "gap:12px;background:#1f2329;color:#f2f4f7;border-radius:9px;padding:10px 12px 10px 14px;" +
+      "font-size:12px;box-shadow:0 8px 22px rgba(0,0,0,.3);font-family:system-ui,sans-serif;max-width:440px;";
+    const label = document.createElement("span");
+    label.textContent = text;
+    const undoBtn = document.createElement("button");
+    undoBtn.type = "button";
+    undoBtn.textContent = "撤销";
+    undoBtn.style.cssText =
+      "border:1px solid rgba(255,255,255,.3);background:rgba(255,255,255,.08);color:#fff;" +
+      "border-radius:6px;padding:3px 9px;font-size:11.5px;font-weight:700;cursor:pointer;" +
+      "font-family:inherit;white-space:nowrap;";
+    const count = document.createElement("span");
+    count.textContent = `${STATUS_UNDO_MS / 1000}s`;
+    count.style.cssText = "color:#9aa3ad;font-variant-numeric:tabular-nums;";
+    t.appendChild(label);
+    t.appendChild(undoBtn);
+    t.appendChild(count);
+    document.body.appendChild(t);
+    let left = STATUS_UNDO_MS / 1000;
+    const timer = setInterval(() => {
+      left -= 1;
+      count.textContent = `${Math.max(left, 0)}s`;
+      if (left <= 0) {
+        clearInterval(timer);
+        t.remove();
+      }
+    }, 1000);
+    undoBtn.addEventListener("click", () => {
+      clearInterval(timer);
+      t.remove();
+      onUndo();
+    });
+  }
+
+  /**
+   * 写 tracker 状态：本地 map 乐观更新 → 重绘 → 后台 POST /api/status。
+   * 失败整体回退并弹持久错误框（气泡留不住失败原因）。undoable 时成功后给 5s
+   * 撤销窗口，撤销就是再写一次旧值。
+   */
+  function writeCardStatus(key, raw, opts = {}) {
+    const entry = evaluated[key];
+    if (!entry || entry.reportNum == null) return;
+    const n = String(entry.reportNum);
+    const prevRaw = typeof entry.status === "string" ? entry.status : "";
+    const next = PANEL.statusLabel(raw);
+    entry.status = raw;
+    applyAllInjections();
+
+    sendMsg({ type: "set-status", n, status: raw }, (res) => {
+      if (chrome.runtime.lastError || !res || !res.ok) {
+        // 回退到当前 map 里的那一条（期间可能已被 evaluated-updated 换成新对象）。
+        const fresh = evaluated[key] || entry;
+        fresh.status = prevRaw;
+        applyAllInjections();
+        showErrorBox((res && res.error) || "状态更新失败：本地 web 服务可能未运行");
+        return;
+      }
+      if (!opts.undoable || !prevRaw) return;
+      const prev = PANEL.statusLabel(prevRaw);
+      const company = opts.company ? `${opts.company} ` : "";
+      showUndoToast(`状态已更新：${company}${prev.text} → ${next.text}`, () => {
+        writeCardStatus(key, prevRaw);
+      });
+    });
   }
 
   function cardCompanyOf(card) {
@@ -555,7 +797,7 @@
   function renderCardActions(card, state) {
     const refs = ensureCardMount(card);
     if (!refs) return false;
-    renderCardChips(refs.info, state);
+    renderCardChips(refs.info, state, card);
     ensureCardButtons(card, refs.ops);
     // 按钮态与胶囊同源：每次重画都按快照归一（幂等），刷新/站点重渲染后自动恢复。
     applyEvalButtonState(card, refs.ops.querySelector('button[data-career-action="eval"]'));
@@ -2111,7 +2353,8 @@
       __diag.boxes = document.querySelectorAll("input[type=checkbox][title^=选择]").length;
       // 智联/猎聘走行内实现，不画悬浮 badge —— 上面两个计数恒为 0。真正反映「卡片 UI
       // 有没有注入」的是行内胶囊与按钮行的数量。
-      __diag.chips = document.querySelectorAll("span[data-career-chip]").length;
+      // 状态胶囊可编辑后是 <button>，这里按属性计数（两种承载都算）。
+      __diag.chips = document.querySelectorAll("[data-career-chip]").length;
       __diag.actionRows = document.querySelectorAll('[data-career-actions="row"]').length;
       // BOSS changed its list markup (pathname=/web/geek/jobs); .job-card-wrapper
       // no longer matches. Snapshot the REAL card container's class chain from the
