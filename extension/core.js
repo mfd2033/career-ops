@@ -36,6 +36,11 @@
   let activeRunsByKey = {};
   let activeRunsPollTimer = null;
   const ACTIVE_RUNS_POLL_MS = 3000;
+  // 快照时间戳：收尾轮询靠「该 URL 还在池里」续期，只认足够新的快照 —— 否则
+  // 页面不再刷新快照（SPA 导航走、卡片消失）时，一条陈旧的 queued 会让轮询永远
+  // 续期下去。超过 30s 未刷新即视同「不知道」，退回按次数计上限。
+  const ACTIVE_RUNS_STALE_MS = 30000;
+  let activeRunsAt = 0;
 
   // Canonical posting-URL key — mirrors web/src/lib/core/url-key.mjs `normalizeUrl`
   // (the same key that /api/report-status uses) so a badge matches an evaluation.
@@ -863,10 +868,20 @@
           next[key] = { status: t.status, runId: t.runId, position: t.position };
         }
         activeRunsByKey = next;
+        activeRunsAt = Date.now();
         applyAllInjections();
         resolve(!!res.ok);
       });
     });
+  }
+
+  /**
+   * 该 URL 此刻是否「还在服务端任务池里」（评估中 / 排队中）。
+   * 收尾轮询据此续期；只认 30s 内的快照，快照不再刷新就当作不知道（退回按次数计）。
+   */
+  function runInPool(key) {
+    if (!key || !activeRunsByKey[key]) return false;
+    return Date.now() - activeRunsAt < ACTIVE_RUNS_STALE_MS;
   }
 
   /** 页上有列表卡才轮询：详情页/其它页面不必为一份用不上的快照每 3s 醒一次 SW。 */
@@ -1709,6 +1724,10 @@
    * 依赖 background SW 存活，SW 被终止后消息永不送达 → 按钮卡「评估中」；此轮询
    * 每 3s 拉一次评估地图，命中即 finalizeCardEval 收尾。240 次（12min）到期裁决
    * 在纯层：必须解锁该卡按钮并告知，不能只停轮询。
+   *
+   * 2026-11-11：到期计数遇到「该 URL 还在 /api/active-runs 里（评估中/排队中）」时
+   * 清零续期。之前按墙上时间硬算 12min，而单槽 FIFO 队列的排队时长只取决于积压 ——
+   * 实测一次评估排队 49.4min，同批派发的卡片全部在任务仍合法排队时被误报「超时」。
    */
   function startCardEvalPoll(key) {
     cardEvalPolls.set(key, 0);
@@ -1725,12 +1744,12 @@
           continue;
         }
         const n = tries + 1;
-        const verdict = CHIPS && CHIPS.evalPollVerdict ? CHIPS.evalPollVerdict(n) : null;
+        const verdict = CHIPS && CHIPS.evalPollVerdict ? CHIPS.evalPollVerdict(n, undefined, runInPool(url)) : null;
         if (verdict && verdict.stop) {
           cardEvalPolls.delete(url);
           settleCardEval(url, verdict.toast);
         } else {
-          cardEvalPolls.set(url, n);
+          cardEvalPolls.set(url, verdict && verdict.reset ? 0 : n);
         }
       }
       if (!cardEvalPolls.size) stopCardEvalPollTimer();
@@ -1742,7 +1761,8 @@
    * SW 被 Chrome 终止(空闲 30s)后消息永不送达 → 按钮卡"评估中";此轮询每 3s
    * 拉一次评估地图(get-evaluated 消息本身会唤醒 SW),命中即 finalizeDetail 收尾。
    * 与消息路径互补:任意一条先命中都安全 —— settleButtons 幂等,收尾时停轮询,
-   * 不会双弹 toast/confirm。240 次(12min)上限防 SPA 导航后 URL 失配泄漏。
+   * 不会双弹 toast/confirm。240 次(12min)是「失联」上限：任务仍在池里时清零续期
+   * （2026-11-11 实测排队可达 49min），只剩「不在池里且没有报告」才累计到 12min。
    */
   function startEvalPoll(url) {
     evalPollUrl = url;
@@ -1759,13 +1779,20 @@
         finalizeDetail();
         return;
       }
+      // 详情页/右栏没有列表卡，startActiveRunsPoll 的每跳闸门（要求有卡）不成立，
+      // 快照不会自己刷新 —— 这里每跳自己拉一次，才知道任务还在不在池里。
+      await refreshActiveRuns();
       // 到期裁决在纯层：只停轮询不解锁的话，按钮永远停在「评估中」，之后
       // 所有卡片的「评估」点击永远无反应（2026-11-10 个人中心感兴趣列表实测）。
-      const verdict = CHIPS && CHIPS.evalPollVerdict ? CHIPS.evalPollVerdict(tries) : null;
+      // 仍在池里（评估中/排队中）→ 续期，不按墙上时间误报超时（同卡片轮询）。
+      const inPool = evalPollUrl ? runInPool(normalizeUrl(evalPollUrl)) : false;
+      const verdict = CHIPS && CHIPS.evalPollVerdict ? CHIPS.evalPollVerdict(tries, undefined, inPool) : null;
       if (verdict && verdict.stop) {
         stopEvalPoll();
         if (verdict.settle) settleButtons();
         if (verdict.toast) showToast(verdict.toast, true);
+      } else if (verdict && verdict.reset) {
+        tries = 0;
       }
     }, 3000));
   }

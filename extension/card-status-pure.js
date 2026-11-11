@@ -156,9 +156,13 @@
   // 两处决策都在真实页面上无法稳定复现（要等评估真在跑/真超时），故抽到这里钉住。
 
   // 收尾轮询上限（次）。3s/次 × 240 = 12min，与 core.js 原有上限同值。
+  // 2026-11-11 修正：这是「失联」上限，不是「评估耗时」上限 —— 任务仍在服务端
+  // 并发池里（running/queued）时永不计入（见 evalPollVerdict 的 runActive）。
   const EVAL_POLL_MAX_TRIES = 240;
   const EVAL_BUSY_TOAST = "该职位的评估已在进行中，请等它完成";
-  const EVAL_POLL_EXPIRED_TOAST = "等待评估结果超时，按钮已恢复；任务可能仍在后台运行";
+  // 文案跟着新的到期口径走：只在「不在任务池里 + 没有报告」持续满 12min 才弹，
+  // 所以它不再意味「可能还在跑」，而是「服务端已经没这个任务了，报告可能没产出」。
+  const EVAL_POLL_EXPIRED_TOAST = "等待评估结果超时，按钮已恢复；任务已不在队列里，可能没有产出报告";
 
   /**
    * 卡片「评估」点击闸门：这次点击放不放行、要不要说话。
@@ -179,17 +183,25 @@
   /**
    * 收尾轮询一次 tick 的到期裁决。到期不能只停轮询：必须同时 settle（解锁按钮）
    * 并告知用户，否则单飞锁永久卡死（见上方实测记录）。
+   *
+   * runActive（2026-11-11 实测）：该 URL 此刻仍在服务端并发池里（running/queued）
+   * 时**永不判到期**，只回 reset 让调用方把计数清零续期。12 分钟上限按墙上时间算，
+   * 而单槽 FIFO 队列的排队时长只取决于积压多少 —— 实测一次评估排队 49.4 分钟
+   * （16:59:18 入队、17:48:43 才起跑），同一批派发的卡片在任务还合法排队时就被
+   * 误报「超时」。上限只该回答一种情况：这段时间里它既不在池里、也没有报告。
    * @param {number} tries 已轮询次数（脏值一律视为未到期）
    * @param {number} [max] 上限覆盖（测试注入用，缺省 EVAL_POLL_MAX_TRIES）
-   * @returns {{stop: boolean, settle: boolean, toast: string|null}}
+   * @param {boolean} [runActive] 该 URL 此刻在服务端任务池里（评估中/排队中）
+   * @returns {{stop: boolean, settle: boolean, toast: string|null, reset: boolean}}
    */
-  function evalPollVerdict(tries, max) {
+  function evalPollVerdict(tries, max, runActive) {
+    if (runActive) return { stop: false, settle: false, toast: null, reset: true };
     const cap = Number.isFinite(max) && max > 0 ? max : EVAL_POLL_MAX_TRIES;
     const n = Number(tries);
     if (Number.isFinite(n) && n >= cap) {
-      return { stop: true, settle: true, toast: EVAL_POLL_EXPIRED_TOAST };
+      return { stop: true, settle: true, toast: EVAL_POLL_EXPIRED_TOAST, reset: false };
     }
-    return { stop: false, settle: false, toast: null };
+    return { stop: false, settle: false, toast: null, reset: false };
   }
 
   // 评估按钮的乐观态与终态文案（与状态胶囊同源不同件：胶囊说这张卡在跑/在排队，

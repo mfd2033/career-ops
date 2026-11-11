@@ -268,8 +268,8 @@ test("cardEvalGate：脏值按布尔归一，truthy 即挡下", () => {
 // 之后所有卡片的「评估」点击永远无反应 —— 必须同时 settle（解锁）并告知用户。
 
 test("evalPollVerdict：未到期 → 不停、不解锁", () => {
-  assert.deepEqual(evalPollVerdict(EVAL_POLL_MAX_TRIES - 1), { stop: false, settle: false, toast: null });
-  assert.deepEqual(evalPollVerdict(0), { stop: false, settle: false, toast: null });
+  assert.deepEqual(evalPollVerdict(EVAL_POLL_MAX_TRIES - 1), { stop: false, settle: false, toast: null, reset: false });
+  assert.deepEqual(evalPollVerdict(0), { stop: false, settle: false, toast: null, reset: false });
 });
 
 test("evalPollVerdict：到期 → 停轮询 + 解锁按钮 + 告知用户", () => {
@@ -281,13 +281,46 @@ test("evalPollVerdict：到期 → 停轮询 + 解锁按钮 + 告知用户", () 
 
 test("evalPollVerdict：脏 tries 不误停", () => {
   for (const bad of [null, undefined, NaN, -1, "abc"]) {
-    assert.deepEqual(evalPollVerdict(bad), { stop: false, settle: false, toast: null }, String(bad));
+    assert.deepEqual(evalPollVerdict(bad), { stop: false, settle: false, toast: null, reset: false }, String(bad));
   }
 });
 
 test("evalPollVerdict：上限可覆盖（测试注入小上限即可验证到期分支）", () => {
   assert.deepEqual(evalPollVerdict(3, 3).stop, true);
   assert.deepEqual(evalPollVerdict(2, 3).stop, false);
+});
+
+// ---- 收尾轮询：任务仍在池里就续期（2026-11-11 智联实测） --------------------
+//
+// 回归点：12min 上限按墙上时间算，但单槽 FIFO 队列的排队时长只取决于积压。
+// 实测一次评估 16:59:18 入队、17:48:43 才起跑（排队 49.4min），同批派发的卡片
+// 在任务仍合法排队时就被弹「等待评估结果超时」。上限只该回答「既不在池里、
+// 又没有报告」这一种失联。
+
+test("evalPollVerdict：任务仍在池里（running/queued）→ 不判到期，只回 reset", () => {
+  const v = evalPollVerdict(EVAL_POLL_MAX_TRIES, undefined, true);
+  assert.equal(v.stop, false);
+  assert.equal(v.settle, false, "续期不能顺手解锁按钮");
+  assert.equal(v.toast, null, "续期不该弹任何提示");
+  assert.equal(v.reset, true, "必须清零计数，否则下一 tick 立刻又撞上限");
+});
+
+test("evalPollVerdict：远超上限也照样续期（排队 49min 的真实场景）", () => {
+  const v = evalPollVerdict(EVAL_POLL_MAX_TRIES * 20, undefined, true);
+  assert.equal(v.stop, false);
+  assert.equal(v.reset, true);
+});
+
+test("evalPollVerdict：离开池子后从零重新计，累计满上限才到期", () => {
+  assert.equal(evalPollVerdict(1, 3, false).reset, false, "不在池里不进续期分支");
+  assert.equal(evalPollVerdict(2, 3, false).stop, false);
+  assert.equal(evalPollVerdict(3, 3, false).stop, true);
+});
+
+test("evalPollVerdict：runActive 脏值按布尔归一（0/空串/undefined 都不续期）", () => {
+  for (const falsy of [0, "", undefined, null]) {
+    assert.equal(evalPollVerdict(EVAL_POLL_MAX_TRIES, undefined, falsy).stop, true, String(falsy));
+  }
 });
 
 // ---- 评估按钮状态派生（2026-11-10 个人中心实测第二组缺陷） ------------------
