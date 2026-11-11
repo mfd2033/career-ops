@@ -23,6 +23,14 @@
 
 - 标题 `h1`；薪资 `SPAN.summary-planes__salary`（实测 `8000-13000元·13薪`）；职位描述正文 `DIV.describtion-card.seo-card.seo-card--default`（站点拼写 typo "describtion-card"，照用）；公司名 `DIV.company-info`（发帖方=公司名）。城市无独立稳定 class，可靠来源是 `positionList[].workCity`；勿用 header 的 `.city`（那是站点城市非职位城市）。
 
+**求职进展页**真身 = `i.zhaopin.com/schedule?status={…}`（bsk 登录态实测，2026-11-11）。四个 tab 投递成功/被查看/有意向/不合适共用同一骨架，SPA 切 tab **原地复用卡片节点**（只换内容，不换 DOM）。
+
+- **卡片** = `DIV.scheduletab DIV.js-item`（内含 `DIV.ji-item.clearfix`，左 `DIV.ji-item-info.fl`、右 `DIV.ji-item-status.fr`）。四 tab 实测卡数/`ji-item`/职位锚点三者恒等（10/7/7/3），选择器不误伤页内其它模块。
+- **字段全在卡片 DOM**：职位锚 `A.ji-item-info-jobName`（`jobs.zhaopin.com/CC…J….htm`，带 `refcode`/`srccode`）、薪资 `P`（`1.5-2.5万·14薪`）、公司 `A.ji-item-info-companyName`。**不走搜索页的 `positionList`**——该状态只属于搜索页，在本页为空或错位，会把投递记录映射到别的职位。
+- **URL 转写同收藏页**：锚点 → `https://www.zhaopin.com/jobdetail/{number}.htm`，与 tracker 的 URL 列/`isDetailPath` 口径一致（实测可直接命中已有行）。
+- 站点自有状态（成功投递/被HR查看/企业对你有意/不合适）在 `.ji-item-status`，与插件状态胶囊无关；插件行追加在整卡末尾通栏（`clear:both`）。
+
+
 ## 决策
 
 ### D1：第三站 site 文件，manifest 加 entry
@@ -37,6 +45,7 @@
 - **搜索页右栏**（`.job-detail-panel`）：`ensureRightPaneButton` 双按钮「评估本职位」+「快评」，`extractListPaneJd` 从右栏取描述全文，`currentActiveUrl` 以 `.job-card--active` 定位当前职位。
 - **详情页**（`/jobdetail/{number}.htm`）：`evaluateInlineJd:true`，「评估本职位」+「快评」双按钮 + 已评估/快评双徽章，`extractDetailJd`、`extractPosterName`。
 - **列表卡片**：已评估徽章（`DIV.job-card` 内右上）。**不激活批量勾选**——BOSS 的 `injectCheckbox`/`syncSelection` 本就 dormant，智联列表卡片只留徽章。
+- **求职进展页**（`i.zhaopin.com/schedule`）：四条 tab 的每张卡补同一条操作行 —— 状态胶囊（可点开九态菜单改状态，按 tracker 行号写回）+ 分数胶囊（点开报告）+「快评」「评估」按钮；URL 取自卡片锚点，与 tracker 口径一致。
 - **评估完成自动开报告**：`finalizeDetail` 是 core 站无关逻辑，智联自动继承，无需改。
 
 ### D3：职位 URL 数据源 = positionList，非卡片 DOM

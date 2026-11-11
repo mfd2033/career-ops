@@ -36,7 +36,14 @@
   // 两种容器互斥（各自页面只出现一种），并列进选择器 —— 在此之前收藏页整页匹配 0，
   // 插件在那里完全不生效。
   const COLLECT_CARD_SELECTOR = "div.joblist-box__item";
-  const CARD_SELECTOR = "div.job-card, div.joblist-box__item";
+  // 「求职进展」（i.zhaopin.com/schedule?status=…）是第三套骨架：
+  // DIV.scheduletab 内一屏 10 条 DIV.js-item，左右两块 —— 职位/公司/薪资在
+  // .ji-item-info.fl，站点自有状态（成功投递/被HR查看/企业对你有意/不合适）
+  // 在 .ji-item-status.fr。四个 tab（投递成功/被查看/有意向/不合适）共用同一
+  // 骨架，且切 tab 时卡片节点被原地复用（只换内容，不换 DOM），所以本页的
+  // 卡片状态胶囊靠 core 的 3s 快照重绘自愈，不需要额外清理。
+  const SCHEDULE_CARD_SELECTOR = "div.scheduletab div.js-item";
+  const CARD_SELECTOR = "div.job-card, div.joblist-box__item, " + SCHEDULE_CARD_SELECTOR;
   // 卡片内唯一 <a> 指向公司详情（留作 diag 参考锚点，非职位锚）。
   const LINK_SELECTOR = 'a[href*="companydetail"]';
 
@@ -47,7 +54,13 @@
   // 绘制在白块之上；白块本身纯白，视觉无缝。搜索卡 (div.job-card) 不受影响。
   const COLLECT_ROW_STYLE_ID = "career-ext-zp-collect-row-style";
   const COLLECT_ROW_CSS =
-    '.joblist-box__item div[data-career-actions="row"]{position:relative;z-index:1;}';
+    '.joblist-box__item div[data-career-actions="row"]{position:relative;z-index:1;}' +
+    // 求职进展卡：操作行接在 .ji-item-info.fl / .ji-item-status.fr 两个浮动块之后，
+    // clear 一下才落到它们下方通栏，否则会被浮动块挤到右侧窄条里。
+    // 左右 25px 对齐站点正文列（.ji-item-info 的 padding-left 与 .ji-item-status
+    // 的 padding-right 都是 25px），底部留 12px 离开卡片分隔线 —— 否则胶囊和按钮
+    // 会贴着卡片边框，看起来像是下一张卡的。
+    '.scheduletab div.js-item div[data-career-actions="row"]{clear:both;box-sizing:border-box;padding:0 25px 12px;}';
 
   /** 注入收藏卡操作行层级修正样式（幂等；node 单测无 document 时跳过）。 */
   function ensureCollectRowStyle() {
@@ -62,6 +75,11 @@
   /** 收藏页卡片？两套骨架的挂载点与 URL 来源完全不同，先分流再各自处理。 */
   function isCollectCard(card) {
     return !!card && typeof card.matches === "function" && card.matches(COLLECT_CARD_SELECTOR);
+  }
+
+  /** 求职进展卡片？列表容器 .scheduletab 只出现在 i.zhaopin.com/schedule 页。 */
+  function isScheduleCard(card) {
+    return !!card && typeof card.closest === "function" && !!card.closest(".scheduletab");
   }
 
   /**
@@ -176,6 +194,7 @@
    */
   function cardIsList(card) {
     if (!card || isDetailPath(location.pathname)) return false;
+    if (isScheduleCard(card)) return !!cardUrl(card);
     if (isCollectCard(card)) return !!cardUrl(card);
     return !!card.querySelector(LINK_SELECTOR);
   }
@@ -187,6 +206,13 @@
    *     （数组顺序与 DOM 卡片顺序一致），再按标题文本兜底一次。
    */
   function cardUrl(card) {
+    // 求职进展卡：职位锚点 a.ji-item-info-jobName 直给 jobs.zhaopin.com/CC…J….htm。
+    // 绝不能落到下面的 positionList index 映射 —— 该状态只属于搜索页，在本页为空
+    // 或错位，会把卡片映射到别的职位上（已投递记录最忌讳张冠李戴）。
+    if (isScheduleCard(card)) {
+      const a = card.querySelector("a.ji-item-info-jobName, a[href*='jobs.zhaopin.com']");
+      return canonicalDetailUrl(a && a.href);
+    }
     if (isCollectCard(card)) {
       const a = card.querySelector(
         'a[href*="/jobdetail/"], a[href*="jobs.zhaopin.com"], a.joblist-box__iteminfo',
@@ -254,6 +280,16 @@
       const el = card.querySelector(sel);
       return el ? (el.innerText || el.textContent || "").trim() : "";
     };
+    // 求职进展卡：标题/公司/薪资都在卡片 DOM 里，不依赖搜索页的 positionList。
+    if (isScheduleCard(card)) {
+      return {
+        url: cardUrl(card),
+        title: text("a.ji-item-info-jobName"),
+        company: text("a.ji-item-info-companyName"),
+        salary: text(".ji-item-info p"),
+        city: undefined,
+      };
+    }
     // 收藏页卡片不吃 positionList（那是搜索页的状态）：标题/公司都在 iteminfo 里，
     // 城市无稳定 class（扫描时城市过滤走 web 侧 title 匹配，同 BOSS/猎聘口径）。
     if (isCollectCard(card)) {
@@ -548,6 +584,10 @@
   //     按钮点击自带 preventDefault/stopPropagation（core onCardQuick/onCardEval），
   //     落在 <a> 内不会触发整卡跳转。
   function cardActionMounts(card) {
+    // 求职进展卡：整卡容器 div.js-item 追加操作行（胶囊居左、按钮居右），
+    // 落在 .ji-item-info / .ji-item-status 两个浮动块下方通栏（样式见
+    // COLLECT_ROW_CSS 的 clear:both 规则）。
+    if (isScheduleCard(card)) return { row: { parent: card, before: null } };
     if (isCollectCard(card)) {
       const info = card.querySelector(".joblist-box__iteminfo, [class*='iteminfo']");
       return info ? { row: { parent: info, before: null } } : null;
@@ -557,10 +597,10 @@
     return { row: { parent: card, before: null } };
   }
 
-  /** 卡片上的公司名（搜索卡与收藏卡的公司块 class 不同，逐候选取第一段）。 */
+  /** 卡片上的公司名（搜索卡/收藏卡/求职进展卡的公司块 class 不同，逐候选取第一段）。 */
   function cardCompany(card) {
     const el = card.querySelector(
-      '[class*="company-name"], [class*="company"] .name, .joblist-box__item__company, h3, h4',
+      '[class*="company-name"], [class*="company"] .name, .joblist-box__item__company, .ji-item-info-companyName, h3, h4',
     );
     const t = el ? (el.innerText || el.textContent || "").trim().split("\n")[0] : "";
     return t.trim().slice(0, 40);

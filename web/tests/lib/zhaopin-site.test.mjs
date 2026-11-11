@@ -59,6 +59,17 @@ test("ZHAOPIN_SITE: contract shape required keys are present and non-empty", () 
   assert.equal(typeof ZHAOPIN_SITE.extractPosterName, "function");
 });
 
+test("ZHAOPIN_SITE: cardSelector covers all three page skeletons (search / collect / schedule)", () => {
+  // 三套骨架互斥但同站：搜索 DIV.job-card、收藏 DIV.joblist-box__item、
+  // 求职进展 DIV.scheduletab DIV.js-item。少认一套 = 那页整页不注入。
+  assert.match(ZHAOPIN_SITE.cardSelector, /div\.job-card/);
+  assert.match(ZHAOPIN_SITE.cardSelector, /div\.joblist-box__item/);
+  assert.match(ZHAOPIN_SITE.cardSelector, /div\.scheduletab\s+div\.js-item/);
+  assert.equal(typeof ZHAOPIN_SITE.cardActionMounts, "function");
+  assert.equal(typeof ZHAOPIN_SITE.cardCompany, "function");
+  assert.equal(typeof ZHAOPIN_SITE.fetchCardJd, "function");
+});
+
 test("ZHAOPIN_SITE: right-pane capabilities ARE declared (two-pane board, like BOSS / unlike LIEpIN)", () => {
   // 智联搜索页是"左列表+右描述面板"两栏布局 → 提供 BOSS 式右栏能力。core 以
   // typeof 守卫,声明即用;这与猎聘(无右栏,全部缺失)形成对比,契约测试锁死。
