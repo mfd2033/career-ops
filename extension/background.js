@@ -26,6 +26,9 @@
 importScripts("probe-pure.js");
 const PROBE = self.__careerOpsProbePure;
 if (!PROBE) throw new Error("[bg] probe-pure.js 未加载:扩展文件不完整");
+importScripts("events-bus-pure.js");
+const EVENTS_BUS = self.__careerOpsEventsBusPure;
+if (!EVENTS_BUS) throw new Error("[bg] events-bus-pure.js 未加载:扩展文件不完整");
 
 const PRIMARY_PORT = PROBE.PRIMARY_PORT;
 // 报告正文比版本探活大得多，也要等 Next 真的读完盘、渲染完响应，给 10s：超了就是
@@ -42,16 +45,38 @@ let lastContentDiag = null;
 // 最近一轮探测的逐端口结果（probe-pure.diagOf）：popup 诊断框据此分清「3000 超时 =
 // 服务忙」与「3000 拒连 = 没起服务」。以前的单值 lastProbeErr 会被最后 settle 的那个
 // 端口覆盖，区间扫描下永远是最慢的那个赢，看不出真因。
-let lastProbe = { at: 0, port: null, reason: null, table: {} };
+let lastProbe = { at: 0, port: null, reason: null, table: {}, inflight: 0 };
+
+// ---- 本地请求在飞计数（诊断用）---------------------------------------------
+//
+// 同源 HTTP/1.1 只有 6 条连接。池子被长连接占满时，探针连 socket 都拿不到，
+// abort 计时器一到就报 timeout —— 与「服务端事件循环被占住」的症状一模一样。
+// 实测（6 条 /api/events 占满、池外裸连接 3ms ok）：primary 6001ms timeout、
+// retry 4000ms timeout。这两个计数是唯一能在诊断里区分二者的东西。
+let inflightLocal = 0;
+
+function enterLocal() {
+  inflightLocal += 1;
+}
+
+function exitLocal() {
+  inflightLocal = Math.max(0, inflightLocal - 1);
+}
 
 /**
  * 一次 /api/version 探测 → probe-pure 的归一形状（附 port）。
  * 这里只负责把「超时 / 异常 / 状态码 / 正文」摊平成 classifyProbe 的入参。
  */
 async function probeVersion(port, timeoutMs) {
+  enterLocal();
   const started = Date.now();
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  // 超时那一刻的在飞请求数：探针自己也算一条，所以池满时这个值会贴着 6。
+  let inflightAtEnd = 0;
+  const timer = setTimeout(() => {
+    inflightAtEnd = inflightLocal;
+    ctrl.abort();
+  }, timeoutMs);
   try {
     const res = await fetch(`http://127.0.0.1:${port}/api/version`, { signal: ctrl.signal });
     let body = null;
@@ -62,11 +87,12 @@ async function probeVersion(port, timeoutMs) {
       if (ctrl.signal.aborted) throw e;
       body = null;
     }
-    return { port, ...PROBE.classifyProbe({ ms: Date.now() - started, status: res.status, body }) };
+    return { port, inflight: inflightAtEnd, ...PROBE.classifyProbe({ ms: Date.now() - started, status: res.status, body }) };
   } catch (e) {
     const timedOut = ctrl.signal.aborted || (e && e.name === "AbortError");
     return {
       port,
+      inflight: inflightAtEnd,
       ...PROBE.classifyProbe({
         ms: Date.now() - started,
         timedOut,
@@ -76,6 +102,7 @@ async function probeVersion(port, timeoutMs) {
     };
   } finally {
     clearTimeout(timer);
+    exitLocal();
   }
 }
 
@@ -107,6 +134,9 @@ async function discoverPort() {
     port: d.port,
     reason: d.reason,
     table: PROBE.diagOf({ primary, alt, retry }),
+    // 超时那一瞬的在飞请求数（取主探/复探里大的那个）。≥6 就是连接池被占满，
+    // 而不是服务端慢 —— 这两种情况给用户的建议完全相反。
+    inflight: Math.max(primary.inflight || 0, retry ? retry.inflight || 0 : 0),
   };
   return d.port;
 }
@@ -136,10 +166,28 @@ function invalidatePort() {
 
 async function needPort() {
   const port = await probePort();
-  if (port == null) {
-    throw new Error(`本地 web 服务未运行（${PRIMARY_PORT} 未应答，已放宽扫过 3001-3040）`);
-  }
+  if (port == null) throw new Error(portErrorText());
   return port;
+}
+
+/**
+ * 探不通时给用户的那句话。
+ *
+ * timeout 与 refused 必须分开：前者是端口在听、服务进程在，只是没答复（事件循环被
+ * 占住，或扩展自己把同源连接池占满）；后者才是真没起服务。把前者说成「未运行」
+ * 会把用户指向一个根本没停的服务 —— 这正是本次排查里用户看到的那句话。
+ */
+function portErrorText() {
+  const reason = lastProbe.reason;
+  if (reason === "timeout") {
+    const secs = Math.round(PROBE.PROBE_TIMEOUT_MS / 1000);
+    const busy = lastProbe.inflight >= 6 ? "（扩展自身连接占满）" : "";
+    return `本地服务在忙：${PRIMARY_PORT} 在 ${secs}s 内没答复${busy}；服务进程还在，稍后重试`;
+  }
+  if (reason === "http" || reason === "invalid") {
+    return `${PRIMARY_PORT} 端口上的不是本项目的 web 服务（${reason}）；检查端口是否被别的程序占用`;
+  }
+  return `本地 web 服务未运行（${PRIMARY_PORT} 拒连，已放宽扫过 3001-3040）`;
 }
 
 /**
@@ -169,6 +217,7 @@ const LOCAL_FETCH_TIMEOUT_MS = 15000;
 async function localFetch(url, { timeoutMs = LOCAL_FETCH_TIMEOUT_MS, ...init } = {}) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  enterLocal();
   try {
     return await fetch(url, { ...init, signal: ctrl.signal });
   } catch (err) {
@@ -180,7 +229,133 @@ async function localFetch(url, { timeoutMs = LOCAL_FETCH_TIMEOUT_MS, ...init } =
     throw err;
   } finally {
     clearTimeout(timer);
+    exitLocal();
   }
+}
+
+// ---- 共享事件通道（对齐服务端 ADR-0020 的多路复用总线）----------------------
+//
+// 服务端 /api/events 本来就是「一条连接多路复用所有 run」（帧 `{runId, ev}`，ev 带
+// 单调 seq）。改造前扩展没吃这个设计：每次单职位评估各 fetch 一条 /api/events，
+// 几条评估叠上快评就能占满同源 6 条连接，探针于是拿不到 socket、6s 后 abort ——
+// 用户看到「服务在忙 / 未检测到服务」，服务其实 1-3ms 就能答。
+//
+// 现在全 SW 共用一条通道，runSingleViaApi 只是按 runId 订阅。
+const EVENTS_IDLE_TIMEOUT_MS = 45000; // 服务端 15s 一帧心跳，三拍不来即判死
+const EVENTS_RECONNECT_DELAY_MS = 1000;
+const EVENTS_RECONNECT_MAX = 3;
+
+const EVENTS_IDLE_CLOSE_MS = 60000; // 没有订阅者后留 60s，然后放掉这条连接让 SW 能睡
+
+const runEvents = EVENTS_BUS.createBus();
+// { base, ctrl, attempt }；null = 没建或已彻底放弃
+let eventsChannel = null;
+let channelIdleClose = null;
+
+/** 确保通道在（不等待建连：总线会缓冲，订阅者按 runId 收）。 */
+function ensureEventsChannel(base) {
+  if (eventsChannel && eventsChannel.base === base && !eventsChannel.ctrl.signal.aborted) return;
+  // 先换对象再 abort 旧连接：旧 pump 的 catch 会看到 ctrl 不匹配而放弃重连，
+  // 同时旧连接立刻释放（否则换端口后老监听上那条会一直挂着占池子）。
+  const prev = eventsChannel;
+  const ctrl = new AbortController();
+  eventsChannel = { base, ctrl, attempt: 0 };
+  if (prev) prev.ctrl.abort();
+  void pumpEventsChannel(base, ctrl, 0);
+}
+
+/**
+ * 没有订阅者时延迟关掉通道。
+ *
+ * 常驻的连接会一直让 MV3 service worker 处于活跃态（未结束的 fetch 算活动），
+ * SW 就再也睡不下去。所以评估结束后留 60s 热身窗口，之后放掉。
+ */
+function scheduleChannelIdleClose() {
+  if (channelIdleClose) clearTimeout(channelIdleClose);
+  channelIdleClose = setTimeout(() => {
+    channelIdleClose = null;
+    if (!eventsChannel || runEvents.subscribers() > 0) return;
+    const ctrl = eventsChannel.ctrl;
+    eventsChannel = null;
+    ctrl.abort(); // pump 的 catch 见到 eventsChannel 已置空 → 不重连
+  }, EVENTS_IDLE_CLOSE_MS);
+}
+
+/**
+ * 读 /api/events 到断流为止。断流后按退避重连：服务端会在重连时整段回放
+ * 所有在飞 run 的缓冲，events-bus 的 seq 去重保证重放不产生重复步骤 ——
+ * 所以一次瞬时抖动不该让正在跑的评估直接失败。
+ */
+async function pumpEventsChannel(base, ctrl, attempt) {
+  let idleTimer = null;
+  const armIdle = () => {
+    if (idleTimer) clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => ctrl.abort(), EVENTS_IDLE_TIMEOUT_MS);
+  };
+  enterLocal();
+  // 建连阶段也要计时：服务端在没有 in-flight run 时不立刻回响应头（首帧要等 15s
+  // 心跳），万一连头都不回，不能让它无限挂着变成一条僵尸连接。
+  armIdle();
+  try {
+    const res = await fetch(`${base}/api/events`, { signal: ctrl.signal, cache: "no-store" });
+    if (!res.ok || !res.body) throw new Error(`事件通道不可用（${res.status}）`);
+    armIdle();
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    let buf = "";
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      armIdle();
+      buf += dec.decode(value, { stream: true });
+      let nl;
+      while ((nl = buf.indexOf("\n")) !== -1) {
+        const line = buf.slice(0, nl).trim();
+        buf = buf.slice(nl + 1);
+        if (!line) continue;
+        let frame;
+        try {
+          frame = JSON.parse(line);
+        } catch {
+          continue;
+        }
+        runEvents.publish(frame);
+      }
+    }
+    throw new Error("事件通道提前结束");
+  } catch (err) {
+    // 已被更新的通道取代（端口变化 / 主动重建）：不重连，也不要覆盖新状态。
+    if (!eventsChannel || eventsChannel.ctrl !== ctrl) return;
+    const reason = err instanceof Error ? err.message : String(err);
+    const next = attempt + 1;
+    if (next > EVENTS_RECONNECT_MAX) {
+      eventsChannel = null;
+      runEvents.failAll(`事件通道断开（已重试 ${EVENTS_RECONNECT_MAX} 次）：${reason}`);
+      return;
+    }
+    const nextCtrl = new AbortController();
+    eventsChannel = { base, ctrl: nextCtrl, attempt: next };
+    setTimeout(() => {
+      if (eventsChannel && eventsChannel.ctrl === nextCtrl) void pumpEventsChannel(base, nextCtrl, next);
+    }, EVENTS_RECONNECT_DELAY_MS);
+  } finally {
+    if (idleTimer) clearTimeout(idleTimer);
+    exitLocal();
+  }
+}
+
+/** 订阅某条 run；返回退订函数（不立刻关共享通道 —— 它要留给下一个评估）。 */
+function subscribeRunEvents(base, runId, handler) {
+  if (channelIdleClose) {
+    clearTimeout(channelIdleClose);
+    channelIdleClose = null;
+  }
+  ensureEventsChannel(base);
+  const off = runEvents.subscribe(runId, handler);
+  return function unsubscribe() {
+    off();
+    if (runEvents.subscribers() === 0) scheduleChannelIdleClose();
+  };
 }
 
 // ---- toolbar connection-status badge (ADR-0050) ---------------------------
@@ -1035,6 +1210,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           probeDiag: lastProbe.table,
           probeAt: lastProbe.at || null,
           probeTimeoutMs: PROBE.PROBE_TIMEOUT_MS,
+          // 超时那一瞬的在飞本地请求数 + 常驻的共享事件通道状态。这是区分
+          // 「服务端慢」与「扩展把同源 6 条连接占满」的唯一现场证据。
+          probeInflight: lastProbe.inflight || 0,
+          probeInflightNow: inflightLocal,
+          eventsChannel: eventsChannel ? { attempt: eventsChannel.attempt, subscribers: runEvents.subscribers() } : null,
           evalKeys: Object.keys(evaluated).length,
           contentDiag: lastContentDiag,
         });
@@ -1292,25 +1472,35 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           if (cfg.unknownEmployer === "agency" && poster) {
             text = `发布方公司：${poster}\n${text}`;
           }
-          const res = await fetch(`${base}/api/quick-eval`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              url: typeof msg.url === "string" ? msg.url : "",
-              title: typeof msg.title === "string" ? msg.title : "",
-              text,
-            }),
-            // 外层预算必须大于服务端内层 QUICK_EVAL_TIMEOUT_MS（15s），好让内层先超时、
-            // 回一个可读的「快评超时…」文案；若外层先 abort，只会落到下方 catch 的笼统提示。
-            // 18s < route maxDuration 60s。
-            signal: AbortSignal.timeout(18000),
-          });
-          const j = await res.json().catch(() => ({}));
-          if (!res.ok) {
+          // 快评最长占 18s 一条连接，也是同源 6 条池子的常客 —— 计入在飞数
+          // （否则超时诊断里看不到它，只会看到「服务在忙」这种误导性结论）。
+          let qres;
+          let j = {};
+          enterLocal();
+          try {
+            qres = await fetch(`${base}/api/quick-eval`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                url: typeof msg.url === "string" ? msg.url : "",
+                title: typeof msg.title === "string" ? msg.title : "",
+                text,
+              }),
+              // 外层预算必须大于服务端内层 QUICK_EVAL_TIMEOUT_MS（15s），好让内层先超时、
+              // 回一个可读的「快评超时…」文案；若外层先 abort，只会落到下方 catch 的笼统提示。
+              // 18s < route maxDuration 60s。
+              signal: AbortSignal.timeout(18000),
+            });
+            j = await qres.json().catch(() => ({}));
+          } finally {
+            // 正文读完才算这条连接用完了 —— 计数放得太早会让诊断低估占用。
+            exitLocal();
+          }
+          if (!qres.ok) {
             const notice =
               j && j.error === "quickEvalNotConfigured"
                 ? "快评不可用：未配置 AI 密钥（设置页 → 粘贴 AI 密钥）"
-                : "快评失败：" + ((j && j.error) || `HTTP ${res.status}`);
+                : "快评失败：" + ((j && j.error) || `HTTP ${qres.status}`);
             sendTab({ type: "quick-eval-error", error: notice });
             break;
           }
@@ -1606,7 +1796,8 @@ async function probeEvalRoute(base) {
 }
 
 /**
- * 单职位评估的单任务链路：POST /api/run 拿 runId → 订阅 /api/events 按 runId 过滤。
+ * 单职位评估的单任务链路：POST /api/run 拿 runId → 在全 SW 共用的那条 /api/events
+ * 通道上按 runId 订阅（总线多路复用，见 subscribeRunEvents）。
  *
  * 对详情页而言这与批量路无差异：收尾靠 evaluated-updated 与 3s 轮询，失败靠
  * `single-eval-error`。popup 也只认它已有的 stage 形状（事件由纯函数折叠而来）。
@@ -1621,11 +1812,11 @@ async function runSingleViaApi({ base, url, cliId, model, jdText, company, role,
   };
   // SW 保活：读流不算活动事件，空闲 30s 就被 Chrome 终止（同 runBatch 里那段教训）。
   const keepalive = setInterval(() => chrome.runtime.getPlatformInfo().catch(() => {}), 20000);
-  const ctrl = new AbortController();
   let state = SINGLE.createRunState(url);
+  let unsubscribe = null;
   try {
     // 派发只建 run 拿 runId，正常毫秒级；单给它一个超时，别让「派发卡住」长期占着
-    // 同源连接。下面的事件流才是长连接，不能用这个预算。
+    // 同源连接。run 的事件走全 SW 共用的那条通道（不再每次评估各开一条 /api/events）。
     const res = await localFetch(`${base}/api/run`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1644,37 +1835,24 @@ async function runSingleViaApi({ base, url, cliId, model, jdText, company, role,
     });
     const j = await res.json().catch(() => ({}));
     if (!res.ok || !j || !j.runId) throw new Error((j && j.error) || `评估接口返回 ${res.status}`);
-    const eres = await fetch(`${base}/api/events`, { signal: ctrl.signal, cache: "no-store" });
-    if (!eres.ok || !eres.body) throw new Error(`事件通道不可用（${eres.status}）`);
-
-    const reader = eres.body.getReader();
-    const dec = new TextDecoder();
-    let buf = "";
-    outer: for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buf += dec.decode(value, { stream: true });
-      let nl;
-      while ((nl = buf.indexOf("\n")) !== -1) {
-        const line = buf.slice(0, nl).trim();
-        buf = buf.slice(nl + 1);
-        if (!line) continue;
-        let frame;
-        try {
-          frame = JSON.parse(line);
-        } catch {
-          continue;
+    const runId = j.runId;
+    // 先订阅再等：subscribe 会把「POST 返回到订阅之间」已到达的帧回放出来
+    // （总线按 runId 缓冲），所以不存在丢首帧的窗口。
+    const finished = new Promise((resolve, reject) => {
+      unsubscribe = subscribeRunEvents(base, runId, (frame) => {
+        // 通道级故障（重连耗尽）：评估本身可能还在后台跑，但要先告诉页面。
+        if (frame && frame.error) {
+          reject(new Error(frame.error));
+          return;
         }
-        // 总线是多任务复用的：只取自己这一路（帧层 keepalive 无 runId，自然落掉）。
-        if (!frame || frame.runId !== j.runId || !frame.ev) continue;
+        if (!frame || !frame.ev) return;
         const step = SINGLE.consumeRunEvent(state, frame.ev);
         state = step.state;
         for (const ev of step.events) announce(ev);
-        if (state.finished) break outer;
-      }
-    }
-    // 没看到终态就断流，是连接问题不是评估失败（评估可能仍在后台跑完）——说清楚两者区别。
-    if (!state.finished) throw new Error("事件通道提前结束（评估可能仍在后台运行，完成后徽章会刷新）");
+        if (state.finished) resolve();
+      });
+    });
+    await finished;
     await loadEvaluated(base);
     await notifyContentScripts();
     // 评估结束：服务必然在线，强制刷新徽章（绕过节流，纠正评估期间的任何陈旧态）。
@@ -1682,8 +1860,9 @@ async function runSingleViaApi({ base, url, cliId, model, jdText, company, role,
   } catch (err) {
     if (!state.finished) failToTab(err instanceof Error ? err.message : String(err));
   } finally {
+    // 只退订自己这一路 —— 共享通道要保持（其他评估还在用它）。
+    if (unsubscribe) unsubscribe();
     clearInterval(keepalive);
-    ctrl.abort();
   }
 }
 
@@ -1710,6 +1889,9 @@ async function runBatch(urls, cliId, model, opts) {
     chrome.runtime.getPlatformInfo().catch(() => {});
   }, 20000);
   try {
+    // 批量 NDJSON 是另一条长连接（时长由评估本身决定），同样计入在飞数：
+    // 它和共享事件通道各占一条，同源池 6 条里这两条是长期住户。
+    enterLocal();
     const res = await fetch(`${base}/api/batch-evaluate`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1764,5 +1946,6 @@ async function runBatch(urls, cliId, model, opts) {
     await updateBadge(true).catch(() => {});
   } finally {
     clearInterval(keepalive);
+    exitLocal();
   }
 }

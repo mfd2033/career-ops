@@ -957,7 +957,7 @@
     if (extra && extra.role) msg.role = extra.role;
     sendMsg(msg, (res) => {
       if (chrome.runtime.lastError || !res || !res.ok) {
-        onFail((res && res.error) || "评估发起失败：本地 web 服务未运行?");
+        onFail((res && res.error) || "评估发起失败：本地服务未响应");
       }
     });
   }
@@ -965,7 +965,7 @@
   function sendQuickEval({ url, title, text, poster }, onFail) {
     sendMsg({ type: "quick-evaluate", url, title, text, poster }, (res) => {
       if (chrome.runtime.lastError || !res || !res.ok) {
-        onFail((res && res.error) || "快评发起失败：本地 web 服务未运行?");
+        onFail((res && res.error) || "快评发起失败：本地服务未响应");
       }
     });
   }
@@ -1850,7 +1850,9 @@
     return new Promise((resolve) => {
       sendMsg({ type: "get-evaluated" }, (res) => {
         if (chrome.runtime.lastError || !res || !res.ok) {
-          resolvedOnce && showToast("本地 web 服务未运行", true);
+          // 「读不到」既可能是没起服务，也可能是探测超时（服务在忙 / 扩展连接占满），
+          // 别断言成「未运行」把用户指向一个没停的服务。
+          resolvedOnce && showToast("本地服务未响应：已评估列表读不到", true);
           resolvedOnce = true;
           resolve(false);
           return;
