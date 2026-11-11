@@ -17,6 +17,8 @@ import { mergeBatchItems, shouldPollBatch } from "@/lib/batch-live.mjs";
 import { BatchItemList } from "@/components/jobs/batch-item-list";
 import { RetryJobButton } from "@/components/jobs/retry-job-button";
 import { CliSessionButton } from "@/components/jobs/cli-session-button";
+import { PostingLinkButton } from "@/components/jobs/posting-link-button";
+import { jobPostingUrl } from "@/lib/job-posting-url.mjs";
 import type { Job, JobItem } from "@/components/jobs/job-store";
 
 const TONE_CHIP = {
@@ -139,6 +141,9 @@ function JobsRow({ job: j }: { job: Job }) {
   // 箭头只在有数据时给（无数据不回填不伪造）；运行中的批量哪怕首项未出也
   // 允许展开——空态占位正是实时点亮的入口。
   const expandable = isBatch && (!!summary?.hasItems || (isRunning && !!j.serverBatchId));
+  // 职位原帖：单任务卡的 input 就是招聘站 URL；批量是多行清单、pdf 是报告号、
+  // fix-portal 是公司名，jobPostingUrl 一律给 null，按钮自守卫不渲染。
+  const postingUrl = jobPostingUrl(j.input);
   return (
     <li>
       <div className="flex items-stretch">
@@ -214,9 +219,12 @@ function JobsRow({ job: j }: { job: Job }) {
         )}
         <span className="hidden shrink-0 text-xs capitalize text-faint sm:block">{t(STATUS_LABEL[j.status] ?? j.status)}</span>
       </Link>
-      {/* 「查看 CLI 会话」与重试同为 Link 的行外兄弟节点（同一不劫持行点击的
-          模式）；组件自守卫（canViewSession：终态 + 有会话 id + 引擎支持恢复），
-          不通过时渲染 null，无数据不占位。 */}
+      {/* 「打开职位原帖」「查看 CLI 会话」与重试同为 Link 的行外兄弟节点（同一不
+          劫持行点击的模式）；两个图标按钮各按自己的口径自守卫（前者只认单条
+          http(s) URL，后者要终态 + 有会话 id + 引擎支持恢复），不通过时渲染
+          null，无数据不占位。外链排在会话之前——回原帖核对 JD 是这一行最高频的
+          附带动作。 */}
+      <PostingLinkButton url={postingUrl} className="shrink-0 self-center" />
       <CliSessionButton job={j} className="shrink-0 self-center" />
       {/* ADR-0061 决议 7：重试做 Link 的兄弟节点（沿用展开 chevron 的行外模式），
           不劫持行点击跳详情；canRetryJob 不通过时组件自身渲染 null。 */}

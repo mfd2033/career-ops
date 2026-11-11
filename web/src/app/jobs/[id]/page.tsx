@@ -22,7 +22,9 @@ import { BatchItemList } from "@/components/jobs/batch-item-list";
 import { StepTimeline } from "@/components/jobs/step-timeline";
 import { RetryJobButton } from "@/components/jobs/retry-job-button";
 import { CliSessionButton, canViewSession } from "@/components/jobs/cli-session-button";
+import { PostingLinkButton } from "@/components/jobs/posting-link-button";
 import { canRetryJob } from "@/lib/job-retry.mjs";
+import { jobPostingUrl } from "@/lib/job-posting-url.mjs";
 
 type RunLedgerEntry = {
   id: string;
@@ -52,6 +54,10 @@ type RunLedgerEntry = {
   reportNum?: number;
   trackerN?: string;
 };
+
+// 详情页操作区：只带图标的按钮（职位原帖 / 查看 CLI 会话）共用同一外形。比列表
+// 行里的紧凑图标多一圈内边距——点击面积贴近同排的重试按钮，也不把行高撑开。
+const ICON_ACTION_CLASS = "px-2 py-1.5";
 
 // ADR-0042 决议 1：运行中每秒走一次的时钟，供「已耗时」显示（不估算、不预测——
 // 只显示真实流逝）。
@@ -138,9 +144,10 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
     const isChild = !!e.parentId;
     const kindLabel = isChild ? t("jobs.subtaskKind") : e.kind;
     const checkupHref = e.trackerN ? `/api/checkup-report?n=${encodeURIComponent(e.trackerN)}` : null;
-    // 职位链接（evaluate/批量评估的 input 是招聘站 URL）：新标签页打开原帖。非 http
-    // 的 input（pdf 的报告号、体检的 tracker 号）保持纯文本，不做假链接。
-    const postingUrl = /^https?:\/\//i.test(e.input ?? "") ? e.input : null;
+    // 职位原帖（evaluate 子行为的 input 是该条招聘站 URL）：下方操作区给图标按钮，
+    // 新标签页打开。批量行（多行清单）、pdf 的报告号、体检的 tracker 号一律 null，
+    // 这里只是展示用的纯文本输入，不做假链接。
+    const postingUrl = jobPostingUrl(e.input);
     return (
       <div className="mx-auto max-w-3xl px-6 py-8">
         <button
@@ -162,20 +169,9 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
             </p>
             <h1 className="mt-2 font-display text-2xl tracking-tight text-landing">{display.title}</h1>
             <p className="mt-1 text-sm text-muted">
-              {kindLabel} · {t("jobs.ledgerInput")}:{" "}
-              {postingUrl ? (
-                // 职位链接可点：台账只存了 URL 字符串，读者常常要回原文核对 JD。
-                <a
-                  href={postingUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="break-all text-brand transition-colors hover:underline"
-                >
-                  {postingUrl}
-                </a>
-              ) : (
-                e.input
-              )}{" "}
+              {/* 台账只存了 URL 字符串，原样印出来供核对；可点入口统一收在下方操作区的
+                  外链图标按钮（与本地卡视图同一份渲染），这里不再重复一个文字链接。 */}
+              {kindLabel} · {t("jobs.ledgerInput")}: {e.input}{" "}
               · {fmtDuration(Math.round((e.finishedAt - e.startedAt) / 1000))}
             </p>
             {/* ADR-0044：台账行无排队信息，只说始于/止于（与本地卡视图口径一致）。 */}
@@ -226,19 +222,24 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
               <p className="mt-3 rounded-lg border border-border bg-surface/60 px-3 py-2 text-sm text-muted">{e.msg}</p>
             )}
             {/* ADR-0061 修订 1：ledger-only 单次 error 卡也可重试——本浏览器无本地卡，
-                点重试会种子一张全新本地卡重发。批量子任务行（isChild）语义特殊，不提供。
-                组件按 canRetryJob 自守卫（done / 无 kind+input 一律渲染 null）。
-                「查看 CLI 会话」同一行操作区，凭 canViewSession 自守卫（终态 + 台账带
-                sessionId + 引擎支持恢复）。 */}
-            {!isChild && (
+                点重试会种子一张全新本地卡重发。批量子任务行（isChild）语义特殊，不提供
+                重试与会话，但它的 input 就是该条的招聘站 URL，外链照给。
+                操作区口径：职位原帖 / 查看 CLI 会话是图标按钮（靠 title 与 aria-label
+                说明），重试保留文字——它是写操作，不与读操作同权。各组件自守卫。 */}
+            {(postingUrl || !isChild) && (
               <div className="mt-3 flex flex-wrap items-center gap-2.5">
-                {e.status === "error" && (
-                  <RetryJobButton
-                    job={{ id: e.id, title: display.title, subtitle: e.input, page: display.page, input: e.input, kind: e.kind, status: e.status, steps: [], text: "", startedAt: e.startedAt }}
-                    withLabel
-                  />
+                <PostingLinkButton url={postingUrl} className={ICON_ACTION_CLASS} />
+                {!isChild && (
+                  <>
+                    <CliSessionButton job={{ sessionId: e.sessionId, cliId: e.cliId, status: e.status }} className={ICON_ACTION_CLASS} />
+                    {e.status === "error" && (
+                      <RetryJobButton
+                        job={{ id: e.id, title: display.title, subtitle: e.input, page: display.page, input: e.input, kind: e.kind, status: e.status, steps: [], text: "", startedAt: e.startedAt }}
+                        withLabel
+                      />
+                    )}
+                  </>
                 )}
-                <CliSessionButton job={{ sessionId: e.sessionId, cliId: e.cliId, status: e.status }} withLabel />
               </div>
             )}
             {/* ADR-0045：UI 外发起的批量终结后，ledger-only 视图不再只有状态+
@@ -312,6 +313,9 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
   for (const it of job.items ?? []) itemMap.set(it.key, it);
   const batchItems = [...itemMap.values()];
   const showBatchPanel = batchItems.length > 0 || job.batchPos != null;
+  // 职位原帖：evaluate 单任务的 input 就是招聘站 URL（批量是多行清单、pdf 是
+  // 报告号、fix-portal 是公司名，一律 null → 图标按钮不渲染）。
+  const postingUrl = jobPostingUrl(job.input);
 
   return (
     <div className="mx-auto max-w-3xl px-6 py-8">
@@ -400,13 +404,15 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
           {/* ADR-0061 决议 3/7：attempt 徽章（第 2 次起显示，done/error 均可）+
               手动重试按钮——组件按 canRetryJob 自守卫，批量先弹确认（决议 6）；
               ledger-only 视图在上方提前 return，到不了这里。
-              「查看 CLI 会话」同一行操作区，凭 canViewSession 自守卫。 */}
-          {((job.attempt != null && job.attempt > 1) || canRetryJob(job) || canViewSession(job)) && (
-            <div className="mt-3 flex items-center gap-2.5">
+              操作区口径与台账分支一致：职位原帖 / 查看 CLI 会话为图标按钮（各凭
+              自守卫），重试保留文字——写操作不与读操作同权。 */}
+          {((job.attempt != null && job.attempt > 1) || canRetryJob(job) || canViewSession(job) || postingUrl) && (
+            <div className="mt-3 flex flex-wrap items-center gap-2.5">
               {job.attempt != null && job.attempt > 1 && (
                 <span className="text-xs text-faint">{t("jobs.retryAttempt", { n: job.attempt })}</span>
               )}
-              <CliSessionButton job={job} withLabel />
+              <PostingLinkButton url={postingUrl} className={ICON_ACTION_CLASS} />
+              <CliSessionButton job={job} className={ICON_ACTION_CLASS} />
               <RetryJobButton job={job} withLabel />
             </div>
           )}

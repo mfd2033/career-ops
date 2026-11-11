@@ -10,6 +10,8 @@ import { fmtStartedAt } from "@/lib/started-at.mjs";
 import { formatRunEngine } from "@/lib/cli-labels.mjs";
 import { batchItemDetailHref } from "@/lib/batch-child-ledger.mjs";
 import { BatchItemRetryButton } from "@/components/jobs/batch-item-retry-button";
+import { PostingLinkButton } from "@/components/jobs/posting-link-button";
+import { jobPostingUrl } from "@/lib/job-posting-url.mjs";
 
 // 演示/无效域名（RFC 2606 保留域）：历史批量运行里拿这类 URL 试跑过，条目仍在
 // 台账里——降权显示而不隐藏记录（UI 审计 2026-10-31 FAIL #13）。
@@ -91,11 +93,15 @@ export function BatchItemList({
                   {t("jobs.batchItemRetryKept")}
                 </span>
               )}
+              {/* 职位原帖：逐项的 key 才是该条 URL（label 是可读的「公司 · 岗位」，
+                  checkup 批量的 key 是 tracker#N），新标签页打开。z-10 浮在整卡的
+                  拉伸链接之上，点它不跳站内详情。 */}
+              <PostingLinkButton url={jobPostingUrl(it.key)} className="relative z-10 mt-0.5" />
               {/* ADR-0093：终态失败的 evaluate 子项可单独重跑（独立工作器，父批量
                   失败记录保留）；成功/跳过/占位项由纯函数拦掉。引擎不随派发透传——
                   修订 2：重试取派发那一刻的最新模型配置。 */}
               {!it.ok && !it.skipped && (
-                <BatchItemRetryButton item={it} parentTerminal={parentTerminal} className="mt-0.5" />
+                <BatchItemRetryButton item={it} parentTerminal={parentTerminal} className="relative z-10 mt-0.5" />
               )}
             </div>
             <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 pl-5 text-[11px] tabular-nums text-faint">
@@ -129,17 +135,25 @@ export function BatchItemList({
         );
         return (
           <li key={it.key}>
-            {href ? (
-              <Link
-                href={href}
-                title={t("jobs.batchOpenDetail")}
-                className="block rounded-xl border border-border bg-surface/60 p-2.5 transition-colors hover:border-brand/50 hover:bg-surface-hover"
-              >
-                {inner}
-              </Link>
-            ) : (
-              <div className="rounded-xl border border-border bg-surface/40 p-2.5">{inner}</div>
-            )}
+            {/* 站内详情由「整卡是 Link」改成拉伸链接覆盖层：卡内现在有外链图标和重试
+                按钮，<a> 不能嵌套 <a>。覆盖层排在内容之后（画在上层）负责整卡点击，
+                两个交互控件各自 relative z-10 浮在它之上。 */}
+            <div
+              className={cn(
+                "relative rounded-xl border p-2.5 transition-colors",
+                href ? "border-border bg-surface/60 hover:border-brand/50 hover:bg-surface-hover" : "border-border bg-surface/40",
+              )}
+            >
+              {inner}
+              {href && (
+                <Link
+                  href={href}
+                  title={t("jobs.batchOpenDetail")}
+                  aria-label={t("jobs.batchOpenDetail")}
+                  className="absolute inset-0 rounded-xl"
+                />
+              )}
+            </div>
           </li>
         );
       })}
