@@ -231,6 +231,24 @@ diagCloseBtn.addEventListener("click", closeDiag);
 diagDismissBtn.addEventListener("click", closeDiag);
 diagOverlay.addEventListener("click", (e) => { if (e.target === diagOverlay) closeDiag(); });
 
+// 复制结果反馈必须落在浮层内部：`#footTip` 在主界面 footer 上，而浮层是全屏
+// fixed 覆盖，写在 footer 里用户一个字都看不见，于是「点了没反应」。
+// 这里把按钮本身切成成功态，2 秒后复位（按钮 flex:1 定宽居中，换字不抖动）。
+const COPY_LABEL = "一键复制诊断";
+const COPY_FLASH_MS = 2000;
+let copyFlashTimer = null;
+
+function flashCopyResult(ok) {
+  if (copyFlashTimer) clearTimeout(copyFlashTimer);
+  copyDiagBtn.textContent = ok ? "已复制 ✓" : "复制失败";
+  copyDiagBtn.classList.toggle("copied", ok);
+  copyFlashTimer = setTimeout(() => {
+    copyDiagBtn.textContent = COPY_LABEL;
+    copyDiagBtn.classList.remove("copied");
+    copyFlashTimer = null;
+  }, COPY_FLASH_MS);
+}
+
 // One-click copy of the last diagnostic snapshot (popup re-opens each click,
 // so lastDiagJson may be stale until paintDiag runs; refresh it on demand and
 // copy the freshest values).
@@ -239,12 +257,15 @@ copyDiagBtn.addEventListener("click", async () => {
   try {
     await navigator.clipboard.writeText(lastDiagJson);
     footTipEl.textContent = "诊断已复制 ✓";
+    flashCopyResult(true);
   } catch {
     // Clipboard API can be unavailable in some popup contexts; fall back to
     // a select-and-copy of the pre element. `<pre>` 没有 .select()，须先判断，
     // 否则抛 TypeError 变成 unhandled rejection。
     if (typeof diagEl.select === "function") diagEl.select();
-    document.execCommand("copy");
-    footTipEl.textContent = "诊断已复制 ✓";
+    // execCommand 返回布尔值，只有真的复制成功才报成功，否则用户依旧不知道。
+    const copied = document.execCommand("copy");
+    footTipEl.textContent = copied ? "诊断已复制 ✓" : "复制失败：请手动选中诊断文本复制";
+    flashCopyResult(copied);
   }
 });

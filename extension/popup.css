@@ -96,5 +96,8 @@ body:has(#diagOverlay:not([hidden])) { min-height: 480px; }
 .sheet-foot .dismiss:hover { background: var(--bg); }
 .copy-btn { background: #2a2e35; color: #cfd6e4; border: 1px solid #3a3f4a; border-radius: 6px; padding: 4px 10px; font-size: 11px; cursor: pointer; }
 .copy-btn:hover { background: #343a44; }
+/* 复制成功态：浮层遮住了 footer 提示，反馈只能由按钮自己给，2 秒后由 JS 复位 */
+.copy-btn.copied,
+.copy-btn.copied:hover { background: var(--brand-strong); border-color: var(--brand-strong); color: #fff; }
 
 @keyframes pulse { 50% { opacity: 0.3; } }
