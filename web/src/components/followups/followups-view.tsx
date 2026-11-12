@@ -3,10 +3,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { ArrowLeft, CalendarClock, ChevronDown, ChevronRight, Loader2, Mail, NotebookPen, Pin, Search, Snowflake, Trash2 } from "lucide-react";
+import { ArrowLeft, CalendarClock, ChevronDown, ChevronRight, Loader2, Mail, NotebookPen, Pin, Search, Snowflake, Trash2, Zap } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { fieldCls } from "@/components/ui/field-styles";
 import { CompanyLogo } from "@/components/company-logo";
+import { AutoFollowupDialog } from "@/components/followups/auto-followup-dialog";
 import { LogDialog } from "@/components/followups/log-dialog";
 import { NextDateDialog } from "@/components/followups/next-date-dialog";
 import { StatusPill } from "@/components/followups/status-pill";
@@ -99,6 +100,8 @@ export function FollowupsView() {
   const [data, setData] = useState<CadenceResponse | null>(null);
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
   const [dialogFor, setDialogFor] = useState<CadenceEntry | null>(null);
+  // 自动跟进（⚡）：话术确认 → 扩展代发 → 回填记录，一个弹窗两个阶段。
+  const [autoFor, setAutoFor] = useState<CadenceEntry | null>(null);
   const [pinFor, setPinFor] = useState<CadenceEntry | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   // Inline status edit (ADR-0077): the undo toast. The write itself is always
@@ -425,6 +428,7 @@ export function FollowupsView() {
                   entry={e}
                   expanded={expanded.has(e.num)}
                   onToggle={() => toggleExpand(e.num)}
+                  onAuto={() => setAutoFor(e)}
                   onLog={() => setDialogFor(e)}
                   onPin={() => setPinFor(e)}
                   onRemove={removeLogged}
@@ -439,6 +443,7 @@ export function FollowupsView() {
       )}
 
       {dialogFor && <LogDialog entry={dialogFor} onClose={() => setDialogFor(null)} onLogged={refetch} />}
+      {autoFor && <AutoFollowupDialog entry={autoFor} onClose={() => setAutoFor(null)} onLogged={refetch} />}
       {pinFor && <NextDateDialog entry={pinFor} onClose={() => setPinFor(null)} onChanged={refetch} />}
       {freezeFor && (
         <FreezeDialog
@@ -548,6 +553,7 @@ function FollowupRow({
   entry: e,
   expanded,
   onToggle,
+  onAuto,
   onLog,
   onPin,
   onRemove,
@@ -558,6 +564,7 @@ function FollowupRow({
   entry: CadenceEntry;
   expanded: boolean;
   onToggle: () => void;
+  onAuto: () => void;
   onLog: () => void;
   onPin: () => void;
   onRemove: (num: number) => void;
@@ -666,6 +673,16 @@ function FollowupRow({
         </td>
         <td className="whitespace-nowrap px-2.5 py-3">
           <span className="inline-flex items-center gap-0.5">
+             {/* 主操作：自动跟进（确认话术 → 扩展代发 → 回填记录）。其余动作降级为 faint。 */}
+             <button
+              type="button"
+              onClick={onAuto}
+              title={t("followups.autoAction")}
+              aria-label={t("followups.autoAction")}
+              className="rounded-md p-1 text-brand-text transition-colors hover:bg-brand-soft hover:text-brand"
+            >
+              <Zap className="size-3.5" />
+            </button>
               <button
               type="button"
               onClick={onLog}

@@ -1156,6 +1156,83 @@ async function fetchDetailHtml(rawUrl) {
   }
 }
 
+// ---- 自动跟进：把用户已确认的一条消息交给招聘站页面的 followup-send.js ----
+//
+// 边界：一次点击只发一条。这里的重试只针对「消息送不到内容脚本」（刚开的 tab /
+// 扩展刚重载），一旦送达就不再发第二次——发送本身绝不重试。结果原样回 web
+// （sent / uncertain / failed + 原因码），记录与「对方未读」由 web 侧决定。
+
+const FOLLOWUP_CONTENT_RETRY = 3;
+const FOLLOWUP_CONTENT_RETRY_MS = 700;
+
+/** URL → 比较键（origin + 去尾斜杠的路径）；非法 URL 返回 null。 */
+function urlMatchKey(raw) {
+  try {
+    const u = new URL(raw);
+    return { origin: u.origin, path: u.pathname.replace(/\/+$/, "") };
+  } catch {
+    return null;
+  }
+}
+
+/** 找已开的同职位页（同 origin，路径相同或互为前缀）。 */
+async function findFollowupTab(raw) {
+  const key = urlMatchKey(raw);
+  if (!key) return null;
+  const tabs = await chrome.tabs.query({}).catch(() => []);
+  const hits = tabs.filter((tab) => {
+    if (!tab.url) return false;
+    const k = urlMatchKey(tab.url);
+    if (!k || k.origin !== key.origin) return false;
+    return k.path === key.path || k.path.startsWith(`${key.path}/`) || key.path.startsWith(`${k.path}/`);
+  });
+  if (!hits.length) return null;
+  return hits.find((tab) => tab.active) || hits[0];
+}
+
+/** 没开就新开并等加载；content script 在 document_idle 注入，多留 800ms。 */
+async function openFollowupTab(raw) {
+  const tab = await chrome.tabs.create({ url: raw, active: true });
+  await waitTabLoaded(tab.id, 15000);
+  await new Promise((resolve) => setTimeout(resolve, 800));
+  return tab;
+}
+
+async function sendFollowup(msg) {
+  const url = typeof (msg && msg.url) === "string" ? msg.url.trim() : "";
+  const text = typeof (msg && msg.text) === "string" ? msg.text : "";
+  if (!/^https?:\/\//i.test(url)) return { ok: false, status: "failed", reason: "no-url" };
+  if (!text.trim()) return { ok: false, status: "failed", reason: "empty-text" };
+
+  // 页面已开 → 提到前台（用户要能看见填了什么、发出去了什么）；没开 → 新开。
+  let tab = await findFollowupTab(url);
+  if (tab && typeof tab.id === "number") {
+    await chrome.tabs.update(tab.id, { active: true }).catch(() => {});
+    if (typeof tab.windowId === "number") await chrome.windows.update(tab.windowId, { focused: true }).catch(() => {});
+  } else {
+    tab = await openFollowupTab(url);
+  }
+  if (!tab || typeof tab.id !== "number") return { ok: false, status: "failed", reason: "no-tab" };
+
+  let lastError = null;
+  for (let attempt = 0; attempt < FOLLOWUP_CONTENT_RETRY; attempt += 1) {
+    try {
+      const res = await chrome.tabs.sendMessage(tab.id, { type: "followup-send", text });
+      if (res && typeof res === "object") return { ...res, tabId: tab.id };
+    } catch (err) {
+      lastError = err;
+      await new Promise((resolve) => setTimeout(resolve, FOLLOWUP_CONTENT_RETRY_MS));
+    }
+  }
+  return {
+    ok: false,
+    status: "failed",
+    reason: "no-content-script",
+    detail: (lastError && lastError.message) || null,
+    tabId: tab.id,
+  };
+}
+
 // ---- message routing ------------------------------------------------------
 
 const selectionByTab = new Map(); // tabId → string[] (selected posting URLs)
@@ -1297,6 +1374,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           sendResponse(await resolveJobJump(msg, sender));
         } catch (err) {
           sendResponse({ ok: false, error: err.message });
+        }
+        break;
+      }
+      case "followup-send": {
+        // 跟进页「自动跟进」的发送通道：web 面板把确认过的文本交来，本 SW 负责
+        // 定位/打开职位页并转发给 followup-send.js，结果原样回传（含失败原因码）。
+        try {
+          sendResponse(await sendFollowup(msg));
+        } catch (err) {
+          sendResponse({ ok: false, status: "failed", reason: "exception", detail: (err && err.message) || String(err) });
         }
         break;
       }

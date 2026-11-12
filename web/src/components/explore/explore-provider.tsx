@@ -24,6 +24,7 @@ import {
   type ScanEvent,
 } from "@/lib/explore";
 import { makeAiStreamParser, type AiTraceChunk } from "@/lib/explore-ai";
+import { extRequest } from "@/lib/ext-bridge";
 import { MAX_OFFER_LIMIT } from "@/lib/whats-new.mjs";
 import { readRemovedUrls, writeRemovedUrls } from "@/lib/explore-removed.mjs";
 import { isScannerMissing, isBrowserCollectorMissing } from "@/lib/explore-error.mjs";
@@ -194,35 +195,8 @@ type ResultSnapshot = {
   aiIntent: string;
 };
 
-// ── 扩展桥(localhost 页面 → 扩展 background,ADR-0007 E5)──────────────────────
-const EXT_BRIDGE_TAG = "__careerExt";
-let extMsgSeq = 0;
-
-/** 探索页 → 扩展 SW(req/res 经 web-bridge.js content script 转发)。桥缺失/超时 → {ok:false}。
- *  timeoutMs 可配:普通探测默认 4s;drive-scan 要等开 tab + content 注入,给 45s。 */
-function extRequest(msg: unknown, timeoutMs = 4000): Promise<Record<string, unknown>> {
-  return new Promise((resolve) => {
-    if (typeof window === "undefined") {
-      resolve({ ok: false, error: "no-window" });
-      return;
-    }
-    const id = ++extMsgSeq;
-    const timer = window.setTimeout(() => {
-      window.removeEventListener("message", onMsg);
-      resolve({ ok: false, error: "ext-bridge-timeout" });
-    }, timeoutMs);
-    function onMsg(e: MessageEvent) {
-      const d = e.data;
-      if (!d || d.tag !== `${EXT_BRIDGE_TAG}:res` || d.id !== id) return;
-      window.removeEventListener("message", onMsg);
-      clearTimeout(timer);
-      resolve((d.res || { ok: false }) as Record<string, unknown>);
-    }
-    window.addEventListener("message", onMsg);
-    window.postMessage({ tag: `${EXT_BRIDGE_TAG}:req`, id, msg }, "*");
-  });
-}
-
+// 扩展桥（页面 → 扩展 SW）的调用口径已抽到 @/lib/ext-bridge：探索页的扫描驱动与
+// 跟进页的自动跟进共用同一套 postMessage 标签与超时语义。
 export function ExploreProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const { t } = useI18n();
