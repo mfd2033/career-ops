@@ -134,6 +134,7 @@ export const en: Dict = {
   "followups.fieldContact": "Contact",
   "followups.optional": "optional",
   "followups.contactPlaceholder": "who you reached out to",
+  "followups.clearContact": "Clear contact",
   // 历史联系人选择：来源是本报告已记录的跟进（computed in followup-contacts.mjs）。
   "followups.historyContacts": "Previously used:",
   "followups.historyMore": "More ({n})",
@@ -317,6 +318,7 @@ export const zh: Dict = {
   "followups.fieldContact": "联系人",
   "followups.optional": "可选",
   "followups.contactPlaceholder": "你联系了谁",
+  "followups.clearContact": "清空联系人",
   // 历史联系人选择（与 en 段同键）。
   "followups.historyContacts": "历史联系人：",
   "followups.historyMore": "更多 {n} 个",

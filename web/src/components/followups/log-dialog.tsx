@@ -5,6 +5,7 @@ import { ChevronDown, Loader2, X } from "lucide-react";
 import { CHANNELS, DEFAULT_CHANNEL, channelLabel } from "@/lib/followup-channel.mjs";
 import { contactOptions, historyContacts, splitHistoryContacts } from "@/lib/followup-contacts.mjs";
 import { GenerateScriptPanel } from "@/components/followups/generate-script-panel";
+import { InputClearButton } from "@/components/input-clear-button";
 import { localISODate, type CadenceEntry, type Channel } from "@/lib/followups";
 import { cn } from "@/lib/cn";
 import { useI18n } from "@/lib/i18n/context";
@@ -179,25 +180,39 @@ export function LogDialog({
               {t("followups.fieldContact")} <span className="font-normal text-faint">({t("followups.optional")})</span>
             </label>
             <div className="relative" ref={contactRef}>
-              <input
-                id={`co-contact-${entry.num}`}
-                value={contact}
-                onChange={(e) => {
-                  setContact(e.target.value);
-                  setSuggestQuery(e.target.value);
-                  setSuggestOpen(true);
-                }}
-                onFocus={() => {
-                  setSuggestQuery("");
-                  setSuggestOpen(true);
-                }}
-                placeholder={t("followups.contactPlaceholder")}
-                role="combobox"
-                aria-expanded={suggestOpen}
-                aria-controls={`co-suggest-${entry.num}`}
-                aria-autocomplete="list"
-                className={cn(inputCls, "mt-1")}
-              />
+              {/* 内嵌 × 需要自己的 relative 容器（ADR-0059 同款）：外层容器还要
+                  锚定候选列表，不能两用。mt-1 移到这层，× 才能垂直居中对齐输入框。 */}
+              <div className="relative mt-1">
+                <input
+                  id={`co-contact-${entry.num}`}
+                  value={contact}
+                  onChange={(e) => {
+                    setContact(e.target.value);
+                    setSuggestQuery(e.target.value);
+                    setSuggestOpen(true);
+                  }}
+                  onFocus={() => {
+                    setSuggestQuery("");
+                    setSuggestOpen(true);
+                  }}
+                  placeholder={t("followups.contactPlaceholder")}
+                  role="combobox"
+                  aria-expanded={suggestOpen}
+                  aria-controls={`co-suggest-${entry.num}`}
+                  aria-autocomplete="list"
+                  // pr-8 常驻留白：文字不滚到 × 下方（ADR-0059 决定 8）
+                  className={cn(inputCls, "pr-8")}
+                />
+                {/* 一键清空：只清联系人，候选列表随过滤词归位到全部历史联系人。 */}
+                <InputClearButton
+                  show={contact.length > 0}
+                  onClear={() => {
+                    setContact("");
+                    setSuggestQuery("");
+                  }}
+                  label={t("followups.clearContact")}
+                />
+              </div>
               {/* 自绘候选列表：与「更多」下拉同一套行样式，替掉浏览器原生
                   datalist 弹出层（样式不可控，与弹窗其余控件不一致）。 */}
               {suggestOpen && suggestions.length > 0 && (
