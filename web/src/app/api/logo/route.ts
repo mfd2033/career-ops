@@ -2,29 +2,27 @@ import { NextRequest } from "next/server";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { careerOpsRoot } from "@/lib/career-ops";
-import { companyDomain } from "@/lib/company";
-import { companyCacheKey } from "@/lib/core/logo-cache-key.mjs";
+import { resolveLogoKey } from "@/lib/core/logo-cache-key.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// Localhost logo proxy + on-disk cache, FOREVER per key. Honors local-first: the
-// browser never talks to Google directly. Accepts `?domain=` (exact) OR
-// `?company=` (a name → we guess a handful of likely domains and resolve once).
-// Each key is fetched at most once ever, then served from .career-ops-web/logo-cache
-// (a hit, or an empty sentinel for a known miss). On any miss → 404 so the
-// client's <img onError> falls back to the offline monogram. Because the cache is
-// keyed by company, once a company's logo resolves it's instant for that card AND
-// every other card (this search or any future one), forever. "Forever" is why
-// company keys are versioned — see lib/core/logo-cache-key.
+// 本地 logo 缓存读取器。**不向任何第三方发请求。**
+//
+// 曾经这里按公司名猜域名、去 Google favicon 服务抓图，成功与失败都落盘一次且永不
+// 重试（失败写 0 字节哨兵）。代价在离线/被墙的机器上最刺眼：抓取失败同样是「永久
+// miss」，40/45 个缓存 key 在几秒内被写死，之后网络恢复也不会再看一眼；同时每张没有
+// logo 的公司卡都会在控制台留一条 resource-load-error。
+//
+// fork-local 决策（2026-11-12）：这个 fork 面向中文招聘，雇主名基本没有可猜的 ASCII
+// 域名，外呼本身也换不来 logo。路由因此收窄为纯读缓存：命中就返回图片，否则 404，
+// 客户端回落彩色字母组合（components/company-logo.tsx，默认连请求都不发）。
+// 参数 → key 的判定全在 lib/core/logo-cache-key 的纯函数里，有测试兜住。
+//
+// 缓存文件里的 0 字节哨兵是历史遗留的「已知 miss」，与 404 同义，不再新写。
 
-const DOMAIN_RE = /^[a-z0-9.-]{1,253}\.[a-z]{2,}$/i;
-
-/** Every miss is permanent — the empty on-disk sentinel is never refetched — so
- *  the 404 can carry a cache header too. Without one the browser treats a 404 as
- *  uncacheable and re-requests the same dead logos on every page load (a 43-row
- *  /followups page fired 26 of them). The client's <img onError> monogram is
- *  unaffected: a cached 404 still errors. */
+/** 404 也带缓存头：否则浏览器把 404 当不可缓存，每次进页面都把同一批死 logo 再问一遍。
+ *  客户端 <img onError> 的字母兜底不受影响 —— 命中缓存的 404 依然会触发 error。 */
 const NO_LOGO_HEADERS = { "Cache-Control": "public, max-age=604800" };
 
 const noLogo = () => new Response("no logo", { status: 404, headers: NO_LOGO_HEADERS });
@@ -33,103 +31,30 @@ function cacheDir(): string {
   return path.join(careerOpsRoot(), ".career-ops-web", "logo-cache");
 }
 
-/** Plausible domains for a company name, cheapest/likeliest first.
- *  The curated override map in lib/company wins when it knows the brand (it is
- *  the only source for non-.com marks like notion.so / zoom.us / deepmind.google);
- *  the slug guesses below cover everything else. Keeping both matters because ATS
- *  postings carry legal entity names ("Amazon.com Services LLC") that no single
- *  slug rule resolves — the firstWord stem is what rescues those.
- *  Changing which domains this returns, or their order, means bumping
- *  COMPANY_KEY_VERSION — warm caches would otherwise never see the change. */
-function companyDomains(company: string): string[] {
-  const paren = company.match(/\(([A-Za-z0-9]{2,12})\)/)?.[1]; // "… (5WPR)"
-  // [^()] (not [^)]) keeps the match unambiguous — no polynomial backtracking on
-  // adversarial inputs full of unclosed parens (CodeQL js/polynomial-redos).
-  const base = company.replace(/\([^()]*\)/g, "").trim();
-  const compact = base.toLowerCase().replace(/&/g, "and").replace(/[^a-z0-9]/g, "");
-  const firstWord = base.toLowerCase().split(/\s+/)[0].replace(/[^a-z0-9]/g, "");
-  const stems = [...new Set([compact, paren?.toLowerCase(), firstWord].filter((s): s is string => !!s && s.length >= 2 && s.length <= 30))];
-  const out: string[] = [];
-  const curated = companyDomain(base);
-  if (curated) out.push(curated);
-  for (const t of [".com", ".ai", ".io", ".co"]) for (const s of stems) out.push(s + t);
-  return [...new Set(out)].slice(0, 5);
-}
-
-/** Fetch a real favicon for one domain (Google's tokenless service). Returns the
- *  bytes, or null for a miss (Google serves a tiny globe placeholder for misses). */
-async function fetchFavicon(domain: string): Promise<ArrayBuffer | null> {
-  try {
-    const res = await fetch(`https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=64`, {
-      headers: { Accept: "image/*" },
-      signal: AbortSignal.timeout(3500),
-      redirect: "follow",
-    });
-    if (!res.ok) return null;
-    const ab = await res.arrayBuffer();
-    return ab.byteLength > 220 ? ab : null;
-  } catch {
-    return null;
-  }
-}
-
 export async function GET(req: NextRequest) {
   const sp = req.nextUrl.searchParams;
-  const domain = (sp.get("domain") ?? "").trim().toLowerCase();
-  const company = (sp.get("company") ?? "").trim();
+  const resolved = resolveLogoKey({ domain: sp.get("domain"), company: sp.get("company") });
 
-  let key: string;
-  let candidates: string[];
-  if (domain) {
-    if (!DOMAIN_RE.test(domain) || domain.includes("..")) return new Response("bad domain", { status: 400 });
-    key = domain.replace(/[^a-z0-9.-]/g, "_");
-    candidates = [domain];
-  } else if (company) {
-    // Versioned + digested (see lib/core/logo-cache-key): the cache never
-    // expires, so the key has to carry both the resolver version and enough of
-    // the name to keep two companies apart.
-    const companyKey = companyCacheKey(company);
-    // Pure CJK names carry no ASCII to key on (companyCacheKey → null) and no
-    // plausible domain either — a guaranteed miss, not a client error. 404 keeps
-    // the <img onError> monogram fallback and the console free of false 400s.
-    if (!companyKey) return noLogo();
-    key = companyKey;
-    candidates = companyDomains(company);
-    if (candidates.length === 0) return noLogo();
-  } else {
-    return new Response("need domain or company", { status: 400 });
-  }
+  if (resolved.status === "bad-domain") return new Response("bad domain", { status: 400 });
+  if (resolved.status === "bad-request") return new Response("need domain or company", { status: 400 });
+  if (resolved.status === "not-found") return noLogo();
 
-  // `key` is already sanitized above, but enforce containment anyway: a cache
-  // path must never resolve outside the cache dir (defense in depth).
-  const file = path.resolve(cacheDir(), `${key}.png`);
-  if (!file.startsWith(path.resolve(cacheDir()) + path.sep)) return new Response("bad key", { status: 400 });
+  // key 已由纯函数保证是安全文件名，这里再强制一次包含关系（纵深防御）：
+  // 缓存路径永远不能解析到缓存目录之外。
+  const root = path.resolve(cacheDir());
+  const file = path.resolve(root, `${resolved.key}.png`);
+  if (!file.startsWith(root + path.sep)) return new Response("bad key", { status: 400 });
 
-  // 1) serve from disk cache forever (hit, or empty sentinel = known miss)
   try {
     const buf = await fs.readFile(file);
     if (buf.byteLength > 0) {
-      return new Response(new Uint8Array(buf), { status: 200, headers: { "Content-Type": "image/png", "Cache-Control": "public, max-age=604800" } });
+      return new Response(new Uint8Array(buf), {
+        status: 200,
+        headers: { "Content-Type": "image/png", "Cache-Control": "public, max-age=604800" },
+      });
     }
-    return noLogo();
   } catch {
-    /* not cached yet → resolve below */
+    /* 未缓存 → 统一落到下面的 404 */
   }
-
-  // 2) resolve once: first candidate domain that yields a real favicon wins
-  let bytes: ArrayBuffer | null = null;
-  for (const d of candidates) {
-    bytes = await fetchFavicon(d);
-    if (bytes) break;
-  }
-
-  try {
-    await fs.mkdir(cacheDir(), { recursive: true });
-    await fs.writeFile(file, bytes ? Buffer.from(bytes) : new Uint8Array(0)); // sentinel on miss → never refetch
-  } catch {
-    /* best-effort */
-  }
-
-  if (!bytes) return noLogo();
-  return new Response(bytes, { status: 200, headers: { "Content-Type": "image/png", "Cache-Control": "public, max-age=604800" } });
+  return noLogo();
 }

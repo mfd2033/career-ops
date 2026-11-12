@@ -6,11 +6,14 @@ import { cn } from "@/lib/cn";
 
 const CONFIG_KEY = "career-ops:config";
 
-// A small company mark: the real favicon on a white tile when logos are enabled
-// and resolvable, otherwise a deterministic colored monogram. The monogram is
-// the always-rendered base layer (SSR-safe + offline floor); the logo fades in
-// on top once loaded, and any failure (404/offline/disabled) just leaves the
-// monogram showing. See lib/company.ts + /api/logo.
+// A small company mark: a logo image on a white tile when one is available,
+// otherwise a deterministic colored monogram. The monogram is the always-rendered
+// base layer (SSR-safe + offline floor); the image fades in on top once loaded,
+// and any failure (404/disabled) just leaves the monogram showing.
+//
+// fork-local（2026-11-12）：/api/logo 已不再外呼，只读磁盘缓存。因此按公司名取图
+// 这条路默认关闭 —— 中文雇主名基本没有可猜的域名，开着只会每张卡换一个 404 和一条
+// 控制台报错。传了 `src`（本地打包的门户 logo）不受这个开关影响，永远显示。
 export function CompanyLogo({
   name,
   src,
@@ -41,18 +44,19 @@ export function CompanyLogo({
     try {
       const raw = localStorage.getItem(CONFIG_KEY);
       const v = raw ? JSON.parse(raw) : null;
-      setEnabled(v?.logos !== false); // default ON unless explicitly disabled
+      // 默认关：按名查图不再外呼，开着只是多问一次本地缓存、多一条 404。
+      setEnabled(v?.logos === true);
     } catch {
-      setEnabled(true);
+      setEnabled(false);
     }
   }, []);
 
   const hue = monogramHue(name);
   const radius = Math.max(4, Math.round(size * 0.28));
-  // Use a caller-supplied image directly (bundled portal logos) when given; otherwise
-  // resolve by NAME via /api/logo. Either way a failure leaves the monogram showing.
+  // 调用方给了明确地址（本地打包的门户 logo）就直接用，不受开关限制；
+  // 否则按名字走 /api/logo 的本地缓存。任一失败都留着字母组合。
   const logoSrc = src ?? `/api/logo?company=${encodeURIComponent(name)}`;
-  const showImg = enabled && !failed && (!!src || !!name?.trim());
+  const showImg = !failed && (!!src || (enabled && !!name?.trim()));
 
   return (
     <span

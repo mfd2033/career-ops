@@ -773,7 +773,8 @@ export function PipelineView({
 }
 
 // 单行抽成 memo 组件：勾选/切 tab 时只重渲染真正变化的行。原表格 key 带索引 i，
-// 搜索改序会连带 key 变化，逼所有 CompanyLogo remount 重发 /api/logo——现在 key 稳定
+// 搜索改序会连带 key 变化，逼所有 CompanyLogo remount（开着 Logo 时会各重发一次本地
+// 缓存请求）——现在 key 稳定
 // 为 r.n，配合 memo，即便重排也不再重挂。父层只传需要本地化的字符串（其余纯展示
 // 逻辑用纯函数在组件内从 row 现算），保证 props 尽量为原始值以便浅比较命中。
 const TrackerRow = memo(function TrackerRow({

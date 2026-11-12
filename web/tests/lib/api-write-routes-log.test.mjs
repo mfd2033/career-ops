@@ -46,7 +46,6 @@ const EXEMPT = new Map([
   ["apply/prefill/route.ts", "唯一写盘是 .career-ops-web/apply-prefill.log 诊断日志；预填答案只流给浏览器，用户层无变更"],
   ["cv/ingest/route.ts", "只写 os.tmpdir() 下随请求销毁的临时 CV；真正落 cv.md 走 /api/cv 已记 cv-save"],
   ["cv-tailor/route.ts", "后台任务，事实源是 runs/index.jsonl 的 kind:cv-tailor，补埋点会让同一次定制出现两条"],
-  ["logo/route.ts", "只写 .career-ops-web/logo-cache 的 favicon 字节与空哨兵，纯可重建缓存"],
   ["open-cli-session/route.ts", "写的是 .career-ops-web/open-session.cmd 这份固定启动器，内容未变即跳过"],
   ["quick-eval/test/route.ts", "只改 data/quick-eval.json 的 lastTest 探测位；密钥增删改走 /api/quick-config 已记 quick-key"],
   ["runs/save/route.ts", "写 .career-ops-web/runs/<id>.md 的 worker 日志转存，事实源是同目录 runs/index.jsonl"],

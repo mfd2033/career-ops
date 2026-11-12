@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
+import { useMemo, useRef, type MouseEvent as ReactMouseEvent } from "react";
 import { ExternalLink, Plus, Check, Loader2, ShieldQuestion, Sparkles, Coins, X, Ban } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { instrumentSerif } from "@/lib/fonts";
@@ -18,25 +18,14 @@ function freshness(postedAt: string): string {
   return days === 0 ? "today" : days === 1 ? "1d ago" : `${days}d ago`;
 }
 
-// Real company logo (favicon) via the localhost proxy, cached on disk FOREVER per
-// company — so once it resolves it's instant for this card AND every other card,
-// this search or any future one. Falls back to a monogram on miss.
+// 公司标：字母组合。
+//
+// fork-local（2026-11-12）：/api/logo 不再外呼、只读磁盘缓存，探索页的雇主几乎
+// 不可能命中缓存 —— 挂 <img> 等于每个卡片换一条 404 和一次闪烁。这里直接出字母块
+// （与原 onError 兜底完全同一份样式）。
 function Logo({ company }: { company: string }) {
-  const [failed, setFailed] = useState(false);
   const letter = (company || "?").trim().charAt(0).toUpperCase();
-  if (failed || !company.trim()) {
-    return <div className="grid size-9 shrink-0 place-items-center rounded-lg bg-brand-soft text-sm font-semibold text-brand">{letter}</div>;
-  }
-  return (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img
-      src={`/api/logo?company=${encodeURIComponent(company)}`}
-      alt=""
-      loading="lazy"
-      onError={() => setFailed(true)}
-      className="size-9 shrink-0 rounded-lg border border-border bg-surface object-contain p-1"
-    />
-  );
+  return <div className="grid size-9 shrink-0 place-items-center rounded-lg bg-brand-soft text-sm font-semibold text-brand">{letter}</div>;
 }
 
 // 卡片与表格行共用的单岗位动作状态：全局 worker 感知 + 入管/评估动作 + 薪资未知打标。
