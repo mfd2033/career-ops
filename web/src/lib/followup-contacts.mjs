@@ -54,3 +54,53 @@ export function splitHistoryContacts(list, visible = 3) {
   const count = Number.isFinite(visible) && visible > 0 ? Math.floor(visible) : 0;
   return { visible: items.slice(0, count), overflow: items.slice(count) };
 }
+
+/**
+ * 联系人候选行：历史跟进里的联系人（带日期/渠道）+ 报告建议联系人（带姓名），
+ * 按输入内容做大小写不敏感的包含匹配。
+ *
+ * 换成自绘下拉的原因：原生 <datalist> 的弹出层由浏览器绘制，样式完全不受
+ * 控制，跟弹窗里的其余控件不是一套；这里把「候选 + 过滤」收敛成数据，组件
+ * 只负责画。
+ *
+ * 顺序即展示顺序：历史在前（最近用过的先出现），建议联系人在后；
+ * 同一个地址只保留一条——历史里已经跟过的人不再重复出现。
+ *
+ * @param {{history?: Array<{contact: string, date: string, channel: string, count: number}>, suggested?: Array<{email: string, name: string | null}>, query?: string}} [input]
+ * @returns {Array<{value: string, label: string, date: string, channel: string, source: "history" | "suggested"}>}
+ */
+export function contactOptions(input = {}) {
+  const { history = [], suggested = [], query = "" } = input;
+  /** @type {Array<{value: string, label: string, date: string, channel: string, source: "history" | "suggested"}>} */
+  const rows = [];
+  const seen = new Set();
+
+  for (const h of Array.isArray(history) ? history : []) {
+    const value = typeof h?.contact === "string" ? h.contact.trim() : "";
+    if (!value) continue;
+    seen.add(value.toLowerCase());
+    rows.push({
+      value,
+      label: value,
+      date: typeof h.date === "string" ? h.date : "",
+      channel: typeof h.channel === "string" ? h.channel : "",
+      source: "history",
+    });
+  }
+
+  for (const s of Array.isArray(suggested) ? suggested : []) {
+    const email = typeof s?.email === "string" ? s.email.trim() : "";
+    if (!email) continue;
+    const key = email.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const name = typeof s?.name === "string" ? s.name.trim() : "";
+    rows.push({ value: email, label: name || email, date: "", channel: "", source: "suggested" });
+  }
+
+  const needle = String(query ?? "").trim().toLowerCase();
+  if (!needle) return rows;
+  return rows.filter(
+    (row) => row.value.toLowerCase().includes(needle) || row.label.toLowerCase().includes(needle),
+  );
+}

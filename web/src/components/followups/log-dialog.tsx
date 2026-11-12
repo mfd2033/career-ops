@@ -2,9 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, Loader2, X } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
 import { CHANNELS, DEFAULT_CHANNEL, channelLabel } from "@/lib/followup-channel.mjs";
-import { historyContacts, splitHistoryContacts } from "@/lib/followup-contacts.mjs";
+import { contactOptions, historyContacts, splitHistoryContacts } from "@/lib/followup-contacts.mjs";
 import { GenerateScriptPanel } from "@/components/followups/generate-script-panel";
 import { localISODate, type CadenceEntry, type Channel } from "@/lib/followups";
 import { cn } from "@/lib/cn";
@@ -42,36 +41,44 @@ export function LogDialog({
   );
   const [showMore, setShowMore] = useState(false);
   const moreRef = useRef<HTMLDivElement>(null);
-  // datalist 同时容纳报告建议联系人与历史联系人（去重，报告里的优先带姓名），
-  // 这样打字时两条来源都能命中，不必记住点过谁。
-  const datalistOptions = useMemo(() => {
-    const options = entry.contacts.map((c) => ({ value: c.email, label: c.name }));
-    const seen = new Set(entry.contacts.map((c) => c.email.toLowerCase()));
-    for (const h of history) {
-      const key = h.contact.toLowerCase();
-      if (seen.has(key)) continue;
-      seen.add(key);
-      options.push({ value: h.contact, label: null });
-    }
-    return options;
-  }, [entry.contacts, history]);
+  // 联系人候选 = 历史跟进里的联系人 + 报告建议联系人（同一地址只留一条），
+  // 输入即过滤。刻意不用原生 <datalist>：它的弹出层由浏览器绘制，样式跟弹窗
+  // 其余控件不是一套（原型里已确认要自绘）。
+  const [suggestOpen, setSuggestOpen] = useState(false);
+  const contactRef = useRef<HTMLDivElement>(null);
+  // 过滤词与输入框值分开：聚焦时清空过滤词，保证刚打开就能看到全部候选
+  // （输入框可能已预填某个联系人，拿它当过滤词会只剩那一行，没法换人）。
+  const [suggestQuery, setSuggestQuery] = useState("");
+  const suggestions = useMemo(
+    () => contactOptions({ history, suggested: entry.contacts, query: suggestQuery }),
+    [history, entry.contacts, suggestQuery],
+  );
 
   useEffect(() => {
-    if (!showMore) return;
+    if (!showMore && !suggestOpen) return;
     const onDown = (e: MouseEvent) => {
-      if (!moreRef.current?.contains(e.target as Node)) setShowMore(false);
+      const target = e.target as Node;
+      if (!moreRef.current?.contains(target)) setShowMore(false);
+      if (!contactRef.current?.contains(target)) setSuggestOpen(false);
     };
     document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);
-  }, [showMore]);
+  }, [showMore, suggestOpen]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key !== "Escape") return;
+      // 逐层关闭：先收下拉，再关弹窗。
+      if (suggestOpen || showMore) {
+        setSuggestOpen(false);
+        setShowMore(false);
+        return;
+      }
+      onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [onClose, suggestOpen, showMore]);
 
   // Keep free text single-line and pipe-free BEFORE it leaves the client
   // (the API's cell() normalizes again server-side — defense in depth): the
@@ -171,23 +178,64 @@ export function LogDialog({
             <label htmlFor={`co-contact-${entry.num}`} className="block text-xs font-medium text-muted">
               {t("followups.fieldContact")} <span className="font-normal text-faint">({t("followups.optional")})</span>
             </label>
-            <input
-              id={`co-contact-${entry.num}`}
-              value={contact}
-              onChange={(e) => setContact(e.target.value)}
-              placeholder={t("followups.contactPlaceholder")}
-              list={datalistOptions.length ? `co-contacts-${entry.num}` : undefined}
-              className={cn(inputCls, "mt-1")}
-            />
-            {datalistOptions.length > 0 && (
-              <datalist id={`co-contacts-${entry.num}`}>
-                {datalistOptions.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label ?? undefined}
-                  </option>
-                ))}
-              </datalist>
-            )}
+            <div className="relative" ref={contactRef}>
+              <input
+                id={`co-contact-${entry.num}`}
+                value={contact}
+                onChange={(e) => {
+                  setContact(e.target.value);
+                  setSuggestQuery(e.target.value);
+                  setSuggestOpen(true);
+                }}
+                onFocus={() => {
+                  setSuggestQuery("");
+                  setSuggestOpen(true);
+                }}
+                placeholder={t("followups.contactPlaceholder")}
+                role="combobox"
+                aria-expanded={suggestOpen}
+                aria-controls={`co-suggest-${entry.num}`}
+                aria-autocomplete="list"
+                className={cn(inputCls, "mt-1")}
+              />
+              {/* 自绘候选列表：与「更多」下拉同一套行样式，替掉浏览器原生
+                  datalist 弹出层（样式不可控，与弹窗其余控件不一致）。 */}
+              {suggestOpen && suggestions.length > 0 && (
+                <div
+                  id={`co-suggest-${entry.num}`}
+                  aria-label={t("followups.historyPickAria")}
+                  className="absolute left-0 right-0 top-full z-10 mt-1 max-h-56 overflow-y-auto rounded-lg border border-border bg-surface p-1 shadow-lg"
+                >
+                  {suggestions.map((o) => (
+                    <button
+                      key={`${o.source}-${o.value}`}
+                      type="button"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => {
+                        setContact(o.value);
+                        setSuggestOpen(false);
+                      }}
+                      className="flex w-full cursor-pointer items-center gap-2 rounded px-2 py-1 text-left transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
+                    >
+                      {o.source === "history" ? (
+                        <>
+                          <span className="w-[76px] shrink-0 whitespace-nowrap text-[11px] tabular-nums text-faint">{o.date || "—"}</span>
+                          {o.channel && <ChannelPill channel={o.channel} />}
+                          <span className="truncate text-xs text-foreground">{o.value}</span>
+                        </>
+                      ) : (
+                        <>
+                          <span className="min-w-0 flex-1 truncate text-xs text-foreground">{o.label}</span>
+                          {o.label !== o.value && (
+                            <span className="shrink-0 truncate text-[11px] text-faint">{o.value}</span>
+                          )}
+                        </>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
             {historyVisible.length > 0 && (
               <div className="mt-2 flex flex-wrap items-center gap-1.5">
                 <span className="text-[11px] text-faint">{t("followups.historyContacts")}</span>
@@ -228,18 +276,15 @@ export function LogDialog({
                           <button
                             key={c.contact}
                             type="button"
+                            onMouseDown={(e) => e.preventDefault()}
                             onClick={() => {
                               setContact(c.contact);
                               setShowMore(false);
                             }}
                             className="flex w-full cursor-pointer items-center gap-2 rounded px-2 py-1 text-left transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
                           >
-                            <span className="w-16 shrink-0 text-[11px] tabular-nums text-faint">{c.date || "—"}</span>
-                            {c.channel && (
-                              <Badge tone="muted" className="shrink-0 text-[10px] font-medium">
-                                {channelLabel(c.channel, t)}
-                              </Badge>
-                            )}
+                            <span className="w-[76px] shrink-0 whitespace-nowrap text-[11px] tabular-nums text-faint">{c.date || "—"}</span>
+                            {c.channel && <ChannelPill channel={c.channel} />}
                             <span className="truncate text-xs text-foreground">{c.contact}</span>
                           </button>
                         ))}
@@ -288,5 +333,16 @@ export function LogDialog({
         </form>
       </div>
     </div>
+  );
+}
+
+/** 渠道小标签：联系人下拉里的一行由「日期 + 渠道 + 联系人」组成，渠道用
+ *  自绘胶囊而非 Badge——Badge 的底色块在这种窄行里会抢走字的注意力。 */
+function ChannelPill({ channel }: { channel: string }) {
+  const { t } = useI18n();
+  return (
+    <span className="shrink-0 rounded-full border border-border px-1.5 text-[10px] leading-4 text-muted">
+      {channelLabel(channel, t)}
+    </span>
   );
 }

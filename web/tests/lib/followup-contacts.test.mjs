@@ -1,4 +1,5 @@
-// followup-contacts 纯逻辑单测：历史联系人聚合 + 「前三个常驻、其余收起」拆分。
+// followup-contacts 纯逻辑单测：历史联系人聚合 + 「前三个常驻、其余收起」拆分
+// + 自绘下拉的候选与过滤。
 // 背景：记录跟进弹窗的联系人字段支持从本报告历史跟进里选人；聚合口径（去重、
 // 排序、次数）与截断规则都必须可门，避免两个入口（/followups 行内、报告页
 // 按钮）行为漂移。
@@ -7,7 +8,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { historyContacts, splitHistoryContacts } from "../../src/lib/followup-contacts.mjs";
+import { contactOptions, historyContacts, splitHistoryContacts } from "../../src/lib/followup-contacts.mjs";
 
 // ---- historyContacts：聚合 -------------------------------------------------
 
@@ -90,4 +91,61 @@ test("visible 非法时全部进溢出，位置仍然确定", () => {
 
 test("非数组输入返回空结果", () => {
   assert.deepEqual(splitHistoryContacts(undefined, 3), { visible: [], overflow: [] });
+});
+
+// ---- contactOptions：自绘下拉的候选 ----------------------------------------
+
+const HISTORY = historyContacts([
+  { contact: "陈女士", date: "2026-11-12", channel: "Platform" },
+  { contact: "jane.doe@acme.cn", date: "2026-10-28", channel: "Email" },
+]);
+const SUGGESTED = [
+  { email: "zhang.wei@acme.cn", name: "张伟" },
+  { email: "Jane.Doe@acme.cn", name: "Jane" },
+];
+
+test("历史在前、建议在后，历史里已有的地址不重复出现", () => {
+  const rows = contactOptions({ history: HISTORY, suggested: SUGGESTED });
+  assert.deepEqual(
+    rows.map((r) => [r.source, r.value, r.label]),
+    [
+      ["history", "陈女士", "陈女士"],
+      ["history", "jane.doe@acme.cn", "jane.doe@acme.cn"],
+      ["suggested", "zhang.wei@acme.cn", "张伟"],
+    ],
+  );
+});
+
+test("历史行带日期与渠道，建议行没有", () => {
+  const rows = contactOptions({ history: HISTORY, suggested: SUGGESTED });
+  assert.deepEqual(
+    rows.map((r) => [r.date, r.channel]),
+    [
+      ["2026-11-12", "Platform"],
+      ["2026-10-28", "Email"],
+      ["", ""],
+    ],
+  );
+});
+
+test("建议联系人没姓名时标签退化为邮箱", () => {
+  const rows = contactOptions({ suggested: [{ email: "solo@acme.cn", name: null }] });
+  assert.deepEqual(rows, [
+    { value: "solo@acme.cn", label: "solo@acme.cn", date: "", channel: "", source: "suggested" },
+  ]);
+});
+
+test("输入即过滤：值或标签命中都算，大小写不敏感", () => {
+  const byName = contactOptions({ history: HISTORY, suggested: SUGGESTED, query: "张" });
+  assert.deepEqual(byName.map((r) => r.value), ["zhang.wei@acme.cn"]);
+  const byEmail = contactOptions({ history: HISTORY, suggested: SUGGESTED, query: "  JANE  " });
+  assert.deepEqual(byEmail.map((r) => r.value), ["jane.doe@acme.cn"]);
+  const noHit = contactOptions({ history: HISTORY, suggested: SUGGESTED, query: "王" });
+  assert.deepEqual(noHit, []);
+});
+
+test("空输入与缺省参数都返回空列表，不崩溃", () => {
+  assert.deepEqual(contactOptions(), []);
+  assert.deepEqual(contactOptions({}), []);
+  assert.deepEqual(contactOptions({ history: [], suggested: [] }), []);
 });
