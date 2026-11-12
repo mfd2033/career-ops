@@ -4,6 +4,7 @@ import { useState } from "react";
 import { BellOff, Check, Clock, FileText, Loader2 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { CompanyLogo } from "@/components/company-logo";
+import { AutoFollowupButton } from "@/components/followups/auto-followup-button";
 import { LogFollowupButton } from "@/components/followups/log-followup-button";
 import type { CadenceEntry } from "@/lib/followups";
 import { useI18n } from "@/lib/i18n/context";
@@ -71,6 +72,8 @@ export function FollowUpCard({ followup, onLogged }: { followup: CadenceEntry; o
         </div>
       </div>
       <div className="ml-auto flex shrink-0 items-center gap-1.5">
+        {/* 「自动跟进」排「记录跟进」左侧（2026-11-12）：与跟进页行内 ⚡ 同一枚弹窗 */}
+        <AutoFollowupButton entry={followup} onLogged={() => onLogged?.()} />
         {/* 「记录跟进」（报告页同款弹窗）：记录成功后通知父级刷新待跟进列表 */}
         <LogFollowupButton entry={followup} iconOnly onLogged={() => onLogged?.()} />
         <button

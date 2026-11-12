@@ -28,6 +28,7 @@ import { ApplyButton } from "@/components/apply-button";
 import { DeleteFromTracker } from "@/components/delete-from-tracker";
 import { SkipFromTracker } from "@/components/skip-from-tracker";
 import { LogFollowupButton } from "@/components/followups/log-followup-button";
+import { AutoFollowupButton } from "@/components/followups/auto-followup-button";
 // 投递时机条（Kaneo CO-44 / ADR-0085）：与管道页同一枚组件——详情页就是点
 // 「申请」的那一屏，按当前时刻告诉用户现在投不投、投哪个平台。
 import { DeliveryTimeHint } from "@/components/delivery-time-hint";
@@ -577,6 +578,9 @@ export function ReportView({
           )}
           {/* 从追踪器移除（硬删除，disc#9）：紧邻「体检这家」右侧，与其余操作同排 */}
           {app && canDelete && <DeleteFromTracker n={id} />}
+          {/* 「自动跟进」排「记录跟进」左侧（2026-11-12）：同一份 entry 门控，弹窗与
+              /followups 的行内 ⚡ 是同一枚，只是入口形态换成描边圆形图标按钮 */}
+          {followupEntry && <AutoFollowupButton entry={followupEntry} variant="outline" />}
           {/* 「记录跟进」（ADR-0075）：entry 存在即渲染；弹窗与 /followups 完全同一枚 */}
           {followupEntry && <LogFollowupButton entry={followupEntry} />}
         </div>

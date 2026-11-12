@@ -24,6 +24,9 @@ function stripComments(src) {
 }
 
 const VIEW = stripComments(readWeb("components/followups/followups-view.tsx"));
+const ENTRY_BUTTON = stripComments(readWeb("components/followups/auto-followup-button.tsx"));
+const REPORT = stripComments(readWeb("components/report-view.tsx"));
+const HOME_CARD = stripComments(readWeb("components/home/follow-up-card.tsx"));
 const DIALOG = stripComments(readWeb("components/followups/auto-followup-dialog.tsx"));
 const DICT = readWeb("lib/i18n/clusters/followups.ts");
 const EXT_JS = stripComments(readRepo("extension/followup-send.js"));
@@ -51,6 +54,26 @@ test("⚡ 排在记录按钮之前（主操作唯一，其余降级）", () => {
   const logAt = VIEW.indexOf("onClick={onLog}");
   assert.ok(autoAt > 0 && logAt > 0, "两个 onClick 都要在行操作区里");
   assert.ok(autoAt < logAt, "自动跟进是主操作，必须排在「记录」之前");
+});
+
+test("报告页与今日卡片也挂 ⚡，且都排在「记录跟进」左侧", () => {
+  for (const [name, src] of [
+    ["report-view.tsx", REPORT],
+    ["home/follow-up-card.tsx", HOME_CARD],
+  ]) {
+    const autoAt = src.indexOf("<AutoFollowupButton");
+    const logAt = src.indexOf("<LogFollowupButton");
+    assert.ok(autoAt > 0, `${name} 缺自动跟进入口`);
+    assert.ok(logAt > 0, `${name} 缺「记录跟进」入口`);
+    assert.ok(autoAt < logAt, `${name} 的自动跟进必须排在「记录跟进」之前（左侧）`);
+  }
+});
+
+test("新入口复用同一枚弹窗，成功轻提示与「记录跟进」同口径", () => {
+  assert.ok(ENTRY_BUTTON.includes("<AutoFollowupDialog"), "入口必须复用跟进页的同一枚弹窗");
+  assert.ok(ENTRY_BUTTON.includes('t("followups.autoAction")'), "名称取自既有的 followups.autoAction");
+  assert.ok(ENTRY_BUTTON.includes('t("followups.loggedToast")'), "轻提示文案与「记录跟进」同键");
+  assert.ok(ENTRY_BUTTON.includes("setTimeout(() => setToast(null), 5000)"), "轻提示必须 5 秒后自动消失");
 });
 
 // ---- 发送必须经过确认 ------------------------------------------------------
