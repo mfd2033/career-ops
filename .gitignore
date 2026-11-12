@@ -140,25 +140,19 @@ data/model-blacklist.json
 # IDE-specific local config
 .idea/
 .vscode/
-.trae/
-# Trae HTML 预览分享打包产物（机器本地、临时性）
-.trae-html-share-packages/
 
 # Agent skill storage (local installations; share via skills-lock.json)
+.agents/*
+!.agents/skills/
 .agents/skills/*
 !.agents/skills/career-ops/
 .agents/skills/*/README.md
 .agents/skills/*/SKILL.md
 .agents/skills/*/references/
-.serena/
 skills-lock.json
 
 # CLI-specific local config
-.claude/settings.local.json
-.claude/memory/
-.claude/.headroom_wrap_*
-.opencode/settings.local.json
-.opencode/memory/
+# .claude/ 与 .opencode/ 内的本地文件由文末「AI CLI / IDE 机器本地状态」一节整块覆盖。
 # OpenCode project config (often holds personal MCP/model/per-machine prefs).
 opencode.json
 # Claude Code project-level MCP server config — commonly ends up holding
@@ -253,18 +247,60 @@ web/dev-server*.log*
 # Local build log scratch (package-build.log)
 package-build.log
 
-# Local session memory (workbuddy)
-.workbuddy/
-
-# Qoder IDE local state (agent/scratch artifacts, machine-specific)
-.qoder/
-
-# CodeArts IDE/agent local state (index cache, temp, per-machine agent config).
-# Its own nested .gitignore (`*`) already hides it; stated here so deleting or
-# editing that file can never leak the index/temp tree into the repo.
-.codeartsdoer/
-
 # Session-scoped working docs (handoff / pack run logs, ephemeral)
 docs/handoff-*.md
 docs/pack-*.md
 data/agent-inbox.md
+
+# —— AI CLI / IDE 机器本地状态（换机可重建，不入库）——
+# 同类规则集中写在这里；另有几项因紧贴相关规则而留在原处：.cache/（浏览器配置，
+# 127MB）、.career-ops-web/、.dashboard-runtime/、.codegraph/、.playwright-mcp/、
+# .cu-shots/、.scratch/、.tmp-script-test-*/。
+# 纯本地产物，整目录忽略：
+.trae/
+# Trae HTML 预览分享打包产物（机器本地、临时性）
+.trae-html-share-packages/
+.serena/
+# workbuddy 会话记忆 / Qoder IDE 本地状态 / CodeArts IDE-agent 本地状态（索引缓存、
+# 临时文件、按机构建的 agent 配置；其嵌套 .gitignore 已是全忽略，这里再写一遍，
+# 防止那份文件被删改后索引树漏进库）。
+.workbuddy/
+.qoder/
+.codeartsdoer/
+# 桌面自动化 / UI 验收截图落盘目录
+.screenshots/
+
+# 各 CLI 的技能分发目录：忽略目录内容，只放行 career-ops 技能本体与命令这类系统层
+# 子树。这些路径同时是 update-system.mjs SYSTEM_PATHS / BOOTSTRAP_PATHS 的同步面，
+# 整目录忽略会把系统层新增文件挡在库外；目录里其余本地状态照旧不入库。
+.claude/*
+!.claude/skills/
+!.claude/skills/**
+.cursor/*
+!.cursor/skills/
+!.cursor/skills/**
+.qwen/*
+!.qwen/skills/
+!.qwen/skills/**
+.kimi/*
+!.kimi/skills/
+!.kimi/skills/**
+.grok/*
+!.grok/skills/
+!.grok/skills/**
+.antigravitycli/*
+!.antigravitycli/skills/
+!.antigravitycli/skills/**
+.opencode/*
+!.opencode/skills/
+!.opencode/skills/**
+!.opencode/commands/
+!.opencode/commands/**
+
+# 刻意不忽略：.github/（CI workflow、issue/PR 模板、CODEOWNERS）与 .claude-plugin/
+# （插件发布清单）—— 几十个系统层文件已 tracked，整目录忽略对它们无效，只会让以后
+# 新增的 workflow/清单项静默漏库，得靠 `git add -f` 才发现。
+
+# 上面的 `!…/skills/**` 放行规则在文件末尾生效，会盖掉上文的 `*.bak*`（上次匹配优先），
+# 导致各 CLI 目录下的 SKILL.md.bak 之类备份重新变成未跟踪。末尾补一条把它按回来。
+*.bak*
