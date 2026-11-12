@@ -2340,7 +2340,10 @@
       sendResponse({ ok: true });
       return;
     }
-    sendResponse({ ok: false });
+    // 不属于本脚本的消息一律不应答。同一页面可以有多个监听器（followup-send.js
+    // 只认 followup-send），chrome 取「第一个调用 sendResponse 的监听器」作为应答；
+    // 在这里回 {ok:false} 会把别的监听器的结果抢掉——发送方拿到的是没有 status /
+    // reason 的空壳，只能报「未知原因」。不调用 sendResponse 即让位。
     return;
   });
 

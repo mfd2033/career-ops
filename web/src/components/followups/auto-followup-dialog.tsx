@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Check, Copy, ExternalLink, Loader2, Send, TriangleAlert, X } from "lucide-react";
 import { CHANNELS, DEFAULT_CHANNEL, channelLabel } from "@/lib/followup-channel.mjs";
-import { AUTO_SEND_SITES, autoNotes, autoSiteForUrl, placeholderTokens, toSingleLine } from "@/lib/followup-auto.mjs";
+import { AUTO_SEND_SITES, autoSiteForUrl, placeholderTokens, toSingleLine } from "@/lib/followup-auto.mjs";
 import { suggestScriptIndex } from "@/lib/followup-scripts.mjs";
 import { extRequest } from "@/lib/ext-bridge";
 import { fieldCls } from "@/components/ui/field-styles";
@@ -31,6 +31,8 @@ const REASON_CODES = [
   "no-tab",
   "no-input",
   "no-send",
+  "unknown-target",
+  "input-not-registered",
   "unverified",
   "input-not-cleared",
   "no-echo",
@@ -44,6 +46,8 @@ const REASON_CODES = [
 type SendOutcome = {
   kind: "sent" | "uncertain" | "failed" | "fallback";
   reason?: string;
+  /** 桥/扩展回的非原因码错误原文；原因码认不出时原样透出，不闷成「未知原因」。 */
+  detail?: string;
   contact?: string;
   at?: string;
   siteLabel?: string;
@@ -149,21 +153,30 @@ export function AutoFollowupDialog({
       const sent = res.ok === true && status === "sent";
       const readContact = typeof res.contact === "string" ? res.contact : "";
       const kind: SendOutcome["kind"] = sent ? "sent" : status === "uncertain" ? "uncertain" : "failed";
+      // 桥自身的失败（超时、SW 没接住）只带 error，不带 reason；两个字段都读，
+      // 否则那几类失败一律退化成「未知原因」，用户无从下手。认不出的错误串
+      // 连同原文一起带出去（见横幅里的 detail），别再吞掉。
+      const reasonCode = typeof res.reason === "string" ? res.reason : typeof res.error === "string" ? res.error : "";
+      // detail 优先用扩展给的现场快照（发送失败时附的候选清单），没有就退到桥的错误串。
+      const detailText =
+        typeof res.detail === "string" && res.detail
+          ? res.detail
+          : typeof res.error === "string"
+            ? res.error
+            : "";
       setOutcome({
         kind,
-        reason: typeof res.reason === "string" ? res.reason : undefined,
+        reason: reasonCode || undefined,
+        detail: detailText || undefined,
         contact: readContact,
         at: typeof res.sentAt === "string" ? res.sentAt : undefined,
         siteLabel,
       });
       if (readContact) setContact(readContact);
-      if (sent) {
-        setUnread(true); // 刚发出 → 对方必然还没读
-        setNotes(autoNotes(siteLabel));
-      } else if (kind === "uncertain") {
-        // 页面读到的人名照填；未读不自动勾（回读没过，不能说「已发出」）。
-        setNotes(autoNotes(siteLabel));
-      }
+      if (sent) setUnread(true); // 刚发出 → 对方必然还没读
+      // 备注写实际发出去的那句（与历史跟进记录口径一致）。uncertain 也写：
+      // 文字确实已经交给了页面，用户要到页面上核对的就是这一句。
+      if (sent || kind === "uncertain") setNotes(message);
     } catch {
       setOutcome({ kind: "fallback" });
       window.open(postingUrl, "_blank", "noopener");
@@ -479,6 +492,9 @@ function OutcomeBanner({
           </>
         )}
         {outcome.kind === "failed" && <p>{t("followups.autoFailed", { reason: reasonText(outcome.reason) })}</p>}
+        {outcome.detail && outcome.detail !== outcome.reason && (
+          <p className="break-words font-mono text-xs opacity-70">{outcome.detail}</p>
+        )}
         {outcome.kind === "fallback" && <p>{t("followups.autoFallback")}</p>}
         {postingUrl && (
           <a

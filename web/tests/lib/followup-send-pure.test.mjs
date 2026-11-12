@@ -26,7 +26,6 @@ const {
   pickSendCandidate,
   pickContactCandidate,
   verifySend,
-  autoNotes,
 } = mod.default ?? mod;
 
 /** 一个「长得像聊天框」的基准描述，各用例按需覆盖字段。 */
@@ -89,10 +88,15 @@ test("占位符枚举：去重、保序", () => {
   assert.deepEqual(placeholderTokens("没有占位符"), []);
 });
 
-test("指纹取末 12 个非空白字符；太短返回空串", () => {
+test("指纹取末 24 个非空白字符；太短返回空串", () => {
   assert.equal(fingerprint("这个岗位还在招人吗？"), "这个岗位还在招人吗？");
   assert.equal(fingerprint("一二三四五"), "一二三四五");
   assert.equal(fingerprint("短"), "");
+  // 长文本只留末尾 24 字：会话列表预览里的同模板话术不会整句撞上
+  assert.equal(
+    fingerprint("您好，我是候选人，想跟进一下简历筛选的进度 这个岗位目前还在招人吗？方便的话可以约个时间聊聊。"),
+    "个岗位目前还在招人吗？方便的话可以约个时间聊聊。",
+  );
 });
 
 // ---- 输入框打分 ------------------------------------------------------------
@@ -115,6 +119,20 @@ test("页面搜索框不当聊天框", () => {
   // 单行输入框只靠位置与尺寸，不给高分
   const bare = chatBox({ tag: "input", type: "text", placeholder: "", classText: "", bottomGap: 60 });
   assert.ok(scoreInputCandidate(bare) < 5);
+});
+
+test("页面顶部的「聊天」搜索框即使类名带 chat 也不当聊天框", () => {
+  // BOSS 聊天页实测：侧栏搜索框 class 里有 chat/search，位置在页面顶部。
+  const topSearch = chatBox({
+    tag: "input",
+    type: "text",
+    placeholder: "搜索",
+    classText: "chat-search-input",
+    bottomGap: 1000,
+  });
+  assert.ok(scoreInputCandidate(topSearch) < 5, `顶部搜索框不该过阈值，实得 ${scoreInputCandidate(topSearch)}`);
+  const editor = chatBox({ contentEditable: true, classText: "chat-input", bottomGap: 40 });
+  assert.equal(pickInputCandidate([topSearch, editor]).index, 1);
 });
 
 test("pickInputCandidate 取分最高的那个，全不达标返回 null", () => {
@@ -194,11 +212,4 @@ test("没有像样的候选就返回 null，不编人名", () => {
   assert.equal(pickContactCandidate([]), null);
   assert.equal(pickContactCandidate([{ text: "搜", classText: "x-name", top: 0, visible: true }]), null);
   assert.equal(pickContactCandidate([{ text: "张三", classText: "x-name", top: 0, visible: false }]), null);
-});
-
-// ---- 备注模板 --------------------------------------------------------------
-
-test("备注模板带站点名，缺站点时落「招聘平台」", () => {
-  assert.equal(autoNotes("BOSS直聘"), "BOSS直聘站内信发送跟进话术");
-  assert.equal(autoNotes(""), "招聘平台站内信发送跟进话术");
 });

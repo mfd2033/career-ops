@@ -25,6 +25,8 @@
 
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const MAX_CONTACT_SCAN = 300;
+  /** 本次运行里有没有点过「立即沟通/继续沟通」跳进聊天页（ADR-0100 修订版的门槛）。 */
+  let clickedChatEntry = false;
 
   function classTextOf(el) {
     return typeof el.className === "string" ? el.className : "";
@@ -72,7 +74,7 @@
     for (const el of entries) {
       const text = (el.innerText || "").replace(/\s+/g, "");
       if (!text || text.length > 8) continue;
-      if (!/立即沟通|继续沟通|聊一聊|发消息|在线沟通|打招呼/.test(text)) continue;
+      if (!/立即沟通|继续沟通|继续聊|聊一聊|发消息|在线沟通|打招呼/.test(text)) continue;
       if (!isVisible(el)) continue;
       el.click();
       return true;
@@ -80,20 +82,19 @@
     return false;
   }
 
+  /** 当前页面上最像聊天输入框的那个；没有返回 null。 */
+  function currentInput() {
+    const candidates = inputCandidates();
+    const best = P.pickInputCandidate(candidates.map((c) => c.desc));
+    return best ? candidates[best.index].el : null;
+  }
+
+  /** 等聊天框出现（只等，不点任何按钮：点入口在 runSend 里单独处理）。 */
   async function findInput(timeoutMs) {
     const deadline = Date.now() + timeoutMs;
-    let triedEntry = false;
     while (Date.now() < deadline) {
-      const candidates = inputCandidates();
-      const best = P.pickInputCandidate(candidates.map((c) => c.desc));
-      if (best) return candidates[best.index].el;
-      if (!triedEntry) {
-        triedEntry = true;
-        if (clickChatEntry()) {
-          await sleep(900);
-          continue;
-        }
-      }
+      const box = currentInput();
+      if (box) return box;
       await sleep(300);
     }
     return null;
@@ -105,7 +106,12 @@
     return String(el.innerText || el.textContent || "");
   }
 
-  /** React 站点只认原生 setter + input 事件；contenteditable 走 insertText。 */
+  /**
+   * React 站点只认原生 setter + input 事件；contenteditable 走 insertText。
+   * 返回实际用了哪条路：`insertText` 与 `value` 站点的状态能收到，`textContent`
+   * 只是把字画在页面上，编辑器自己的 state 仍是空的——那种情况下点「发送」不会
+   * 有任何事发生，字会留在框里。这个区别必须回传，否则只能靠猜。
+   */
   function fillInput(el, text) {
     el.focus();
     const tag = el.tagName.toLowerCase();
@@ -115,7 +121,7 @@
       setter.call(el, text);
       el.dispatchEvent(new Event("input", { bubbles: true }));
       el.dispatchEvent(new Event("change", { bubbles: true }));
-      return;
+      return "value";
     }
     const selection = window.getSelection();
     const range = document.createRange();
@@ -128,18 +134,109 @@
     } catch {
       inserted = false;
     }
-    if (!inserted) {
-      el.textContent = text;
-      el.dispatchEvent(new InputEvent("input", { bubbles: true, data: text, inputType: "insertText" }));
-    }
+    if (inserted) return "insertText";
+    el.textContent = text;
+    el.dispatchEvent(new InputEvent("input", { bubbles: true, data: text, inputType: "insertText" }));
+    return "textContent";
   }
 
-  /** 在输入框所在的聊天容器里找发送按钮；找不到返回 null（调用方回车兜底）。 */
+  /**
+   * 编辑器的「已接收」信号：BOSS 的发送按钮在空内容时带 `disabled` 类，收到内容才摘掉。
+   * 这比等固定毫秒数可靠——按钮还禁用着就点，等于什么都没发生，字却会留在框里
+   * 或被下一次渲染抹掉（这时读到的「已清空」是假的）。
+   */
+  function sendReady(buttonEl) {
+    if (!buttonEl) return false;
+    if (buttonEl.disabled === true || buttonEl.getAttribute("aria-disabled") === "true") return false;
+    return !/\bdisabled\b/.test(String(buttonEl.className || ""));
+  }
+
+  async function waitSendReady(buttonEl, timeoutMs) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (sendReady(buttonEl)) return true;
+      await sleep(100);
+    }
+    return sendReady(buttonEl);
+  }
+
+  /** 备用注入：走 paste 事件。富文本编辑器多半自己接管粘贴，比 execCommand 更容易进状态。 */
+  function pasteInput(el, text) {
+    try {
+      const dt = new DataTransfer();
+      dt.setData("text/plain", text);
+      const event = new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true });
+      el.dispatchEvent(event);
+    } catch {
+      return false;
+    }
+    return readValue(el).trim() !== "";
+  }
+
+  /**
+   * 输入框所在的聊天容器。必须从 parentElement 往上找：三站的输入框类名自己就带
+   * chat / im-（BOSS 是 div#chat-input.chat-input，猎聘是 ant-im-input im-ui-textarea），
+   * 直接从输入框 closest 会把作用域缩成输入框内部，发送按钮和消息列表全都找不到。
+   */
+  function chatScopeOf(inputEl) {
+    const from = inputEl && inputEl.parentElement;
+    if (!from) return document.body;
+    return (
+      from.closest('[class*="chat"],[class*="im-"],[class*="dialog"],[class*="panel"],[class*="conversation"]') ||
+      from
+    );
+  }
+
+  /**
+   * 消息流的容器：从输入框往上取**最外层**那个像聊天区的祖先。
+   * 取最近的那个会把作用域缩成编辑器外壳（BOSS 是 div.chat-input 外面一圈），
+   * 消息列表根本不在里面，于是「发出去了」被读成「聊天流里没出现」。
+   * 放宽后会连左侧会话列表一起进来，所以 readMessages 里要把列表预览类节点排掉。
+   */
+  function messageScopeOf(inputEl) {
+    let node = inputEl && inputEl.parentElement;
+    let best = null;
+    let depth = 0;
+    while (node && node !== document.body && depth < 12) {
+      if (node.matches && node.matches('[class*="chat"],[class*="im-"]')) best = node;
+      node = node.parentElement;
+      depth += 1;
+    }
+    return best || chatScopeOf(inputEl);
+  }
+
+  /**
+   * 在聊天容器里找发送按钮；找不到返回 null（调用方回车兜底）。
+   * BOSS 的「发送」在编辑器的兄弟节点里，不在编辑器的父链容器内，所以按由近到远
+   * 三级找；最后一级扫全页时只收与输入框同一水平带（±80px）的候选，免得点中页面
+   * 别处的「发送」（比如「发送简历」）。
+   */
   function findSendButton(inputEl) {
-    const scope =
-      inputEl.closest('[class*="chat"],[class*="im-"],[class*="dialog"],[class*="panel"],[class*="conversation"]') ||
-      inputEl.parentElement ||
-      document.body;
+    const er = inputEl.getBoundingClientRect();
+    const midLine = er.top + er.height / 2;
+    const scopes = [
+      { scope: chatScopeOf(inputEl), near: false },
+      { scope: inputEl.closest('[class*="chat"],[class*="im-"]'), near: false },
+      { scope: document.body, near: true },
+    ];
+    for (const step of scopes) {
+      if (!step.scope) continue;
+      const pairs = collectSendCandidates(step.scope, step.near ? midLine : null);
+      // 同一个「发送」往往是按钮 + 外面一整条动作栏。猎聘实测收到的是
+      // DIV.im-ui-input-actions（434px 宽，整条栏），点它的中心等于点空白，
+      // 消息原地不动。留最内层那个：被别的候选包住、文案又相同的直接丢掉。
+      for (let i = pairs.length - 1; i >= 0; i -= 1) {
+        const p = pairs[i];
+        if (pairs.some((q) => q !== p && p.el.contains(q.el) && q.desc.text === p.desc.text)) pairs.splice(i, 1);
+      }
+      const best = P.pickSendCandidate(pairs.map((p) => p.desc));
+      if (best) return pairs[best.index].el;
+    }
+    return null;
+  }
+
+  /** 收容器里的短文案可点节点；midLine 非空时只留与这条水平线相邻的。 */
+  function collectSendCandidates(scope, midLine) {
     const nodes = scope.querySelectorAll("button, [role='button'], a, div, span");
     const pairs = [];
     let scanned = 0;
@@ -148,6 +245,7 @@
       const text = (el.innerText || "").replace(/\s+/g, "");
       if (text.length > 8) continue; // 发送按钮不会有长文案
       const rect = el.getBoundingClientRect();
+      if (midLine !== null && Math.abs(rect.top + rect.height / 2 - midLine) > 80) continue;
       pairs.push({
         el,
         desc: {
@@ -164,8 +262,7 @@
         },
       });
     }
-    const best = P.pickSendCandidate(pairs.map((p) => p.desc));
-    return best ? pairs[best.index].el : null;
+    return pairs;
   }
 
   function pressEnter(el) {
@@ -192,71 +289,154 @@
     return readValue(el).trim() === "";
   }
 
-  /** 聊天流里最后几条消息文本（只取最内层节点，避免容器把整段拼成一条）。 */
+  /**
+   * 聊天流里的消息文本。两处必须这么写：
+   *   • 作用域从输入框的父节点往上找，不能把输入框自己算进去（否则只剩刚才填的草稿）；
+   *   • **不回落 document.body**。三站的页面侧栏都是「所有会话的最后一条消息预览」，
+   *     同一套话术模板会在别的会话里出现，末段指纹一撞就把「没发出去」判成「已回显」。
+   * 也不再要求「最内层节点」：猎聘的 im-ui-message-* 层层套娃，最内层不带定位类名，
+   * 按最内层筛结果一条都收不到，只能按整条消息节点的 innerText 收、再按文本去重。
+   */
   function readMessages(inputEl) {
-    const scopes = [
-      inputEl.closest('[class*="chat"],[class*="conversation"],[class*="im-"],[class*="message"]'),
-      document.body,
-    ].filter(Boolean);
-    const leafSelector = '[class*="message"],[class*="msg"],[class*="bubble"],[class*="chat-item"]';
-    for (const scope of scopes) {
-      const texts = [];
-      for (const node of scope.querySelectorAll(leafSelector)) {
-        if (node.querySelector(leafSelector)) continue;
-        const text = String(node.innerText || "").trim();
-        if (text && text.length <= 400) texts.push(text);
-      }
-      if (texts.length) return texts.slice(-8);
+    const scope = messageScopeOf(inputEl);
+    if (!scope || scope === document.body) return [];
+    const selector = '[class*="message"],[class*="msg"],[class*="bubble"],[class*="chat-item"]';
+    // 作用域放宽后会把左侧会话列表包进来，那里每行都挂着「最后一条消息」预览，
+    // 同一套话术模板撞上就成假阳性。预览类节点在这里排掉。
+    const previewLike = /last-?msg|preview|unread|brief|abstract/i;
+    const texts = [];
+    for (const node of scope.querySelectorAll(selector)) {
+      if (node === inputEl || node.contains(inputEl)) continue; // 输入框里的草稿不算回显
+      if (previewLike.test(String(node.className || ""))) continue;
+      const text = String(node.innerText || "").trim();
+      if (!text || text.length > 400) continue;
+      if (!texts.includes(text)) texts.push(text);
     }
-    return [];
+    return texts.slice(-12);
   }
 
-  /** 聊天头部招聘方名字；读不到返回空串（记录里那格留空，不编人名）。 */
+  /**
+   * 聊天头部招聘方名字；读不到返回空串（记录里那格留空，不编人名）。
+   * 容器同 readMessages；另外**跳过按钮/链接里的文字**——那是「交换手机号」「求简历」
+   * 这类操作标签，不是人名，早先真被填进过联系人。
+   */
   function readContact(inputEl) {
-    const scopes = [
-      inputEl.closest('[class*="chat"],[class*="conversation"],[class*="dialog"],[class*="panel"]'),
-      null,
-    ];
-    for (const scope of scopes) {
-      const root = scope || document.body;
-      const nodes = root.querySelectorAll('[class*="name"],[class*="nick"],[class*="title"],[class*="hr"]');
-      const candidates = [];
-      let scanned = 0;
-      for (const node of nodes) {
-        if (scanned++ > MAX_CONTACT_SCAN) break;
-        const text = String(node.innerText || "").trim();
-        if (!text || text.length > 40) continue;
-        const rect = node.getBoundingClientRect();
-        candidates.push({ text, classText: classTextOf(node), top: rect.top, visible: isVisible(node) });
-      }
-      const hit = P.pickContactCandidate(candidates);
-      if (hit) return hit;
+    const scope = chatScopeOf(inputEl);
+    if (!scope || scope === document.body) return "";
+    const nodes = scope.querySelectorAll('[class*="name"],[class*="nick"],[class*="title"],[class*="hr"]');
+    const candidates = [];
+    let scanned = 0;
+    for (const node of nodes) {
+      if (scanned++ > MAX_CONTACT_SCAN) break;
+      if (node.closest("button, a, [role='button']")) continue;
+      const text = String(node.innerText || "").trim();
+      if (!text || text.length > 40) continue;
+      const rect = node.getBoundingClientRect();
+      candidates.push({ text, classText: classTextOf(node), top: rect.top, visible: isVisible(node) });
     }
-    return "";
+    return P.pickContactCandidate(candidates) || "";
+  }
+
+  /** 页面是不是 BOSS 的会话列表页（左列会话、右侧聊天区）。 */
+  function isConversationListPage() {
+    return location.pathname.replace(/\/+$/, "") === "/web/geek/chat";
   }
 
   async function runSend(msg) {
     const text = P.joinMessage(msg && msg.text);
     if (!text) return { ok: false, status: "failed", reason: "empty-text" };
     const site = P.siteForUrl(location.href);
+    // SW 会在点过入口、页面加载完之后把这条标志带回来：新文档凭它知道自己是从
+    // 该岗位的「继续沟通」进来的（点完必然跳页，本脚本往往等不到那之后）。
+    const entryClicked = Boolean(msg && msg.entryClicked === true);
+    clickedChatEntry = entryClicked;
 
-    const input = await findInput(6000);
+    let input = currentInput();
+    if (!input && !entryClicked) {
+      if (clickChatEntry()) {
+        // 页面要跳去聊天页，本脚本可能随文档一起销毁，等下去没有意义：
+        // 交回给 SW，它等页面加载后再发一次，并带上 entryClicked。
+        return { ok: false, status: "navigating", reason: "chat-entry-clicked", site: site ? site.id : null };
+      }
+    }
+    if (!input) input = await findInput(6000);
     if (!input) return { ok: false, status: "failed", reason: "no-input", site: site ? site.id : null };
 
-    const contact = readContact(input);
-    fillInput(input, text);
-    const filled = readValue(input).trim();
-    if (!filled) {
-      return { ok: false, status: "failed", reason: "input-rejected", contact, site: site ? site.id : null };
+    // BOSS 的会话列表页默认打开上一条会话。只有「本次从该岗位详情页点了继续沟通
+    // 才落到这个聊天页」时，右侧才是这条岗位的招聘者；否则无从判断发给谁，
+    // 宁可不发（ADR-0100 修订版）。
+    if (site && site.id === "boss" && isConversationListPage() && !clickedChatEntry) {
+      return {
+        ok: false,
+        status: "failed",
+        reason: "unknown-target",
+        site: "boss",
+        detail: `entry | 页面停在会话列表，本次没有经过岗位页的继续沟通 ; ${describeInput(input)} ; ${describeSendArea(input)}`,
+      };
     }
 
-    const button = findSendButton(input);
+    const contact = readContact(input);
+    // 填字前先找一次按钮，记下它此刻是不是禁用态：BOSS 空内容时带 `disabled` 类，
+    // 只有「本来就禁用」的站点才需要后面的就绪等待，免得改到另两站的行为。
+    const buttonBefore = findSendButton(input);
+    const gatedByButton = buttonBefore ? !sendReady(buttonBefore) : false;
+    let fillMode = fillInput(input, text);
+    const filled = readValue(input).trim();
+    if (!filled) {
+      return {
+        ok: false,
+        status: "failed",
+        reason: "input-rejected",
+        contact,
+        site: site ? site.id : null,
+        detail: `${describeInput(input)}|fill=${fillMode}`,
+      };
+    }
+    // 给站点一拍把内容同步进它自己的状态：React 那边是异步批处理的，
+    // 刚 dispatch 完就点「发送」，处理器读到的可能还是空内容（点了等于没点）。
+    await sleep(300);
+
+    // 有些站点的「发送」要等编辑器拿到内容、重新渲染后才出现，给一拍再找一次。
+    let button = buttonBefore || findSendButton(input);
+    if (!button) {
+      await sleep(400);
+      button = findSendButton(input);
+    }
+
+    // 真正决定能不能发的是「编辑器有没有收到内容」，这里用按钮的禁用态当信号。
+    // 看到还禁着就换 paste 再来一次；两次都没进状态就报失败，绝不硬点。
+    if (button && gatedByButton) {
+      let ready = await waitSendReady(button, 1500);
+      if (!ready) {
+        if (pasteInput(input, text)) fillMode = `${fillMode}->paste`;
+        await sleep(300);
+        ready = await waitSendReady(button, 1500);
+      }
+      if (!ready) {
+        return {
+          ok: false,
+          status: "failed",
+          reason: "input-not-registered",
+          contact,
+          site: site ? site.id : null,
+          detail: `${describeInput(input)}|fill=${fillMode} ; ${describeButton(button)} | ${describeSendArea(input)}`,
+        };
+      }
+    }
     if (button) button.click();
     else pressEnter(input);
 
     const cleared = await waitCleared(input, 2000);
-    await sleep(400);
-    const messages = readMessages(input);
+    // 回显晚于输入框清空：轮询到 3 秒再判定，读早了会把「已发出」报成「没出现」。
+    const fp = P.fingerprint(text);
+    let messages = [];
+    const echoDeadline = Date.now() + 3000;
+    while (Date.now() < echoDeadline) {
+      messages = readMessages(input);
+      if (fp && messages.some((m) => String(m).replace(/\s+/g, "").includes(fp))) break;
+      await sleep(250);
+    }
+    const notes = collectNotes();
     const verdict = P.verifySend({ after: readValue(input), messages, expectText: text });
 
     let reason = null;
@@ -271,10 +451,71 @@
       reason,
       cleared: verdict.cleared,
       echoed: verdict.echoed,
+      notes,
       contact,
       site: site ? site.id : null,
       sentAt: new Date().toISOString(),
+      // 没发出去时把输入框附近的候选抖出来：BOSS 一开 DevTools 就整页刷新，
+      // 这条路是唯一能拿到它真实 DOM 的通道。
+      detail: verdict.ok
+        ? null
+        : `${describeInput(input)}|fill=${fillMode} ; ${button ? `clicked ${describeButton(button)}` : "enter"}${notes ? ` ; note=${notes}` : ""} | ${describeSendArea(input)}`,
     };
+  }
+
+  /**
+   * 点完发送后页面上冒出来的短提示。站点拒收（次数上限、需先交换联系方式、
+   * 发送失败）都只弹一句 toast，页面上不留痕，不抓就永远只能猜。
+   */
+  function collectNotes() {
+    const selector = '[role="alert"],[class*="toast"],[class*="tip"],[class*="notice"],[class*="error"],[class*="warn"]';
+    const out = [];
+    for (const el of document.querySelectorAll(selector)) {
+      if (!isVisible(el)) continue;
+      const text = String(el.innerText || "").replace(/\s+/g, " ").trim();
+      if (!text || text.length > 60) continue;
+      if (!out.includes(text)) out.push(text);
+      if (out.length >= 4) break;
+    }
+    return out.join(" / ");
+  }
+
+  /** 被点下去的那个「发送」是谁：标签、类名、文案、位置、是否禁用。 */
+  function describeButton(el) {
+    const r = el.getBoundingClientRect();
+    const cls = String(el.className || "").slice(0, 24);
+    const disabled = el.disabled === true || el.getAttribute("aria-disabled") === "true";
+    const clsDisabled = /\bdisabled\b/.test(String(el.className || ""));
+    return `${el.tagName}.${cls}|text=${(el.innerText || "").replace(/\s+/g, "").slice(0, 6)}|rect=${Math.round(r.left)},${Math.round(r.top)} ${Math.round(r.width)}x${Math.round(r.height)}|disabled=${disabled}|clsDisabled=${clsDisabled}`;
+  }
+
+  /**
+   * 被当成聊天框的那个节点是谁：标签、类名、占位、位置与尺寸、离屏底距离。
+   * 三站靠特征打分选输入框，选错时只看邻居快照分不清「选错了谁」，这一行补上。
+   */
+  function describeInput(inputEl) {
+    const r = inputEl.getBoundingClientRect();
+    const cls = String(inputEl.className || "").slice(0, 32);
+    const ph = (inputEl.getAttribute("placeholder") || inputEl.getAttribute("data-placeholder") || "").slice(0, 12);
+    return `input | ${inputEl.tagName}.${cls}${inputEl.id ? `#${inputEl.id}` : ""}|ph=${ph}|rect=${Math.round(r.left)},${Math.round(r.top)} ${Math.round(r.width)}x${Math.round(r.height)}|gap=${Math.round(window.innerHeight - r.top)}`;
+  }
+
+  /** 输入框同一水平带上的短文案可点节点，压缩成一行，用于排障。 */
+  function describeSendArea(inputEl) {
+    const r = inputEl.getBoundingClientRect();
+    const mid = r.top + r.height / 2;
+    const out = [];
+    for (const el of document.querySelectorAll("button, [role='button'], a, div, span")) {
+      const b = el.getBoundingClientRect();
+      if (!b.width || Math.abs(b.top + b.height / 2 - mid) > 120) continue;
+      const text = (el.innerText || "").replace(/\s+/g, "").slice(0, 8);
+      const cls = String(el.className || "").slice(0, 28);
+      const aria = (el.getAttribute("aria-label") || "").slice(0, 12);
+      if (!text && !cls && !aria) continue;
+      out.push(`${el.tagName}.${cls}|${text}|${aria}`);
+      if (out.length >= 12) break;
+    }
+    return out.join(" ; ");
   }
 
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {

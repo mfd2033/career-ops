@@ -1,7 +1,7 @@
 // followup-send-pure.js — 「自动跟进」发送链路的纯逻辑层（三站共用）。
 //
 // 只做判断、不碰 DOM：站点表、文本规整、输入框/发送按钮候选打分、发送结果核对、
-// 联系人候选挑选、备注模板。DOM 采集在 followup-send.js；SW 路由在 background.js。
+// 联系人候选挑选。DOM 采集在 followup-send.js；SW 路由在 background.js。
 //
 // 三站没有公开的聊天 DOM 契约，选择器一改版就失效。所以这里刻意不写死选择器，
 // 改成「按特征打分 + 阈值」：输入框看标签/尺寸/离屏底距离/关键词，发送按钮看
@@ -95,8 +95,12 @@
     return out;
   }
 
-  /** 回读校验用的尾部指纹：去空白后的末 n 个字。太短（<4）无法区分，返回空串。 */
-  function fingerprint(text, n = 12) {
+  /**
+   * 回读校验用的尾部指纹：去空白后的末 n 个字。太短（<4）无法区分，返回空串。
+   * n 不能太小：三站的会话列表预览里常有同一个话术模板，末 12 字会撞上别的会话，
+   * 把「没发出去」判成「已回显」。
+   */
+  function fingerprint(text, n = 24) {
     const s = joinMessage(text).replace(/\s+/g, "");
     if (s.length < 4) return "";
     return s.slice(Math.max(0, s.length - n));
@@ -117,11 +121,14 @@
     if (multilineInput) score += 3;
     else if (c.contentEditable) score += 2;
 
-    // bottomGap = 视口底部到输入框顶部的距离：聊天框几乎总贴着屏底。
+    // bottomGap = 视口底部到输入框顶部的距离：聊天框几乎总贴着屏底，
+    // 而会话列表的搜索框在页面顶部。BOSS 的聊天页顶部就有一个搜索框，
+    // 扣分不够时它会被选成「聊天框」，跟进话术就被打进了搜索里（实测踩到）。
     if (typeof c.bottomGap === "number") {
       if (c.bottomGap <= 260) score += 3;
       else if (c.bottomGap <= 480) score += 1;
-      else if (c.bottomGap > 900) score -= 2;
+      else if (c.bottomGap <= 720) score -= 1;
+      else score -= 6; // 高于半屏：就是顶部搜索/筛选框，直接判死
     }
 
     const hay = `${c.placeholder || ""} ${c.classText || ""} ${c.idText || ""} ${c.ariaLabel || ""}`.toLowerCase();
@@ -202,12 +209,6 @@
     return { ok: cleared && echoed, cleared, echoed };
   }
 
-  /** 备注模板：渠道 + 动作，不写任何页面读不到的内容。 */
-  function autoNotes(siteLabel) {
-    const label = String(siteLabel || "").trim() || "招聘平台";
-    return `${label}站内信发送跟进话术`;
-  }
-
   const api = {
     SITES,
     INPUT_MIN_SCORE,
@@ -222,7 +223,6 @@
     pickSendCandidate,
     pickContactCandidate,
     verifySend,
-    autoNotes,
   };
 
   if (typeof window !== "undefined" && window && !window.__careerFollowupSendPure) {

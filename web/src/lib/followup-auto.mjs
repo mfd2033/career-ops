@@ -57,9 +57,3 @@ export function placeholderTokens(text) {
   }
   return out;
 }
-
-/** 备注模板：与扩展侧 autoNotes 同一条句子，发送成功后自动回填到记录里。 */
-export function autoNotes(siteLabel) {
-  const label = String(siteLabel || "").trim() || "招聘平台";
-  return `${label}站内信发送跟进话术`;
-}

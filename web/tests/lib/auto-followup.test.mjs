@@ -96,10 +96,15 @@ test("记录走 POST /api/followups/log，八个字段一个不少", () => {
 });
 
 test("只有「已发送」才自动勾对方未读；不确定时不勾", () => {
-  const sentBlock = DIALOG.slice(DIALOG.indexOf("if (sent) {"), DIALOG.indexOf("} else if (kind === \"uncertain\")"));
-  assert.ok(sentBlock.includes("setUnread(true)"), "已发送才勾未读");
-  const uncertainBlock = DIALOG.slice(DIALOG.indexOf("} else if (kind === \"uncertain\")"), DIALOG.indexOf("} catch {"));
-  assert.ok(!uncertainBlock.includes("setUnread(true)"), "不确定时绝不能自动勾未读");
+  const hits = DIALOG.split("setUnread(true)").length - 1;
+  assert.equal(hits, 1, "自动勾未读只应有一处");
+  const line = DIALOG.split("\n").find((l) => l.includes("setUnread(true)"));
+  assert.ok(line && line.includes("if (sent)"), `自动勾未读必须挂在 if (sent) 上：${(line || "").trim()}`);
+});
+
+test("备注自动写实际发出的话术，不再写固定的站点模板", () => {
+  assert.ok(DIALOG.includes("setNotes(message)"), "备注要回填发出去的那句");
+  assert.ok(!DIALOG.includes("站内信发送跟进话术"), "固定模板已废弃，不该再出现");
 });
 
 // ---- 三站表两侧不漂移 ------------------------------------------------------
@@ -126,12 +131,6 @@ test("压行规则两侧同结果（确认的文本 = 发出的文本）", () =>
   }
 });
 
-test("备注模板两侧同一句", () => {
-  for (const label of ["BOSS直聘", "猎聘", "智联招聘", ""]) {
-    assert.equal(webPure.autoNotes(label), extPure.autoNotes(label));
-  }
-});
-
 test("web 侧站点识别与扩展侧同判定", () => {
   for (const url of ["https://www.zhipin.com/x", "https://www.liepin.com/y", "https://jobs.zhaopin.com/z", "https://careers.tencent.com/a", "bad"]) {
     assert.equal(
@@ -140,6 +139,19 @@ test("web 侧站点识别与扩展侧同判定", () => {
       `两侧对 ${url} 判定不一致`,
     );
   }
+});
+
+test("BOSS 聊天页只在本次从岗位页点进去时才发（ADR-0100 修订版）", () => {
+  assert.ok(EXT_JS.includes("clickedChatEntry"), "必须记录本次有没有点过继续沟通");
+  assert.ok(EXT_JS.includes('reason: "unknown-target"'), "没有点进去要报 unknown-target，不能照发");
+  assert.ok(DIALOG.includes('"unknown-target"'), "原因码要进 REASON_CODES 才会翻译");
+});
+
+test("点完「继续沟通」由 SW 接力：跳页会换掉文档，标志必须随消息传回", () => {
+  assert.ok(EXT_JS.includes('status: "navigating"'), "点完入口要先交回 SW，不能原地等一个马上被销毁的文档");
+  assert.ok(EXT_JS.includes("msg.entryClicked === true"), "新文档必须能从消息里知道自己是从岗位页进来的");
+  assert.ok(BG.includes('res.status === "navigating"'), "SW 要识别 navigating 并等页面加载");
+  assert.ok(BG.includes("entryClicked = true"), "SW 要在第二次下发时带上 entryClicked");
 });
 
 // ---- i18n ----------------------------------------------------------------

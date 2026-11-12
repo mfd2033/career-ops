@@ -214,6 +214,8 @@ export const en: Dict = {
   "followups.autoReason.empty-text": "the message is empty",
   "followups.autoReason.exception": "unexpected error on the page",
   "followups.autoReason.ext-bridge-timeout": "the extension didn't answer in time",
+  "followups.autoReason.unknown-target": "the chat page opened on an unknown conversation — reopen it from the posting's Continue-chat button",
+  "followups.autoReason.input-not-registered": "the chat box kept its send button disabled — the site never took the text",
   "followups.autoReason.unknown": "unknown reason",
 
   // ── log-followup-button.tsx（报告页入口，ADR-0075）──
@@ -439,6 +441,8 @@ export const zh: Dict = {
   "followups.autoReason.empty-text": "话术是空的",
   "followups.autoReason.exception": "页面里出现异常",
   "followups.autoReason.ext-bridge-timeout": "扩展没有在时限内应答",
+  "followups.autoReason.unknown-target": "聊天页停在一条不明会话上没有从岗位页点「继续沟通」进来，为免发错人不发",
+  "followups.autoReason.input-not-registered": "聊天框的发送按钮一直处于禁用态——站点没接收这段文字",
   "followups.autoReason.unknown": "未知原因",
 
   // ── log-followup-button.tsx（报告页入口，ADR-0075）──

@@ -1215,9 +1215,19 @@ async function sendFollowup(msg) {
   if (!tab || typeof tab.id !== "number") return { ok: false, status: "failed", reason: "no-tab" };
 
   let lastError = null;
+  // 「点过继续沟通」这件事必须由 SW 记住：点完页面就跳走，旧文档里的脚本随之
+  // 销毁，新文档不知道自己是怎么进来的。这里等页面加载完，把标志带给下一次。
+  let entryClicked = false;
   for (let attempt = 0; attempt < FOLLOWUP_CONTENT_RETRY; attempt += 1) {
     try {
-      const res = await chrome.tabs.sendMessage(tab.id, { type: "followup-send", text });
+      const res = await chrome.tabs.sendMessage(tab.id, { type: "followup-send", text, entryClicked });
+      if (res && res.status === "navigating") {
+        // 上一次一个字都没写，只是点了入口：等聊天页加载完再来一次，不算发送重试。
+        await waitTabLoaded(tab.id, 8000);
+        await new Promise((resolve) => setTimeout(resolve, 800));
+        entryClicked = true;
+        continue;
+      }
       if (res && typeof res === "object") return { ...res, tabId: tab.id };
     } catch (err) {
       lastError = err;
