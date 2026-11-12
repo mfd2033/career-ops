@@ -1,8 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Loader2, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ChevronDown, Loader2, X } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { CHANNELS, DEFAULT_CHANNEL, channelLabel } from "@/lib/followup-channel.mjs";
+import { historyContacts, splitHistoryContacts } from "@/lib/followup-contacts.mjs";
 import { GenerateScriptPanel } from "@/components/followups/generate-script-panel";
 import { localISODate, type CadenceEntry, type Channel } from "@/lib/followups";
 import { cn } from "@/lib/cn";
@@ -31,6 +33,37 @@ export function LogDialog({
   const [unread, setUnread] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 历史联系人：来源只有本报告已记录的跟进（entry.followups，引擎已按日期
+  // 倒序），不跨报告、不新增接口。前三个常驻成 chips，其余收进下拉。
+  const history = useMemo(() => historyContacts(entry.followups ?? []), [entry.followups]);
+  const { visible: historyVisible, overflow: historyOverflow } = useMemo(
+    () => splitHistoryContacts(history, 3),
+    [history],
+  );
+  const [showMore, setShowMore] = useState(false);
+  const moreRef = useRef<HTMLDivElement>(null);
+  // datalist 同时容纳报告建议联系人与历史联系人（去重，报告里的优先带姓名），
+  // 这样打字时两条来源都能命中，不必记住点过谁。
+  const datalistOptions = useMemo(() => {
+    const options = entry.contacts.map((c) => ({ value: c.email, label: c.name }));
+    const seen = new Set(entry.contacts.map((c) => c.email.toLowerCase()));
+    for (const h of history) {
+      const key = h.contact.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      options.push({ value: h.contact, label: null });
+    }
+    return options;
+  }, [entry.contacts, history]);
+
+  useEffect(() => {
+    if (!showMore) return;
+    const onDown = (e: MouseEvent) => {
+      if (!moreRef.current?.contains(e.target as Node)) setShowMore(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [showMore]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -79,6 +112,12 @@ export function LogDialog({
     }
   };
 
+  // chip 悬停说明：最近一次使用日期 · 渠道 · 用过几次（缺字段的旧记录自动省略）
+  const contactTitle = (c: { date: string; channel: string; count: number }) =>
+    [c.date, channelLabel(c.channel, t), c.count > 1 ? t("followups.historyUsedTimes", { n: c.count }) : ""]
+      .filter(Boolean)
+      .join(" · ");
+
   const inputCls =
     "w-full rounded-md border border-border bg-surface/60 px-3 py-2 text-sm outline-none transition-colors placeholder:text-faint focus:border-brand/50 focus-visible:ring-2 focus-visible:ring-brand/40";
 
@@ -126,25 +165,91 @@ export function LogDialog({
               </select>
             </label>
           </div>
-          <label className="block text-xs font-medium text-muted">
-            {t("followups.fieldContact")} <span className="font-normal text-faint">({t("followups.optional")})</span>
+          {/* 联系人不再是 <label> 包裹：内部有 chip/下拉按钮等可点控件，
+              label 会把点击转给输入框。改用 htmlFor 显式关联。 */}
+          <div>
+            <label htmlFor={`co-contact-${entry.num}`} className="block text-xs font-medium text-muted">
+              {t("followups.fieldContact")} <span className="font-normal text-faint">({t("followups.optional")})</span>
+            </label>
             <input
+              id={`co-contact-${entry.num}`}
               value={contact}
               onChange={(e) => setContact(e.target.value)}
               placeholder={t("followups.contactPlaceholder")}
-              list={entry.contacts.length ? `co-contacts-${entry.num}` : undefined}
+              list={datalistOptions.length ? `co-contacts-${entry.num}` : undefined}
               className={cn(inputCls, "mt-1")}
             />
-            {entry.contacts.length > 0 && (
+            {datalistOptions.length > 0 && (
               <datalist id={`co-contacts-${entry.num}`}>
-                {entry.contacts.map((c) => (
-                  <option key={c.email} value={c.email}>
-                    {c.name ?? undefined}
+                {datalistOptions.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label ?? undefined}
                   </option>
                 ))}
               </datalist>
             )}
-          </label>
+            {historyVisible.length > 0 && (
+              <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                <span className="text-[11px] text-faint">{t("followups.historyContacts")}</span>
+                {historyVisible.map((c) => (
+                  <button
+                    key={c.contact}
+                    type="button"
+                    onClick={() => setContact(c.contact)}
+                    title={contactTitle(c)}
+                    className="inline-flex max-w-full cursor-pointer items-center gap-1 rounded-full border border-border px-2 py-0.5 text-[11px] text-muted transition-colors hover:border-brand/40 hover:text-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
+                  >
+                    <span className="truncate">{c.contact}</span>
+                    {c.count > 1 && <span className="shrink-0 tabular-nums text-faint">{c.count}</span>}
+                  </button>
+                ))}
+                {historyOverflow.length > 0 && (
+                  <div className="relative" ref={moreRef}>
+                    <button
+                      type="button"
+                      onClick={() => setShowMore((v) => !v)}
+                      aria-expanded={showMore}
+                      aria-controls={`co-history-more-${entry.num}`}
+                      className="inline-flex cursor-pointer items-center gap-0.5 rounded-full border border-border px-2 py-0.5 text-[11px] text-muted transition-colors hover:border-brand/40 hover:text-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
+                    >
+                      {t("followups.historyMore", { n: historyOverflow.length })}
+                      <ChevronDown
+                        className={cn("size-3 transition-transform", showMore && "rotate-180")}
+                        aria-hidden="true"
+                      />
+                    </button>
+                    {showMore && (
+                      <div
+                        id={`co-history-more-${entry.num}`}
+                        aria-label={t("followups.historyPickAria")}
+                        className="absolute left-0 top-full z-10 mt-1 w-64 max-w-[min(16rem,calc(100vw-4rem))] rounded-lg border border-border bg-surface p-1 shadow-lg"
+                      >
+                        {historyOverflow.map((c) => (
+                          <button
+                            key={c.contact}
+                            type="button"
+                            onClick={() => {
+                              setContact(c.contact);
+                              setShowMore(false);
+                            }}
+                            className="flex w-full cursor-pointer items-center gap-2 rounded px-2 py-1 text-left transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
+                          >
+                            <span className="w-16 shrink-0 text-[11px] tabular-nums text-faint">{c.date || "—"}</span>
+                            {c.channel && (
+                              <Badge tone="muted" className="shrink-0 text-[10px] font-medium">
+                                {channelLabel(c.channel, t)}
+                              </Badge>
+                            )}
+                            <span className="truncate text-xs text-foreground">{c.contact}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
           <label className="block text-xs font-medium text-muted">
             {t("followups.fieldNotes")} <span className="font-normal text-faint">({t("followups.optional")})</span>
             <textarea

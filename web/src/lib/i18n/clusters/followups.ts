@@ -134,6 +134,11 @@ export const en: Dict = {
   "followups.fieldContact": "Contact",
   "followups.optional": "optional",
   "followups.contactPlaceholder": "who you reached out to",
+  // 历史联系人选择：来源是本报告已记录的跟进（computed in followup-contacts.mjs）。
+  "followups.historyContacts": "Previously used:",
+  "followups.historyMore": "More ({n})",
+  "followups.historyUsedTimes": "{n}×",
+  "followups.historyPickAria": "Pick a previously used contact",
   "followups.fieldNotes": "Notes",
   "followups.unreadCheckbox": "Recipient unread",
   "followups.notesPlaceholder": "what you said, what you're waiting on…",
@@ -312,6 +317,11 @@ export const zh: Dict = {
   "followups.fieldContact": "联系人",
   "followups.optional": "可选",
   "followups.contactPlaceholder": "你联系了谁",
+  // 历史联系人选择（与 en 段同键）。
+  "followups.historyContacts": "历史联系人：",
+  "followups.historyMore": "更多 {n} 个",
+  "followups.historyUsedTimes": "{n} 次",
+  "followups.historyPickAria": "从历史联系人中选择",
   "followups.fieldNotes": "备注",
   "followups.unreadCheckbox": "对方未读",
   "followups.notesPlaceholder": "你说了什么、在等待什么……",
