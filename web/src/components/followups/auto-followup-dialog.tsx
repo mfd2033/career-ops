@@ -173,7 +173,9 @@ export function AutoFollowupDialog({
         siteLabel,
       });
       if (readContact) setContact(readContact);
-      if (sent) setUnread(true); // 刚发出 → 对方必然还没读
+      // 「对方未读」不按「刚发出所以一定没读」默认：只认页面上写着送达/未读。
+      // 读不到状态就不勾，等用户到页面上看一眼再决定（实事求是）。
+      setUnread(res.readState === "unread");
       // 备注写实际发出去的那句（与历史跟进记录口径一致）。uncertain 也写：
       // 文字确实已经交给了页面，用户要到页面上核对的就是这一句。
       if (sent || kind === "uncertain") setNotes(message);

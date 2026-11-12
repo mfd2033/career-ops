@@ -1218,11 +1218,14 @@ async function sendFollowup(msg) {
   // 「点过继续沟通」这件事必须由 SW 记住：点完页面就跳走，旧文档里的脚本随之
   // 销毁，新文档不知道自己是怎么进来的。这里等页面加载完，把标志带给下一次。
   let entryClicked = false;
+  let jobContact = "";
   for (let attempt = 0; attempt < FOLLOWUP_CONTENT_RETRY; attempt += 1) {
     try {
-      const res = await chrome.tabs.sendMessage(tab.id, { type: "followup-send", text, entryClicked });
+      const res = await chrome.tabs.sendMessage(tab.id, { type: "followup-send", text, entryClicked, jobContact });
       if (res && res.status === "navigating") {
         // 上一次一个字都没写，只是点了入口：等聊天页加载完再来一次，不算发送重试。
+        // 岗位页上读到的招聘者姓名一起带过去，聊天窗读不到名字时用它兜。
+        jobContact = typeof res.entryContact === "string" ? res.entryContact : "";
         await waitTabLoaded(tab.id, 8000);
         await new Promise((resolve) => setTimeout(resolve, 800));
         entryClicked = true;

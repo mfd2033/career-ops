@@ -337,6 +337,50 @@
     return P.pickContactCandidate(candidates) || "";
   }
 
+  /**
+   * 岗位详情页上的招聘者姓名——聊天窗读不到时的回退来源。
+   * BOSS 把它写成标题「赵女士」，紧跟「· 小猎吧」「猎头顾问」。只认 2–7 字、
+   * 以称呼结尾的短文本；别的站没这种写法就返回空串，不猜。
+   */
+  function readJobPageContact() {
+    const pattern = /^[\u4e00-\u9fa5A-Za-z]{1,5}(女士|先生|小姐|老师)$/;
+    const nodes = document.querySelectorAll("h1, h2, h3, h4, [class*='boss'], [class*='hr'], [class*='recruit']");
+    let scanned = 0;
+    for (const el of nodes) {
+      if (scanned++ > MAX_CONTACT_SCAN) break;
+      if (!isVisible(el)) continue;
+      if (el.closest("a, button, [role='button']")) continue;
+      const text = String(el.innerText || "").replace(/\s+/g, "").trim();
+      if (!pattern.test(text)) continue;
+      return text;
+    }
+    return "";
+  }
+
+  /**
+   * 刚发出去那条消息的送达状态，从消息节点自己的文字里读：
+   * 「已读」→ 对方读了；「送达 / 未读」→ 还没读；读不到 → unknown。
+   * 记录里的「对方未读」只在这个函数说 unread 时勾，不做默认假设。
+   */
+  function readDeliveryState(inputEl, text) {
+    const fp = P.fingerprint(text);
+    if (!fp) return "unknown";
+    const scope = messageScopeOf(inputEl);
+    if (!scope || scope === document.body) return "unknown";
+    const selector = '[class*="message"],[class*="msg"],[class*="bubble"],[class*="chat-item"]';
+    const previewLike = /last-?msg|preview|brief|abstract/i;
+    for (const node of scope.querySelectorAll(selector)) {
+      if (node === inputEl || node.contains(inputEl)) continue;
+      if (previewLike.test(String(node.className || ""))) continue;
+      const raw = String(node.innerText || "").replace(/\s+/g, "");
+      if (!raw.includes(fp)) continue;
+      if (/已读/.test(raw)) return "read";
+      if (/送达|未读/.test(raw)) return "unread";
+      return "unknown";
+    }
+    return "unknown";
+  }
+
   /** 页面是不是 BOSS 的会话列表页（左列会话、右侧聊天区）。 */
   function isConversationListPage() {
     return location.pathname.replace(/\/+$/, "") === "/web/geek/chat";
@@ -356,7 +400,14 @@
       if (clickChatEntry()) {
         // 页面要跳去聊天页，本脚本可能随文档一起销毁，等下去没有意义：
         // 交回给 SW，它等页面加载后再发一次，并带上 entryClicked。
-        return { ok: false, status: "navigating", reason: "chat-entry-clicked", site: site ? site.id : null };
+        // 岗位页上的招聘者姓名一并交回：聊天窗里读不到时用它兜（用户定的口径）。
+        return {
+          ok: false,
+          status: "navigating",
+          reason: "chat-entry-clicked",
+          site: site ? site.id : null,
+          entryContact: readJobPageContact(),
+        };
       }
     }
     if (!input) input = await findInput(6000);
@@ -375,7 +426,8 @@
       };
     }
 
-    const contact = readContact(input);
+    // 先读聊天窗；读不到就用上一跳从岗位页带回来的招聘者姓名。
+    const contact = readContact(input) || String((msg && msg.jobContact) || "");
     // 填字前先找一次按钮，记下它此刻是不是禁用态：BOSS 空内容时带 `disabled` 类，
     // 只有「本来就禁用」的站点才需要后面的就绪等待，免得改到另两站的行为。
     const buttonBefore = findSendButton(input);
@@ -451,6 +503,8 @@
       reason,
       cleared: verdict.cleared,
       echoed: verdict.echoed,
+      // 「对方未读」只认页面上写着送达/未读；读到已读就是 read，读不到 unknown。
+      readState: verdict.ok ? readDeliveryState(input, text) : "unknown",
       notes,
       contact,
       site: site ? site.id : null,
