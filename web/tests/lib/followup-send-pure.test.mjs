@@ -25,6 +25,7 @@ const {
   pickInputCandidate,
   pickSendCandidate,
   pickContactCandidate,
+  pickChatScope,
   verifySend,
 } = mod.default ?? mod;
 
@@ -212,4 +213,60 @@ test("没有像样的候选就返回 null，不编人名", () => {
   assert.equal(pickContactCandidate([]), null);
   assert.equal(pickContactCandidate([{ text: "搜", classText: "x-name", top: 0, visible: true }]), null);
   assert.equal(pickContactCandidate([{ text: "张三", classText: "x-name", top: 0, visible: false }]), null);
+});
+
+// ---- 会话作用域 ------------------------------------------------------------
+//
+// 作用域选错 = 读不到联系人、也读不到消息流。智联实测那条链原样搬进来当夹具：
+// 输入框外壳 `im-sender__input-wrapper` 自己就命中 `im-`，只取最近命中的话
+// 作用域永远停在输入区，头部（`im-chat-header__name`）在圈外。
+
+/** 智联聊天页（i.zhaopin.com/im，2026-11-12 现场实测）的输入框祖先链，由近到远。 */
+const ZHAOPIN_CHAIN = [
+  { tag: "div", classText: "im-sender__input-wrapper" },
+  { tag: "div", classText: "im-sender__panel" },
+  { tag: "div", classText: "im-sender" },
+  { tag: "div", classText: "im-main-panel__chat" },
+  { tag: "div", classText: "im-main-panel" },
+  { tag: "main", classText: "im-page__main km-main" },
+  { tag: "section", classText: "im-container km-layout" },
+  { tag: "main", classText: "im-page__inner km-main" },
+  { tag: "section", classText: "im-page km-layout" },
+  { tag: "div", classText: "im-page-wrap" },
+  { tag: "div", classText: "zp-im-root" },
+];
+
+test("智联：作用域跳过输入框外壳，落到 im-main-panel__chat", () => {
+  const idx = pickChatScope(ZHAOPIN_CHAIN);
+  assert.equal(ZHAOPIN_CHAIN[idx].classText, "im-main-panel__chat");
+});
+
+test("输入框外壳再像会话也不算作用域（input/sender/panel 组合）", () => {
+  // 外壳单拎出来时链里只有它：宁可回落调用方，也不要把输入区当会话区。
+  assert.equal(pickChatScope([{ tag: "div", classText: "im-sender__input-wrapper" }]), -1);
+  assert.equal(pickChatScope([{ tag: "div", classText: "im-sender__panel" }]), -1);
+});
+
+test("带 chat 语义词的容器直接算数（BOSS / 猎聘骨架）", () => {
+  assert.equal(
+    pickChatScope([
+      { tag: "div", classText: "chat-editor" },
+      { tag: "div", classText: "chat-conversation" },
+      { tag: "div", classText: "chat-panel" },
+    ]),
+    1,
+  );
+  assert.equal(
+    pickChatScope([
+      { tag: "div", classText: "ant-im-input im-ui-textarea-wrap" },
+      { tag: "div", classText: "im-ui-dialog" },
+    ]),
+    1,
+  );
+});
+
+test("链上没有会话容器就返回 -1，由调用方回落输入框父节点", () => {
+  assert.equal(pickChatScope([]), -1);
+  assert.equal(pickChatScope(undefined), -1);
+  assert.equal(pickChatScope([{ tag: "div", classText: "form-row" }, { tag: "div", classText: "wrapper" }]), -1);
 });

@@ -50,6 +50,21 @@
   // 联系人反特征：页面导航、会话列表预览、状态词。
   const CONTACT_ANTI = /搜索|消息|我的|简历|职位|公司|在线|离线|已读|未读|设置|更多|聊天|发送/;
 
+  // ---- 会话作用域（读联系人 / 找发送按钮的落脚点）---------------------------
+  //
+  // 三站的输入框都裹在「组合器」外壳里，而外壳类名往往带着 chat / im 前缀。
+  // 智联实测：`TEXTAREA.im-sender__input` 的父节点是
+  // `DIV.im-sender__input-wrapper` —— 它自己就命中 `[class*="im-"]`，于是
+  // `closest()` 就地停下，作用域缩进输入区，会话头部（`im-chat-header__name`）
+  // 和消息流全在作用域外，联系人恒为空、回读恒收不到消息。
+  //
+  // 判据两条：类名要带会话语义词（chat / conversation / dialog / im- / panel），
+  // 且不能是组合器外壳（input / textarea / editor / sender / composer / toolbar /
+  // footer / btn）。外壳那几个词是硬否决——`chat-editor`、`chat-input` 也带 chat，
+  // 但它们恰恰就是输入区本身。
+  const SCOPE_HINT = /(chat|conversation|dialog|im-|panel)/i;
+  const SCOPE_ANTI = /(input|textarea|editor|sender|composer|toolbar|footer|btn)/i;
+
   const INPUT_MIN_SCORE = 5;
   const SEND_MIN_SCORE = 3;
 
@@ -197,6 +212,23 @@
   }
 
   /**
+   * 从输入框往上的祖先链里挑会话作用域，返回下标（由近到远，第一个合格的），
+   * 全不合格返回 -1（调用方回落输入框父节点）。
+   *
+   * @param {Array<{tag?: string, classText?: string}>} ancestors 由近到远的祖先描述
+   */
+  function pickChatScope(ancestors) {
+    const list = Array.isArray(ancestors) ? ancestors : [];
+    for (let i = 0; i < list.length; i += 1) {
+      const cls = String((list[i] && list[i].classText) || "");
+      if (!SCOPE_HINT.test(cls)) continue;
+      if (SCOPE_ANTI.test(cls)) continue;
+      return i;
+    }
+    return -1;
+  }
+
+  /**
    * 发送结果核对（原型里定的两条都成立才报「已发送」）：
    *   1. 输入框已清空；2. 聊天流里出现刚发的那句（尾部指纹命中）。
    * 任一不成立 → ok:false，调用方报「不确定」，不自动勾「对方未读」。
@@ -222,6 +254,7 @@
     pickInputCandidate,
     pickSendCandidate,
     pickContactCandidate,
+    pickChatScope,
     verifySend,
   };
 

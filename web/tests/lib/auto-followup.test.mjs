@@ -162,6 +162,18 @@ test("点完「继续沟通」由 SW 接力：跳页会换掉文档，标志必�
   assert.ok(BG.includes("entryClicked = true"), "SW 要在第二次下发时带上 entryClicked");
 });
 
+test("会话作用域交给纯逻辑挑，不再用「最近的近邻」拍板（智联联系人读空）", () => {
+  assert.ok(EXT_JS.includes("P.pickChatScope("), "chatScopeOf 必须走纯逻辑 pickChatScope");
+  assert.ok(
+    !/from\.closest\('\[class\*="chat"\]/.test(EXT_JS),
+    "最近的 closest 命中会把作用域锁在输入框外壳（im-sender__input-wrapper）上",
+  );
+  assert.ok(
+    EXT_JS.includes('[class*="timeline"],[class*="message"],[class*="msg"],[class*="bubble"]'),
+    "人名只在会话头部，消息区节点必须排除",
+  );
+});
+
 // ---- i18n ----------------------------------------------------------------
 
 test("followups.auto* 键 en/zh 成对且集合相同", () => {

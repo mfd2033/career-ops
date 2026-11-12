@@ -177,14 +177,27 @@
    * 输入框所在的聊天容器。必须从 parentElement 往上找：三站的输入框类名自己就带
    * chat / im-（BOSS 是 div#chat-input.chat-input，猎聘是 ant-im-input im-ui-textarea），
    * 直接从输入框 closest 会把作用域缩成输入框内部，发送按钮和消息列表全都找不到。
+   *
+   * 也不能只取最近那个命中 `[class*="im-"]` 的祖先：那个命中往往就是输入框自己的
+   * 外壳（智联 `DIV.im-sender__input-wrapper`），作用域一缩进去，会话头部和消息流
+   * 全在圈外，联系人读到的永远是空。选谁交给纯逻辑 pickChatScope（可单测），这里
+   * 只负责把祖先链摘成描述。
    */
   function chatScopeOf(inputEl) {
     const from = inputEl && inputEl.parentElement;
     if (!from) return document.body;
-    return (
-      from.closest('[class*="chat"],[class*="im-"],[class*="dialog"],[class*="panel"],[class*="conversation"]') ||
-      from
-    );
+    const chain = [];
+    const els = [];
+    let node = from;
+    let depth = 0;
+    while (node && node !== document.body && depth < 12) {
+      chain.push({ tag: node.tagName.toLowerCase(), classText: classTextOf(node) });
+      els.push(node);
+      node = node.parentElement;
+      depth += 1;
+    }
+    const idx = P.pickChatScope(chain);
+    return idx >= 0 ? els[idx] : from;
   }
 
   /**
@@ -329,6 +342,11 @@
     for (const node of nodes) {
       if (scanned++ > MAX_CONTACT_SCAN) break;
       if (node.closest("button, a, [role='button']")) continue;
+      // 消息流里的节点也带 name/title 类名（智联 im-message__name-wrapper、
+      // im-msg-11__title）。作用域放宽到整个会话容器后它们会进候选池，而
+      // 视口上方（top<0）的节点还会因位置得分被抬高 —— 一条短消息能压过
+      // 会话头部的真名。人名只在头部，消息区一律不看。
+      if (node.closest('[class*="timeline"],[class*="message"],[class*="msg"],[class*="bubble"]')) continue;
       const text = String(node.innerText || "").trim();
       if (!text || text.length > 40) continue;
       const rect = node.getBoundingClientRect();
