@@ -2,7 +2,7 @@
 
 ## 状态
 
-Accepted (2026-10-16)
+Accepted (2026-10-16)；修订 2026-11-12（「对方未读」标注下线，见文末修订节）
 
 ## 背景
 
@@ -48,6 +48,20 @@ Accepted (2026-10-16)
 - 代价二：status-log 出现「Discarded + 撤销」成对记录——账本如实，不做合并（同 ADR-0077 代价二）。
 - 已知边界：未读标注是人工动作，忘标注的「实际未读」行会在 14 天后被建议冻结——❄ 只是建议，确认对话里用户可自行察觉；撤销窗口 10s 后只能从报告页找回。
 - 回滚：引擎新增输出字段为纯增量；web 视图层增量（组件 + i18n + flag mock 删除），可独立退回；无数据迁移。
+
+## 修订（2026-11-12）：「对方未读」标注下线，冻结只看沉默天数
+
+用户判断：发送那一刻对方是否在线无从得知，聊天窗的「送达」只说明消息到了，等对方真读了自己也不会回来补记。这个标记本来就不准，而且一落下就不再变。
+
+改动：
+
+- LogDialog 与自动跟进弹窗的「对方未读」复选框删除；自动跟进不再按页面送达状态回填 `readState`，扩展侧 `readDeliveryState` 一并删除。
+- `followup-cadence.mjs` 的 `freezeSuggested` 去掉 `readState !== 'unread'` 这道门。`readState` 输出与 `[unread]` 解析保留，只为历史行不报错、token 不混进 notes，不参与任何判定。
+- 沉默列的 `✉` 分支与「未读 · 再看一眼」提示删除；FreezeDialog 的「已读状态」证据行删除，证据剩「最近跟进」「沉默天数」两行。
+- i18n 键 `unreadCheckbox` / `unreadHint` / `freezeEvidenceRead` / `freezeEvidenceReadRead` 删除。
+- `POST /api/followups/log` 的 `unread` 入参保留，兼容还在跑的旧客户端；本仓库已无调用方传它。
+
+代价：`data/follow-ups.md` 里已有历史行带 `[unread]`（自动跟进按发送瞬间的「送达」写下），此前这些行永远不会被建议冻结，现在按沉默天数正常进判定。数据不动，不迁移。
 
 ## References
 

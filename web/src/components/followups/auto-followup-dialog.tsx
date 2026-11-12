@@ -14,12 +14,12 @@ import { useI18n } from "@/lib/i18n/context";
 
 // 「自动跟进」（跟进页行操作区 ⚡）：一个弹窗两个阶段，把原先五步的
 // 复制 → 打开 → 粘贴 → 发送 → 记录 收成两步——先看并改话术，确认后由扩展送进
-// 招聘站聊天框发出；发完把渠道/联系人/备注/未读自动回填成一条记录。
+// 招聘站聊天框发出；发完把渠道/联系人/备注自动回填成一条记录。
 //
 // 边界（原型的「回退」小节，全部要真实实现，不许假装成功）：
 //   • 只覆盖 BOSS直聘 / 猎聘 / 智联招聘；其余站点只复制 + 打开；
 //   • 扩展未装/未重载 → 复制 + 打开，记录只预填渠道；
-//   • 找不到对话框 / 回读校验不过 → 不报成功、不自动勾「对方未读」；
+//   • 找不到对话框 / 回读校验不过 → 不报成功；
 //   • 一次确认只发一条，不重试、不批量、不代投。
 
 /** 等扩展开 tab + 注入内容脚本 + 回读校验，30s 是这串动作的合理上限。 */
@@ -77,7 +77,6 @@ export function AutoFollowupDialog({
   const [channel, setChannel] = useState<Channel>(DEFAULT_CHANNEL);
   const [contact, setContact] = useState(entry.contacts[0]?.email ?? "");
   const [notes, setNotes] = useState("");
-  const [unread, setUnread] = useState(false);
   const [saving, setSaving] = useState(false);
   const [logError, setLogError] = useState<string | null>(null);
 
@@ -173,9 +172,6 @@ export function AutoFollowupDialog({
         siteLabel,
       });
       if (readContact) setContact(readContact);
-      // 「对方未读」不按「刚发出所以一定没读」默认：只认页面上写着送达/未读。
-      // 读不到状态就不勾，等用户到页面上看一眼再决定（实事求是）。
-      setUnread(res.readState === "unread");
       // 备注写实际发出去的那句（与历史跟进记录口径一致）。uncertain 也写：
       // 文字确实已经交给了页面，用户要到页面上核对的就是这一句。
       if (sent || kind === "uncertain") setNotes(message);
@@ -204,7 +200,6 @@ export function AutoFollowupDialog({
           channel,
           contact: tableSafe(contact),
           notes: tableSafe(notes),
-          unread,
         }),
       });
       const json = await res.json().catch(() => ({}));
@@ -379,16 +374,6 @@ export function AutoFollowupDialog({
                 placeholder={t("followups.notesPlaceholder")}
                 className={cn(inputCls, "mt-1 resize-none")}
               />
-            </label>
-
-            <label className="mt-3 flex cursor-pointer items-center gap-2 text-xs font-medium text-muted">
-              <input
-                type="checkbox"
-                checked={unread}
-                onChange={(e) => setUnread(e.target.checked)}
-                className="size-3.5 accent-[hsl(203_52%_68%)]"
-              />
-              {t("followups.unreadCheckbox")}
             </label>
 
             {logError && <p className="mt-2 text-xs text-red-500">{logError}</p>}

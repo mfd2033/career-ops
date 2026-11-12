@@ -29,8 +29,6 @@ export function LogDialog({
   const [channel, setChannel] = useState<Channel>(DEFAULT_CHANNEL);
   const [contact, setContact] = useState(entry.contacts[0]?.email ?? "");
   const [notes, setNotes] = useState("");
-  // ADR-0079 决策 5：已读/未读唯一可靠来源是人工标注；勾选 → log 行尾 [unread]。
-  const [unread, setUnread] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // 历史联系人：来源只有本报告已记录的跟进（entry.followups，引擎已按日期
@@ -103,7 +101,6 @@ export function LogDialog({
           channel,
           contact: tableSafe(contact),
           notes: tableSafe(notes),
-          unread,
         }),
       });
       const j = await res.json().catch(() => ({}));
@@ -321,15 +318,6 @@ export function LogDialog({
             />
           </label>
           {error && <p className="text-xs text-red-500">{error}</p>}
-          <label className="flex cursor-pointer items-center gap-2 text-xs font-medium text-muted">
-            <input
-              type="checkbox"
-              checked={unread}
-              onChange={(e) => setUnread(e.target.checked)}
-              className="size-3.5 accent-[hsl(203_52%_68%)]"
-            />
-            {t("followups.unreadCheckbox")}
-          </label>
           {/* ADR-0080 + ADR-0082：话术区默认展开，只读模板文件 + 本行 entry；复制走剪贴板，
               不写备注、不写 follow-ups.md（用户决策「不联动」）。 */}
           <GenerateScriptPanel entry={entry} />

@@ -39,7 +39,9 @@ export async function POST(req: Request) {
     contact?: string;
     notes?: string;
     note?: string; // legacy alias for notes
-    unread?: boolean; // ADR-0079 决策 5：人工标注「对方未读」→ 行尾 [unread] token
+    // 历史入参：ADR-0079 决策 5 的「对方未读」标注已下线（2026-11-12），
+    // 仅保留兼容旧客户端的写入路径，本仓库不再有调用方传它。
+    unread?: boolean;
   };
   try {
     body = (await req.json()) as typeof body;

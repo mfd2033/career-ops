@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { ArrowLeft, CalendarClock, ChevronDown, ChevronRight, Loader2, Mail, NotebookPen, Pin, Search, Snowflake, Trash2, Zap } from "lucide-react";
+import { ArrowLeft, CalendarClock, ChevronDown, ChevronRight, Loader2, NotebookPen, Pin, Search, Snowflake, Trash2, Zap } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { fieldCls } from "@/components/ui/field-styles";
 import { CompanyLogo } from "@/components/company-logo";
@@ -650,7 +650,7 @@ function FollowupRow({
         <td className={cn("px-2.5 py-3 tabular-nums num-col", daysHeatClass(e.daysSinceLastFollowup))}>
           {e.daysSinceLastFollowup == null ? <span className="text-faint">—</span> : e.daysSinceLastFollowup}
         </td>
-        {/* career-ops-49：沉默天数 + 冻结判定（❄ 仅「已读不回且达阈值」时出现，悬停看全称） */}
+        {/* career-ops-49：沉默天数 + 冻结判定（❄ 仅「沉默达阈值」时出现，悬停看全称） */}
         <td className="px-2.5 py-3 num-col">
           {e.silenceDays == null ? (
             <span className="text-faint">—</span>
@@ -660,11 +660,6 @@ function FollowupRow({
               title={t("followups.freezeBadge")}
             >
               <Snowflake className="size-3.5" aria-label={t("followups.freezeBadge")} />
-              <span className="tabular-nums">{e.silenceDays}</span>
-            </span>
-          ) : e.readState === "unread" ? (
-            <span className="inline-flex items-center gap-1 text-faint" title={t("followups.unreadHint")}>
-              <Mail className="size-3.5" aria-label={t("followups.unreadHint")} />
               <span className="tabular-nums">{e.silenceDays}</span>
             </span>
           ) : (
@@ -834,10 +829,6 @@ function FreezeDialog({
           <div className="flex justify-between gap-3">
             <span className="text-faint">{t("followups.freezeEvidenceLast")}</span>
             <span>{e.followups?.[0]?.date ?? "—"}</span>
-          </div>
-          <div className="flex justify-between gap-3">
-            <span className="text-faint">{t("followups.freezeEvidenceRead")}</span>
-            <span>{t("followups.freezeEvidenceReadRead")}</span>
           </div>
           <div className="flex justify-between gap-3">
             <span className="text-faint">{t("followups.freezeEvidenceSilence")}</span>

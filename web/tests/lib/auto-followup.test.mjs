@@ -79,7 +79,7 @@ test("发送前先把话术写进剪贴板（扩展缺席时的兜底）", () =>
 
 // ---- 记录字段齐全 ----------------------------------------------------------
 
-test("记录走 POST /api/followups/log，八个字段一个不少", () => {
+test("记录走 POST /api/followups/log，七个字段一个不少", () => {
   assert.ok(DIALOG.includes('fetch("/api/followups/log"'), "必须写 /api/followups/log");
   for (const field of [
     "appNum: entry.num",
@@ -89,15 +89,14 @@ test("记录走 POST /api/followups/log，八个字段一个不少", () => {
     "channel,",
     "contact: tableSafe(contact)",
     "notes: tableSafe(notes)",
-    "unread,",
   ]) {
     assert.ok(DIALOG.includes(field), `记录请求缺字段：${field}`);
   }
 });
 
-test("「对方未读」只按页面上的送达状态勾选，不预设", () => {
-  assert.equal(DIALOG.split("setUnread(true)").length - 1, 0, "不许再出现无条件勾选");
-  assert.ok(DIALOG.includes('setUnread(res.readState === "unread")'), "只有页面说未读才勾");
+test("「对方未读」标注已下线：没有勾选框，也没有自动勾选", () => {
+  assert.ok(!DIALOG.includes("setUnread"), "不许再留未读状态");
+  assert.ok(!DIALOG.includes("unreadCheckbox"), "勾选框已删");
 });
 
 test("备注自动写实际发出的话术，不再写固定的站点模板", () => {
@@ -145,14 +144,17 @@ test("BOSS 聊天页只在本次从岗位页点进去时才发（ADR-0100 修订
   assert.ok(DIALOG.includes('"unknown-target"'), "原因码要进 REASON_CODES 才会翻译");
 });
 
-test("联系人读不到时回落到岗位页，未读状态不猜（用户口径 2026-11-12）", () => {
+test("联系人读不到时回落到岗位页（用户口径 2026-11-12）", () => {
   assert.ok(EXT_JS.includes("function readJobPageContact"), "要能从岗位页读招聘者姓名");
   assert.ok(EXT_JS.includes("msg.jobContact"), "聊天窗读不到时要吃 SW 带回来的岗位页姓名");
   assert.ok(EXT_JS.includes("entryContact: readJobPageContact()"), "点入口那一跳要把岗位页姓名交回去");
   assert.ok(BG.includes("jobContact"), "SW 要把它接力给第二段");
-  assert.ok(EXT_JS.includes("function readDeliveryState"), "送达状态要从页面上读，不能假定");
-  assert.ok(!DIALOG.includes("if (sent) setUnread(true)"), "不许按「刚发出所以未读」默认勾选");
-  assert.ok(DIALOG.includes('res.readState === "unread"'), "只有页面说未读才勾");
+});
+
+test("送达状态读取随「对方未读」一起下线，不再回传 readState", () => {
+  assert.ok(!EXT_JS.includes("readDeliveryState"), "扩展不该再读送达状态");
+  assert.ok(!EXT_JS.includes("readState"), "结果里不再带 readState");
+  assert.ok(!DIALOG.includes("readState"), "弹窗不再消费 readState");
 });
 
 test("点完「继续沟通」由 SW 接力：跳页会换掉文档，标志必须随消息传回", () => {

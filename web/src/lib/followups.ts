@@ -66,8 +66,9 @@ export type CadenceEntry = {
   nextOverride?: string | null;
   daysUntilNext: number | null;
   /* ── ADR-0079 冻结判定：引擎（followup-cadence.mjs）单点输出，前端只消费不复算。
-     freezeSuggested 仅在「applied/interview 且非未读且沉默 ≥ freeze_threshold_days」时
-     为 true；unread 永不建议。旧引擎无这些字段时为 undefined，UI 按「无建议」处理。 */
+     freezeSuggested 仅在「applied/interview 且沉默 ≥ freeze_threshold_days」时为 true。
+     readState 是历史 [unread] 标记的回显（标注入口已下线），不参与判定。
+     旧引擎无这些字段时为 undefined，UI 按「无建议」处理。 */
   silenceDays?: number | null;
   readState?: "read" | "unread" | null;
   freezeSuggested?: boolean;

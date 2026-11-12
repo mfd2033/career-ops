@@ -375,30 +375,6 @@
     return "";
   }
 
-  /**
-   * 刚发出去那条消息的送达状态，从消息节点自己的文字里读：
-   * 「已读」→ 对方读了；「送达 / 未读」→ 还没读；读不到 → unknown。
-   * 记录里的「对方未读」只在这个函数说 unread 时勾，不做默认假设。
-   */
-  function readDeliveryState(inputEl, text) {
-    const fp = P.fingerprint(text);
-    if (!fp) return "unknown";
-    const scope = messageScopeOf(inputEl);
-    if (!scope || scope === document.body) return "unknown";
-    const selector = '[class*="message"],[class*="msg"],[class*="bubble"],[class*="chat-item"]';
-    const previewLike = /last-?msg|preview|brief|abstract/i;
-    for (const node of scope.querySelectorAll(selector)) {
-      if (node === inputEl || node.contains(inputEl)) continue;
-      if (previewLike.test(String(node.className || ""))) continue;
-      const raw = String(node.innerText || "").replace(/\s+/g, "");
-      if (!raw.includes(fp)) continue;
-      if (/已读/.test(raw)) return "read";
-      if (/送达|未读/.test(raw)) return "unread";
-      return "unknown";
-    }
-    return "unknown";
-  }
-
   /** 页面是不是 BOSS 的会话列表页（左列会话、右侧聊天区）。 */
   function isConversationListPage() {
     return location.pathname.replace(/\/+$/, "") === "/web/geek/chat";
@@ -521,8 +497,6 @@
       reason,
       cleared: verdict.cleared,
       echoed: verdict.echoed,
-      // 「对方未读」只认页面上写着送达/未读；读到已读就是 read，读不到 unknown。
-      readState: verdict.ok ? readDeliveryState(input, text) : "unknown",
       notes,
       contact,
       site: site ? site.id : null,

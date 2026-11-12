@@ -231,7 +231,7 @@
   /**
    * 发送结果核对（原型里定的两条都成立才报「已发送」）：
    *   1. 输入框已清空；2. 聊天流里出现刚发的那句（尾部指纹命中）。
-   * 任一不成立 → ok:false，调用方报「不确定」，不自动勾「对方未读」。
+   * 任一不成立 → ok:false，调用方报「不确定」。
    */
   function verifySend({ after, messages, expectText }) {
     const fp = fingerprint(expectText);

@@ -1160,7 +1160,7 @@ async function fetchDetailHtml(rawUrl) {
 //
 // 边界：一次点击只发一条。这里的重试只针对「消息送不到内容脚本」（刚开的 tab /
 // 扩展刚重载），一旦送达就不再发第二次——发送本身绝不重试。结果原样回 web
-// （sent / uncertain / failed + 原因码），记录与「对方未读」由 web 侧决定。
+// （sent / uncertain / failed + 原因码），记录由 web 侧决定。
 
 const FOLLOWUP_CONTENT_RETRY = 3;
 const FOLLOWUP_CONTENT_RETRY_MS = 700;

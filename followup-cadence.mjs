@@ -438,9 +438,9 @@ function parseTrackerContent(content) {
 // aren't either, so both fail the `isNaN` check below and never enter `entries`.
 const BULLET_RE = /^-\s+(\d{4}-\d{2}-\d{2})\s+·\s+#(\d+)\s+(.+?)(?:\s+—\s+(.*))?$/;
 
-// follow-ups.md log 行尾可选 [unread] token（ADR-0079 决策 5）：用户人工标注
-// 「对方未读」。已读/未读没有自动信号源（邮件回执、LinkedIn 回执在本仓库均不可得），
-// 未标注默认 read——「已发出即视为对方可读」。抽成纯函数以便单测与 log 写入端共用格式。
+// follow-ups.md log 行尾可选 [unread] token（ADR-0079 决策 5，2026-11-12 起停用写入口）：
+// 只保留解析，供历史记录不报错、不把 token 混进 notes；新记录不再产生该标记，
+// 判定也不再读它。抽成纯函数以便单测与 log 写入端共用格式。
 export function stripUnreadToken(line) {
   const text = String(line ?? '');
   const stripped = text.replace(/\s*\[unread\]\s*$/, '');
@@ -826,16 +826,14 @@ export function analyzeFromContent(trackerContent, followupsContent = '', status
       if (lastDate) daysSinceLastFollowup = daysBetween(lastDate, now);
     }
 
-    // 冻结判定（ADR-0079 决策 1）。silenceDays = 距上次跟进，无记录则距申请日；
-    // readState 取最近一次跟进的 [unread] 标记，无跟进记录为 null（null = 无标注，
-    // 按默认口径「已发出即视为对方可读」计为已读）。
-    // 仅 applied/interview 参与——responded 是双向互动，不是「已读不回」；
-    // unread 永不建议冻结——未读只是「再看一眼」，不是「放弃」。
+    // 冻结判定（ADR-0079 决策 1）。silenceDays = 距上次跟进，无记录则距申请日。
+    // 仅 applied/interview 参与——responded 是双向互动，不是「已读不回」。
+    // 已读/未读人工标注已下线（2026-11-12 用户决策：无可靠信号，标了也不准），
+    // 判定只看沉默天数；readState 仍按旧 [unread] 标记原样输出，仅供历史记录展示。
     const readState = sortedFollowups.length > 0 ? (sortedFollowups[0].unread ? 'unread' : 'read') : null;
     const silenceDays = daysSinceLastFollowup ?? daysSinceApp;
     const freezeSuggested =
       (normalized === 'applied' || normalized === 'interview') &&
-      readState !== 'unread' &&
       silenceDays >= CADENCE.freeze_threshold_days;
 
     let urgency = computeUrgency(normalized, daysSinceApp, daysSinceLastFollowup, followupCount);
