@@ -66,6 +66,11 @@ export const en: Dict = {
   "config.modelFlag": "Passed as",
   "config.modelUnavailable": "Couldn't list this tool's models — it may not be installed or signed in, or this machine is offline. Runs will use the tool's own default.",
   "config.currentModel": "Currently using",
+  // 单工具的模型目录刷新：只重查当前选中引擎，与头部「重新检测」（全量）并存。
+  "config.modelRefresh": "Refresh model list",
+  "config.modelRefreshing": "Refreshing…",
+  "config.modelRefreshed": "Updated {name}'s model list · {count} items",
+  "config.modelRefreshFailed": "Couldn't refresh the model list (the tool may not be signed in, or this machine is offline) — kept the current list.",
   "config.provider": "Provider",
   "config.pasteKey": "Paste an AI key",
   "config.bringKey": "Bring a key from OpenAI, Anthropic, and others.",
@@ -351,6 +356,11 @@ export const zh: Dict = {
   "config.modelFlag": "作为参数传入",
   "config.modelUnavailable": "未能列出该工具的模型——可能未安装或未登录，也可能本机离线。任务将使用该工具自身的默认模型。",
   "config.currentModel": "当前使用的模型",
+  // 单工具的模型目录刷新：只重查当前选中引擎，与头部「重新检测」（全量）并存。
+  "config.modelRefresh": "刷新模型列表",
+  "config.modelRefreshing": "正在刷新…",
+  "config.modelRefreshed": "已更新 {name} 的模型列表 · {count} 项",
+  "config.modelRefreshFailed": "未能刷新模型列表（可能未登录或本机离线），已保留原列表。",
   "config.provider": "提供商",
   "config.pasteKey": "粘贴 AI 密钥",
   "config.bringKey": "从 OpenAI、Anthropic 等获取一个密钥。",

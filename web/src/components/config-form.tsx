@@ -11,6 +11,7 @@ import {
   FolderOpen,
   ChevronDown,
   ChevronRight,
+  RefreshCw,
   Sparkles,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
@@ -322,6 +323,44 @@ export function ConfigForm() {
         /* 保留旧缓存与旧下拉 */
       })
       .finally(() => setRechecking(false));
+  }
+
+  // 单工具的模型目录刷新（区别于上面 recheck 的全量重扫）：只重查当前选中
+  // 引擎的模型目录，不动其他引擎的探针，也不改「上次检测」时间戳。
+  const [modelRefreshingFor, setModelRefreshingFor] = useState<string | null>(null);
+  const [modelRefreshNotice, setModelRefreshNotice] = useState<{ cliId: string; ok: boolean; count?: number } | null>(null);
+  // 成功回执数秒后淡出；失败回执保留，直到下一次刷新或离开。
+  useEffect(() => {
+    if (!modelRefreshNotice?.ok) return;
+    const timer = window.setTimeout(() => setModelRefreshNotice(null), 4000);
+    return () => window.clearTimeout(timer);
+  }, [modelRefreshNotice]);
+
+  async function refreshModelsFor(id: string) {
+    if (modelRefreshingFor) return;
+    setModelRefreshingFor(id);
+    setModelRefreshNotice(null);
+    try {
+      const res = await fetch(`/api/clis?refresh=1&cli=${encodeURIComponent(id)}`);
+      if (!res.ok) throw new Error(String(res.status));
+      const data = await res.json();
+      const fresh: Cli | undefined = (data.clis ?? []).find((c: Cli) => c.id === id);
+      if (!fresh) throw new Error("missing entry");
+      // 单引擎结果就地并回：页面状态与浏览器缓存拿到同一份新目录，其余引擎不动。
+      // 已保存/在途的模型若仍在目录里保持选中；不在则由 picker 的既有守卫如实回落。
+      setClis((prev) => {
+        if (!prev) return prev;
+        const next = prev.map((c) => (c.id === id ? fresh : c));
+        writeClisCache(next);
+        return next;
+      });
+      setModelRefreshNotice({ cliId: id, ok: true, count: fresh.model?.options.length ?? 0 });
+    } catch {
+      // 失败不碰 setClis：旧列表原样保留，回执给出可行动的原因。
+      setModelRefreshNotice({ cliId: id, ok: false });
+    } finally {
+      setModelRefreshingFor(null);
+    }
   }
 
   // ADR-0097：测试一个指定目录。只问服务端「这个目录里有没有这个引擎、它跑不跑得起来」，
@@ -954,12 +993,48 @@ export function ConfigForm() {
                                 </option>
                               ))}
                             </SelectField>
-                            {selectedCli.model.flag && (
-                              <p className="mt-2 inline-flex items-center gap-1 text-[11px] text-faint">
-                                <Sparkles className="size-3" />
-                                <span className="font-mono">{t("config.modelFlag")} {selectedCli.model.flag}</span>
-                              </p>
-                            )}
+                            {/* 单工具的模型目录刷新：与「作为参数传入」提示同行，
+                                视觉是头部「重新检测」的降级档，不新增控件体系。 */}
+                            <div className="mt-2 flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
+                              {selectedCli.model.flag && (
+                                <p className="inline-flex items-center gap-1 text-[11px] text-faint">
+                                  <Sparkles className="size-3" />
+                                  <span className="font-mono">{t("config.modelFlag")} {selectedCli.model.flag}</span>
+                                </p>
+                              )}
+                              {selectedCli.installed && (
+                                <button
+                                  type="button"
+                                  onClick={() => void refreshModelsFor(cliId)}
+                                  disabled={modelRefreshingFor !== null || rechecking}
+                                  aria-label={`${t("config.modelRefresh")} · ${selectedCli.name}`}
+                                  className="ml-auto flex shrink-0 cursor-pointer items-center gap-1.5 rounded-lg border border-border bg-surface px-2.5 py-1 text-[11px] text-muted transition-colors hover:bg-surface-hover hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 max-sm:min-h-[44px]"
+                                >
+                                  <RefreshCw className={cn("size-3", modelRefreshingFor === cliId && "animate-spin")} />
+                                  {modelRefreshingFor === cliId ? t("config.modelRefreshing") : t("config.modelRefresh")}
+                                </button>
+                              )}
+                            </div>
+                            {/* 常驻 live region：只在有结果时成形，空状态下 sr-only ——
+                                读屏用户在按钮变「正在刷新…」后要能收到结论。 */}
+                            <p
+                              role="status"
+                              aria-live="polite"
+                              className={cn(
+                                "text-[11px] leading-relaxed",
+                                modelRefreshNotice?.cliId === cliId
+                                  ? modelRefreshNotice.ok
+                                    ? "mt-1.5 text-emerald-700 dark:text-emerald-400"
+                                    : "mt-1.5 text-amber-700 dark:text-amber-400"
+                                  : "sr-only",
+                              )}
+                            >
+                              {modelRefreshNotice?.cliId === cliId
+                                ? modelRefreshNotice.ok
+                                  ? t("config.modelRefreshed", { name: selectedCli.name, count: modelRefreshNotice.count ?? 0 })
+                                  : t("config.modelRefreshFailed")
+                                : ""}
+                            </p>
                             {currentModel && (
                               <div className="mt-3 flex items-center gap-2 rounded-lg border border-brand/30 bg-brand-soft/40 px-3 py-2 text-sm">
                                 <Sparkles className="size-4 shrink-0 text-brand" />
@@ -974,9 +1049,45 @@ export function ConfigForm() {
                             so instead of rendering nothing at all — a missing picker
                             with no explanation reads as a broken page. */}
                         {selectedCli && selectedCli.model?.options.length === 0 && (
-                          <p className="rounded-xl border border-border bg-surface/50 p-4 text-[11px] leading-relaxed text-faint">
-                            {t("config.modelUnavailable")}
-                          </p>
+                          <>
+                            <p className="rounded-xl border border-border bg-surface/50 p-4 text-[11px] leading-relaxed text-faint">
+                              {t("config.modelUnavailable")}
+                            </p>
+                            {/* 「问不到不编造」正是刷新按钮最该出现的场景：刚登录/刚联网，
+                                在这里刷一次就能就地长出下拉，不必全量重检。 */}
+                            {selectedCli.installed && (
+                              <div className="mt-2 flex flex-wrap items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => void refreshModelsFor(cliId)}
+                                  disabled={modelRefreshingFor !== null || rechecking}
+                                  aria-label={`${t("config.modelRefresh")} · ${selectedCli.name}`}
+                                  className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-border bg-surface px-2.5 py-1 text-[11px] text-muted transition-colors hover:bg-surface-hover hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 max-sm:min-h-[44px]"
+                                >
+                                  <RefreshCw className={cn("size-3", modelRefreshingFor === cliId && "animate-spin")} />
+                                  {modelRefreshingFor === cliId ? t("config.modelRefreshing") : t("config.modelRefresh")}
+                                </button>
+                              </div>
+                            )}
+                            <p
+                              role="status"
+                              aria-live="polite"
+                              className={cn(
+                                "text-[11px] leading-relaxed",
+                                modelRefreshNotice?.cliId === cliId
+                                  ? modelRefreshNotice.ok
+                                    ? "mt-1.5 text-emerald-700 dark:text-emerald-400"
+                                    : "mt-1.5 text-amber-700 dark:text-amber-400"
+                                  : "sr-only",
+                              )}
+                            >
+                              {modelRefreshNotice?.cliId === cliId
+                                ? modelRefreshNotice.ok
+                                  ? t("config.modelRefreshed", { name: selectedCli.name, count: modelRefreshNotice.count ?? 0 })
+                                  : t("config.modelRefreshFailed")
+                                : ""}
+                            </p>
+                          </>
                         )}
                       </div>
                     </div>

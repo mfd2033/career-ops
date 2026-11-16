@@ -579,69 +579,101 @@ async function findBinFor(spec: CliSpec, customDir?: string | null): Promise<str
   }
 }
 
+// 一个引擎的完整检测：找二进制（含用户指定目录）+ `--version` 探针 + 模型目录。
+// 全量 sweep 与「单引擎模型刷新」共用这一条路径 —— 目录读取规则
+// （opencode/qoder 的 CLI 查询、claude 的 settings.json）只写这一份，不漂移。
+async function detectOneCli(c: CliSpec, customDirs: Record<string, string>): Promise<DetectedCli> {
+  const customDir = customDirs[c.id] ?? null;
+  const found = await findBinFor(c, customDir);
+  const probe = found ? await probeCli(found) : null;
+  const usable = probe ? probe.usable : undefined;
+  let model = c.model;
+  // opencode's model list is user-config-driven (opencode.jsonc providers),
+  // so a static list would diverge from what the opencode TUI/desktop shows.
+  // Read the real config; fall back to the static defaults only when nothing
+  // is found.
+  if (c.id === "opencode") {
+    // The full list opencode actually exposes — built-in free models plus
+    // every configured provider — via the `opencode models` command (config
+    // files as fallback). A static list would diverge from what the opencode
+    // TUI/desktop shows.
+    const dynamic = await loadOpencodeModels(found ?? undefined);
+    if (dynamic.length > 0) {
+      // The static default is not in the real list, so it would render as an
+      // unselectable phantom. Fall back to the first real model.
+      model = { ...c.model, options: dynamic, default: dynamic[0].id };
+    }
+  }
+  // Qoder CN's catalogue is read from the CLI the same way (ADR-0052 决议 7).
+  // `found` is required, not merely preferred: with no resolved binary there
+  // is nothing to ask, and spawning a bare `qoderclicn` would only add a
+  // pointless subprocess per TTL. When the query cannot answer — not signed
+  // in, offline — the static entry stays empty on purpose: the config page
+  // then says it could not list the models, rather than offering a copied
+  // list that may no longer exist.
+  if (c.id === "qoder-cn" && found) {
+    const dynamic = await loadQoderModels(found);
+    if (dynamic.length > 0) {
+      model = { ...c.model, options: dynamic, default: dynamic[0].id };
+    }
+  }
+  // Claude 的模型目录读自本机实时生效的 `~/.claude/settings.json`（档位映射）：
+  // CLI 没有 `--list-models`、代理 `/v1/models` 又是空的，这个 env 映射是唯一
+  // 能反映「当前 provider 真会把 --model 落到哪」的来源。解析不到（官方直连、
+  // 无代理、文件缺失）时保持静态表不变——与 opencode/qoder 同一「问不到不编造」纪律。
+  // default 仍留 "sonnet"：那是 CLI 自身无 --model 时的默认，不随档位映射漂移。
+  if (c.id === "claude") {
+    const dynamic = loadClaudeModels();
+    if (dynamic.length > 0) {
+      model = { ...c.model, options: dynamic };
+    }
+  }
+  return {
+    id: c.id,
+    name: c.name,
+    run: c.run,
+    url: c.url,
+    installed: !!found,
+    path: found,
+    usable,
+    version: probe?.version,
+    pathSource: customDir && found ? (isInsideDir(customDir, found) ? "custom" : "auto") : undefined,
+    model,
+  };
+}
+
 export async function detectClis(): Promise<DetectedCli[]> {
   const customDirs = readCustomCliDirs();
   // ADR-0098 决议 3：每个引擎的「找二进制 + 跑 --version」彼此无关，并发跑。
   // 顺序仍是 KNOWN 的顺序（map 保序），只是等待重叠。
-  return Promise.all(KNOWN.map(async (c) => {
-    const customDir = customDirs[c.id] ?? null;
-    const found = await findBinFor(c, customDir);
-    const probe = found ? await probeCli(found) : null;
-    const usable = probe ? probe.usable : undefined;
-    let model = c.model;
-    // opencode's model list is user-config-driven (opencode.jsonc providers),
-    // so a static list would diverge from what the opencode TUI/desktop shows.
-    // Read the real config; fall back to the static defaults only when nothing
-    // is found.
-    if (c.id === "opencode") {
-      // The full list opencode actually exposes — built-in free models plus
-      // every configured provider — via the `opencode models` command (config
-      // files as fallback). A static list would diverge from what the opencode
-      // TUI/desktop shows.
-      const dynamic = await loadOpencodeModels(found ?? undefined);
-      if (dynamic.length > 0) {
-        // The static default is not in the real list, so it would render as an
-        // unselectable phantom. Fall back to the first real model.
-        model = { ...c.model, options: dynamic, default: dynamic[0].id };
-      }
-    }
-    // Qoder CN's catalogue is read from the CLI the same way (ADR-0052 决议 7).
-    // `found` is required, not merely preferred: with no resolved binary there
-    // is nothing to ask, and spawning a bare `qoderclicn` would only add a
-    // pointless subprocess per TTL. When the query cannot answer — not signed
-    // in, offline — the static entry stays empty on purpose: the config page
-    // then says it could not list the models, rather than offering a copied
-    // list that may no longer exist.
-    if (c.id === "qoder-cn" && found) {
-      const dynamic = await loadQoderModels(found);
-      if (dynamic.length > 0) {
-        model = { ...c.model, options: dynamic, default: dynamic[0].id };
-      }
-    }
-    // Claude 的模型目录读自本机实时生效的 `~/.claude/settings.json`（档位映射）：
-    // CLI 没有 `--list-models`、代理 `/v1/models` 又是空的，这个 env 映射是唯一
-    // 能反映「当前 provider 真会把 --model 落到哪」的来源。解析不到（官方直连、
-    // 无代理、文件缺失）时保持静态表不变——与 opencode/qoder 同一「问不到不编造」纪律。
-    // default 仍留 "sonnet"：那是 CLI 自身无 --model 时的默认，不随档位映射漂移。
-    if (c.id === "claude") {
-      const dynamic = loadClaudeModels();
-      if (dynamic.length > 0) {
-        model = { ...c.model, options: dynamic };
-      }
-    }
-    return {
-      id: c.id,
-      name: c.name,
-      run: c.run,
-      url: c.url,
-      installed: !!found,
-      path: found,
-      usable,
-      version: probe?.version,
-      pathSource: customDir && found ? (isInsideDir(customDir, found) ? "custom" : "auto") : undefined,
-      model,
-    };
-  }));
+  return Promise.all(KNOWN.map((c) => detectOneCli(c, customDirs)));
+}
+
+/**
+ * 单引擎的模型目录刷新（配置页「刷新模型列表」按钮）。
+ *
+ * 只重查这一个引擎：重置它自己的目录缓存（opencode / qoder-cn 的模块级缓存；
+ * claude 每次都重读文件，静态表的引擎重查结果不变），跑一次 `detectOneCli`，
+ * 并把结果 splice 回进程内检测缓存 —— 否则另一个标签页之后走的 plain GET
+ * 仍会读到旧目录。不重跑其余引擎的 `--version` 探针，这正是它与「重新检测」
+ * 的全部区别。
+ *
+ * @param {string} cliId - KNOWN 里的引擎 id
+ * @returns {Promise<DetectedCli | null>} 该引擎的新检测结果；未知引擎为 null
+ */
+export async function refreshSingleCliModels(cliId: string): Promise<DetectedCli | null> {
+  const spec = KNOWN.find((c) => c.id === cliId);
+  if (!spec) return null;
+  if (cliId === "opencode") resetOpencodeModelCache();
+  if (cliId === "qoder-cn") resetQoderModelCache();
+  const fresh = await detectOneCli(spec, readCustomCliDirs());
+  // 在飞的全量 sweep 落地时会把整个缓存覆写一遍，先等它收尾再 splice，
+  // 否则刚并回去的新目录会被旧 sweep 的完成值冲掉。
+  if (detectionInflight) await detectionInflight;
+  if (cachedDetection) {
+    cachedDetection = cachedDetection.map((c) => (c.id === cliId ? fresh : c));
+  }
+  return fresh;
 }
 
 // ADR-0015: a real detection is a sweep of PATH + candidate dirs (on Windows
