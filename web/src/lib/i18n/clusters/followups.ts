@@ -42,6 +42,9 @@ export const en: Dict = {
   "followups.urgency.waiting": "Waiting",
   "followups.urgency.cold": "Cold",
   "followups.col.action": "Action",
+  // ── 跟进时机（ADR-0102）──
+  "followups.col.timing": "Timing",
+  "followups.colHint.timing": "Golden-hour level for sending this row's follow-up on its source platform (same matrix as delivery timing)",
   // ── career-ops-49 冻结判定（原型预览）──
   "followups.col.silence": "Silence",
   "followups.freezeTab": "FREEZE",
@@ -269,6 +272,9 @@ export const zh: Dict = {
   "followups.urgency.waiting": "等待中",
   "followups.urgency.cold": "已冷却",
   "followups.col.action": "操作",
+  // ── 跟进时机（ADR-0102）──
+  "followups.col.timing": "跟进时机",
+  "followups.colHint.timing": "该行来源平台当前发跟进消息的黄金时段结论（与投递时机同一矩阵）",
   // ── career-ops-49 冻结判定（原型预览）──
   "followups.col.silence": "沉默",
   "followups.freezeTab": "建议冻结",

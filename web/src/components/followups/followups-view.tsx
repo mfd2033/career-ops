@@ -11,6 +11,7 @@ import { AutoFollowupDialog } from "@/components/followups/auto-followup-dialog"
 import { LogDialog } from "@/components/followups/log-dialog";
 import { NextDateDialog } from "@/components/followups/next-date-dialog";
 import { StatusPill } from "@/components/followups/status-pill";
+import { FollowupTimingBadge } from "@/components/followups/followup-timing-badge";
 import { scoreTone } from "@/lib/format";
 import { channelLabel } from "@/lib/followup-channel.mjs";
 import { matchesReportNo } from "@/lib/report-no-search.mjs";
@@ -418,6 +419,14 @@ export function FollowupsView() {
                     </th>
                   );
                 })}
+                {/* 跟进时机列（ADR-0102）：纯展示、不参与排序（实时时钟量，排序无意义），
+                    紧贴操作区——发跟进的动作就发生在行尾。 */}
+                <th
+                  className="whitespace-nowrap px-2.5 py-2.5 font-medium"
+                  title={t("followups.colHint.timing")}
+                >
+                  {t("followups.col.timing")}
+                </th>
                 <th className="px-2.5 py-2.5 font-medium">{t("followups.col.action")}</th>
               </tr>
             </thead>
@@ -666,6 +675,10 @@ function FollowupRow({
             <span className="tabular-nums">{e.silenceDays}</span>
           )}
         </td>
+        {/* 跟进时机（ADR-0102）：该行来源平台当前发跟进消息的结论；来源不在三平台 →「—」。 */}
+        <td className="whitespace-nowrap px-2.5 py-3">
+          <FollowupTimingBadge postingUrl={e.postingUrl} />
+        </td>
         <td className="whitespace-nowrap px-2.5 py-3">
           <span className="inline-flex items-center gap-0.5">
              {/* 主操作：自动跟进（确认话术 → 扩展代发 → 回填记录）。其余动作降级为 faint。 */}
@@ -714,7 +727,7 @@ function FollowupRow({
       </tr>
       {expanded && (
         <tr className="bg-surface/30">
-          <td colSpan={COLUMNS.length + 3} className="px-4 py-3">
+          <td colSpan={COLUMNS.length + 4} className="px-4 py-3">
             <HistoryPanel entry={e} onRemove={onRemove} />
           </td>
         </tr>

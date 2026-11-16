@@ -55,6 +55,9 @@ export type CadenceEntry = {
   score: string;
   notes: string;
   reportPath: string | null;
+  /** 本行报告头 `**URL:**` 的职位链接（仅 http(s)，服务端按 num 批量装配；ADR-0102）。
+   *  取不到 / 旧引擎 JSON 缺字段 → undefined 或 null，UI 按「无规律」处理。 */
+  postingUrl?: string | null;
   contacts: SuggestedContact[];
   daysSinceApplication: number;
   daysSinceLastFollowup: number | null;

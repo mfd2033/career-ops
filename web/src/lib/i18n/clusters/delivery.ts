@@ -25,7 +25,7 @@ export const en: Dict = {
   // 报告来源不在这三个平台（ATS/公司官网…）时如实说没有规律，不套用别家口径。
   "delivery.noSource": "No known delivery-time pattern for this posting's source",
   // 判定依据 + 数据来源：悬停 title 用，短句写清「为什么现在能投/不能投」。
-  "delivery.tooltip": "Judged from the Boss Zhipin / Liepin / Zhaopin golden-hour matrix (guide dated 2026-10-10). Boss Zhipin is chat-first, so evenings 20:00–22:00 and weekends work too; Liepin and Zhaopin are apply-then-screen, so aim for Tue–Thu 09:30–11:00 and 14:00–16:00 on workdays.",
+  "delivery.tooltip": "Judged from the Boss Zhipin / Liepin / Zhaopin golden-hour matrix (guide dated 2026-10-10). Boss Zhipin is chat-first, so evenings 20:00–22:00 and weekends work too; Liepin and Zhaopin are apply-then-screen, so aim for Tue–Thu 09:30–11:00 and 14:00–16:00 on workdays. The same conclusion applies to follow-up messages.",
 
   // ── 矩阵弹窗（delivery-matrix-dialog.tsx） ──
   "delivery.matrix.open": "Open the golden-hour matrix",
@@ -80,7 +80,7 @@ export const zh: Dict = {
   // 报告来源不在这三个平台（ATS/公司官网…）时如实说没有规律，不套用别家口径。
   "delivery.noSource": "该职位来源不在 Boss直聘/猎聘/智联，暂无投递时段规律",
   // 判定依据 + 数据来源
-  "delivery.tooltip": "按 BOSS直聘/猎聘/智联 的投递黄金时间矩阵判断（指南 2026-10-10）：BOSS直聘是直聊模式，晚间 20:00–22:00 与周末同样有效；猎聘/智联是投递→筛选模式，只认工作日周二~周四 09:30–11:00、14:00–16:00。",
+  "delivery.tooltip": "按 BOSS直聘/猎聘/智联 的投递黄金时间矩阵判断（指南 2026-10-10）：BOSS直聘是直聊模式，晚间 20:00–22:00 与周末同样有效；猎聘/智联是投递→筛选模式，只认工作日周二~周四 09:30–11:00、14:00–16:00。跟进消息的发送时机同此结论。",
 
   // ── 矩阵弹窗（delivery-matrix-dialog.tsx） ──
   "delivery.matrix.open": "查看投递黄金时间矩阵",

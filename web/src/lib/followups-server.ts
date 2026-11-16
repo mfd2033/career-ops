@@ -1,7 +1,8 @@
 import { execFile } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { careerOpsRoot, findApplication, readApplicationUrl, rootScript } from "@/lib/career-ops";
+import { careerOpsRoot, findApplication, readApplicationUrl, readApplicationUrls, rootScript } from "@/lib/career-ops";
+import type { Application } from "@/lib/career-ops";
 import { withFollowupsLock, FollowupsBusyError } from "@/lib/core/followups-lock";
 import { parseCadenceStdout } from "@/lib/followup-cadence-read.mjs";
 import { parseScripts, fillScripts, groupOrder } from "@/lib/followup-scripts.mjs";
@@ -146,10 +147,21 @@ export async function readCadencePayload(): Promise<CadencePayload> {
   });
   const parsed = parseCadenceStdout(stdout);
   if (!parsed) return { available: false, metadata: null, entries: [] };
+  // 跟进时机（ADR-0102）：按行批量装配报告头职位链接，客户端经 sourcePlatform()
+  // 还原来源平台再查黄金时段矩阵。复用 readApplicationUrls 单点（批量走
+  // reportsIndexOf 索引），不自写第二份报告头解析。挂在 cadence 缓存 payload 上：
+  // 缓存键已含 data/applications.md 的戳；reports/ 文件的 mtime 不在键里，
+  // 报告头 URL 中途改动要等下一次判定刷新——URL 是报告生成时落定的低频字段，可接受。
+  const entries = parsed.entries as CadenceEntry[];
+  const urlMap = readApplicationUrls(
+    entries
+      .map((e) => findApplication(String(e.num)))
+      .filter((a): a is Application => a !== null),
+  );
   const payload: CadencePayload = {
     available: true,
     metadata: parsed.metadata,
-    entries: parsed.entries as CadenceEntry[],
+    entries: entries.map((e) => ({ ...e, postingUrl: urlMap[String(e.num)] ?? null })),
     cadenceConfig: parsed.cadenceConfig,
   };
   cadenceCache = { key, payload };
