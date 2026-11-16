@@ -215,6 +215,17 @@ test("没有像样的候选就返回 null，不编人名", () => {
   assert.equal(pickContactCandidate([{ text: "张三", classText: "x-name", top: 0, visible: false }]), null);
 });
 
+test("猎聘聊天头的操作标签不进联系人（实证 2026-11-16 #6）", () => {
+  // 「交换手机号」在猎聘不是 button/a（closest 拦不住），文本又不命中旧反特征表，
+  // 曾被填进联系人。真名在旁边时必须让位给真名；没有真名就返回 null，不留标签。
+  const leak = { text: "交换手机号", classText: "dialog-header-title", top: 80, visible: true };
+  assert.equal(
+    pickContactCandidate([leak, { text: "王莉娜", classText: "chat-header-name", top: 110, visible: true }]),
+    "王莉娜",
+  );
+  assert.equal(pickContactCandidate([leak]), null);
+});
+
 // ---- 会话作用域 ------------------------------------------------------------
 //
 // 作用域选错 = 读不到联系人、也读不到消息流。智联实测那条链原样搬进来当夹具：
