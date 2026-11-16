@@ -1,0 +1,4 @@
+# 占位目录：CodeBuddy CLI v2.161.x 的 BuiltinWorkflowProvider 启动时会扫描
+# <仓库根>/builtin/workflows 下的 *.workflow.js；目录不存在时每次会话刷一条
+# "[BuiltinWorkflow] readdir ... failed" 警告（console.warn，功能无损降级）。
+# 本目录仅用于消音，不承载 workflow 脚本；诊断记录 2026-11-16。
