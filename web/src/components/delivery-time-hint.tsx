@@ -55,8 +55,12 @@ export function DeliveryTimeHint({ platforms }: { platforms?: string[] }) {
 
   return (
     <>
+      {/* 条宽跟随内容（`inline-flex`），不铺满流式内容区：ADR-0065 取消 max-w 后
+          满宽的条在 2K 屏上会把条尾推到两千多像素外，条目内全是点不到的空白。
+          `md:self-start` 不能省——管道页 `md:` 是 flex-col，交叉轴默认 stretch，
+          不收窄就又把条拉回满宽；窄屏仍是 shrink-to-fit 上取可用宽度，换行表现不变。 */}
       <div
-        className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-border bg-surface/50 px-3 py-2 text-xs md:shrink-0"
+        className="mt-4 inline-flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-border bg-surface/50 px-3 py-2 text-xs md:self-start md:shrink-0"
         title={t("delivery.tooltip")}
         aria-label={t("delivery.aria")}
       >
@@ -87,7 +91,7 @@ export function DeliveryTimeHint({ platforms }: { platforms?: string[] }) {
                 <Badge tone={ACTION_TONE[summary.action]}>{t(`delivery.verdict.${summary.action}`)}</Badge>
               </>
             ) : (
-              // 多平台（列表页）：「今天该投哪些」的批量视角，三平台并列 + 右对齐下一段黄金。
+              // 多平台（列表页）：「今天该投哪些」的批量视角，三平台并列 + 下一段黄金。
               <>
                 <Badge tone={ACTION_TONE[summary.action]}>{t(`delivery.verdict.${summary.action}`)}</Badge>
 
@@ -102,9 +106,11 @@ export function DeliveryTimeHint({ platforms }: { platforms?: string[] }) {
                   ))}
                 </span>
 
-                {/* 行尾：下一段黄金文案 + 矩阵入口。入口尺寸取 20px（= 徽章高度），
-                    挂载后条高不因多这一枚按钮再加 4px（ADR-0039 槽位原则）。 */}
-                <span className="ml-auto flex items-center gap-2">
+                {/* 紧跟徽章之后，不推到条尾（原来是 `ml-auto`）：条已收窄到内容宽度，
+                    再靠右也只是贴到条右缘，但那意味着中间留一段空白把手要跨。
+                    入口尺寸取 20px（= 徽章高度），挂载后条高不因多这一枚按钮再加 4px
+                    （ADR-0039 槽位原则）。 */}
+                <span className="flex items-center gap-2">
                   <span className="text-faint">{rightText(summary, t)}</span>
                   {!platforms && (
                     <button

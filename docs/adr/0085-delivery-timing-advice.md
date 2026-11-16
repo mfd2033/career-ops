@@ -76,6 +76,12 @@ Accepted (2026-10-20)
   - `LEVEL_TONE` / `ACTION_TONE` 挪到 `web/src/components/delivery-tone.ts`，`delivery-time-hint.tsx` 原地继续导出，管道页行级列的 import 不用改；这么挪是为了避开常驻条与弹窗互相 import 成环。
   - 影响面：`web/src/lib/delivery-window.mjs`（`matrixRows`）、`web/src/lib/delivery-window.d.mts`、新增 `web/src/components/delivery-matrix-dialog.tsx` 与 `web/src/components/delivery-tone.ts`、`web/src/components/delivery-time-hint.tsx`、`web/src/lib/i18n/clusters/delivery.ts`（新增 `delivery.matrix.*`，en/zh 同序），测试 `web/tests/lib/delivery-window.test.mjs` 增补矩阵断言 5 条与接线守卫 1 条。
 
+- **2026-11-16 — 常驻条收窄到内容宽度，矩阵入口不再推到条尾**：内容区自 ADR-0065 起取消 `max-w` 上限，条却还是满宽 + `ml-auto` 收尾，「下一段黄金 + 矩阵入口」被推到条的最右端。1440 屏上按钮距内容区左缘约 1000px，2560 屏约 2100px，鼠标行程随屏宽线性变长。当初定 `ml-auto` 时还在 `max-w-6xl`（1152px）语境里，宽度放开后这条假设就不成立了。
+  - 条从 `flex` 改为 `inline-flex`，宽度跟随内容，不再铺满内容区。`md:self-start` 不能省：管道页 `md:` 是 `flex-col`，交叉轴默认 `stretch`，不加就把条又拉回满宽。窄屏仍是 shrink-to-fit 取可用宽度，`flex-wrap` 换行表现不变。
+  - 条尾文案与矩阵入口去掉 `ml-auto`，紧跟三平台徽章之后。条已收窄，再靠右只是贴到条右缘，中间照样留一段空白要跨。
+  - 影响面：`web/src/components/delivery-time-hint.tsx`。组件两处挂载（管道页页头、报告详情页操作区）共用，详情页内容更短，收窄后同样按内容宽度收住。
+  - 已知边界：条右缘不再与页头搜索框右缘对齐，宽屏下左侧是紧凑信息块、右侧留底色。原型对照见 `.scratch/proto/delivery-hint-align.html`（一次性，不进版本控制）。
+
 ## References
 
 - 需求来源：Kaneo 任务 CO-44（工作区 Nono工作室 / 项目 CareerOps），附件《投简历黄金时间指南-20261010》
