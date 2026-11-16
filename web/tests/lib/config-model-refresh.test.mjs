@@ -46,9 +46,10 @@ test("/api/clis only takes the single-engine path when a cli param is present", 
 
 test("refreshSingleCliModels resets only THAT engine's model cache and splices the result back", () => {
   const fn = slice(CLIS, "export async function refreshSingleCliModels(", "export async function resolveCli(", "refreshSingleCliModels");
-  // 两个动态目录引擎的缓存重置必须按 cliId 收窄——无条件重置就成了全量刷新
+  // 三个动态目录引擎的缓存重置必须按 cliId 收窄——无条件重置就成了全量刷新
   assert.ok(fn.includes('if (cliId === "opencode") resetOpencodeModelCache()'), "opencode 的目录缓存没有按引擎收窄重置");
   assert.ok(fn.includes('if (cliId === "qoder-cn") resetQoderModelCache()'), "qoder-cn 的目录缓存没有按引擎收窄重置");
+  assert.ok(fn.includes('if (cliId === "codebuddy") resetCodebuddyModelCache()'), "codebuddy 的目录缓存没有按引擎收窄重置");
   assert.ok(!fn.includes("resetOpencodeModelCache();\n  resetQoderModelCache();"), "两个缓存被无条件重置了 —— 这就成了全量刷新");
   // 结果必须并回进程内检测缓存：另一个标签页的 plain GET 才能读到新目录
   assert.ok(fn.includes("cachedDetection = cachedDetection.map"), "刷新结果没有并回进程内检测缓存");

@@ -5,6 +5,7 @@ import { stdoutOf } from "./exec-async.mjs";
 import { codexStreamArgs, isFatalClaudeStderr, isFatalCodexStderr, isFatalOpenCodeStderr, parseClaudeEvent, parseCodexEvent } from "./run-cli-support.mjs";
 import { loadOpencodeModels, resetOpencodeModelCache } from "./opencode-models.mjs";
 import { loadQoderModels, resetQoderModelCache } from "./qoder-models.mjs";
+import { loadCodebuddyModels, resetCodebuddyModelCache } from "./codebuddy-models.mjs";
 import { loadClaudeModels } from "./claude-models.mjs";
 import { cliDisplayName } from "./cli-labels.mjs";
 import { cliSearchDirs, npmPrefixDirs, workbuddyBundledCliDirs } from "./cli-bin-dirs.mjs";
@@ -219,41 +220,54 @@ const MODELS: Record<string, ModelMeta> = {
     default: "",
     options: [],
   },
-  // Source: `codebuddy --help` on v2.137.1 (the CLI printed this list itself).
-  // `default` is not a guess either — with no `--model` at all, `system/init`
-  // echoes `model: "cmcc:auto"` back, so that is what the CLI would use.
+  // Static FALLBACK + ADR-0073 guard evidence — NOT the picker's primary source
+  // (detectOneCli replaces `options` with the runtime list from
+  // codebuddy-models.mjs whenever `codebuddy --help` can answer). Two consumers:
+  //   • dropCrossEngineModel (ADR-0073) reads ONLY this static table, so ids
+  //     CodeBuddy has issued in the past (hy3, hy3-x, hy4-preview, cmcc:auto)
+  //     stay listed even after the CLI stopped printing them — a stale saved
+  //     pick must still be recognised as codebuddy-owned and stripped from
+  //     another engine's dispatch. engine-config-guard.test.mjs pins hy3.
+  //   • the config page, only when the runtime query cannot answer (broken CLI,
+  //     spawn failure) — then the fallback list shows, marked (legacy) where it
+  //     no longer matches `--help` on v2.161.4.
+  // `default` is deliberately EMPTY (same tier as antigravity / qoder-cn): the
+  // v2.137.1-era echo "cmcc:auto" is gone from the current CLI, and v2.161.4's
+  // product.json routes by default to its "Auto" (`default-model`) entry, which
+  // `--help` does not print as an accepted --model value. An empty default
+  // renders as "auto" in the UI instead of an unselectable phantom
+  // (clis-coverage.test.mjs skips empty defaults on purpose).
   codebuddy: {
     flag: "--model",
-    default: "cmcc:auto",
+    default: "",
     options: [
-      { id: "cmcc:auto", label: "cmcc:auto (default)" },
-      { id: "cmcc:ydy-deepseek-v4-flash-0731", label: "cmcc:ydy-deepseek-v4-flash-0731" },
-      { id: "cmcc:Deepseek-V4-pro", label: "cmcc:Deepseek-V4-pro" },
-      { id: "cmcc:Kimi-2.6", label: "cmcc:Kimi-2.6" },
-      { id: "cmcc:Kimi-K2.7-code", label: "cmcc:Kimi-K2.7-code" },
-      { id: "cmcc:ydy-kimi-K3", label: "cmcc:ydy-kimi-K3" },
-      { id: "cmcc:ydy-minimax-m3", label: "cmcc:ydy-minimax-m3" },
-      { id: "cmcc:Glm-5.2", label: "cmcc:Glm-5.2" },
-      { id: "auto", label: "auto" },
-      { id: "hy4-preview", label: "hy4-preview" },
-      { id: "hy3", label: "hy3" },
-      { id: "hy3-x", label: "hy3-x" },
+      // Verified verbatim against `codebuddy --help` on v2.161.4 (2026-11-16);
+      // the runtime query keeps this fresh on newer CLIs.
+      { id: "hy4std", label: "hy4std" },
+      { id: "hy4flash-free", label: "hy4flash-free" },
+      { id: "hy4flash", label: "hy4flash" },
       { id: "deepseek-v4.1-flash", label: "deepseek-v4.1-flash" },
-      { id: "deepseek-v4-pro", label: "deepseek-v4-pro" },
       { id: "glm-5.3", label: "glm-5.3" },
       { id: "glm-5.3-flash", label: "glm-5.3-flash" },
       { id: "glm-5.2", label: "glm-5.2" },
-      { id: "glm-5.1", label: "glm-5.1" },
-      { id: "glm-5v-turbo", label: "glm-5v-turbo" },
-      { id: "minimax-m3", label: "minimax-m3" },
+      { id: "space-bunny", label: "space-bunny" },
+      { id: "minimax-m3.1-flash", label: "minimax-m3.1-flash" },
+      { id: "minimax-m2.7", label: "minimax-m2.7" },
+      { id: "kimi-k3.1-pro", label: "kimi-k3.1-pro" },
       { id: "kimi-k3-1", label: "kimi-k3-1" },
       { id: "kimi-k2.8-preview", label: "kimi-k2.8-preview" },
-      { id: "kimi-k2.7", label: "kimi-k2.7" },
-      { id: "kimi-k2.6", label: "kimi-k2.6" },
-      { id: "custom-local:agnes-image-2.1-flash", label: "custom-local:agnes-image-2.1-flash" },
-      { id: "custom-local:agnes-2.5-flash", label: "custom-local:agnes-2.5-flash" },
-      { id: "custom-local:deepseek-v4-flash", label: "custom-local:deepseek-v4-flash" },
-      { id: "custom-local:z-ai/glm-5.3-free", label: "custom-local:z-ai/glm-5.3-free" },
+      { id: "deepseek-v4-pro", label: "deepseek-v4-pro" },
+      { id: "step-5-preview", label: "step-5-preview" },
+      { id: "mimo-v2.6-pro", label: "mimo-v2.6-pro" },
+      { id: "custom-local:agnes-3.0-flash", label: "custom-local:agnes-3.0-flash" },
+      { id: "custom-local:u2-flash", label: "custom-local:u2-flash" },
+      // Legacy ids: gone from --help, kept ONLY as guard evidence for stale
+      // saved picks (ADR-0073). Prune when no config / tracker row can carry
+      // them anymore.
+      { id: "hy3", label: "hy3 (legacy)" },
+      { id: "hy3-x", label: "hy3-x (legacy)" },
+      { id: "hy4-preview", label: "hy4-preview (legacy)" },
+      { id: "cmcc:auto", label: "cmcc:auto (legacy default)" },
     ],
   },
 };
@@ -628,6 +642,19 @@ async function detectOneCli(c: CliSpec, customDirs: Record<string, string>): Pro
       model = { ...c.model, options: dynamic };
     }
   }
+  // CodeBuddy 的目录同样读自 CLI（`--help` 的 "Currently supported:" 列表，
+  // codebuddy-models.mjs）——与 qoder-cn 同一条 ADR-0052 决议 9 纪律：目录归 CLI
+  // 所有，hy4flash-free / hy4flash（2026-11-16 发布）就是这样进来的，不再依赖
+  // 手抄快照。与 qoder-cn 不同的是静态表保留为兜底（--help 不需要登录，离线也能
+  // 答，答不上来时页面给静态回退而不是空下拉）；ADR-0073 守卫无论如何只读静态表。
+  // default 不被 dynamic[0] 覆盖：--help 的第一个 id（hy4std）不是 CLI 自身的
+  // 默认（product.json 路由到 "Auto"），覆盖会让「当前使用的模型」读数说谎。
+  if (c.id === "codebuddy" && found) {
+    const dynamic = await loadCodebuddyModels(found);
+    if (dynamic.length > 0) {
+      model = { ...c.model, options: dynamic };
+    }
+  }
   return {
     id: c.id,
     name: c.name,
@@ -666,6 +693,7 @@ export async function refreshSingleCliModels(cliId: string): Promise<DetectedCli
   if (!spec) return null;
   if (cliId === "opencode") resetOpencodeModelCache();
   if (cliId === "qoder-cn") resetQoderModelCache();
+  if (cliId === "codebuddy") resetCodebuddyModelCache();
   const fresh = await detectOneCli(spec, readCustomCliDirs());
   // 在飞的全量 sweep 落地时会把整个缓存覆写一遍，先等它收尾再 splice，
   // 否则刚并回去的新目录会被旧 sweep 的完成值冲掉。
@@ -707,6 +735,7 @@ export async function detectClisCached({ refresh = false }: { refresh?: boolean 
   if (refresh) {
     resetOpencodeModelCache();
     resetQoderModelCache();
+    resetCodebuddyModelCache();
   }
   const running = detectClis();
   detectionInflight = running;
