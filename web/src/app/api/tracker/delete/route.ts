@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { careerOpsRoot, rootScript, trackerCanDelete } from "@/lib/career-ops";
 import { isTrackerWriting } from "@/lib/core/run-registry";
 import { logOperation } from "@/lib/op-log-server";
+import { DATA_SCOPE_TRACKER, publishDataChange } from "@/lib/data-events.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -103,6 +104,9 @@ export async function POST(req: Request) {
     // 失去归属的报告一并写进去，回看时才知道当时丢的是哪份文件。
     const orphan = parseOrphan(result.err);
     if (!dryRun) {
+      // 这条路由自己 spawn（不走 runTrackerScript 的统一发布点），所以单独播一次：
+      // 删行后另一个标签页的管道列表必须跟着少一行（ADR-0101）。
+      publishDataChange(DATA_SCOPE_TRACKER);
       logOperation({
         trigger: "manual",
         type: "tracker-delete",

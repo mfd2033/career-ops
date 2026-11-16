@@ -8,6 +8,7 @@ import { cn } from "@/lib/cn";
 import { CoMark } from "@/components/co-mark";
 import { AssistantConsole } from "@/components/assistant-console";
 import { MobileNav } from "@/components/mobile-nav";
+import { DataFreshnessBridge } from "@/components/data-freshness-bridge";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { JobsProvider } from "@/components/jobs/job-store";
 import { PipelineProvider } from "@/components/pipeline/pipeline-provider";
@@ -68,6 +69,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <ApplyProvider>
       <ExploreProvider>
       <MobileNav />
+      {/* 数据变更桥（ADR-0101）：别的写入方（扩展/另一标签页）改完 tracker，让当前
+          页面自动 router.refresh()。不渲染任何节点。 */}
+      <DataFreshnessBridge />
       <div className="flex min-h-screen">
         {/* 工作器区（fitToHeight）用 flex-1 min-h-0 吸收剩余空间并按可用高度自适应张数，
             正常窗口下内容恰好填满 h-screen → 整侧栏不会出现纵向滚动条。

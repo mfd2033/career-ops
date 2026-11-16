@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { careerOpsRoot, rootScript } from "@/lib/career-ops";
 import { createQueryCache } from "@/lib/query-cache.mjs";
+import { DATA_SCOPE_TRACKER, publishDataChange } from "@/lib/data-events.mjs";
 import {
   boundedLockWait,
   failureBody,
@@ -124,6 +125,27 @@ export function coreScriptMissing(): NextResponse {
 }
 
 /**
+ * 这次 CLI 调用是否真的改了 tracker（ADR-0101 的发布判据）。
+ *
+ * 只认落盘的调用：`tracker-add`（新增行 / upsert 命中后改行）与 `tracker-edit`
+ * （按行改字段）恒为写；`tracker.mjs` 本体只在其子命令是写的时候算——`query`
+ * （列表）、`history`（状态历史）、`health`（体检探针）都是读，播一次变更等于让
+ * 所有打开页面白刷一遍。
+ *
+ * `sync` 重建的是派生索引，不改变用户看得见的行；这里仍然算写：索引与 markdown
+ * 不一致时，页面上的排序/筛选依赖派生数据，跟着刷新一次没有坏处。
+ *
+ * @param nameNoExt - 脚本名（无 `.mjs`）
+ * @param args - 传给脚本的参数
+ * @returns 是否应广播一次数据变更
+ */
+function isTrackerWrite(nameNoExt: string, args: string[]): boolean {
+  if (nameNoExt === "tracker-add" || nameNoExt === "tracker-edit") return true;
+  if (nameNoExt !== "tracker") return false;
+  return args[0] === "delete" || args[0] === "sync" || args[0] === "merge";
+}
+
+/**
  * Run one core CLI and decode whatever it printed.
  *
  * @param nameNoExt - Script name without the .mjs extension (e.g. "tracker-add").
@@ -147,6 +169,10 @@ export async function runTrackerScript(
   // 脚本名：同一个 `tracker.mjs` 既能 `query` 也能 `sync`/`delete`，按脚本名判断
   // 会把写漏掉，而那正是用户最在乎的那次刷新。
   if (run.code === 0 && args[0] !== "query") invalidateTrackerQueries();
+  // 写成功 → 通知其它已打开的标签页重取（ADR-0101）。判据必须比上面那条**更窄**：
+  // 缓存作废晚一点只是多 spawn 一次，而多发一次变更会让所有页面白刷一遍，读接口
+  // （`history` / `health`）尤其不该走到这里。所以只认真正落盘的那几类调用。
+  if (run.code === 0 && isTrackerWrite(nameNoExt, args)) publishDataChange(DATA_SCOPE_TRACKER);
   const parsed = parseCliJson(run.stdout);
   // query prints a bare array of row objects. Narrow it here rather than
   // claiming at the call site: the document arrives from a child process, so

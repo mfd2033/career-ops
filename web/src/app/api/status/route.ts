@@ -3,6 +3,7 @@ import { execFile } from "node:child_process";
 import fs from "node:fs";
 import { careerOpsRoot, rootScript } from "@/lib/career-ops";
 import { canonicalizeStatus } from "@/lib/core/states";
+import { DATA_SCOPE_TRACKER, publishDataChange } from "@/lib/data-events.mjs";
 import { parseCliJson, trackerRowArg, clientErrorMessage } from "@/lib/status-cli.mjs";
 import { logOperation, trackerLogTitle } from "@/lib/op-log-server";
 import { localISODate } from "@/lib/followups";
@@ -246,6 +247,11 @@ export async function POST(req: Request) {
       dedupeKey: `status:${row}:${localISODate()}:${oldStatus}->${newStatus}`,
     });
   }
+
+  // 通知其它已打开的标签页重取（ADR-0101）：扩展开在招聘站页面上改状态时，web 端
+  // 的管道页/报告页没人会自己发现这次写入。只在真发生迁移时播——幂等重放没改变
+  // 任何东西，播了就是一次白刷。
+  if (parsed.changed === true) publishDataChange(DATA_SCOPE_TRACKER);
 
   // Response shape is unchanged for existing callers; `changed` and
   // `statusLogged` are additive.

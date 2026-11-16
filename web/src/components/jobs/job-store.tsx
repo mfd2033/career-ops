@@ -532,6 +532,16 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
                   [key: string]: unknown;
                 };
                 if (frame.type === "keepalive") continue;
+                // 用户层数据变更（ADR-0101）：无 runId 的通道级帧。这条单连接由
+                // job-store 持有，所以转发也在这里做——转成窗口事件交给
+                // DataFreshnessBridge 防抖后 router.refresh()，job-store 不关心
+                // 数据本身。放在 `!frame.runId` 之前，否则会被下一行直接丢掉。
+                if (frame.type === "data-changed") {
+                  window.dispatchEvent(
+                    new CustomEvent("co-data-changed", { detail: { scope: frame.scope } }),
+                  );
+                  continue;
+                }
                 if (!frame.runId) continue;
                 const jobId = runIds.current.get(frame.runId);
                 if (!jobId) continue; // another tab's / extension's run — surfaced via the active-runs poll instead

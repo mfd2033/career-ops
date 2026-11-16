@@ -4,6 +4,10 @@ import {
   listRunIds,
   type RunEvent,
 } from "@/lib/core/run-events";
+import {
+  dataChangeFrame,
+  subscribeDataChanges,
+} from "@/lib/data-events.mjs";
 
 // GET /api/events — the ONE multiplexed worker-event channel (ADR-0020).
 //
@@ -41,6 +45,10 @@ export async function GET(req: Request) {
         for (const ev of getRunBuffer(runId)) send({ runId, ev });
       }
       const unsub = subscribeRuns((runId: string, ev: RunEvent) => send({ runId, ev }));
+      // 用户层数据变更（ADR-0101）：一条成功的 tracker 写入 → 所有打开页面的标签页
+      // 各自 router.refresh()。与 keepalive 同级——**不带 runId**，所以不认识它的旧
+      // 客户端会按「无 runId 的帧」忽略，既有线协议不变。
+      const unsubData = subscribeDataChanges((change) => send(dataChangeFrame(change.scope)));
       // Channel-level keepalive: the frame stream is quiet whenever no worker
       // is emitting, and a proxy/browser must not drop the (single) channel.
       const heartbeat = setInterval(() => send({ type: "keepalive" }), 15_000);
@@ -49,6 +57,7 @@ export async function GET(req: Request) {
         if (closed) return;
         closed = true;
         unsub();
+        unsubData();
         clearInterval(heartbeat);
         try { controller.close(); } catch { /* already closed */ }
       };
