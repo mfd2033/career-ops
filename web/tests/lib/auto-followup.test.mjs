@@ -235,7 +235,16 @@ test("SW 有 followup-send 分支，且转发给内容脚本", () => {
     BG.includes('chrome.tabs.sendMessage(tab.id, { type: "followup-send"'),
     "SW 必须把消息转发给内容脚本",
   );
-  assert.ok(BG.includes("sendFollowup(msg)"), "分支必须调用 sendFollowup");
+  assert.ok(BG.includes("sendFollowup(msg, sender)"), "分支必须调用 sendFollowup，并带上 sender");
+});
+
+test("发送成功后 SW 把焦点还给本地面板，失败/不确定留在招聘页", () => {
+  assert.ok(BG.includes("sendFollowup(msg, sender)"), "sendFollowup 要接 sender，才知道发起面板的 tab");
+  assert.ok(BG.includes("async function refocusWebTab"), "SW 要有还焦点的助手");
+  assert.ok(
+    BG.includes('if (res.status === "sent") await refocusWebTab(webTabId);'),
+    "只有 sent 才切回面板：uncertain 要留在招聘页核对，failed 要留在原地补救",
+  );
 });
 
 test("内容脚本只在三站生效，且发送后做两项回读", () => {

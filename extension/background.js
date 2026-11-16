@@ -1198,11 +1198,31 @@ async function openFollowupTab(raw) {
   return tab;
 }
 
-async function sendFollowup(msg) {
+/** 发送收尾把焦点还给本地面板 tab（同探索页收尾 refocusExploreWindow 的口径）：
+ *  只聚焦窗口 + 切 active，不动招聘站页面。面板跑在 Electron 壳里时没有 tab，
+ *  sender.tab 为 null，这里自然空转。 */
+async function refocusWebTab(tabId) {
+  if (tabId == null) return;
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    if (tab && typeof tab.windowId === "number") {
+      await chrome.windows.update(tab.windowId, { focused: true }).catch(() => {});
+    }
+    const p = chrome.tabs.update(tabId, { active: true });
+    if (p && typeof p.catch === "function") p.catch(() => {});
+  } catch {
+    /* 面板 tab 已关：静默 */
+  }
+}
+
+async function sendFollowup(msg, sender) {
   const url = typeof (msg && msg.url) === "string" ? msg.url.trim() : "";
   const text = typeof (msg && msg.text) === "string" ? msg.text : "";
   if (!/^https?:\/\//i.test(url)) return { ok: false, status: "failed", reason: "no-url" };
   if (!text.trim()) return { ok: false, status: "failed", reason: "empty-text" };
+  // 发起方是本地面板上的 web-bridge（localhost 桥），sender.tab 就是那个面板 tab。
+  // 发送收尾（sent）时把焦点还给它，用户接着在弹窗里完成「记录跟进」这一步。
+  const webTabId = sender && sender.tab && typeof sender.tab.id === "number" ? sender.tab.id : null;
 
   // 页面已开 → 提到前台（用户要能看见填了什么、发出去了什么）；没开 → 新开。
   let tab = await findFollowupTab(url);
@@ -1231,7 +1251,12 @@ async function sendFollowup(msg) {
         entryClicked = true;
         continue;
       }
-      if (res && typeof res === "object") return { ...res, tabId: tab.id };
+      if (res && typeof res === "object") {
+        // 只有 sent 才切走：uncertain 要留在招聘页核对回显（followup-send.js 的口径），
+        // failed 要留在原地补救（ADR-0100：从岗位页点继续沟通再试）。招聘站 tab 不关不动。
+        if (res.status === "sent") await refocusWebTab(webTabId);
+        return { ...res, tabId: tab.id };
+      }
     } catch (err) {
       lastError = err;
       await new Promise((resolve) => setTimeout(resolve, FOLLOWUP_CONTENT_RETRY_MS));
@@ -1393,8 +1418,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       case "followup-send": {
         // 跟进页「自动跟进」的发送通道：web 面板把确认过的文本交来，本 SW 负责
         // 定位/打开职位页并转发给 followup-send.js，结果原样回传（含失败原因码）。
+        // sender 带过来是为了记住发起面板的 tab：sent 收尾时把焦点还给面板。
         try {
-          sendResponse(await sendFollowup(msg));
+          sendResponse(await sendFollowup(msg, sender));
         } catch (err) {
           sendResponse({ ok: false, status: "failed", reason: "exception", detail: (err && err.message) || String(err) });
         }
