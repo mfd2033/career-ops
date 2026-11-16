@@ -2,8 +2,9 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Check, X, FileText, Loader2 } from "lucide-react";
+import { Check, X, FileText, ExternalLink, Loader2 } from "lucide-react";
 import { cn } from "@/lib/cn";
+import { openableUrl } from "@/lib/inbox-url.mjs";
 import { CompanyLogo } from "@/components/company-logo";
 import { scoreNum, scoreTone } from "@/lib/format";
 import type { Application } from "@/lib/career-ops";
@@ -23,6 +24,9 @@ export function DecisionCard({ app }: { app: Application }) {
   const [done, setDone] = useState<string | null>(null);
   const score = scoreNum(app.score);
   const tone = scoreTone(app.score);
+  // 职位原帖直开（原型 2026-11-16 方案一）：tracker 的 URL 列需通过 http(s)
+  // 校验才可点（手粘行可能是坏链，同收件箱行口径）；无链接时置灰不隐藏。
+  const postingUrl = openableUrl(app.url);
 
   const setStatus = async (status: "Applied" | "SKIP") => {
     setBusy(status);
@@ -90,6 +94,28 @@ export function DecisionCard({ app }: { app: Application }) {
           {busy === "Applied" ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
           {t("home.applied")}
         </button>
+        {/* 打开职位原帖：新标签页直开 tracker URL，省去先进报告页再找链接。
+            有链接是 <a>，无链接是可悬停的置灰 span（disabled 元素不派发指针
+            事件，title 挂按钮上提示不显示——沿用跟进页话术面板口径）。 */}
+        {postingUrl ? (
+          <a
+            href={postingUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            title={t("home.openPosting")}
+            aria-label={t("home.openPosting")}
+            className="inline-flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-md text-faint transition-colors hover:bg-surface-hover hover:text-foreground"
+          >
+            <ExternalLink className="size-3.5 shrink-0" />
+          </a>
+        ) : (
+          <span
+            title={t("home.noPostingTitle")}
+            className="inline-flex h-[26px] w-[26px] shrink-0 cursor-not-allowed items-center justify-center rounded-md text-faint opacity-60"
+          >
+            <ExternalLink className="size-3.5 shrink-0" />
+          </span>
+        )}
       </div>
     </div>
   );

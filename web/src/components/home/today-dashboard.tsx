@@ -244,12 +244,14 @@ export function TodayDashboard({
           {awaiting.length === 0 ? (
             <p className="text-sm text-muted">无</p>
           ) : (
-            /* 列宽自适应（auto-fill ≥260px）而不是固定两列：左列本身只占页面一半，
+            /* 列宽自适应（auto-fill ≥280px）而不是固定两列：左列本身只占页面一半，
                固定两列在本视口下每卡仅 ~165px，三个操作按钮（查看/跳过/已申请）
                最小宽 ~214px 放不下——「查看/跳过」文字竖排折行、「已申请」溢出
-               卡片边框、公司名只剩 1 个字（UI 修复 2026-10-31）。260px 下按钮行
-               （214px）落在卡内容宽（232px）内，宽视口仍可两列。 */
-            <div className="grid min-h-0 flex-1 content-start gap-2.5 overflow-y-auto overscroll-contain hide-scrollbar sm:grid-cols-[repeat(auto-fill,minmax(260px,1fr))]">
+               卡片边框、公司名只剩 1 个字（UI 修复 2026-10-31）。原定 260px：按钮行
+               （214px）落在卡内容宽（232px）内。2026-11-16 加「打开职位」图标后
+               按钮行最宽 ~248px（214 + gap 8 + 图标 26），260px 卡内容宽（232px）
+               装不下，故放宽到 280px（内容宽 250px，宽视口仍可两列）。 */
+            <div className="grid min-h-0 flex-1 content-start gap-2.5 overflow-y-auto overscroll-contain hide-scrollbar sm:grid-cols-[repeat(auto-fill,minmax(280px,1fr))]">
               {awaiting.map((a) => (
                 <DecisionCard key={a.n} app={a} />
               ))}

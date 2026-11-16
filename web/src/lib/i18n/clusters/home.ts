@@ -45,6 +45,8 @@ export const en: Dict = {
   "home.skip": "Skip",
   "home.recordAppliedTitle": "Record Applied without opening the apply flow",
   "home.applied": "Applied",
+  "home.openPosting": "Open the posting in a new tab",
+  "home.noPostingTitle": "This record has no posting link",
 
   // follow-up-card.tsx
   "home.appliedOn": "applied {date}",
@@ -100,6 +102,8 @@ export const zh: Dict = {
   "home.skip": "跳过",
   "home.recordAppliedTitle": "在不打开申请流程的情况下记录已申请",
   "home.applied": "已申请",
+  "home.openPosting": "打开职位原帖（新标签页）",
+  "home.noPostingTitle": "该记录没有职位链接",
 
   // follow-up-card.tsx
   "home.appliedOn": "已于 {date} 申请",
