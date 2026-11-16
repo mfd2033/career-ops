@@ -67,6 +67,15 @@ Accepted (2026-10-20)
   - 时钟纪律同页头条：只在浏览器算，首帧 `now=null` 走「—」占位（避免 hydration 不一致），每 30 秒重算；按平台等级（而非 `now` 引用）下发到行，跨窗口边界时结论才真正翻面，`memo` 行不白白重渲染。
   - 影响面：`web/src/components/pipeline-view.tsx`（列头/列体/时钟）、`web/src/components/delivery-time-hint.tsx`（导出 `LEVEL_TONE`）、`web/src/lib/i18n/clusters/pipeline.ts`（新增 `pipeline.col.deliveryTiming`），测试 `web/tests/lib/delivery-window.test.mjs` 增补接线守卫。
 
+- **2026-11-16 — 常驻条新增三平台矩阵弹窗**：条尾加一枚图标按钮（lucide `Table2`，20px，文案只留在 `title` 与 `aria-label`），点开一个只读弹窗，看三张平台矩阵的完整时段表。
+  - 三个平台收进同一张表，不再按平台分成两张：行取三平台时段边界的并集，列是四种日型，每种日型下再分 BOSS / 猎聘 / 智联 三个子列，同一时刻三平台谁黄金谁避开能在同一行横向比。相邻两行在所有平台和所有日型下取值相同时合并，13 段并成 12 行（16:00–17:00 与 17:00–18:00 就是一处）。
+  - 数据下沉到引擎：新增 `matrixRows(platformIds?)`，返回每行的 `{start, end, levels}`，其中 `levels[platformId]` 是按 `DAY_TYPES` 顺序的四个等级。弹窗只负责摆放，不自己算等级，也不存第二份矩阵。
+  - 实时量只有两个：今天所属日型那一组描底并标「今天」，当前时刻所在行描底并标「现在」。两者都由传进来的 `now` 算，与常驻条取同一时刻。
+  - 入口只在管道页出现。传了 `platforms` 的报告详情页是单平台视角，既不挂入口也不挂弹窗，`!platforms` 守卫同时管住这两处。
+  - 按钮取 20px 而不是 24px：等于徽章高度，挂载后不会把条高再顶 4px（ADR-0039 槽位原则）；窄屏放大到 `size-8` 便于点击。
+  - `LEVEL_TONE` / `ACTION_TONE` 挪到 `web/src/components/delivery-tone.ts`，`delivery-time-hint.tsx` 原地继续导出，管道页行级列的 import 不用改；这么挪是为了避开常驻条与弹窗互相 import 成环。
+  - 影响面：`web/src/lib/delivery-window.mjs`（`matrixRows`）、`web/src/lib/delivery-window.d.mts`、新增 `web/src/components/delivery-matrix-dialog.tsx` 与 `web/src/components/delivery-tone.ts`、`web/src/components/delivery-time-hint.tsx`、`web/src/lib/i18n/clusters/delivery.ts`（新增 `delivery.matrix.*`，en/zh 同序），测试 `web/tests/lib/delivery-window.test.mjs` 增补矩阵断言 5 条与接线守卫 1 条。
+
 ## References
 
 - 需求来源：Kaneo 任务 CO-44（工作区 Nono工作室 / 项目 CareerOps），附件《投简历黄金时间指南-20261010》

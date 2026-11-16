@@ -35,6 +35,13 @@ export type DeliverySummary = {
   nextGold: (UpcomingWindow & { platform: string }) | null;
 };
 
+/** 合并矩阵的一行：`levels[platformId]` 是按 DAY_TYPES 顺序的四个等级。 */
+export type CombinedMatrixRow = {
+  start: number;
+  end: number;
+  levels: Record<string, DeliveryLevel[]>;
+};
+
 export const PLATFORMS: string[];
 export const LEVELS: DeliveryLevel[];
 export const DAY_TYPES: DayType[];
@@ -43,6 +50,11 @@ export function dayTypeOf(date: Date): DayType;
 export function minutesOfDay(date: Date): number;
 export function formatMinutes(min: number): string;
 export function windowsFor(platform: string, dayType: DayType): MatrixWindow[];
+/**
+ * 三平台合并矩阵（矩阵弹窗用）：行 = 所给平台时段边界的并集，相邻两行在所有
+ * 平台 × 所有日型下取值相同则合并；`platformIds` 缺省为三个平台，未知 id 丢弃。
+ */
+export function matrixRows(platformIds?: string[]): CombinedMatrixRow[];
 export function windowAt(platform: string, date: Date): MatrixWindow;
 export function nextWindow(
   platform: string,

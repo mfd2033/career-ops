@@ -1,28 +1,20 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Clock } from "lucide-react";
+import { Clock, Table2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { DeliveryMatrixDialog } from "@/components/delivery-matrix-dialog";
+import { ACTION_TONE, LEVEL_TONE } from "@/components/delivery-tone";
 import { formatMinutes, summarize } from "@/lib/delivery-window.mjs";
-import type { DeliveryAction, DeliveryLevel, DeliverySummary } from "@/lib/delivery-window.mjs";
+import type { DeliverySummary } from "@/lib/delivery-window.mjs";
 import { useI18n } from "@/lib/i18n/context";
 
 // 星期索引 → i18n 键后缀，与 Date.getDay() 对齐（0 = 周日）。
 const WEEKDAY_KEYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"] as const;
 
-// 等级与全局结论都复用既有语义色：good = 该投，warn = 别投，muted = 可以但非最佳。
-// 品牌橙留给「选中/激活」，不参与等级编码。
-// 导出给管道页的「投递时机」行级列复用（ADR-0085 修订）：等级 → 语义色只有这一处口径。
-export const LEVEL_TONE: Record<DeliveryLevel, "good" | "muted" | "warn"> = {
-  best: "good",
-  ok: "muted",
-  avoid: "warn",
-};
-const ACTION_TONE: Record<DeliveryAction, "good" | "muted" | "warn"> = {
-  send: "good",
-  ok: "muted",
-  wait: "warn",
-};
+// 等级 → 语义色只有一处口径（delivery-tone.ts，避免与矩阵弹窗互相 import）。
+// 这里继续对外导出，管道页行级列沿用同一入口，不新建第二套配色。
+export { LEVEL_TONE } from "@/components/delivery-tone";
 
 // 矩阵粒度是半小时，30 秒足够「到点即换结论」，也不至于空转。
 const TICK_MS = 30_000;
@@ -41,6 +33,10 @@ const TICK_MS = 30_000;
 export function DeliveryTimeHint({ platforms }: { platforms?: string[] }) {
   const { t } = useI18n();
   const [now, setNow] = useState<Date | null>(null);
+  // 矩阵弹窗只在管道页（三平台视角）挂：传了 platforms 的报告详情页是单平台看
+  // 职位的视角，没有「三平台横向比」的需求。打开时把当时的 now 传进去，弹窗
+  // 「今天那一组 / 现在那一行」的高亮与常驻条同一时刻，不各自取表。
+  const [matrixOpen, setMatrixOpen] = useState(false);
 
   useEffect(() => {
     setNow(new Date());
@@ -58,62 +54,84 @@ export function DeliveryTimeHint({ platforms }: { platforms?: string[] }) {
   const singlePlatform = summary?.platforms.length === 1;
 
   return (
-    <div
-      className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-border bg-surface/50 px-3 py-2 text-xs md:shrink-0"
-      title={t("delivery.tooltip")}
-      aria-label={t("delivery.aria")}
-    >
-      <span className="inline-flex items-center gap-1.5 font-medium text-muted">
-        <Clock className="size-3.5" />
-        {t("delivery.title")}
-      </span>
+    <>
+      <div
+        className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-border bg-surface/50 px-3 py-2 text-xs md:shrink-0"
+        title={t("delivery.tooltip")}
+        aria-label={t("delivery.aria")}
+      >
+        <span className="inline-flex items-center gap-1.5 font-medium text-muted">
+          <Clock className="size-3.5" />
+          {t("delivery.title")}
+        </span>
 
-      {summary && weekdayKey ? (
-        <>
-          <span className="tabular-nums text-faint">
-            {t("delivery.clock", {
-              weekday: t(`delivery.weekday.${weekdayKey}`),
-              time: summary.clock,
-            })}
-          </span>
+        {summary && weekdayKey ? (
+          <>
+            <span className="tabular-nums text-faint">
+              {t("delivery.clock", {
+                weekday: t(`delivery.weekday.${weekdayKey}`),
+                time: summary.clock,
+              })}
+            </span>
 
-          {summary.platforms.length === 0 ? (
-            // 来源不在三平台（ATS/公司官网/拉勾…）：如实说没有规律，
-            // 不拿别家的时段套上去。
-            <span className="text-faint">{t("delivery.noSource")}</span>
-          ) : singlePlatform ? (
-            // 单平台（报告详情页）：这一页只有这一个来源平台，再挂一枚
-            // 「猎聘 · 可以」只是把已知信息重说一遍——只留结论与窗口。
-            <>
-              {/* 窗口文案紧跟时刻：先读「现在几点、窗口到几点」，再读该不该投。 */}
-              <span className="text-faint">{rightText(summary, t)}</span>
-              <Badge tone={ACTION_TONE[summary.action]}>{t(`delivery.verdict.${summary.action}`)}</Badge>
-            </>
-          ) : (
-            // 多平台（列表页）：「今天该投哪些」的批量视角，三平台并列 + 右对齐下一段黄金。
-            <>
-              <Badge tone={ACTION_TONE[summary.action]}>{t(`delivery.verdict.${summary.action}`)}</Badge>
+            {summary.platforms.length === 0 ? (
+              // 来源不在三平台（ATS/公司官网/拉勾…）：如实说没有规律，
+              // 不拿别家的时段套上去。
+              <span className="text-faint">{t("delivery.noSource")}</span>
+            ) : singlePlatform ? (
+              // 单平台（报告详情页）：这一页只有这一个来源平台，再挂一枚
+              // 「猎聘 · 可以」只是把已知信息重说一遍——只留结论与窗口。
+              <>
+                {/* 窗口文案紧跟时刻：先读「现在几点、窗口到几点」，再读该不该投。 */}
+                <span className="text-faint">{rightText(summary, t)}</span>
+                <Badge tone={ACTION_TONE[summary.action]}>{t(`delivery.verdict.${summary.action}`)}</Badge>
+              </>
+            ) : (
+              // 多平台（列表页）：「今天该投哪些」的批量视角，三平台并列 + 右对齐下一段黄金。
+              <>
+                <Badge tone={ACTION_TONE[summary.action]}>{t(`delivery.verdict.${summary.action}`)}</Badge>
 
-              <span className="flex flex-wrap items-center gap-1.5">
-                {summary.platforms.map((entry) => (
-                  <Badge key={entry.platform} tone={LEVEL_TONE[entry.level]}>
-                    {t("delivery.chip", {
-                      platform: t(`delivery.platform.${entry.platform}`),
-                      level: t(`delivery.level.${entry.level}`),
-                    })}
-                  </Badge>
-                ))}
-              </span>
+                <span className="flex flex-wrap items-center gap-1.5">
+                  {summary.platforms.map((entry) => (
+                    <Badge key={entry.platform} tone={LEVEL_TONE[entry.level]}>
+                      {t("delivery.chip", {
+                        platform: t(`delivery.platform.${entry.platform}`),
+                        level: t(`delivery.level.${entry.level}`),
+                      })}
+                    </Badge>
+                  ))}
+                </span>
 
-              <span className="ml-auto text-faint">{rightText(summary, t)}</span>
-            </>
-          )}
-        </>
-      ) : (
-        // 未挂载（SSR 首帧）时的同高占位：高度与结论态一致，列表不会跳动。
-        <span className="text-faint">—</span>
+                {/* 行尾：下一段黄金文案 + 矩阵入口。入口尺寸取 20px（= 徽章高度），
+                    挂载后条高不因多这一枚按钮再加 4px（ADR-0039 槽位原则）。 */}
+                <span className="ml-auto flex items-center gap-2">
+                  <span className="text-faint">{rightText(summary, t)}</span>
+                  {!platforms && (
+                    <button
+                      type="button"
+                      onClick={() => setMatrixOpen(true)}
+                      title={t("delivery.matrix.open")}
+                      aria-label={t("delivery.matrix.open")}
+                      className="inline-flex size-5 items-center justify-center rounded-md border border-border text-muted transition-colors hover:border-brand/40 hover:text-brand max-sm:size-8"
+                    >
+                      <Table2 className="size-3.5" />
+                    </button>
+                  )}
+                </span>
+              </>
+            )}
+          </>
+        ) : (
+          // 未挂载（SSR 首帧）时的同高占位：高度与结论态一致，列表不会跳动。
+          <span className="text-faint">—</span>
+        )}
+      </div>
+
+      {/* 三平台矩阵弹窗：只在管道页（不传 platforms）挂，单平台详情页不出现。 */}
+      {matrixOpen && now && !platforms && (
+        <DeliveryMatrixDialog now={now} onClose={() => setMatrixOpen(false)} />
       )}
-    </div>
+    </>
   );
 }
 

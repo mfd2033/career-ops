@@ -106,6 +106,63 @@ export function windowAt(platform, date) {
   return hit || { start: 0, end: 1440, level: "avoid" };
 }
 
+/**
+ * 某平台在某日型的第 `minute` 分钟属于哪一段、等级为何。矩阵行首尾相接（00:00–24:00
+ * 全覆盖），所以任何 0–1439 的分钟都必有一行命中；越界值退回 avoid，不抛异常。
+ * @param {string} platform
+ * @param {string} dayType
+ * @param {number} minute
+ * @returns {"best"|"ok"|"avoid"}
+ */
+function levelAtMinute(platform, dayType, minute) {
+  const hit = windowsFor(platform, dayType).find((row) => minute >= row.start && minute < row.end);
+  return hit ? hit.level : "avoid";
+}
+
+/**
+ * 三平台合并矩阵（弹窗用）：行 = 所给平台时段边界的并集，列 = 四个日型，
+ * 每格给「每个平台在该行该日型下的等级」——这样同一时刻三平台谁黄金谁避开
+ * 可以在同一行横向比，不必来回切两张表。
+ *
+ * 三平台边界不同（Boss 09:00 切、猎聘 09:30 切），并集必然多出几行；相邻两行在
+ * **所有平台 × 所有日型** 下取值完全相同时合并（例：16:00–17:00 与 17:00–18:00），
+ * 免得同一串等级在表里重复铺两行。未知平台 id 一律丢弃，不虚构一列全 avoid 的平台。
+ *
+ * @param {string[]} [platformIds]
+ * @returns {Array<{start: number, end: number, levels: Record<string, Array<"best"|"ok"|"avoid">>}>}
+ *          levels 的键是平台 id，值是按 DAY_TYPES 顺序的四等级数组
+ */
+export function matrixRows(platformIds = PLATFORMS) {
+  const ids = [...new Set((Array.isArray(platformIds) ? platformIds : PLATFORMS).filter((id) => PLATFORMS.includes(id)))];
+  if (ids.length === 0) return [];
+
+  const bounds = new Set([0, 1440]);
+  for (const id of ids) {
+    for (const dayType of DAY_TYPES) {
+      for (const row of windowsFor(id, dayType)) {
+        bounds.add(row.start);
+        bounds.add(row.end);
+      }
+    }
+  }
+  const edges = [...bounds].sort((a, b) => a - b);
+
+  const rows = [];
+  for (let i = 0; i < edges.length - 1; i++) {
+    const start = edges[i];
+    const end = edges[i + 1];
+    const levels = {};
+    for (const id of ids) levels[id] = DAY_TYPES.map((dayType) => levelAtMinute(id, dayType, start));
+
+    const prev = rows[rows.length - 1];
+    const sameAsPrev =
+      prev && DAY_TYPES.every((_, idx) => ids.every((id) => prev.levels[id][idx] === levels[id][idx]));
+    if (sameAsPrev) prev.end = end;
+    else rows.push({ start, end, levels });
+  }
+  return rows;
+}
+
 /** 把「当天 0 点 + 偏移天数」构造成本地 Date。 */
 function startOfDay(date, dayOffset = 0) {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate() + dayOffset);

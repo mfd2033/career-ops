@@ -14,6 +14,7 @@ import {
   PLATFORMS,
   dayTypeOf,
   formatMinutes,
+  matrixRows,
   nextWindow,
   summarize,
   windowAt,
@@ -156,6 +157,69 @@ test("summarize：周一上午猎聘/智联只是「可以」→ ok", () => {
   assert.deepEqual(s.platforms.map((p) => p.level), ["ok", "avoid", "avoid"]);
 });
 
+// ── 矩阵弹窗（ADR-0085 增量）：三平台合并成一张表的数据层 ──
+test("matrixRows：行覆盖 00:00–24:00，每行给三平台 × 四日型的等级", () => {
+  const rows = matrixRows();
+  assert.equal(rows[0].start, 0);
+  assert.equal(rows[rows.length - 1].end, 1440);
+  for (let i = 1; i < rows.length; i++) {
+    assert.equal(rows[i].start, rows[i - 1].end, "行与行之间不能有缝");
+  }
+  for (const row of rows) {
+    assert.deepEqual(Object.keys(row.levels), PLATFORMS);
+    for (const id of PLATFORMS) assert.equal(row.levels[id].length, DAY_TYPES.length);
+  }
+});
+
+test("matrixRows：每个格子与 windowsFor 的判定一致（不另立口径）", () => {
+  for (const row of matrixRows()) {
+    for (const id of PLATFORMS) {
+      DAY_TYPES.forEach((dayType, index) => {
+        const hit = windowsFor(id, dayType).find((w) => row.start >= w.start && row.start < w.end);
+        assert.equal(row.levels[id][index], hit.level, `${id}/${dayType}/${formatMinutes(row.start)} 口径不一致`);
+      });
+    }
+  }
+});
+
+test("matrixRows：同一行横向可比（周二 14:23 三平台全黄金，周五 16:30 只有 Boss 黄金）", () => {
+  const rows = matrixRows();
+  const midweek = DAY_TYPES.indexOf("midweek");
+  const atNow = rows.find((r) => 14 * 60 + 23 >= r.start && 14 * 60 + 23 < r.end);
+  assert.deepEqual(PLATFORMS.map((id) => atNow.levels[id][midweek]), ["best", "best", "best"]);
+
+  const fri = DAY_TYPES.indexOf("fri");
+  const atLate = rows.find((r) => 16 * 60 + 30 >= r.start && 16 * 60 + 30 < r.end);
+  assert.equal(atLate.levels.boss[fri], "best");
+  assert.equal(atLate.levels.liepin[fri], "avoid");
+  assert.equal(atLate.levels.zhaopin[fri], "avoid");
+});
+
+test("matrixRows：相邻两行取值完全相同就并成一行（16:00–18:00），并完不再有可并的相邻行", () => {
+  const rows = matrixRows();
+  assert.equal(rows.length, 12, "三平台边界并集 13 段，合并后应剩 12 行");
+  const merged = rows.find((row) => row.start === 960 && row.end === 1080);
+  assert.ok(merged, "16:00–17:00 与 17:00–18:00 取值相同，应并成 16:00–18:00");
+
+  for (let i = 1; i < rows.length; i++) {
+    const prev = rows[i - 1];
+    const same = PLATFORMS.every((id) =>
+      DAY_TYPES.every((_, index) => prev.levels[id][index] === rows[i].levels[id][index]),
+    );
+    assert.equal(same, false, `${formatMinutes(prev.start)} 与 ${formatMinutes(rows[i].start)} 取值相同却未合并`);
+  }
+});
+
+test("matrixRows：未知平台 id 丢弃，空列表回空数组", () => {
+  assert.deepEqual(matrixRows([]), []);
+  assert.deepEqual(matrixRows(["bogus"]), []);
+
+  const bossOnly = matrixRows(["boss"]);
+  assert.deepEqual(Object.keys(bossOnly[0].levels), ["boss"]);
+  assert.equal(bossOnly[0].start, 0);
+  assert.equal(bossOnly[bossOnly.length - 1].end, 1440);
+});
+
 // ── UI 接线守卫（组件无测试面，同 ADR-0077）：键对称 + 挂载点存在 ──
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -252,4 +316,20 @@ test("summarize：空平台列表/未知平台 id → 没有可判平台（调�
     assert.equal(s.action, "wait");
     assert.equal(s.nextGold, null);
   }
+});
+
+test("组件接线：矩阵入口只在管道页挂，弹窗数据全部来自 matrixRows()", () => {
+  const hint = readFileSync(join(here, "../../src/components/delivery-time-hint.tsx"), "utf8");
+  // 入口文案走 i18n；传了 platforms 的单平台详情页不出现入口与弹窗
+  assert.match(hint, /t\("delivery\.matrix\.open"\)/);
+  assert.match(hint, /\{!platforms && \(/);
+  assert.match(hint, /\{matrixOpen && now && !platforms && \(/);
+
+  const dialog = readFileSync(join(here, "../../src/components/delivery-matrix-dialog.tsx"), "utf8");
+  // 唯一数据源：合并矩阵由引擎算，弹窗只负责摆放
+  assert.match(dialog, /matrixRows\(\)/);
+  assert.match(dialog, /t\("delivery\.matrix\.title"\)/);
+  // 文案一律走 i18n：剔除注释后不应出现中文
+  const code = dialog.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+  assert.doesNotMatch(code, /[\u4e00-\u9fa5]/, "弹窗正文不应含硬编码中文（注释除外）");
 });

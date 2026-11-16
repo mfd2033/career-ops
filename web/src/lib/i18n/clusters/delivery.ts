@@ -27,6 +27,22 @@ export const en: Dict = {
   // 判定依据 + 数据来源：悬停 title 用，短句写清「为什么现在能投/不能投」。
   "delivery.tooltip": "Judged from the Boss Zhipin / Liepin / Zhaopin golden-hour matrix (guide dated 2026-10-10). Boss Zhipin is chat-first, so evenings 20:00–22:00 and weekends work too; Liepin and Zhaopin are apply-then-screen, so aim for Tue–Thu 09:30–11:00 and 14:00–16:00 on workdays.",
 
+  // ── 矩阵弹窗（delivery-matrix-dialog.tsx） ──
+  "delivery.matrix.open": "Open the golden-hour matrix",
+  "delivery.matrix.title": "Golden-hour matrix",
+  "delivery.matrix.aria": "Golden-hour matrix for BOSS Zhipin, Liepin and Zhaopin",
+  "delivery.matrix.close": "Close",
+  "delivery.matrix.colTime": "Time",
+  "delivery.matrix.today": "today",
+  "delivery.matrix.now": "now",
+  "delivery.matrix.dayType.mon": "Mon",
+  "delivery.matrix.dayType.midweek": "Tue–Thu",
+  "delivery.matrix.dayType.fri": "Fri",
+  "delivery.matrix.dayType.weekend": "Sat–Sun",
+  "delivery.matrix.platform.boss": "Boss",
+  "delivery.matrix.platform.liepin": "Liepin",
+  "delivery.matrix.platform.zhaopin": "Zhaopin",
+
   // ── 平台名（与 source-label.mjs 的域名映射保持同一套展示名） ──
   "delivery.platform.boss": "BOSS Zhipin",
   "delivery.platform.liepin": "Liepin",
@@ -65,6 +81,22 @@ export const zh: Dict = {
   "delivery.noSource": "该职位来源不在 Boss直聘/猎聘/智联，暂无投递时段规律",
   // 判定依据 + 数据来源
   "delivery.tooltip": "按 BOSS直聘/猎聘/智联 的投递黄金时间矩阵判断（指南 2026-10-10）：BOSS直聘是直聊模式，晚间 20:00–22:00 与周末同样有效；猎聘/智联是投递→筛选模式，只认工作日周二~周四 09:30–11:00、14:00–16:00。",
+
+  // ── 矩阵弹窗（delivery-matrix-dialog.tsx） ──
+  "delivery.matrix.open": "查看投递黄金时间矩阵",
+  "delivery.matrix.title": "投递黄金时间矩阵",
+  "delivery.matrix.aria": "BOSS直聘、猎聘、智联招聘投递黄金时间矩阵",
+  "delivery.matrix.close": "关闭",
+  "delivery.matrix.colTime": "时段",
+  "delivery.matrix.today": "今天",
+  "delivery.matrix.now": "现在",
+  "delivery.matrix.dayType.mon": "周一",
+  "delivery.matrix.dayType.midweek": "周二~周四",
+  "delivery.matrix.dayType.fri": "周五",
+  "delivery.matrix.dayType.weekend": "周六日",
+  "delivery.matrix.platform.boss": "BOSS",
+  "delivery.matrix.platform.liepin": "猎聘",
+  "delivery.matrix.platform.zhaopin": "智联",
 
   // ── 平台名（与 source-label.mjs 的域名映射保持同一套展示名） ──
   "delivery.platform.boss": "BOSS直聘",
