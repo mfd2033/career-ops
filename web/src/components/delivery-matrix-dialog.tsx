@@ -6,23 +6,14 @@ import { Badge } from "@/components/ui/badge";
 import { LEVEL_TONE } from "@/components/delivery-tone";
 import {
   DAY_TYPES,
-  LEVELS,
   PLATFORMS,
   dayTypeOf,
   formatMinutes,
   matrixRows,
   minutesOfDay,
 } from "@/lib/delivery-window.mjs";
-import type { DeliveryLevel } from "@/lib/delivery-window.mjs";
 import { useI18n } from "@/lib/i18n/context";
 import { cn } from "@/lib/cn";
-
-// 图例圆点：与 Badge 的语义色同一套（emerald / 中性 / amber），不新造颜色。
-const DOT_TONE: Record<DeliveryLevel, string> = {
-  best: "bg-emerald-500",
-  ok: "bg-muted/40",
-  avoid: "bg-amber-400",
-};
 
 /**
  * 投递黄金时间矩阵弹窗（ADR-0085 增量）：把 BOSS直聘 / 猎聘 / 智联招聘 三个平台
@@ -75,15 +66,6 @@ export function DeliveryMatrixDialog({ now, onClose }: { now: Date; onClose: () 
           </button>
         </div>
 
-        <div className="mt-3 flex flex-wrap items-center gap-x-3.5 gap-y-1.5">
-          {LEVELS.map((level) => (
-            <span key={level} className="inline-flex items-center gap-1.5 text-xs text-muted">
-              <span className={cn("size-2 rounded-sm", DOT_TONE[level])} />
-              {t(`delivery.level.${level}`)}
-            </span>
-          ))}
-        </div>
-
         {/* 窄屏整体横滑：时段列与今天那一组仍要能同屏对齐比较，所以不拆表。 */}
         <div className="mt-3 overflow-x-auto">
           <table className="w-full min-w-[640px] border-collapse text-[11px]">
@@ -110,7 +92,7 @@ export function DeliveryMatrixDialog({ now, onClose }: { now: Date; onClose: () 
                     >
                       {t(`delivery.matrix.dayType.${dayType}`)}
                       {isToday && (
-                        <span className="ml-1 text-[10px] font-semibold">{t("delivery.matrix.today")}</span>
+                        <span className="ml-1 text-[11px] font-semibold">{t("delivery.matrix.today")}</span>
                       )}
                     </th>
                   );
@@ -124,7 +106,7 @@ export function DeliveryMatrixDialog({ now, onClose }: { now: Date; onClose: () 
                       key={`${dayType}-${platform}`}
                       scope="col"
                       className={cn(
-                        "border-b border-border px-1 pt-0.5 text-center text-[10px] font-medium text-faint",
+                        "border-b border-border px-1 pt-0.5 text-center text-xs font-medium text-faint",
                         index === 0 && "border-l border-border",
                         isToday && "bg-brand-soft",
                       )}
@@ -143,7 +125,7 @@ export function DeliveryMatrixDialog({ now, onClose }: { now: Date; onClose: () 
                     <th
                       scope="row"
                       className={cn(
-                        "whitespace-nowrap px-2 py-1 text-left text-[11px] font-medium tabular-nums",
+                        "whitespace-nowrap px-2 py-1 text-left text-xs font-medium tabular-nums",
                         isNowRow
                           ? "text-foreground shadow-[inset_2px_0_0_var(--color-brand)]"
                           : "text-muted",
@@ -151,7 +133,7 @@ export function DeliveryMatrixDialog({ now, onClose }: { now: Date; onClose: () 
                     >
                       {formatMinutes(row.start)}–{formatMinutes(row.end)}
                       {isNowRow && (
-                        <span className="ml-1 text-[10px] font-semibold text-brand-text">
+                        <span className="ml-1 text-[11px] font-semibold text-brand-text">
                           {t("delivery.matrix.now")}
                         </span>
                       )}
@@ -171,7 +153,7 @@ export function DeliveryMatrixDialog({ now, onClose }: { now: Date; onClose: () 
                           >
                             <Badge
                               tone={LEVEL_TONE[level]}
-                              className="min-w-[34px] px-1 py-0.5 text-[10px]"
+                              className="min-w-[34px] px-1 py-0.5 text-[11px]"
                             >
                               {t(`delivery.level.${level}`)}
                             </Badge>
