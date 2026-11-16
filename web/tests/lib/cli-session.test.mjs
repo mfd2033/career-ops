@@ -42,6 +42,10 @@ describe("canViewSession（按钮自守卫）", () => {
   it("运行中 + 已有 sessionId（claude/qoder-cn 的 init 帧）→ 显示", () => {
     assert.equal(canViewSession({ status: "running", cliId: "claude", sessionId: UUID }), true);
     assert.equal(canViewSession({ status: "running", cliId: "qoder-cn", sessionId: UUID }), true);
+    // codebuddy：stream-json 与 claude 同形，init 帧同样带 session_id（2026-11-16
+    // 实测闭环收录，见 cli-session-shared.mjs 的注释）。
+    assert.equal(canViewSession({ status: "running", cliId: "codebuddy", sessionId: UUID }), true);
+    assert.equal(canViewSession({ status: "done", cliId: "codebuddy", sessionId: UUID }), true);
   });
   it("运行中 opencode 无 sessionId 但有合法 runId → 显示（服务端按标题反查）", () => {
     assert.equal(canViewSession({ status: "running", cliId: "opencode", runId: RUN_ID }), true);
@@ -127,6 +131,15 @@ describe("sessionResumeArgv", () => {
       BIN,
       "--session",
       "ses_e405af519ffeZanSoMNrAmtzc4",
+    ]);
+  });
+  // 2026-11-16 实测闭环（v2.184.0）：--session-id 派发 + --resume 续聊记忆延续；
+  // 阴性对照报 "No conversation found"，不静默新开。
+  it("codebuddy → --resume", () => {
+    assert.deepEqual(sessionResumeArgv("codebuddy", BIN, "a1b2c3d4-e5f6-7890-abcd-ef1234567890"), [
+      BIN,
+      "--resume",
+      "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
     ]);
   });
   it("不支持的引擎 / 非法 id / 空 binPath 一律 null", () => {

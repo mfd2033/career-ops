@@ -9,7 +9,7 @@
 
 /**
  * 各引擎「在交互终端恢复指定会话」的 argv（binPath 之后的部分）。
- * 来源：本机实测 `--help` + headless 闭环（2026-11-09）——
+ * 来源：本机实测 `--help` + headless 闭环 ——
  *   - claude:     `-r, --resume [value]`（TUI）；headless -p 默认不持久化会话，
  *                 派发必须带 `--session-id <uuid>` 会话才落盘（/api/run 负责）。
  *   - qoder-cn:   `-r, --resume [id]`（TUI，与 claude 同形）；同样需要派发时
@@ -19,12 +19,17 @@
  *                 退出（2026-11-09 实测 exit 0，约 1.5s，窗口一闪而过）；`-i` 是
  *                 「在 run 里开分屏」而不是「打开 TUI」。顶层 `-s/--session` 才是
  *                 与 claude `--resume` 同义的入口，实测窗口驻留。
+ *   - codebuddy:  `-r, --resume [sessionId]`（与 claude 同形）。
+ *                 2026-11-16 实测闭环（v2.184.0）：`-p --session-id <uuid>` 派发 →
+ *                 `--resume <同一uuid> -p` 续聊成功延续记忆；阴性对照（不存在的
+ *                 uuid）报 "No conversation found with session ID"，不会静默新开。
  * 恢复 cwd 必须与 headless run 相同（仓库根）：claude/qoder 的会话按项目目录存。
  */
 export const SESSION_RESUME_ARGS = Object.freeze({
   claude: (sessionId) => ["--resume", sessionId],
   "qoder-cn": (sessionId) => ["-r", sessionId],
   opencode: (sessionId) => ["--session", sessionId],
+  codebuddy: (sessionId) => ["--resume", sessionId],
 });
 
 /** 该引擎是否支持恢复会话（前端按钮自守卫与后端 API 校验共用）。 */
