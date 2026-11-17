@@ -452,7 +452,7 @@ export function ReportView({
     rawStatus !== "" &&
     rawStatus !== "—" &&
     rawStatus !== "-" &&
-    ["SKIP", "DISCARDED", "REJECTED"].includes(canonStatus(rawStatus));
+    ["SKIP", "DISCARDED", "REJECTED", "EXPIRED"].includes(canonStatus(rawStatus));
   const pdfReady = (app?.pdf ?? "").includes("✅");
   // The tailored CV is recorded in data/pdf-index.tsv keyed by its REPORT number
   // (a re-evaluated row keeps its tracker `#` but links a new report file, so the

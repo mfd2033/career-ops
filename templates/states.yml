@@ -52,6 +52,13 @@ states:
     dashboard_group: rejected
     terminal: true
 
+  - id: expired
+    label: Expired
+    aliases: [expired, closed, job_closed, "job closed", position_closed, "position closed", "职位已失效", "岗位已失效", "职位已关闭", "岗位已关闭"]
+    description: Job posting is closed or expired — no longer available
+    dashboard_group: expired
+    terminal: true
+
   - id: discarded
     label: Discarded
     aliases: [descartado, descartada, cerrada, cancelada, "iptal edildi", iptal_edildi, "ıptal edildi", ıptal_edildi]

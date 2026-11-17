@@ -127,8 +127,8 @@ const I18N_ZH = (() => {
 })();
 const CANONICAL_LABELS = [...STATES_YML.matchAll(/^\s+label:\s*(\S+)\s*$/gm)].map((m) => m[1]);
 
-test("状态字典覆盖 templates/states.yml 全部九个规范状态，且中文与 web i18n 逐字一致", () => {
-  assert.equal(CANONICAL_LABELS.length, 9, "states.yml 状态数变了 → 字典要同步");
+test("状态字典覆盖 templates/states.yml 全部十个规范状态，且中文与 web i18n 逐字一致", () => {
+  assert.equal(CANONICAL_LABELS.length, 10, "states.yml 状态数变了 → 字典要同步");
   for (const label of CANONICAL_LABELS) {
     const hit = STATUS_DICT[label];
     assert.ok(hit, `扩展字典缺状态 ${label}`);

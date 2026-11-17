@@ -26,6 +26,7 @@ export const CANONICAL_STATES = [
   "Offer",
   "Hired",
   "Rejected",
+  "Expired",
   "Discarded",
   "SKIP",
 ] as const;
@@ -38,7 +39,8 @@ export function statusDot(status: string): string {
   if (c.includes("HIRED") || c.includes("INTERVIEW") || c.includes("OFFER")) return "bg-emerald-400";
   if (c.includes("APPLIED") || c.includes("RESPONDED")) return "bg-sky-400";
   if (c.includes("REJECTED") || c.includes("SKIP")) return "bg-red-400";
-  if (c.includes("DISCARDED")) return "bg-zinc-600";
+  // 职位已失效 = 岗位关闭，不是被拒；与「已放弃」同一档灰点，不再新增颜色。
+  if (c.includes("EXPIRED") || c.includes("DISCARDED")) return "bg-zinc-600";
   return "bg-zinc-500"; // Evaluated / unknown
 }
 

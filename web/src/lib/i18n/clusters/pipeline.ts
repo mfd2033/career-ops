@@ -38,6 +38,7 @@ export const en: Dict = {
   "pipeline.tab.offer": "OFFER",
   "pipeline.tab.hired": "HIRED",
   "pipeline.tab.rejected": "REJECTED",
+  "pipeline.tab.expired": "EXPIRED",
   "pipeline.tab.discarded": "DISCARDED",
   "pipeline.tab.skip": "SKIP",
 
@@ -82,6 +83,7 @@ export const en: Dict = {
   "pipeline.status.offer": "Offer",
   "pipeline.status.hired": "Hired",
   "pipeline.status.rejected": "Rejected",
+  "pipeline.status.expired": "Expired",
   "pipeline.status.discarded": "Discarded",
   "pipeline.status.skip": "SKIP",
 
@@ -334,6 +336,7 @@ export const zh: Dict = {
   "pipeline.tab.offer": "录用通知",
   "pipeline.tab.hired": "已入职",
   "pipeline.tab.rejected": "已拒绝",
+  "pipeline.tab.expired": "职位已失效",
   "pipeline.tab.discarded": "已放弃",
   "pipeline.tab.skip": "跳过",
 
@@ -377,6 +380,7 @@ export const zh: Dict = {
   "pipeline.status.offer": "录用通知",
   "pipeline.status.hired": "已入职",
   "pipeline.status.rejected": "已拒绝",
+  "pipeline.status.expired": "职位已失效",
   "pipeline.status.discarded": "已放弃",
   "pipeline.status.skip": "跳过",
 

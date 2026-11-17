@@ -137,7 +137,7 @@ try {
 }
 
 // Canonical states and aliases
-const CANONICAL_STATES = ['Evaluated', 'Applied', 'Responded', 'Interview', 'Offer', 'Hired', 'Rejected', 'Discarded', 'SKIP'];
+const CANONICAL_STATES = ['Evaluated', 'Applied', 'Responded', 'Interview', 'Offer', 'Hired', 'Rejected', 'Expired', 'Discarded', 'SKIP'];
 
 // Sentinel returned by parseTsvContent when a row's status cell is neither a
 // canonical state nor a known alias — e.g. a real job title landed in the
@@ -182,6 +182,8 @@ function validateStatus(status) {
     'entrevista': 'Interview',
     'oferta': 'Offer',
     'rechazado': 'Rejected', 'rechazada': 'Rejected',
+    'expired': 'Expired', 'closed': 'Expired', 'job closed': 'Expired', 'job_closed': 'Expired',
+    'position closed': 'Expired', 'position_closed': 'Expired',
     'contratado': 'Hired', 'contratada': 'Hired', 'accepted': 'Hired', 'accept': 'Hired',
     'descartado': 'Discarded', 'descartada': 'Discarded', 'cerrada': 'Discarded', 'cancelada': 'Discarded',
     'no aplicar': 'SKIP', 'no_aplicar': 'SKIP', 'skip': 'SKIP', 'monitor': 'SKIP',

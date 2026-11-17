@@ -28,6 +28,7 @@ export const en: Dict = {
   "analytics.stage.offer": "Offer",
   "analytics.stage.hired": "Hired",
   "analytics.stage.rejected": "Rejected",
+  "analytics.stage.expired": "Expired",
   "analytics.stage.discarded": "Discarded",
 };
 
@@ -57,5 +58,6 @@ export const zh: Dict = {
   "analytics.stage.offer": "录用通知",
   "analytics.stage.hired": "已入职",
   "analytics.stage.rejected": "已拒绝",
+  "analytics.stage.expired": "职位已失效",
   "analytics.stage.discarded": "已放弃",
 };

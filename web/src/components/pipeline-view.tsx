@@ -45,6 +45,7 @@ const TABS = [
   "OFFER",
   "HIRED",
   "REJECTED",
+  "EXPIRED",
   "DISCARDED",
   "SKIP",
 ] as const;
@@ -105,6 +106,7 @@ export function PipelineView({
     OFFER: t("pipeline.tab.offer"),
     HIRED: t("pipeline.tab.hired"),
     REJECTED: t("pipeline.tab.rejected"),
+    EXPIRED: t("pipeline.tab.expired"),
     DISCARDED: t("pipeline.tab.discarded"),
     SKIP: t("pipeline.tab.skip"),
   };

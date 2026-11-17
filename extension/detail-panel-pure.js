@@ -37,7 +37,7 @@
   // 是纯 JS，import 不进去 TS 模块。契约只走原始码（语言不进接口），两边必须逐状态
   // 对齐；这笔双份债由单测钉住 —— 改中文名时只改一处会在测试里当场死。
   //
-  // 键 = templates/states.yml 的 label（九个规范状态，大小写不敏感匹配）；
+  // 键 = templates/states.yml 的 label（十个规范状态，大小写不敏感匹配）；
   // zh = web i18n 的同名标签（注意 skip 在两边都是「跳过」，不带「已」）；
   // color = 沿生命周期递进取色，跟分数分档共用一套 palette。
   // 本字典不列 states.yml 的 aliases（那是写入端的归一问题，set-status.mjs 已卡住），
@@ -50,6 +50,7 @@
     Offer: { zh: "录用通知", color: "#14b8a6" },
     Hired: { zh: "已入职", color: "#00c68d" },
     Rejected: { zh: "已拒绝", color: "#d93026" },
+    Expired: { zh: "职位已失效", color: "#6b7280" },
     Discarded: { zh: "已放弃", color: "#6b7280" },
     SKIP: { zh: "跳过", color: "#8a8f98" },
   };

@@ -7,7 +7,7 @@ import { AnalyticsView } from "@/components/analytics/analytics-view";
 
 export const dynamic = "force-dynamic";
 
-const STAGES = ["EVALUATED", "APPLIED", "RESPONDED", "INTERVIEW", "OFFER", "HIRED", "REJECTED", "DISCARDED"];
+const STAGES = ["EVALUATED", "APPLIED", "RESPONDED", "INTERVIEW", "OFFER", "HIRED", "REJECTED", "EXPIRED", "DISCARDED"];
 
 export default function Analytics() {
   const { applications } = pipelineSummary();

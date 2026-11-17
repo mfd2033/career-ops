@@ -269,10 +269,10 @@ test("组件接线：报告详情页只显示「该报告来源平台」的建�
   }
 });
 
-test("组件接线：跳过/放弃/拒绝（已决定的终态）不再渲染投递时机条", () => {
+test("组件接线：跳过/放弃/拒绝/职位已失效（已决定的终态）不再渲染投递时机条", () => {
   const reportView = readFileSync(join(here, "../../src/components/report-view.tsx"), "utf8");
-  // 三种终态按 canonical token 判定（别名/大小写交给 canonStatus）
-  assert.match(reportView, /\["SKIP", "DISCARDED", "REJECTED"\]\.includes\(canonStatus\(rawStatus\)\)/);
+  // 四种终态按 canonical token 判定（别名/大小写交给 canonStatus）
+  assert.match(reportView, /\["SKIP", "DISCARDED", "REJECTED", "EXPIRED"\]\.includes\(canonStatus\(rawStatus\)\)/);
   // 占位状态（空 / — / -）是「未填」，不能被 canonStatus 折成 DISCARDED 而误隐
   assert.match(reportView, /rawStatus !== "—"/);
   assert.match(reportView, /rawStatus !== "-"/);

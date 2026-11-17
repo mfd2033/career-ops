@@ -53,6 +53,18 @@ export const STATUS_ALIAS = {
   rechazado: "REJECTED",
   rechazada: "REJECTED",
   reddedildi: "REJECTED",
+  // Expired — states.yml `expired`
+  expired: "EXPIRED",
+  closed: "EXPIRED",
+  job_closed: "EXPIRED",
+  "job closed": "EXPIRED",
+  position_closed: "EXPIRED",
+  "position closed": "EXPIRED",
+  // 中文别名（foldStatus 只做 NFKC + 小写，汉字原样匹配）
+  职位已失效: "EXPIRED",
+  岗位已失效: "EXPIRED",
+  职位已关闭: "EXPIRED",
+  岗位已关闭: "EXPIRED",
   // Discarded — states.yml `discarded`
   descartado: "DISCARDED",
   descartada: "DISCARDED",
