@@ -144,7 +144,8 @@ const ROW = {
   appliedDate: "10-02",
   daysSinceApplication: 14,
   followupCount: 2,
-  followups: [{ date: "10-09" }, { date: "10-12" }],
+  // 与引擎真实输出同向：followup-cadence.mjs 的 followups[] 按日期降序
+  followups: [{ date: "10-12" }, { date: "10-09" }],
 };
 
 test("自动占位符按 CadenceEntry 字段替换", () => {
@@ -154,6 +155,15 @@ test("自动占位符按 CadenceEntry 字段替换", () => {
   );
   assert.equal(text, "10-02 / 高级后端工程师 / 137 / 云枢科技 / 14 / 10-12 / 2");
   assert.deepEqual(missing, []);
+});
+
+// 回归：引擎的 followups[] 是按日期降序的，取「最近一条」不能依赖数组下标。
+// 真实案例：报告 1165 有 11-11、11-04 两条跟进，话术曾写成 11-04。
+test("{上次跟进日} 取日期最大的一条，与数组顺序无关", () => {
+  const desc = { ...ROW, followups: [{ date: "2026-11-11" }, { date: "2026-11-04" }] };
+  const asc = { ...ROW, followups: [{ date: "2026-11-04" }, { date: "2026-11-11" }] };
+  assert.equal(fillText("{上次跟进日}", desc).text, "2026-11-11");
+  assert.equal(fillText("{上次跟进日}", asc).text, "2026-11-11");
 });
 
 test("编号是数字时不留小数点尾巴（137.0 这种脏值不进话术）", () => {

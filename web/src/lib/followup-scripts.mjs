@@ -48,8 +48,14 @@ function valueFor(key, row) {
   if (!field) return null;
   let value;
   if (field === "lastFollowupDate") {
+    // 取日期最大的一条：引擎输出的 followups[] 虽然降序，但顺序不是契约，
+    // 依赖下标会在多条跟进时取成最早的那次（报告 1165：11-11 写成 11-04）。
     const list = Array.isArray(row.followups) ? row.followups : [];
-    value = list.length ? list[list.length - 1]?.date : null;
+    value = list.reduce((latest, item) => {
+      const date = item && item.date ? String(item.date) : "";
+      if (!date) return latest;
+      return !latest || date > latest ? date : latest;
+    }, null);
   } else {
     value = row[field];
   }
