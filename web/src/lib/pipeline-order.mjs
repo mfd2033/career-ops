@@ -19,9 +19,13 @@ import { scoreNum } from "./score-num.mjs";
 import { salaryMedian } from "./report-salary.mjs";
 import { matchesReportNo } from "./report-no-search.mjs";
 
-/** The tracker table's own default context — ALL rows, score descending. Used
- *  as the fallback when a report is opened without (or outside) a list
- *  context, so prev/next still work. */
+/** The report page's OWN fallback context — ALL rows, score descending — used
+ *  when a report is opened without (or outside) a list context, so prev/next
+ *  still work. The tracker table's no-param default is NOT always this: it is
+ *  decided per data by defaultPipelineTab (EVALUATED when the evaluated queue
+ *  is non-empty, ALL otherwise) and, once the table has chosen, the tab is
+ *  always serialized into row links — so this constant only covers context-less
+ *  deep links. */
 export const DEFAULT_ORDER = {
   tab: "ALL",
   min: null,
@@ -114,6 +118,22 @@ function compareByKey(a, b, sortKey, dir) {
   const bv = sortKeyValue(b, sortKey);
   if (typeof av === "number" || typeof bv === "number") return (av - bv) * dir;
   return av.localeCompare(bv) * dir;
+}
+
+/**
+ * 管道页在「无 tab 参数」时的默认视图：已评估队列非空就落 EVALUATED（用户日常
+ * 真正要决策的那一屏），为空才退回 ALL（整张 tracker）。
+ *
+ * 判定口径与 tabs 上的计数完全一致（同一个 canonStatus().includes()）——计数显示
+ * 「EVALUATED 87」而默认却落到别的 tab，是这次要消掉的那种自相矛盾。INBOX 不参与：
+ * 收件箱是扫描后的分诊入口，仍靠自己的 tab 显式进入。
+ *
+ * @param {Array<{status?: string}>} applications - tracker rows, in file order.
+ * @returns {"EVALUATED"|"ALL"} The tab to select when the URL carries no tab.
+ */
+export function defaultPipelineTab(applications) {
+  const rows = Array.isArray(applications) ? applications : [];
+  return rows.some((r) => canonStatus(r.status).includes("EVALUATED")) ? "EVALUATED" : "ALL";
 }
 
 /** Normalize a URL-derived context to the shape every consumer sorts/filters
@@ -326,10 +346,11 @@ export function countSelectedOffView(applications, visible, selected) {
  * page to build prev/next + back links — both must emit IDENTICAL queries so a
  * round-trip preserves the view.
  *
- * The tab is ALWAYS serialized: the list page's no-param default is ALL (the
- * tracker table), and INBOX is reached only via an explicit tab=INBOX — omitting
+ * The tab is ALWAYS serialized: the list page's no-param default is decided per
+ * data by defaultPipelineTab (EVALUATED when the evaluated queue is non-empty,
+ * ALL otherwise), and INBOX is reached only via an explicit tab=INBOX — omitting
  * the tab would make a row link (and the report page's back link) fall back to
- * the default view instead of the table the user actually came from. Only
+ * the data-driven default instead of the table the user actually came from. Only
  * min/max/company/sort/dir/q — whose omissions resolve to the same tracker-table
  * defaults — are elided.
  * @param {{tab?: string, min?: number|null, max?: number|null, company?: string, q?: string, sortKey?: string, dir?: number}} ctx

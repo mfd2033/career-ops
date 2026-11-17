@@ -14,7 +14,7 @@ import { DeliveryTimeHint, LEVEL_TONE } from "@/components/delivery-time-hint";
 import { canonStatus, fmtDuration, scoreTone, statusDot, checkupTone } from "@/lib/format";
 import type { CheckupEntry } from "@/lib/format";
 import { CHECKUP_RISK_LABELS } from "@/lib/company-checkups.mjs";
-import { orderApplications, buildContextQuery, countSelectedOffView } from "@/lib/pipeline-order.mjs";
+import { orderApplications, buildContextQuery, countSelectedOffView, defaultPipelineTab } from "@/lib/pipeline-order.mjs";
 import { normalizeUrl } from "@/lib/core/url-key.mjs";
 // 收件箱关键词条（ADR-0068）：kwd 是视图型 URL 参数（与 tab/q/company 同语言），
 // 只作用于 INBOX 行集——有意不进 orderApplications/buildContextQuery 共享链。
@@ -31,7 +31,8 @@ import { useI18n } from "@/lib/i18n/context";
 import { useUnknownEmployerPolicy } from "@/lib/use-unknown-employer";
 import { resolveCompanyLabel } from "@/lib/unknown-employer.mjs";
 
-// ALL (the full tracker) is the default tab; INBOX is the triage queue you land on via its own tab.
+// 无 tab 参数时的默认视图由 defaultPipelineTab 决定：已评估队列非空 → EVALUATED，
+// 否则 ALL。INBOX 是分诊队列，仍只通过它自己的 tab 进入。
 const TABS = [
   "INBOX",
   "ALL",
@@ -126,7 +127,11 @@ export function PipelineView({
   // filterPipeline/navigate actions drive
   // the table identically (no useState mirror → no desync).
   const pTab = (params.get("tab") ?? "").toUpperCase();
-  const tab: Tab = (TABS as readonly string[]).includes(pTab) ? (pTab as Tab) : "ALL";
+  // 缺省值随数据走（见 defaultPipelineTab）：已评估 > 0 落 EVALUATED，否则 ALL。
+  // URL 里有合法 tab 时它永远优先——深链、助手 navigate、返回链接都不受影响。
+  const tab: Tab = (TABS as readonly string[]).includes(pTab)
+    ? (pTab as Tab)
+    : (defaultPipelineTab(applications) as Tab);
   const pMin = parseFloat(params.get("min") ?? "");
   const minFilter: number | null = Number.isFinite(pMin) ? pMin : null;
   // max（ADR-0067）：分数上限，与 min 组成半开区间 [min, max)——分析页分数桶下钻的落地端。
