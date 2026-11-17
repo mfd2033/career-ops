@@ -4,7 +4,7 @@ import { Fragment, memo, useCallback, useEffect, useDeferredValue, useMemo, useR
 import { useVirtualizer } from "@tanstack/react-virtual";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Search, ChevronsUpDown, X, Compass, ArrowRight, RotateCcw, Loader2, SkipForward, HeartPulse } from "lucide-react";
+import { Search, ChevronsUpDown, X, Compass, ArrowRight, RotateCcw, Loader2, SkipForward, HeartPulse, ExternalLink } from "lucide-react";
 import type { Application, InboxJob } from "@/lib/career-ops";
 import { Badge } from "@/components/ui/badge";
 import { CompanyLogo } from "@/components/company-logo";
@@ -16,6 +16,8 @@ import type { CheckupEntry } from "@/lib/format";
 import { CHECKUP_RISK_LABELS } from "@/lib/company-checkups.mjs";
 import { orderApplications, buildContextQuery, countSelectedOffView, defaultPipelineTab } from "@/lib/pipeline-order.mjs";
 import { normalizeUrl } from "@/lib/core/url-key.mjs";
+// 行内「打开职位原帖」：只有通过 http(s) 校验的 URL 才可点（手粘行可能是坏链）。
+import { openableUrl } from "@/lib/inbox-url.mjs";
 // 收件箱关键词条（ADR-0068）：kwd 是视图型 URL 参数（与 tab/q/company 同语言），
 // 只作用于 INBOX 行集——有意不进 orderApplications/buildContextQuery 共享链。
 import { parseKwdParam, serializeKwd } from "@/lib/inbox-keywords.mjs";
@@ -722,6 +724,9 @@ export function PipelineView({
                           showSuggest={tab === "EVALUATED" && !!suggests?.has(r.n)}
                           suggestLabel={t("pipeline.suggestCheckup")}
                           suggestTitle={t("pipeline.suggestCheckupTitle")}
+                          postingUrl={openableUrl(r.url)}
+                          postingLabel={t("pipeline.openPosting")}
+                          noPostingLabel={t("pipeline.noPostingTitle")}
                           revalText={r.revalDate && r.revalDate !== r.date ? t("pipeline.revalOn", { date: r.revalDate }) : null}
                           deliveryLevel={deliveryLevel}
                           deliveryLabel={deliveryLevel ? t(`delivery.level.${deliveryLevel}`) : null}
@@ -795,6 +800,9 @@ const TrackerRow = memo(function TrackerRow({
   showSuggest,
   suggestLabel,
   suggestTitle,
+  postingUrl,
+  postingLabel,
+  noPostingLabel,
   revalText,
   deliveryLevel,
   deliveryLabel,
@@ -816,6 +824,10 @@ const TrackerRow = memo(function TrackerRow({
   showSuggest: boolean;
   suggestLabel: string;
   suggestTitle: string;
+  /** 已校验的职位 URL；空串/非法链接已在父层归一为 null。 */
+  postingUrl: string | null;
+  postingLabel: string;
+  noPostingLabel: string;
   revalText: string | null;
   deliveryLevel: DeliveryLevel | null;
   deliveryLabel: string | null;
@@ -852,8 +864,35 @@ const TrackerRow = memo(function TrackerRow({
         </div>
       </td>
       <td className="px-4 py-3 text-muted">
-        {/* 职位常带括号后缀（方向/城市），单行截断 + 全文悬停，上限 32rem。 */}
-        <div className="max-w-[32rem] truncate" title={row.role}>{row.role}</div>
+        {/* 职位常带括号后缀（方向/城市），单行截断 + 全文悬停，上限 32rem。
+            行内「打开职位原帖」图标（方案 A）：外链是独立 <a>，不参与站内导航；
+            必须 stopPropagation，否则点图标会连带勾选整行。无有效 URL 时置灰
+            占位而非隐藏，保持图标位置与列宽稳定。 */}
+        <div className="flex max-w-[32rem] items-center gap-1">
+          <span className="min-w-0 truncate" title={row.role}>{row.role}</span>
+          {postingUrl ? (
+            <a
+              href={postingUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => e.stopPropagation()}
+              title={postingLabel}
+              aria-label={postingLabel}
+              className="inline-flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-md text-faint transition-colors hover:bg-surface-hover hover:text-foreground"
+            >
+              <ExternalLink className="size-3.5 shrink-0" />
+            </a>
+          ) : (
+            <span
+              title={noPostingLabel}
+              aria-label={noPostingLabel}
+              aria-disabled="true"
+              className="inline-flex h-[26px] w-[26px] shrink-0 cursor-not-allowed items-center justify-center rounded-md text-faint opacity-60"
+            >
+              <ExternalLink className="size-3.5 shrink-0" />
+            </span>
+          )}
+        </div>
       </td>
       <td className="px-4 py-3 num-col">
         {/* 分数只做展示（ADR-0062）。 */}

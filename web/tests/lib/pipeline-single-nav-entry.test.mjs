@@ -73,11 +73,21 @@ test("company and role are single-line truncated (ADR-0064 修订决议 11)", ()
   assert.match(ROW, /title=\{row\.role\}/, "职位全文必须可悬停读到");
 });
 
-test("only the checkbox cell and the company link stop propagation", () => {
-  // 行点击（ADR-0038）靠 stopPropagation 才不被劫持。去链后行内该只剩两处：
-  // 复选框 <td> 与公司 <Link>。任何新增的拦截格都意味着那一格又不再参与勾选。
-  assert.equal(count(ROW_CODE, "e.stopPropagation()"), 2,
-    "职位/分数/角标该冒泡到行 = 切换勾选，不再自行拦截");
+test("only the checkbox cell, the company link, and the open-posting link stop propagation", () => {
+  // 行点击（ADR-0038）靠 stopPropagation 才不被劫持。行内该只有三处：复选框 <td>、
+  // 公司 <Link>、职位旁「打开原帖」外链（2026-11-17 方案 A）。任何新增的拦截格都
+  // 意味着那一格又不再参与勾选——第四处出现时先确认它是不是"不该勾选"的控件。
+  assert.equal(count(ROW_CODE, "e.stopPropagation()"), 3,
+    "除复选框、公司链接、打开职位外链外，其余格子应冒泡到行 = 切换勾选");
+});
+
+test("the open-posting control is an external <a>, never a second in-app <Link>", () => {
+  // 外链只在新标签页打开原帖，不占站内导航入口（ADR-0062 的 <Link> 唯一性不变）。
+  // 没有这条守卫，日后把它换成 <Link> 或去掉 rel 都会静默通过。
+  assert.match(ROW, /target="_blank"[\s\S]*?rel="noopener noreferrer"/,
+    "打开职位必须是新标签页外链，并带 rel=noopener noreferrer");
+  assert.match(ROW, /href=\{postingUrl\}/, "外链地址必须走父层校验后的 postingUrl");
+  assert.match(ROW, /title=\{noPostingLabel\}/, "无链接态必须有可悬停说明，而不是死链");
 });
 
 test("checkup state lives in exactly one place: the checkup column (ADR-0064 修订决议 1/5)", () => {

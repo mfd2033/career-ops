@@ -57,6 +57,9 @@ export const en: Dict = {
   "pipeline.col.status": "status",
   "pipeline.col.date": "date",
   "pipeline.col.source": "source",
+  // 行内「打开职位原帖」图标按钮（2026-11-17 方案 A）
+  "pipeline.openPosting": "Open the posting in a new tab",
+  "pipeline.noPostingTitle": "This record has no posting link",
 
   // Eval timing breakdown (评估用时, ADR-0016) — pipeline/[id] + jobs/[id]
   "pipeline.timing.title": "Eval duration",
@@ -349,6 +352,9 @@ export const zh: Dict = {
   "pipeline.col.status": "状态",
   "pipeline.col.date": "日期",
   "pipeline.col.source": "来源",
+  // 行内「打开职位原帖」图标按钮（2026-11-17 方案 A）
+  "pipeline.openPosting": "打开职位原帖（新标签页）",
+  "pipeline.noPostingTitle": "该记录没有职位链接",
 
   // 评估用时分步明细 (ADR-0016) — pipeline/[id] + jobs/[id]
   "pipeline.timing.title": "评估用时",
