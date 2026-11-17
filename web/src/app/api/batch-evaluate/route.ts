@@ -33,6 +33,7 @@ import { resolveCli, dropCrossEngineModel } from "@/lib/clis";
 import { withModelFlag, isFatalGenericStderr, classifyFatalStderr, fatalStopMessage, parseReservationOutput } from "@/lib/run-cli-support.mjs";
 import { resolveWorkerInvocation } from "@/lib/worker-invocation.mjs";
 import { isReservedReportFile } from "@/lib/report-files.mjs";
+import { hasCompletedReportForNum } from "@/lib/run-reconcile.mjs";
 import { spawnHeadlessCli, terminateCli } from "@/lib/spawn-cli.mjs";
 import { careerOpsRoot, readMemory, readInbox, readApplications, readScanDates, readMarketModesDir, listMarketModes } from "@/lib/career-ops";
 import { readAppConfig } from "@/lib/app-config";
@@ -201,10 +202,7 @@ export async function POST(req: Request) {
   // Did THIS worker's own number get a real (non-sentinel) report? Parallel-safe:
   // each worker owns {num}, so a match keyed on the number proves that worker
   // persisted — no cross-worker interference, unlike a global before/after diff.
-  const wroteReportForNum = (num: number) => {
-    const prefix = String(num).padStart(3, "0") + "-";
-    return reportEntries().some((n) => n.startsWith(prefix) && n.endsWith(".md") && !isReservedReportFile(n));
-  };
+  const wroteReportForNum = (num: number) => hasCompletedReportForNum(reportEntries(), num);
 
   // Remove this batch's reservation sentinels (reports/{NNN}-RESERVED.md).
   // Called from BOTH the normal completion path and the client-cancel path —

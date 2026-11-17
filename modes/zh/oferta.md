@@ -601,7 +601,7 @@
 
 把完整评估存到 `reports/{###}-{company-slug}-{YYYY-MM-DD}.md`。
 
-- `{###}` = 下一个顺序号（3 位、前补零）。为了原子分配、避免并发冲突，**必须**先跑 `node reserve-report-num.mjs` 占号（stdout 返回 `{###}`），写完报告后再跑 `node reserve-report-num.mjs --release {###}` 释放哨兵。
+- `{###}` = 下一个顺序号（3 位、前补零）。为了原子分配、避免并发冲突，**必须**先跑 `node reserve-report-num.mjs` 占号（stdout 返回 `{###}`），写完报告后再跑 `node reserve-report-num.mjs --release {###}` 释放哨兵。例外：派发提示词已经给出预占号时（web 单次评估就是这种情况），直接用那个号，不要跑 reserve-report-num.mjs——既不占号也不释放。
 - `{company-slug}` = 公司名小写、空格换连字符（中文公司名用拼音或通用简称，保持可读）
 - `{YYYY-MM-DD}` = 当天日期
 - **中介代招、终雇主不明（#1596）：** slug 用 `confidential-{中介slug}`（例如 `042-confidential-hays-2026-07-06.md`）。终雇主揭晓后**不重命名**文件 —— 改标题/头部/YAML 即可。

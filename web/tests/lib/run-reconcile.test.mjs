@@ -11,7 +11,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { deriveRunReportNum, buildReconcileArgs } from "../../src/lib/run-reconcile.mjs";
+import { deriveRunReportNum, hasCompletedReportForNum, buildReconcileArgs } from "../../src/lib/run-reconcile.mjs";
 
 const URL = "https://www.liepin.com/job/1998394056.shtml";
 
@@ -78,4 +78,30 @@ test("buildReconcileArgs: a non-URL input is not an inbox entry", () => {
   assert.equal(buildReconcileArgs({ kind: "evaluate", input: "042", num: 42 }), null);
   assert.equal(buildReconcileArgs({ kind: "pdf", input: URL, num: 42 }), null);
   assert.equal(buildReconcileArgs({ kind: "checkup", input: URL, num: 42 }), null);
+});
+// ---- ADR-0089 跟进：按本 run 预占号判定归属（并发安全） -------------------------
+test("hasCompletedReportForNum: only THIS run's number counts", () => {
+  const after = ["041-a-2026-09-23.md", "042-b-2026-09-23.md"];
+  assert.equal(hasCompletedReportForNum(after, 42), true);
+  // 并发窗口里别人写的 041 不算本 run（42）的产物——旧窗口增量判定会说是。
+  assert.equal(hasCompletedReportForNum(["041-a-2026-09-23.md"], 42), false);
+});
+
+test("hasCompletedReportForNum: a lone sentinel is not a report", () => {
+  assert.equal(hasCompletedReportForNum(["042-RESERVED.md"], 42), false);
+  assert.equal(hasCompletedReportForNum(["042-RESERVED.md", "042-b-2026-09-23.md"], 42), true);
+});
+
+test("hasCompletedReportForNum: zero-padded prefix, 3+ digits, no false neighbours", () => {
+  // CLI 输出补零（035），校验必须认 035-…；0420-… 不能命中 42。
+  assert.equal(hasCompletedReportForNum(["035-acme.md"], 35), true);
+  assert.equal(hasCompletedReportForNum(["1001-taken.md"], 1001), true);
+  assert.equal(hasCompletedReportForNum(["0420-other.md"], 42), false);
+  assert.equal(hasCompletedReportForNum(["README.md", "checkups", "notes.txt"], 42), false);
+});
+
+test("hasCompletedReportForNum: bad numbers never match", () => {
+  for (const num of [0, -1, 1.5, NaN, null, undefined]) {
+    assert.equal(hasCompletedReportForNum(["042-acme.md"], num), false);
+  }
 });

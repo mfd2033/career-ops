@@ -10,7 +10,7 @@ import { after } from "next/server";
 import { resolveCli, dropCrossEngineModel } from "@/lib/clis";
 import { cliDisplayName } from "@/lib/cli-labels.mjs";
 import { resolveWorkerInvocation } from "@/lib/worker-invocation.mjs";
-import { accumulateTokens, authExpiredHint, blacklistGateLedgerFields, checkupArtifactRowCount, checkupArtifactTodayForTracker, classifyFatalStderr, fatalStopMessage, makeCheckupHtmlProbe, detectBlacklistGate, failureEvidence, failureLedgerMsg, hasNewCompletedReport, isFatalGenericStderr, persistRunOutcome, PERSISTENCE_GATED_KINDS, RUN_SILENCE_MS, silenceStopMessage, withModelFlag } from "@/lib/run-cli-support.mjs";
+import { accumulateTokens, authExpiredHint, blacklistGateLedgerFields, checkupArtifactRowCount, checkupArtifactTodayForTracker, classifyFatalStderr, fatalStopMessage, makeCheckupHtmlProbe, detectBlacklistGate, failureEvidence, failureLedgerMsg, isFatalGenericStderr, persistRunOutcome, PERSISTENCE_GATED_KINDS, RUN_SILENCE_MS, silenceStopMessage, withModelFlag } from "@/lib/run-cli-support.mjs";
 import { spawnHeadlessCli, terminateCli } from "@/lib/spawn-cli.mjs";
 import { careerOpsRoot, readMemory, findReportFile, readInbox, readScanDates, findCheckupTarget, readApplications, rootScript, readMarketModesDir, listMarketModes, type InboxJob } from "@/lib/career-ops";
 import { checkupDispatchText } from "@/lib/checkup-request.mjs";
@@ -27,7 +27,7 @@ import { buildPrompt, isShellSafeCompanyName, clampInlineJd, clampInlineEmployer
 import { jobLabel, reportJobLabel, evaluateDisplayTitle, trackerUrlLabels } from "@/lib/job-label.mjs";
 // 评估模式（CO-65）：profile.yml 的 language.modes_dir → 实际评估模式文件。
 import { resolveMarketMode } from "@/lib/market-modes.mjs";
-import { deriveRunReportNum, buildReconcileArgs } from "@/lib/run-reconcile.mjs";
+import { hasCompletedReportForNum, buildReconcileArgs } from "@/lib/run-reconcile.mjs";
 import { acquireTrackerWrite, releaseTrackerWrite } from "@/lib/core/run-registry";
 import { acquire, release, __setSizeSource, DEFAULT_POOL_SIZE } from "@/lib/core/concurrency-pool";
 import { registerRun, setCancelHandler, publish, completeRun, getRunBuffer } from "@/lib/core/run-events";
@@ -51,6 +51,44 @@ function logEvalTiming(reportNum: string, phase: "start" | "end") {
     process.execPath,
     [path.join(careerOpsRoot(), "log-eval-timing.mjs"), reportNum, "pdf", phase],
     { cwd: careerOpsRoot() },
+    () => {},
+  );
+}
+
+/**
+ * 单任务 evaluate 派发时预占一个独占报告号（ADR-0089 跟进）。
+ *
+ * 为什么不再让 agent 自己 reserve：批量的 reserveRange 早就证明「预先分配的号」
+ * 是唯一可判定归属的锚点；单任务靠「窗口内 reports/ 新增恰好一份」在并发池下
+ * 两头都错——多份时不猜（台账空号）、恰好一份时被多个 run 同时认领（2026-11-17
+ * 云宝三连同挂 #1341）。
+ *
+ * @returns 补零前的数值；`reserve-report-num.mjs` 失败/输出异常时为 null。
+ */
+function reserveOneReportNumber(): Promise<number | null> {
+  return new Promise((resolve) => {
+    execFile(
+      process.execPath,
+      [path.join(careerOpsRoot(), "reserve-report-num.mjs")],
+      { cwd: careerOpsRoot(), timeout: 30_000 },
+      (err, stdout) => {
+        if (err) {
+          resolve(null);
+          return;
+        }
+        const m = /^(\d{3,})$/.exec(String(stdout ?? "").trim());
+        resolve(m ? Number(m[1]) : null);
+      },
+    );
+  });
+}
+
+/** 终态释放预占哨兵（只删 `NNN-RESERVED.md`，已写出的正式报告不受影响）。 */
+function releaseReservedReportNumber(num: number): void {
+  execFile(
+    process.execPath,
+    [path.join(careerOpsRoot(), "reserve-report-num.mjs"), "--release", String(num).padStart(3, "0")],
+    { cwd: careerOpsRoot(), timeout: 15_000 },
     () => {},
   );
 }
@@ -140,6 +178,27 @@ export async function POST(req: Request) {
     );
   }
 
+  // ADR-0089 跟进：单任务 evaluate 的报告号在派发端预占（早于并发池排队），
+  // 收尾按这个独占号判归属。预占失败直接返回 500，不留一条「已在跑但永远
+  // 没有号」的 run。释放回调同时兜住下面的 runPipeline 崩溃分支。
+  let reservedReportNum: number | undefined;
+  let reservedReleased = false;
+  const releaseReservedOnce = () => {
+    if (reservedReportNum == null || reservedReleased) return;
+    reservedReleased = true;
+    releaseReservedReportNumber(reservedReportNum);
+  };
+  if (kind === "evaluate") {
+    const num = await reserveOneReportNumber();
+    if (num == null) {
+      return new Response(
+        JSON.stringify({ error: "Could not reserve a report number, so nothing was dispatched. Re-run it." }),
+        { status: 500, headers: { "Content-Type": "application/json" } },
+      );
+    }
+    reservedReportNum = num;
+  }
+
   // Register the run BEFORE returning the runId so the bus already has the
   // record when the first events flow.
   const runId = randomUUID();
@@ -214,9 +273,9 @@ export async function POST(req: Request) {
     kind === "evaluate"
       ? evaluateDisplayTitle({ reportLabel: reportLabelFor(reportNum), inboxLabel, company: employer, role })
       : "";
-  // ADR-0089：报告号由 runPipeline 捕获或推得后作为第三参传入——pdf / checkup
-  // 的 input 就是号本身；evaluate 的号只有收尾 reconcile 推得出（见
-  // finishAfterReconcile），推不出就留空。台账行显式携带它，读取端（ledger-only
+  // ADR-0089（2026-11-17 跟进）：报告号由 runPipeline 作为第三参传入——pdf /
+  // checkup 的 input 就是号本身；evaluate 用 POST 预占的独占号（persisted 成立时，
+  // 见 finishAfterReconcile），无产物则留空。台账行显式携带它，读取端（ledger-only
   // 卡）不必再靠 URL join / kind 猜。
   // 第五参 doneLabel：终态标题已在 send() 里算过一次（随 done 事件发出去），传进来
   // 复用，免得为同一份报告再读一遍磁盘。
@@ -229,7 +288,8 @@ export async function POST(req: Request) {
       // ADR-0043 缺失惯例）。缓冲区此刻仍在（completeRun 之后也保留）。
       const steps = buildRunLedgerSteps(getRunBuffer(runId));
       // ADR-0089：pdf / checkup 的 input 就是报告号（各自 kind 的启动契约）；
-      // evaluate 的号由收尾 reconcile 推得。两者都过数字校验，凑不出就留空。
+      // evaluate 的号由 finishAfterReconcile 传入（= POST 预占号，persisted 成立时）。
+      // 两者都过数字校验，凑不出就留空。
       const bareInput = String(input).trim();
       const capturedNum = (kind === "pdf" || kind === "checkup") && /^\d+$/.test(bareInput) ? bareInput : undefined;
       const reportNum = capturedNum ?? reconciledNum;
@@ -320,6 +380,9 @@ export async function POST(req: Request) {
         // 与台账——两处同源，列表上那行字不会因为卡片来源不同而两副面孔。
         poolTitle: dispatchLabel || input,
         finishedLabel,
+        // ADR-0089 跟进：本 run 独占的报告号 + 终态释放回调（close/取消/崩溃共用）。
+        reservedReportNum,
+        releaseReserved: releaseReservedOnce,
       });
     } catch (e) {
       // Nothing else catches this promise — a crash here must still terminate
@@ -327,6 +390,9 @@ export async function POST(req: Request) {
       const msg = `Worker crashed unexpectedly: ${e instanceof Error ? e.message : String(e)}`.slice(0, 200);
       publish(runId, { type: "error", msg });
       recordEnd("error", msg);
+      // 崩溃路径也必须退回预占号（ADR-0089 跟进）：normal close/cancel 在 runPipeline
+      // 内部释放，这里兜住它没走到的情形。
+      releaseReservedOnce();
       // 体检登记兜底：正常路径由 runPipeline 的 close()/取消处理器清除，这里只覆盖
       // close() 自身抛错的情形（那时进程可能还活着，所以不声称 processGone —
       // ADR-0033 决议 6）。
@@ -380,6 +446,8 @@ async function runPipeline({
   inbox,
   poolTitle,
   finishedLabel,
+  reservedReportNum,
+  releaseReserved,
 }: {
   runId: string;
   kind: string;
@@ -407,6 +475,11 @@ async function runPipeline({
   poolTitle: string;
   /** 完成态的「公司 · 岗位」（evaluate）：报告 Machine Summary 给出，拼不出返回 ""。 */
   finishedLabel: (reportNum?: string) => string;
+  /** ADR-0089 跟进: the number POST reserved for this evaluate before queueing, and the
+   *  idempotent release callback the terminal paths (done/error/cancel/crash) call
+   *  so an unspent sentinel goes back to the allocator. */
+  reservedReportNum?: number;
+  releaseReserved: () => void;
   /** Server run-ledger recorder (once per run; passed in from POST scope).
    *  ADR-0089: the third arg is the report number the run resolved to (evaluate's
    *  is known only after the closing reconcile), recorded on the ledger row.
@@ -434,6 +507,9 @@ async function runPipeline({
     pdfPaths = pathsResult.paths;
   }
 
+  // ADR-0089 跟进：号由 POST 在排队前预占，terminate 路径统一调 releaseReserved
+  // （close / 取消 / 崩溃三处）。此处只消费，不再自己分配。
+
   // Resolve the posting date HERE rather than asking the agent for it. The
   // scanner already wrote it from the provider's own `offer.postedAt`, so this
   // copies a recorded value instead of inviting a guess — and modes/oferta.md is
@@ -456,7 +532,7 @@ async function runPipeline({
       ? (resolveSkillCopy(scanSkillRegistry({ extraDirs: readAppConfig().skillDirs ?? [] }), OFFER_CHECKUP_SKILL_NAME) ??
         undefined)
       : undefined;
-  const prompt = buildPrompt({ kind, input, memory: readMemory(), today, postedAt, unknownEmployer: readAppConfig().unknownEmployer, checkupCompany, checkupSkill, jdText, company: employer, cardSalary, reportNum: pdfPaths?.reportNum, reportFile: pdfPaths?.reportFile, marketMode: resolveMarketMode({ raw: readMarketModesDir(), available: listMarketModes() }) });
+  const prompt = buildPrompt({ kind, input, memory: readMemory(), today, postedAt, unknownEmployer: readAppConfig().unknownEmployer, checkupCompany, checkupSkill, jdText, company: employer, cardSalary, reportNum: reservedReportNum != null ? String(reservedReportNum).padStart(3, "0") : pdfPaths?.reportNum, reportFile: pdfPaths?.reportFile, marketMode: resolveMarketMode({ raw: readMarketModesDir(), available: listMarketModes() }) });
 
   // Which tools each kind gets, and the whole argv for every runtime that HAS an
   // audited scope, live with those runtimes: claude-invocation.mjs (declared on
@@ -495,11 +571,10 @@ async function runPipeline({
     dispatchArgs = [...args, "--session-id", randomUUID()];
   }
 
-  // For write-needing kinds, snapshot reports/ so we can verify the worker
-  // actually persisted (non-Claude CLIs lack Write auth and silently no-op).
-  // Names, not a count: reserving a number writes reports/NNN-RESERVED.md and the
-  // final report REPLACES it, so the `.md` count is unchanged and a count-delta
-  // gate reported "didn't save a report" for an evaluation that saved fine (#2085).
+  // For write-needing kinds, read reports/ at the terminal step to verify the
+  // worker actually persisted (non-Claude CLIs lack Write auth and silently no-op).
+  // evaluate 用「本 run 预占号」判定，不用窗口增量——并发池里增量会把别人的报告
+  // 算成自己的（ADR-0089 跟进）。
   const reportsDir = path.join(careerOpsRoot(), "reports");
   const reportEntries = () => {
     try {
@@ -508,7 +583,6 @@ async function runPipeline({
       return [];
     }
   };
-  const reportsBefore = kind === "evaluate" ? reportEntries() : [];
   // checkup 的产物通道是台账（data/company-checkups.tsv，ADR-0025 的唯一机器
   // 通道；HTML 只是可选附件，--html - 合法），所以快照台账行而非 reports/ 增量
   // —— ADR-0030 决议 1。读失败按 0 行：一个读不出的台账不能反过来豁免门禁。
@@ -536,7 +610,7 @@ async function runPipeline({
   // 把 /api/events 的帧接到接管卡片上，否则单任务永远只显示「处理中」占位。
   // 池卡片的标题就是要显示在列表上的那行字：能带出「公司 · 岗位」就带（扩展发起的
   // 单次评估没有本地卡，快照之外没有别的标题来源），拼不出仍回退 URL（poolTitle）。
-  const poolHandle = acquire({ url: input, title: poolTitle, source: "run", cliId, model: model || undefined, runId, kind });
+  const poolHandle = acquire({ url: input, title: poolTitle, source: "run", cliId, model: model || undefined, runId, kind, reportNum: reservedReportNum });
 
   // Spawned/guarded only AFTER the pool grants a slot. `child`/`writeToken` are
   // outer lets so cancel() can reach them whether the run is queued
@@ -648,6 +722,9 @@ async function runPipeline({
     releaseWriteTokenOnce();
     releasePoolOnce();
     clearCheckupLiveOnce();
+    // 终态回收预占哨兵（ADR-0089 跟进）：正式报告已落盘则只删 NNN-RESERVED.md，
+    // 未落盘则把这个号退回给下一次派发。
+    releaseReserved();
     completeRun(runId);
   };
 
@@ -687,6 +764,7 @@ async function runPipeline({
     }
     clearCheckupLiveOnce();
     publish(runId, { type: "error", msg: "Cancelled" });
+    releaseReserved();
     completeRun(runId);
   });
 
@@ -1002,9 +1080,9 @@ async function runPipeline({
        */
       const finishAfterReconcile = async () => {
         try {
-          const num = deriveRunReportNum({ beforeEntries: reportsBefore, afterEntries: reportEntries() });
-          // ADR-0089：把本 run 推得的号交给 recordEnd 一起落台账（done 还没送出，
-          // recordEnd 尚未触发）。推不出（并发歧义 / 无报告）就留空，不猜。
+          // ADR-0089 跟进：号就是派发时预占的那个，不再从窗口增量推。走到这里说明
+          // 诚实门已确认 reports/{num}-*.md 落盘（persisted），所以它就是本 run 的号。
+          const num = reservedReportNum;
           if (num != null) reconciledReportNum = String(num);
           const args = buildReconcileArgs({ kind, input, num });
           if (args) {
@@ -1013,7 +1091,7 @@ async function runPipeline({
               execFile(
                 process.execPath,
                 [path.join(careerOpsRoot(), "reconcile-pipeline.mjs"), ...args],
-                { cwd: careerOpsRoot(), timeout: 30_000 },
+{ cwd: careerOpsRoot(), timeout: 60_000 },
                 (err, stdout) => {
                   if (err) send({ type: "text", text: `\u26A0\uFE0F reconcile-pipeline: ${err.message}\n` });
                   else if (String(stdout ?? "").trim()) send({ type: "text", text: `${String(stdout).trim()}\n` });
@@ -1022,9 +1100,8 @@ async function runPipeline({
               );
             });
           } else if (num == null && /^https?:\/\//i.test(String(input))) {
-            // Ambiguous (another evaluate landed its report in this window) or no
-            // report at all. Say so instead of silently skipping: the script's own
-            // `--from-tracker` sweep is the documented catch-all for these rows.
+            // 预占号缺失（正常路径不会发生，派发前已拦下）。如实说明，不猜号；
+            // 该收件箱行留给脚本自己的 `--from-tracker` 清扫。
             send({ type: "text", text: "\u26A0\uFE0F could not attribute one report number to this run — its inbox row (if any) stays pending; `node reconcile-pipeline.mjs --from-tracker` sweeps it up.\n" });
           }
         } catch (e) {
@@ -1110,8 +1187,10 @@ async function runPipeline({
 
         // ADR-0042 决议 1：worker 已结束，进入 route 自己的产物校验/落盘判定段。
         send({ type: "status", label: "phase:finalizing:persist" });
+        // ADR-0089 跟进：evaluate 只认本 run 预占的那个号——并发 worker 写的报告不算
+        // 本 run 的产物（旧窗口增量判定把 5 条空跑洗成了 done）。
         const persisted = kind === "evaluate"
-          ? hasNewCompletedReport(reportsBefore, reportEntries())
+          ? hasCompletedReportForNum(reportEntries(), reservedReportNum ?? 0)
           : kind === "checkup"
             ? countArtifactRows() > ledgerRowsBefore
             : false;

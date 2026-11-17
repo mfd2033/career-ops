@@ -469,6 +469,21 @@ test("buildPrompt: an inline JD does not smuggle batch persistence into a single
   assert.ok(!/batch orchestrator merges/i.test(p));
 });
 
+test("buildPrompt: a dispatch-reserved number replaces the self-reserve step (ADR-0089 跟进)", () => {
+  const p = buildPrompt({
+    kind: "evaluate",
+    input: "https://acme.com/jobs/7",
+    memory: "",
+    today: "2026-08-14",
+    reportNum: "042",
+  });
+  assert.match(p, /Use the already-reserved report number 042 for THIS run/);
+  assert.ok(!/Reserve a report number: run `node reserve-report-num\.mjs`/.test(p), "must not tell the worker to reserve a second number");
+  assert.match(p, /OVERRIDES the reserve step/);
+  // 合并 tracker 仍由 worker 自己做（单任务路径不变）。
+  assert.match(p, /d\. Merge into the tracker: run `node merge-tracker\.mjs`/);
+});
+
 test("buildBatchPrompt: a literal {num} inside the inline JD survives number pinning", () => {
   // ADR-0051 决议 4 的回归锁：JD 正文里出现模板占位字面量时，钉号不得改写它。
   const jd = "职位要求：能把 {num} 这类模板占位讲清楚。";

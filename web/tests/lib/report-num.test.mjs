@@ -42,6 +42,27 @@ test("resolveJobReportNum: the pool cards' `#N` subtitle", () => {
   assert.equal(resolveJobReportNum({ subtitle: "Evaluating 3 postings" }, null), null);
 });
 
+test("resolveJobReportNum: a failed card does NOT borrow a later re-run's report", () => {
+  // 2026-11-17 15:59 杰尔古格失败卡凭 URL 反查挂上了 20 分钟后重跑成功的 #1344。
+  // URL 索引回答的是「这份职位后来变成哪份报告」，不是「本 run 写了什么」。
+  assert.equal(
+    resolveJobReportNum({ kind: "evaluate", input: POSTING, status: "error" }, index),
+    null,
+  );
+  // 捕获号仍然优先：pdf/checkup 的失败卡指向自己启动时引用的报告。
+  assert.equal(
+    resolveJobReportNum({ kind: "pdf", reportNum: "1261", input: POSTING, status: "error" }, index),
+    "1261",
+  );
+  // 池卡 subtitle 也照常：那是本 run 派发时拿到的号。
+  assert.equal(
+    resolveJobReportNum({ kind: "batch-evaluate", subtitle: "#42", input: POSTING, status: "error" }, index),
+    "42",
+  );
+  // 非 error 状态照旧走 URL 反查。
+  assert.equal(resolveJobReportNum({ kind: "evaluate", input: POSTING, status: "done" }, index), "812");
+});
+
 test("resolveJobReportNum: numeric-input kinds fall back to the bare number", () => {
   // localStorage keeps up to 40 records written before `reportNum` existed.
   assert.equal(resolveJobReportNum({ kind: "pdf", input: " 35 ", subtitle: "tailored for this role" }, null), "35");

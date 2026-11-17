@@ -577,7 +577,7 @@ Apply all language rules from `_writing.md` Professional Writing section to the 
 
 Save full evaluation in `reports/{###}-{company-slug}-{YYYY-MM-DD}.md`.
 
-- `{###}` = next sequential number (3 digits, zero-padded). To allocate it atomically and prevent race conditions, you MUST run `node reserve-report-num.mjs` to claim the number (stdout returns `{###}`), write the report, and then run `node reserve-report-num.mjs --release {###}` to release the sentinel.
+- `{###}` = next sequential number (3 digits, zero-padded). To allocate it atomically and prevent race conditions, you MUST run `node reserve-report-num.mjs` to claim the number (stdout returns `{###}`), write the report, and then run `node reserve-report-num.mjs --release {###}` to release the sentinel. EXCEPTION: when the dispatch prompt already hands you a reserved number (web single-run evaluations do), use THAT number and do not run reserve-report-num.mjs at all — neither the reserve nor the release.
 - `{company-slug}` = company name in lowercase, without spaces (use hyphens)
 - `{YYYY-MM-DD}` = current date
 - **Agency-mediated posting with unknown end employer (#1596):** slug is `confidential-{agency-slug}` (e.g. `042-confidential-hays-2026-07-06.md`). The file is NEVER renamed after the employer is revealed — update the title/header/YAML instead.

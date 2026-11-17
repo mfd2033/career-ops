@@ -179,6 +179,9 @@ function employerDirective(policy) {
  *   (`reportFile`) when one is available so the agent never has to glob; absent →
  *   falls back to `reports/{reportNum}-*.md` and then to `input` (byte-identical
  *   for a normal row).
+ *   For `evaluate`, reportNum is the number the DISPATCHER pre-reserved for this
+ *   single run (ADR-0089 跟进) — the prompt then overrides the mode doc's "reserve a
+ *   number yourself" step. Absent → the old self-reserve text, byte-identical.
  *   checkupSkill — ADR-0056 决议 5：服务端经 skill-registry 解析好的 offer体检 最高版本
  *   副本（绝对路径 + 版本号）。present → prompt 第一条指令先读技能正文，页脚换技能
  *   模板带版本号那句；absent → prompt 与旧版逐字节一致（技能缺失不硬失败，workflow 第 8 条）。
@@ -349,6 +352,11 @@ End with EXACTLY one final line: VERDICT: ★{star}/5 — {one-line recommendati
   // 评估模式（CO-65）：marketMode 由调用方用 market-modes.mjs 从 profile.yml 解析好传入，
   // null = 根版 modes/oferta.md（旧行为）。这里只拼路径，不做目录判定。
   const evalRef = marketMode?.evalFile ?? "modes/oferta.md";
+  // ADR-0089 跟进：单任务 evaluate 的号改由派发端预占（并发池下「窗口内新增」既会漏
+  // 也会错认）。有预占号 → 明文覆盖模式文档里的 reserve 步骤；无 → 保持原文。
+  const reserveStep = reportNum
+    ? `   a. Use the already-reserved report number ${reportNum} for THIS run — do NOT run \`node reserve-report-num.mjs\`, and do NOT release its sentinel. The platform reserved the number before dispatch; this instruction OVERRIDES the reserve step in ${evalRef}. Use ${reportNum} for the report filename and for every \`{num}\` placeholder below.`
+    : "   a. Reserve a report number: run `node reserve-report-num.mjs` — its stdout is a 3-digit number (e.g. 035).";
   const evalSharedHint = marketMode?.dir
     ? ` This run uses the MARKET MODE SET ${marketMode.dir}: the market vocabulary and scoring rules for it live in ${marketMode.sharedFile} — read that file once before scoring. The output language of the report is still governed by language.output, not by the mode directory.`
     : "";
@@ -366,7 +374,7 @@ End with EXACTLY one final line: VERDICT: ★{star}/5 — {one-line recommendati
    ERROR: cannot extract JD for {host} — {host} extraction via bsk failed ({code}); provide the JD text inline.
 
 2. Persist the result CANONICALLY so the web and the CLI share ONE source of truth:
-   a. Reserve a report number: run \`node reserve-report-num.mjs\` — its stdout is a 3-digit number (e.g. 035).
+${reserveStep}
    b. Write the full report to reports/{num}-{company-slug}-${today}.md  (company-slug = company lowercased, non-alphanumerics → hyphens).
    c. Append ONE row of 10 TAB-separated columns to batch/tracker-additions/{num}-{company-slug}.tsv, in THIS exact order (real \\t tabs, status BEFORE score). ALWAYS write all 10 fields — leave the last one EMPTY if there is no posting URL, never "N/A" or "-":
       {num}\t${today}\t{Company}\t{Role}\t{CanonicalStatus e.g. Evaluated}\t{score}/5\t❌\t[{num}](reports/{num}-{company-slug}-${today}.md)\t{one-line note}${postedSegment}\t{posting URL, or empty}

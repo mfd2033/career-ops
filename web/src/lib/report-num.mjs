@@ -55,7 +55,12 @@ export function resolveJobReportNum(job, reports) {
   if (NUMERIC.test(captured)) return captured;
 
   const input = typeof job.input === "string" ? job.input : "";
-  if (/^https?:\/\//i.test(input) && reports) {
+  // 失败卡（含用户中断）不走「职位 URL → 索引」这条回退：那个索引回答的是
+  // 「这份职位后来变成哪份报告」，不是「本 run 写了什么」。2026-11-17 的
+  // 杰尔古格失败卡因此挂上了 20 分钟后重跑成功的 #1344，看起来像失败也有产物。
+  // 捕获号与池卡 `#N` 不动——pdf/checkup 的失败卡仍指向自己启动时引用的报告。
+  const failed = job.status === "error";
+  if (!failed && /^https?:\/\//i.test(input) && reports) {
     const key = normalizeUrl(input);
     const num = key ? reports[key]?.reportNum : null;
     if (num) return String(num);
