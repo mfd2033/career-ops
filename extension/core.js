@@ -649,7 +649,17 @@
     ev.preventDefault();
     ev.stopPropagation();
     if (btn.disabled || quickEvaluating) return;
-    const url = site.cardUrl(card);
+    // 站点把职位 URL 藏在页面状态里（智联 positionList 只在采集时被写入扩展侧缓存）：
+    // 缓存缺失就先补一次再取，别让用户点出一个「未能识别链接」的死路。
+    let url = site.cardUrl(card);
+    if (!url && typeof site.ensureCardUrl === "function") {
+      btn.disabled = true; // await 期间挡住连点，避免补缓存期间重复派发
+      try {
+        url = await site.ensureCardUrl(card);
+      } finally {
+        btn.disabled = false;
+      }
+    }
     if (!url) {
       showToast("未能识别该职位的链接", true);
       return;
@@ -684,7 +694,16 @@
     ev.preventDefault();
     ev.stopPropagation();
     if (btn.disabled) return;
-    const url = site.cardUrl(card);
+    let url = site.cardUrl(card);
+    if (!url && typeof site.ensureCardUrl === "function") {
+      // 同 onCardQuick：先补一次 URL 缓存，再走闸门（key 由补出来的 url 决定）。
+      btn.disabled = true;
+      try {
+        url = await site.ensureCardUrl(card);
+      } finally {
+        btn.disabled = false;
+      }
+    }
     const key = url ? normalizeUrl(url) : "";
     // 闸门决策在纯层：按钮自身禁用或同 URL 已在飞才挡下（CHIPS 缺失时退回放行
     // —— 与旧的无声行为相比不更糟）；其余放行，交给服务端并发池排队（ADR-0014）。
@@ -804,6 +823,49 @@
       const url = site.cardUrl(card);
       renderCardBadge(card, url ? normalizeUrl(url) : "");
     });
+    requestUrlBackfill();
+  }
+
+  // ---- 列表卡 URL 缓存补齐 ------------------------------------------------
+  //
+  // 有的站点把职位 URL 藏在页面状态里（智联 positionList 此前只在「采集」开始时被
+  // 写进扩展侧缓存），缓存缺失时整页卡片取不到 URL：按钮照建、点击才报错，徽章
+  // 也不出现。这里在「有列表卡但没有一张能取到 URL」时向站点借一次刷新，补完重扫。
+  // 冷却与单飞都在站点侧（ensureUrlCache），本函数只管判定时机，不重复发请求。
+  const URL_BACKFILL_COOLDOWN_MS = 5000;
+  let urlBackfillInFlight = false;
+  let urlBackfillAt = 0;
+  let urlBackfillFailures = 0;
+
+  function requestUrlBackfill() {
+    if (!site || typeof site.ensureUrlCache !== "function") return;
+    if (urlBackfillInFlight) return;
+    if (Date.now() - urlBackfillAt < URL_BACKFILL_COOLDOWN_MS) return;
+    let missing = false;
+    document.querySelectorAll(site.cardSelector).forEach((card) => {
+      if (missing || !site.cardIsList(card)) return;
+      if (!site.cardUrl(card)) missing = true;
+    });
+    if (!missing) return;
+    urlBackfillAt = Date.now();
+    urlBackfillInFlight = true;
+    site.ensureUrlCache().then(
+      (ok) => {
+        urlBackfillInFlight = false;
+        if (ok) {
+          urlBackfillFailures = 0;
+          applyAllInjections();
+          return;
+        }
+        // 连补三次仍拿不到（页面状态真没有这些职位）就别再空转，直到下次手动点击
+        // —— 点击路径的 ensureCardUrl 不受此限，仍会自己试一次。
+        urlBackfillFailures += 1;
+        if (urlBackfillFailures >= 3) urlBackfillAt = Number.MAX_SAFE_INTEGER;
+      },
+      () => {
+        urlBackfillInFlight = false;
+      },
+    );
   }
 
   /** 把一份 state 画进卡片操作区（挂载 + 胶囊 + 按钮）。挂载点不可用返回 false。 */
@@ -1927,6 +1989,7 @@
     // 详情页浮窗：四行读数 + 两个动作，取代过去的四个独立固定元素。
     renderDetailPanel();
     if (typeof site.ensureRightPaneButton === "function") site.ensureRightPaneButton();
+    requestUrlBackfill();
   }
 
   // ---- scan mode（扩展驱动采集，ADR-0007） ----------------------------------

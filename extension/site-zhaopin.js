@@ -9,7 +9,9 @@
 //     ensureRightPaneButton / extractListPaneJd / currentActiveUrl，右栏快评可行；
 //   • 搜索卡片 DIV.job-card 内【无职位 <a>】（唯一 <a> 指向公司详情）→ 职位 URL
 //     无法从卡片 DOM 取得，必须用 window.__INITIAL_STATE__.positionList 的
-//     positionUrl 按卡片 index 映射；
+//     positionUrl 按卡片 index 映射；positionList 只在主世界可见，扩展侧靠
+//     html[data-zpstate] 缓存，缓存缺失由 ensureCardUrl / ensureUrlCache 现补
+//     （此前只在采集开始时刷新，日常点卡片评估必然「未能识别该职位的链接」）；
 //   • 列表 SSR 只渲染首屏 20 条且 positionList 不随懒加载增长（顺序还会错位）→
 //     首屏外的职位经 fetchRestPages 由 background MAIN world 直连
 //     /c/i/search/positions 翻页拉取（ADR-0008），不依赖 DOM 卡片；
@@ -111,11 +113,37 @@
    */
   let _zpCacheTs = 0;
   const ZP_STATE_ATTR = "data-zpstate";
+  // 缓存归属：写入时记录当时的列表身份（path+query）。智联是 SPA，切筛选/翻页只换
+  // URL 与卡片，旧 positionList 仍在 html 属性上 —— 不校验归属就会把新卡映射到旧
+  // 数组的下标，得到别的职位的 URL（张冠李戴比取不到更危险）。
+  const ZP_STATE_KEY_ATTR = "data-zpstate-key";
+  let zpRefreshPromise = null;
+  // 后台通道注入点：浏览器分支 init 后由 C.sendMsg 承担；node 单测用 setTransport 注入。
+  let zpTransport = null;
 
-  /** 从 html[data-zpstate] 读精简 positionList 缓存,无/空返回 null。 */
+  /** 当前列表身份（缓存归属判定用）。node 无 location 时返回空串（不校验）。 */
+  function zpCacheKey() {
+    return typeof location === "undefined" ? "" : location.pathname + (location.search || "");
+  }
+
+  /** 写入 data-zpstate 与其归属标记（属性写入 best-effort，失败不影响返回）。 */
+  function writeZpCache(list) {
+    try {
+      document.documentElement.setAttribute(ZP_STATE_ATTR, JSON.stringify(list));
+      document.documentElement.setAttribute(ZP_STATE_KEY_ATTR, zpCacheKey());
+    } catch (e) {
+      /* attr write best-effort */
+    }
+    _zpCacheTs = Date.now();
+  }
+
+  /** 从 html[data-zpstate] 读精简 positionList 缓存；无/空/归属不符返回 null。 */
   function _zpFromAttr() {
     const raw = document.documentElement.getAttribute(ZP_STATE_ATTR);
     if (!raw) return null;
+    // 旧版本写的缓存没有归属标记：认它（升级当次可用），下次刷新补上。
+    const key = document.documentElement.getAttribute(ZP_STATE_KEY_ATTR);
+    if (key && key !== zpCacheKey()) return null;
     try {
       const arr = JSON.parse(raw);
       return Array.isArray(arr) && arr.length ? arr : null;
@@ -125,26 +153,35 @@
   }
 
   /**
-   * 刷新 data-zpstate 缓存(该字段为智联职位 url 数据源,loaded 自后台 MAIN world 读取)。
+   * 刷新 data-zpstate 缓存（智联职位 url 的唯一数据源）。
+   *
    * 后台经 chrome.scripting.executeScript({world:'MAIN'}) 读 window.__INITIAL_STATE__
-   * .positionList(页面 CSP script-src 禁内联注入,故不走 <script> 弹入;扩展 programmatic
-   * 注入豁免 CSP),精简 {url,name,city}[] 回传后写入本属性。返回实际写入条数。
+   * .positionList（页面 CSP 禁内联注入，扩展 programmatic 注入豁免 CSP），精简
+   * {url,name,city}[] 回传后写入本属性。
+   *
+   * 单飞：并发调用共用一个 Promise —— 页面首屏 20 张卡同时缺 url 时只发一次注入，
+   * 不会把 background 打进请求风暴。
    */
-  function useMainWorldToReadPositionList(cb) {
-    if (C && typeof C.sendMsg === "function") {
-      C.sendMsg({ type: "zp-get-state" }, (res) => {
+  function refreshPositionList() {
+    if (zpRefreshPromise) return zpRefreshPromise;
+    zpRefreshPromise = new Promise((resolve) => {
+      const send = zpTransport || (C && typeof C.sendMsg === "function" ? C.sendMsg.bind(C) : null);
+      if (!send) {
+        resolve([]);
+        return;
+      }
+      send({ type: "zp-get-state" }, (res) => {
         const list = (res && res.ok && Array.isArray(res.list) && res.list) || [];
-        try {
-          document.documentElement.setAttribute(ZP_STATE_ATTR, JSON.stringify(list));
-        } catch (e) {
-          /* attr write best-effort */
-        }
-        _zpCacheTs = Date.now();
-        if (typeof cb === "function") cb(list);
+        writeZpCache(list);
+        resolve(list);
       });
-      return;
-    }
-    if (typeof cb === "function") cb([]);
+    });
+    // 结束后清空单飞句柄，下一次缺失才能重新补。
+    const clear = () => {
+      zpRefreshPromise = null;
+    };
+    zpRefreshPromise.then(clear, clear);
+    return zpRefreshPromise;
   }
 
   function getPositionList() {
@@ -160,9 +197,44 @@
     return [];
   }
 
-  /** 启动采集前确保 url 缓存就绪(异步):refresh 一次填充 data-zpstate。 */
+  /** 启动采集前确保 url 缓存就绪（异步）：refresh 一次填充 data-zpstate。 */
   function ensureZpState() {
-    return new Promise((resolve) => useMainWorldToReadPositionList(() => resolve()));
+    return refreshPositionList().then(() => {});
+  }
+
+  /**
+   * 页面级补缓存：当前读不到 positionList 就刷一次。返回是否已有可用列表。
+   * core 在「有列表卡但全都取不到 url」时调用，补完重扫卡片（徽章/按钮才拿得到 URL）。
+   */
+  function ensureUrlCache() {
+    if (getPositionList().length) return Promise.resolve(true);
+    // 只有搜索/推荐页（div.job-card 骨架）的 URL 来自 positionList；收藏页与求职进展页
+    // 没有这份状态，别为它们白发后台注入。
+    if (typeof document !== "undefined" && !document.querySelector("div.job-card")) return Promise.resolve(false);
+    return refreshPositionList().then((list) => !!(list && list.length));
+  }
+
+  /**
+   * 卡片 URL 的带保证入口：先读缓存；读不到就补一次再读。
+   * 收藏卡/求职进展卡的 URL 来自卡片锚点，与 positionList 无关，补缓存无用，直接返回。
+   * 取不到仍返回 null（调用方保留原有提示），绝不拼一个猜出来的 URL。
+   */
+  async function ensureCardUrl(card) {
+    const direct = cardUrl(card);
+    if (direct) return direct;
+    if (!card) return null;
+    if (typeof location !== "undefined" && isDetailPath(location.pathname)) return null;
+    if (isCollectCard(card) || isScheduleCard(card)) return null;
+    await refreshPositionList();
+    return cardUrl(card);
+  }
+
+  /**
+   * node 单测注入后台通道（浏览器路径不使用）：fn(msg, cb) 与 C.sendMsg 同签名。
+   * 生产流程里没有任何调用点，只为让 cardUrl 的「缺缓存→补→重算」可脱离浏览器验证。
+   */
+  function setZpTransport(fn) {
+    zpTransport = typeof fn === "function" ? fn : null;
   }
 
   /**
@@ -517,9 +589,11 @@
     };
     const btn = make(LIST_EVAL_BTN_ID, "评估本职位", false);
     if (btn) {
-      bindOnce(btn, "eval", () => {
+      bindOnce(btn, "eval", async () => {
         const el = document.getElementById(LIST_EVAL_BTN_ID);
-        const url = currentActiveUrl();
+        // 右栏通常直接给 jobdetail 锚；推荐/搜索页偶发只有卡片时，经缓存补齐再取。
+        const active = document.querySelector("div.job-card--active") || document.querySelector(CARD_SELECTOR);
+        const url = currentActiveUrl() || (active ? await ensureCardUrl(active) : null);
         if (!url) {
           C.toast("未选中职位，请先在左侧点击一个职位", true);
           return;
@@ -543,9 +617,10 @@
     }
     const qbtn = make(LIST_QUICK_BTN_ID, "快评", true);
     if (qbtn) {
-      bindOnce(qbtn, "quick", () => {
+      bindOnce(qbtn, "quick", async () => {
         if (C.isQuickEvaluating() || qbtn.disabled) return;
-        const url = currentActiveUrl();
+        const active = document.querySelector("div.job-card--active") || document.querySelector(CARD_SELECTOR);
+        const url = currentActiveUrl() || (active ? await ensureCardUrl(active) : null);
         if (!url) {
           C.toast("未选中职位，请先在左侧点击一个职位", true);
           return;
@@ -653,6 +728,9 @@
     isDetailPath,
     cardIsList,
     cardUrl,
+    // url 缓存缺失时补一次再取（core 的卡片按钮 / 徽章都走它，见 refreshPositionList）。
+    ensureCardUrl,
+    ensureUrlCache,
     cardMeta,
     buildScanCityMap: () => buildZhaopinCityMap(getPositionList()),
     // core 采集启动前 await 此钩子,确保 html[data-zpstate] url 缓存就位
@@ -682,6 +760,8 @@
       module.exports = {
         ZHAOPIN_SITE, isDetailPath, cardIsList, cardUrl, currentActiveUrl,
         extractDetailJd, extractPosterName, extractListPaneJd,
+        // url 缓存链路（缺缓存→补→重算），node 单测可直接驱动。
+        getPositionList, refreshPositionList, ensureCardUrl, ensureUrlCache, setZpTransport,
       };
     }
     return;
