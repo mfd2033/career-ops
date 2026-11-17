@@ -68,10 +68,17 @@ export type Job = {
   // 未记录（早于该功能 / 老扩展）——列表不占位，详情页写「未记录」。
   cliId?: string;
   model?: string;
-  // The report this worker references, when it is known at LAUNCH (pdf). Not
-  // every kind can know one: an evaluate worker's number is reserved by the
-  // agent mid-run, so that kind resolves via the posting URL instead (ADR-0018).
+  // The report this worker references. Known at LAUNCH for pdf (its `input` is the
+  // number); for evaluate it's the dispatcher's pre-reserved number, written here
+  // ONLY when the run settles as done (see reservedReportNum below), so a failed /
+  // empty run never advertises a number it didn't produce. Resolution for records
+  // without it falls back to the posting-URL index (ADR-0018) — no longer the
+  // primary path, since tracker merges land after the done event.
   reportNum?: string;
+  // ADR-0089 跟进（展示侧）：服务端在派发时预占、随 POST /api/run 响应或池快照到达
+  // 的独占号。它只是「本 run 名下的号」，done 之前不展示、不跳转——done 事件本身
+  // 已经由诚实门确认 reports/{num}-*.md 落盘，那时才提升为 reportNum。
+  reservedReportNum?: number;
   batchId?: string; // groups jobs fired together (e.g. "evaluate all Anthropic")
   /** The server-side run id (from /api/run's {runId}), when known. Joins the
    *  localStorage card to the server run ledger so /jobs can dedupe the two. */
@@ -298,19 +305,24 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
     for (const a of adoptables) {
       const jobId = `${ADOPT_PREFIX}${a.runId}`;
       const kind = a.kind ?? "batch-evaluate"; // 快照没带 kind（旧服务端）时回退展示型默认值
+      // ADR-0089 跟进（展示侧）：池快照带着服务端派发时预占的报告号，接管卡据它
+      // 在 done 后直接显示/跳转，不再等 URL 索引（tracker 合并晚于 done 事件）。
+      const subtitle = a.reportNum != null ? `#${a.reportNum}` : undefined;
       // 刷新后重新接管同一 run：先剔除同 id 旧卡、以及 restore 恢复出的同
       // runId 旧卡（interrupted 猜标牌），绝不让同一 run 在列表里出现两张。
-      accs.current.set(jobId, { opts: { title: a.title, kind, input: a.url, page: "/jobs" }, text: "", verdictLine: "", doneTokens: 0, doneCostUsd: null, steps: [], lastSeq: 0 });
+      accs.current.set(jobId, { opts: { title: a.title, subtitle, kind, input: a.url, page: "/jobs" }, text: "", verdictLine: "", doneTokens: 0, doneCostUsd: null, steps: [], lastSeq: 0 });
       runIds.current.set(a.runId, jobId);
       const card: Job = {
         id: jobId,
         title: a.title,
+        subtitle,
         page: "/jobs",
         input: a.url,
         kind,
         cliId: a.cliId,
         model: a.model,
         runId: a.runId,
+        reservedReportNum: a.reportNum,
         status: a.status,
         active: true,
         queuedPos: a.queuedPos,
@@ -382,6 +394,11 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
                 result,
                 cost,
                 endedAt: Date.now(),
+                // ADR-0089 跟进（展示侧）：本 run 的预占号在 done 时才落为卡片的
+                // 报告号——done 由服务端诚实门在 reports/{num}-*.md 落盘后发出，
+                // 所以这不是猜测。失败/空跑卡走不到这里，号已在服务端退回。
+                reportNum:
+                  status === "done" && j.reservedReportNum != null ? String(j.reservedReportNum) : j.reportNum,
                 // 用户停止的终态已由 stopJob 写过「用户中断」行；服务端随后到达的
                 // error 事件（msg 常为 cancelled by user）不得再覆盖成一条失败行。
                 steps:
@@ -812,7 +829,13 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
               }));
               return;
             }
-            const { runId, error, title } = (await res.json()) as { runId?: string; error?: string; title?: string };
+            const { runId, error, title, reportNum } = (await res.json()) as {
+              runId?: string;
+              error?: string;
+              title?: string;
+              // ADR-0089 跟进：服务端派发时预占的独占报告号（仅 evaluate 有）。
+              reportNum?: number;
+            };
             if (!runId) {
               accs.current.delete(id);
               patch(id, (j) => ({
@@ -833,7 +856,12 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
             runIds.current.set(runId, id);
             // Persist the runId onto the card so /jobs can dedupe this card
             // against the server run ledger (same run, one history row).
-            patch(id, (j) => ({ ...j, runId }));
+            // ADR-0089 跟进：预占号同批落卡（done 时才提升为 reportNum）。
+            patch(id, (j) => ({
+              ...j,
+              runId,
+              reservedReportNum: typeof reportNum === "number" ? reportNum : j.reservedReportNum,
+            }));
             // 派发标签（「公司 · 岗位」，/api/run 从 pipeline/tracker 行诚实解析）：
             // 就地升级「评估 · 粘贴的链接」这类通用标题，评估中就能看出在评谁；
             // 拼不出时 undefined，保留原兜底形状（不编造）。副标题与标题里的岗位

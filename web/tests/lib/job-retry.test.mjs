@@ -211,7 +211,9 @@ test("resetJobForRetry：原卡复用——id 与展示/派发字段原样保留
   assert.equal(r.kind, "evaluate");
   assert.equal(r.cliId, "codex");
   assert.equal(r.model, "gpt-x");
-  assert.equal(r.reportNum, "042");
+  // ADR-0089 跟进：evaluate 的号属于**上一轮**产物，重试后要重新由派发决定。
+  assert.equal("reportNum" in r, false, "evaluate 重试应清掉上一轮报告号");
+  assert.equal("reservedReportNum" in r, false, "上一轮预占号不跨轮复用");
   assert.equal(r.batchId, "b1");
   assert.deepEqual(r.urls, ["https://x/a"]);
   // 重置：attempt+1、回 running、startedAt 重置
@@ -237,4 +239,15 @@ test("resetJobForRetry：attempt 从 3 续到 4；steps 缺失时从空数组起
   );
   assert.equal(r.attempt, 4);
   assert.deepEqual(r.steps, [{ kind: "status", label: "sep", ts: 7 }]);
+});
+// ADR-0089 跟进（展示侧）：pdf/checkup 的号是启动契约（input 即号），重试仍是
+// 同一份报告，必须原样保留——清掉会让卡片在重试期间丢掉报告跳转。
+test("resetJobForRetry：pdf/checkup 的报告号不随重置清除", () => {
+  for (const kind of ["pdf", "checkup"]) {
+    const r = resetJobForRetry(
+      { id: "job-8", status: "error", kind, input: "042", reportNum: "042" },
+      { now: 9, separatorLabel: "sep" },
+    );
+    assert.equal(r.reportNum, "042", `${kind} 应保留启动时的报告号`);
+  }
 });

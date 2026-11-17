@@ -32,6 +32,8 @@ export const ADOPT_PREFIX = "adopt-";
  * @property {number} startedAt     running = 真实获槽时刻；queued = 入队时刻（不假报起点）
  * @property {number|undefined} enqueuedAt
  * @property {number|undefined} queuedPos
+ * @property {number|undefined} reportNum  服务端派发时预占的报告号（ADR-0089 跟进，
+ *   展示侧）——接管卡据它在 done 后直接显示/跳转，不再等 URL 索引。
  */
 
 /**
@@ -67,6 +69,8 @@ export function pickAdoptableRuns(snapshot, guards) {
       cliId: r.cliId, model: r.model, status: "running",
       startedAt: r.startedAt ?? r.enqueuedAt, enqueuedAt: r.enqueuedAt,
       queuedPos: undefined,
+      // ADR-0089 跟进（展示侧）：快照带号才透传，缺失不占位（同「无数据不占位」惯例）。
+      ...(typeof r.reportNum === "number" ? { reportNum: r.reportNum } : {}),
     });
   }
   for (const q of Array.isArray(snapshot.queued) ? snapshot.queued : []) {
@@ -76,6 +80,7 @@ export function pickAdoptableRuns(snapshot, guards) {
       cliId: q.cliId, model: q.model, status: "queued",
       startedAt: q.enqueuedAt, enqueuedAt: q.enqueuedAt,
       queuedPos: q.position,
+      ...(typeof q.reportNum === "number" ? { reportNum: q.reportNum } : {}),
     });
   }
   return out;

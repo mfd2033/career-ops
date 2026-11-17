@@ -404,7 +404,14 @@ export async function POST(req: Request) {
   // 本地派发卡（quick-evaluate/重新评估等）在响应里拿到派发标签，就地升级
   // 「评估 · 粘贴的链接」这类通用标题为「公司 · 岗位」——拼不出时 undefined，
   // 客户端保留原兜底形状（不编造）。
-  return Response.json({ runId, title: dispatchLabel || undefined });
+  //
+  // ADR-0089 跟进（展示侧）：evaluate 的独占号在派发时就已确定，随响应交给客户端
+  // 暂存（Job.reservedReportNum），done 事件到达时才落为卡片的报告号。这样卡片
+  // 不依赖 `/api/report-status` 的 URL 索引——tracker 合并晚于 done 事件（实测
+  // 2026-11-17 22:14 完成的 run，applications.md 到 22:24 才写入），索引在那一刻
+  // 必然查不到本 run，卡片会永久定格为空号。号只在本 run 的 done 时使用，失败/
+  // 空跑卡仍不挂号（号已被 releaseReserved 退回）。
+  return Response.json({ runId, title: dispatchLabel || undefined, reportNum: reservedReportNum });
 }
 
 /** ADR-0076: the flat tailored-CV short name carries the tracker row's Role

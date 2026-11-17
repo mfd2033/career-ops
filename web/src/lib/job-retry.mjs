@@ -138,7 +138,11 @@ export function resetJobForRetry(job, { now, separatorLabel, retry = null }) {
     kind: job.kind,
     cliId: job.cliId,
     model: job.model,
-    reportNum: job.reportNum,
+    // ADR-0089 跟进（展示侧）：evaluate 的 reportNum 是**上一轮**的产物号（done 时
+    // 由预占号提升），新一轮的号要等本次派发才确定，留着会让重试卡显示旧报告。
+    // pdf/checkup 的号是启动契约（input 即号），原样保留。上一轮的预占号
+    // （reservedReportNum）一律不列 → 随重置丢弃，由新一次派发重写。
+    ...(job.kind === "evaluate" ? {} : { reportNum: job.reportNum }),
     batchId: job.batchId,
     urls: scoped && retry.field === "urls" ? retry.retry.slice() : job.urls,
     ns: scoped && retry.field === "ns" ? retry.retry.slice() : job.ns,

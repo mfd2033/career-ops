@@ -38,6 +38,17 @@ test("the real kind rides along for the adopted card (no more blanket batch-eval
   assert.equal(out[0].kind, "pdf");
 });
 
+// ADR-0089 跟进（展示侧）：池快照带着派发时预占的报告号，接管卡要原样拿到——
+// 否则 done 之后它只能等 tracker 索引，而索引写在 done 之后，卡片会定格空号。
+test("the pre-reserved report number rides along; absent stays absent", () => {
+  const withNum = pickAdoptableRuns({ running: [running({ runId: "u1", reportNum: 1353 })], queued: [] },
+    { mappedRunIds: new Set(), localActiveInputs: new Set() });
+  assert.equal(withNum[0].reportNum, 1353);
+  const without = pickAdoptableRuns({ running: [running({ runId: "u2" })], queued: [] },
+    { mappedRunIds: new Set(), localActiveInputs: new Set() });
+  assert.equal("reportNum" in without[0], false, "无号时不得占位");
+});
+
 test("queued entries are adopted too (the bus registers before the pool grants a slot)", () => {
   const out = pickAdoptableRuns({ running: [], queued: [queued({ runId: "u2" })] },
     { mappedRunIds: new Set(), localActiveInputs: new Set() });
