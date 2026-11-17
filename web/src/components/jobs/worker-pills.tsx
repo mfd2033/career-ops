@@ -4,10 +4,12 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import { X, History } from "lucide-react";
+import { History } from "lucide-react";
 import { useJobs } from "@/components/jobs/job-store";
 import { WorkerCard, pillTone, TONE } from "@/components/jobs/worker-card";
 import { RetryJobButton } from "@/components/jobs/retry-job-button";
+import { StopJobButton } from "@/components/jobs/stop-job-button";
+import { RemoveJobButton } from "@/components/jobs/remove-job-button";
 import { CliSessionButton } from "@/components/jobs/cli-session-button";
 import { pickTrayJobs } from "@/lib/tray-jobs.mjs";
 import { useI18n } from "@/lib/i18n/context";
@@ -25,7 +27,7 @@ const TRAY_LIMIT = 6;
 const LIST_GAP = 6;
 
 export function WorkerPills({ fitToHeight = false }: { fitToHeight?: boolean }) {
-  const { jobs, ledgerOnlyJobs, cancelJob, clearFinished } = useJobs();
+  const { jobs, ledgerOnlyJobs, clearFinished } = useJobs();
   const pathname = usePathname();
   const { t } = useI18n();
 
@@ -114,31 +116,17 @@ export function WorkerPills({ fitToHeight = false }: { fitToHeight?: boolean }) 
             job={j}
             variant="tray"
             trailing={
-              // 纯台账卡没有本地可删状态（✕ 点了台账行还在，下次轮询
-              // 又合并回来），不渲染；RetryJobButton 凭 canRetryJob 也自守卫
-              // 渲染 null。故 ledgerOnly 卡整个 trailing 不占位。
+              // 纯台账卡没有本地可操作状态（停止/移除都会被台账合并回来），不渲染；
+              // 各按钮自守卫，不通过时渲染 null，不会留下空位。
+              // 动作常显：进行中「停止」、出错「重试」、终态「移除」互斥出现。
+              // 停止与移除是两件事——运行中中断走停止并保留卡片，终态才移除。
               j.ledgerOnly ? undefined : (
-              // ADR-0061：侧栏托盘与 /jobs 行、详情页同口径——error 卡除了
-              // 取消/忽略的 ✕，还要能一键重试。RetryJobButton 凭 canRetryJob
-              // 自守卫（非 error / 池源 / ledger-only 批量一律渲染 null），
-              // 故这里无条件挂上，只在可重试时占位。onClick 内部已 preventDefault
-              // 阻止外层 Link 跳详情。
               <span className="flex items-center gap-0.5">
-                {/* 「查看 CLI 会话」：hover 图标排与重试同排；组件自守卫渲染 null，
-                    onClick 内部已 preventDefault 阻止外层 Link 跳详情。 */}
-                <CliSessionButton job={j} className="opacity-0 transition-opacity group-hover:opacity-100" />
-                <RetryJobButton job={j} className="opacity-0 transition-opacity group-hover:opacity-100" />
-                <button
-                  onClick={(e) => {
-                    e.preventDefault();
-                    cancelJob(j.id);
-                  }}
-                  className="text-faint opacity-0 transition-opacity hover:text-foreground group-hover:opacity-100"
-                  title={j.status === "queued" || j.status === "running" ? t("jobs.cancelQueued") : t("jobs.dismissJob")}
-                  aria-label={j.status === "queued" || j.status === "running" ? t("jobs.cancelQueued") : t("jobs.dismissJob")}
-                >
-                  <X className="size-3" />
-                </button>
+                {/* 「查看 CLI 会话」：终态且有会话 id 才渲染，自守卫。 */}
+                <CliSessionButton job={j} />
+                <StopJobButton job={j} />
+                <RetryJobButton job={j} />
+                <RemoveJobButton job={j} />
               </span>
               )
             }

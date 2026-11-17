@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { ArrowLeft, Loader2, Check, X, Clock, AlertTriangle } from "lucide-react";
+import { ArrowLeft, Loader2, Check, X, Clock, AlertTriangle, Square } from "lucide-react";
 import { useJobs, type JobItem } from "@/components/jobs/job-store";
 import { HeroGlow } from "@/components/hero-glow";
 import { Badge } from "@/components/ui/badge";
@@ -21,9 +21,11 @@ import { fmtDuration } from "@/lib/format";
 import { BatchItemList } from "@/components/jobs/batch-item-list";
 import { StepTimeline } from "@/components/jobs/step-timeline";
 import { RetryJobButton } from "@/components/jobs/retry-job-button";
+import { StopJobButton } from "@/components/jobs/stop-job-button";
 import { CliSessionButton, canViewSession } from "@/components/jobs/cli-session-button";
 import { PostingLinkButton } from "@/components/jobs/posting-link-button";
 import { canRetryJob } from "@/lib/job-retry.mjs";
+import { canStopJob, isStopped } from "@/lib/job-stop.mjs";
 import { jobPostingUrl } from "@/lib/job-posting-url.mjs";
 
 type RunLedgerEntry = {
@@ -82,6 +84,8 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
   const { reportNum, entry } = useJobTiming(job ?? {});
   const subtitleIsNum = !!job?.subtitle && /^#\d+$/.test(job.subtitle);
   const running = job?.status === "running";
+  // 用户主动停止：status 仍是 error，展示口径以标记为准（已停止 · 用户中断）。
+  const stopped = isStopped(job);
   const now = useNow(!!running);
 
   // ADR-0042 决议 6：服务端批量逐项登记的恢复通道——另一个页签打开详情页、或
@@ -352,6 +356,8 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
               <><Clock className="size-3 text-zinc-400" /> {t("jobs.queued")}{job.queuedPos != null ? ` · ${t("jobs.queuedPos", { n: job.queuedPos })}` : ""}</>
             ) : job.status === "done" ? (
               <><Check className="size-3 text-emerald-500" /> {t("jobs.statusDone")}</>
+            ) : stopped ? (
+              <><Square className="size-3 fill-current text-zinc-400" /> {t("jobs.statusStopped")}</>
             ) : (
               <><X className="size-3 text-red-400" /> {t("jobs.statusError")}</>
             )}
@@ -404,15 +410,17 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
           {/* ADR-0061 决议 3/7：attempt 徽章（第 2 次起显示，done/error 均可）+
               手动重试按钮——组件按 canRetryJob 自守卫，批量先弹确认（决议 6）；
               ledger-only 视图在上方提前 return，到不了这里。
-              操作区口径与台账分支一致：职位原帖 / 查看 CLI 会话为图标按钮（各凭
-              自守卫），重试保留文字——写操作不与读操作同权。 */}
-          {((job.attempt != null && job.attempt > 1) || canRetryJob(job) || canViewSession(job) || postingUrl) && (
+              进行中给「停止任务」（中断并保留卡片），终态给「重试」——写操作保留
+              文字，不与图标读操作同权。停止的按钮自守卫（池源 running 卡无句柄
+              时渲染 null）。 */}
+          {((job.attempt != null && job.attempt > 1) || canStopJob(job) || canRetryJob(job) || canViewSession(job) || postingUrl) && (
             <div className="mt-3 flex flex-wrap items-center gap-2.5">
               {job.attempt != null && job.attempt > 1 && (
                 <span className="text-xs text-faint">{t("jobs.retryAttempt", { n: job.attempt })}</span>
               )}
               <PostingLinkButton url={postingUrl} className={ICON_ACTION_CLASS} />
               <CliSessionButton job={job} className={ICON_ACTION_CLASS} />
+              <StopJobButton job={job} withLabel />
               <RetryJobButton job={job} withLabel />
             </div>
           )}

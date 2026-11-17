@@ -1,13 +1,18 @@
-// Cancel a task that is QUEUED in the global concurrency pool.
+// Cancel a task in the global concurrency pool.
 //
-// A queued task has not spawned a CLI child yet, so cancelling it is safe from
-// the pool alone: dequeue it and the awaiting route's "granted" resolve turns
-// false, closing that worker's SSE with status=error·cancelled (and the batch
-// route releases the URL's reserved report number). Running tasks keep their
-// existing cancel path (tree-terminate the child), which the pool cannot do —
-// this endpoint only dequeues, ADR-0014 Q5.
+// QUEUED: the task has not spawned a CLI child yet, so dequeuing it is the whole
+// stop (the awaiting route's "granted" resolve turns false and its SSE closes
+// with status=error·cancelled; a batch route also releases the URL's reserved
+// report number), ADR-0014 Q5.
+//
+// RUNNING single-run worker: the pool itself cannot terminate a child, but the
+// pool entry carries the /api/run event-bus runId, so hand it to cancelRun —
+// that is the same tree-terminate path the worker card's stop button uses.
+// RUNNING batch workers carry no runId (one stream, no per-id handle); the
+// response says so honestly instead of pretending the batch stopped.
 
-import { cancel as poolCancel } from "@/lib/core/concurrency-pool";
+import { cancel as poolCancel, listPool } from "@/lib/core/concurrency-pool";
+import { cancelRun } from "@/lib/core/run-events";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -24,5 +29,11 @@ export async function POST(req: Request) {
     return Response.json({ error: "id required" }, { status: 400 });
   }
   const result = poolCancel(id);
-  return Response.json(result);
+  if (!result.removed) {
+    const running = listPool().running.find((entry) => entry.id === id);
+    if (running?.runId && cancelRun(running.runId)) {
+      return Response.json({ ...result, cancelled: true });
+    }
+  }
+  return Response.json({ ...result, cancelled: result.removed });
 }

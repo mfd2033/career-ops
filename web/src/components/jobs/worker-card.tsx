@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Check, X, Loader2, AlertTriangle, Clock } from "lucide-react";
+import { Check, X, Loader2, AlertTriangle, Clock, Square } from "lucide-react";
 import type { Job } from "@/components/jobs/job-store";
 import { useI18n } from "@/lib/i18n/context";
+import { isStopped } from "@/lib/job-stop.mjs";
 import { cn } from "@/lib/cn";
 import { fmtDuration } from "@/lib/format";
 import { fmtStartedAt } from "@/lib/started-at.mjs";
@@ -34,7 +35,7 @@ const humanizeStep = (
 // Auth/sign-in failures are the most common real error — detect them so we can give
 // a concrete next step instead of a dead end (#8).
 function isAuthError(job: Job): boolean {
-  if (job.status !== "error") return false;
+  if (job.status !== "error" || job.cancelledByUser) return false;
   const hay = `${job.steps[job.steps.length - 1]?.label ?? ""} ${job.text}`.toLowerCase();
   return /auth|login|sign[ -]?in|credential|api[ -]?key|unauthorized|not authenticated|installed and authenticated/.test(hay);
 }
@@ -72,6 +73,8 @@ export const TONE = {
 } as const;
 
 export function pillTone(j: Job): keyof typeof TONE {
+  // 用户停止是主动终态，不是失败：状态色用中性的 muted，与红色 error 分开。
+  if (isStopped(j)) return "muted";
   if (j.status === "error") return "bad";
   if (j.status === "queued") return "muted";
   if (j.status === "done") return j.result?.tone ?? "muted";
@@ -90,6 +93,7 @@ export function WorkerCard({
   const tone = TONE[pillTone(job)];
   const running = job.status === "running";
   const queued = job.status === "queued";
+  const stopped = isStopped(job);
   // ADR-0044: the honest execution start. A local card that waited in the pool
   // stamps runningStartedAt on its first `phase:running`; a pool-sourced running
   // card's startedAt is already the real start. Fall back to startedAt (dispatch
@@ -101,7 +105,11 @@ export function WorkerCard({
   const { t } = useI18n();
   const rawLast = job.steps[job.steps.length - 1]?.label;
   const last = rawLast ? humanizeStep(rawLast, t) : undefined;
-  const bottom = job.status === "done" && job.result?.summary ? job.result.summary : last;
+  const bottom = stopped
+    ? t("jobs.stoppedByUser")
+    : job.status === "done" && job.result?.summary
+      ? job.result.summary
+      : last;
   const inline = variant === "inline";
   const hasScore = job.result?.score != null;
   const authError = isAuthError(job);
@@ -125,6 +133,8 @@ export function WorkerCard({
           <Loader2 className="size-3 shrink-0 animate-spin text-brand" />
         ) : queued ? (
           <Clock className="size-3 shrink-0 text-zinc-400" />
+        ) : stopped ? (
+          <Square className="size-3 shrink-0 fill-current text-zinc-400" />
         ) : job.status === "error" ? (
           <AlertTriangle className={cn("size-3 shrink-0", tone.icon)} />
         ) : (

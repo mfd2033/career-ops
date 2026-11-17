@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Check, AlertTriangle, Loader2, Trash2, Clock, ChevronRight } from "lucide-react";
+import { Check, AlertTriangle, Loader2, Trash2, Clock, ChevronRight, Square } from "lucide-react";
 import { useJobs } from "@/components/jobs/job-store";
 import { pillTone } from "@/components/jobs/worker-pills";
 import { useI18n } from "@/lib/i18n/context";
@@ -16,9 +16,12 @@ import { batchSummary } from "@/lib/batch-summary.mjs";
 import { mergeBatchItems, shouldPollBatch } from "@/lib/batch-live.mjs";
 import { BatchItemList } from "@/components/jobs/batch-item-list";
 import { RetryJobButton } from "@/components/jobs/retry-job-button";
+import { StopJobButton } from "@/components/jobs/stop-job-button";
+import { RemoveJobButton } from "@/components/jobs/remove-job-button";
 import { CliSessionButton } from "@/components/jobs/cli-session-button";
 import { PostingLinkButton } from "@/components/jobs/posting-link-button";
 import { jobPostingUrl } from "@/lib/job-posting-url.mjs";
+import { isStopped, jobStatusLabelKey } from "@/lib/job-stop.mjs";
 import type { Job, JobItem } from "@/components/jobs/job-store";
 
 const TONE_CHIP = {
@@ -28,12 +31,6 @@ const TONE_CHIP = {
   muted: "bg-surface-hover text-muted",
 } as const;
 
-const STATUS_LABEL: Record<string, string> = {
-  running: "jobs.statusRunning",
-  queued: "jobs.queued",
-  done: "jobs.statusDone",
-  error: "jobs.statusError",
-};
 
 export default function JobsHistory() {
   const { jobs, ledgerOnlyJobs, clearFinished } = useJobs();
@@ -84,6 +81,8 @@ export default function JobsHistory() {
 function JobsRow({ job: j }: { job: Job }) {
   const { t } = useI18n();
   const tone = pillTone(j);
+  // 用户停止是主动终态：状态列读「已停止」，图标用中性方块而非红色失败三角。
+  const stopped = isStopped(j);
   const { reportNum, entry } = useJobTiming(j);
   const secs = j.status === "done" ? doneDurationSeconds(entry, j) : null;
   // The pool cards carry "#N" as their subtitle — the report number now lives in
@@ -160,7 +159,7 @@ function JobsRow({ job: j }: { job: Job }) {
           </button>
         )}
       <Link href={`/jobs/${j.id}`} className="flex min-w-0 flex-1 items-center gap-3 px-4 py-3 transition-colors hover:bg-surface-hover">
-        <span className="hidden shrink-0 text-xs capitalize text-faint sm:block">{t(STATUS_LABEL[j.status] ?? j.status)}</span>
+        <span className="hidden shrink-0 text-xs capitalize text-faint sm:block">{t(jobStatusLabelKey(j))}</span>
         {j.status === "queued" && j.queuedPos != null && (
           <span className="shrink-0 text-xs tabular-nums text-faint">#{j.queuedPos}</span>
         )}
@@ -172,6 +171,8 @@ function JobsRow({ job: j }: { job: Job }) {
           <Clock className="size-4 shrink-0 text-zinc-400" />
         ) : j.status === "running" ? (
           <Loader2 className="size-4 shrink-0 animate-spin text-brand" />
+        ) : stopped ? (
+          <Square className="size-4 shrink-0 fill-current text-zinc-400" />
         ) : j.status === "error" ? (
           <AlertTriangle className="size-4 shrink-0 text-red-400" />
         ) : (
@@ -217,18 +218,17 @@ function JobsRow({ job: j }: { job: Job }) {
             {j.result.score}/5
           </span>
         )}
-        <span className="hidden shrink-0 text-xs capitalize text-faint sm:block">{t(STATUS_LABEL[j.status] ?? j.status)}</span>
+        <span className="hidden shrink-0 text-xs capitalize text-faint sm:block">{t(jobStatusLabelKey(j))}</span>
       </Link>
-      {/* 「打开职位原帖」「查看 CLI 会话」与重试同为 Link 的行外兄弟节点（同一不
-          劫持行点击的模式）；两个图标按钮各按自己的口径自守卫（前者只认单条
-          http(s) URL，后者要终态 + 有会话 id + 引擎支持恢复），不通过时渲染
-          null，无数据不占位。外链排在会话之前——回原帖核对 JD 是这一行最高频的
-          附带动作。 */}
+      {/* 「打开职位原帖」「查看 CLI 会话」与停止/重试/移除同为 Link 的行外兄弟节点
+          （同一不劫持行点击的模式）；各按钮按自己的口径自守卫，不通过时渲染
+          null，无数据不占位。进行中给「停止」，终态给「重试 + 移除」——两种语义
+          不再挤在同一个 ✕ 上。 */}
       <PostingLinkButton url={postingUrl} className="shrink-0 self-center" />
       <CliSessionButton job={j} className="shrink-0 self-center" />
-      {/* ADR-0061 决议 7：重试做 Link 的兄弟节点（沿用展开 chevron 的行外模式），
-          不劫持行点击跳详情；canRetryJob 不通过时组件自身渲染 null。 */}
-      <RetryJobButton job={j} className="mr-2 shrink-0 self-center" />
+      <StopJobButton job={j} className="shrink-0 self-center" />
+      <RetryJobButton job={j} className="shrink-0 self-center" />
+      <RemoveJobButton job={j} className="mr-2 shrink-0 self-center" />
       </div>
       {expandable && batchOpen && (
         <div className="px-4 pb-4 pl-9">

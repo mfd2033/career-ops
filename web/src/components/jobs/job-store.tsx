@@ -6,6 +6,7 @@ import { readSavedCliId, readSavedModel, resolveCliId } from "@/lib/saved-cli";
 import { useI18n } from "@/lib/i18n/context";
 import { reconcileJobsWithLedger } from "@/lib/job-ledger-reconcile.mjs";
 import { canRetryJob, batchRetryPlan, nextAttempt, resetJobForRetry } from "@/lib/job-retry.mjs";
+import { canStopJob } from "@/lib/job-stop.mjs";
 import { pickAdoptableRuns, ADOPT_PREFIX } from "@/lib/job-adopt.mjs";
 import { ledgerRunsToCards } from "@/lib/ledger-display.mjs";
 
@@ -76,6 +77,9 @@ export type Job = {
    *  localStorage card to the server run ledger so /jobs can dedupe the two. */
   runId?: string;
   status: "running" | "queued" | "done" | "error";
+  // 用户主动停止（不是失败）：status 仍是 error，以沿用 ADR-0061 的可重试判定；
+  // 展示与状态列读作「已停止 · 用户中断」，托盘 / /jobs 行 / 详情页同口径。
+  cancelledByUser?: boolean;
   // Set ONLY by the localStorage restore when it guess-marks a previously
   // "running" card as interrupted (ADR-0031): the marker lets the run-ledger
   // reconciliation tell a guess apart from a real SSE-delivered error and
@@ -230,6 +234,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
   const accs = useRef(new Map<string, RunAcc>());
   const removed = useRef(new Set<string>()); // cards removed before their POST /api/run even returned
   const jobsRef = useRef<Job[]>([]); // retryJob 读最新卡的镜像（回调闭包不追 jobs，避免 stale）
+  const activeRunsRef = useRef<ActiveRunApi>({ running: [], queued: [] }); // stopJob 查池源排队卡（投影卡不在 jobs state）
   const channelCtl = useRef<AbortController | null>(null); // /api/events 当前连接（每次重连新建一个）
   const replayChannel = useRef<() => void>(() => {}); // abort 当前连接 → 重连循环服务端全量重放缓冲区
   const terminalRunIds = useRef(new Set<string>()); // 本页签已收到终态的 runId——轮询响应晚于 done 落地时防重建定局卡
@@ -265,6 +270,12 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
       clearInterval(timer);
     };
   }, []);
+
+  // 池快照镜像：stopJob 需要判「这张 active- 投影卡是不是还在排队」。单独同步，
+  // 不并进 persist effect——否则 3s 轮询会让 localStorage 每轮全量序列化一次。
+  useEffect(() => {
+    activeRunsRef.current = activeRuns;
+  }, [activeRuns]);
 
   // 影子卡片接管（adopt）：别的页签/扩展发起、或本页签刷新后失配的单任务，
   // 以前只有轮询合成的「处理中」占位卡——/api/events 的帧按 run UUID 索引，
@@ -364,8 +375,22 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
       setJobs((js) =>
         js.map((j) =>
           j.id === id
-            // 终态清除阶段（ADR-0042 决议 1：阶段只描述进行中）。
-            ? { ...j, status, phase: undefined, result, cost, endedAt: Date.now(), steps: lastLabel ? capSteps([...j.steps, { kind: "status", label: lastLabel, ts: Date.now() }]) : j.steps }
+            ? {
+                ...j,
+                status,
+                phase: undefined,
+                result,
+                cost,
+                endedAt: Date.now(),
+                // 用户停止的终态已由 stopJob 写过「用户中断」行；服务端随后到达的
+                // error 事件（msg 常为 cancelled by user）不得再覆盖成一条失败行。
+                steps:
+                  status === "error" && j.cancelledByUser
+                    ? j.steps
+                    : lastLabel
+                      ? capSteps([...j.steps, { kind: "status", label: lastLabel, ts: Date.now() }])
+                      : j.steps,
+              }
             : j,
         ),
       );
@@ -722,6 +747,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
   // persist
   useEffect(() => {
     jobsRef.current = jobs; // ADR-0061：retryJob 凭镜像找卡，不走闭包里的旧 state
+
     if (!loaded.current) return;
     try {
       // ADR-0042 决议 3：持久化时步骤截断到最近 20 条，防 localStorage 膨胀。
@@ -874,7 +900,13 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
           result,
           cost,
           endedAt: acc.serverFinishedAt ?? Date.now(),
-          steps: lastLabel ? capSteps([...j.steps, { kind: "status", label: lastLabel, ts: Date.now() }]) : j.steps,
+          // 用户停止：保留 stopJob 写下的「用户中断」行，不被流里的失败文案覆盖。
+          steps:
+            status === "error" && j.cancelledByUser
+              ? j.steps
+              : lastLabel
+                ? capSteps([...j.steps, { kind: "status", label: lastLabel, ts: Date.now() }])
+                : j.steps,
         }));
           if (status === "done") {
             fetch("/api/runs/save", {
@@ -1026,10 +1058,13 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
           }
           finish("done", t("jobs.stepDone"));
         } catch (e) {
-          // A user-cancelled batch surfaces as AbortError once the controller.abort()
-          // drops the stream — the card is already removed, so don't repaint an
-          // error state for a deliberate cancel.
-          if ((e as Error)?.name === "AbortError") return;
+          // 用户停止批量：controller.abort() 断开流后这里收到 AbortError。卡片不再
+          // 被移除（stopJob 已落「用户中断」），补一次终态收尾即可——label 用停止
+          // 文案，finish 会因 cancelledByUser 保留已有步骤行。
+          if ((e as Error)?.name === "AbortError") {
+            finish("error", t("jobs.stoppedByUser"));
+            return;
+          }
           finish("error", t("jobs.stepConnectionError"));
         }
       })();
@@ -1120,6 +1155,8 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
     [dispatchJob, patch, startJob, t],
   );
 
+  // 移除（提示性动作）：把卡片从列表拿掉；若卡片还在跑，顺手取消对端执行。
+  // 运行中的卡不再提供这个入口（UI 只给「停止」），保留此路径给终态卡。
   const removeJob = useCallback((id: string) => {
     removed.current.add(id);
     // Batch job → abort its NDJSON stream (the server-side stream cancel
@@ -1156,10 +1193,70 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  const cancelJob = useCallback((id: string) => {
-    removeJob(id);
-    // Also clear finished for queued? no-op: remove handles both paths above.
-  }, [removeJob]);
+  // 停止（破坏性动作）：中断执行但保留卡片，落「已停止 · 用户中断」终态。
+  // 该终态仍是 status=error，沿用 ADR-0061 的可重试判定（单条 kind+input、
+  // 批量 urls/ns 都在卡上），所以停止后同一张卡可以直接重试。
+  const stopJob = useCallback((id: string) => {
+    // 池源投影卡不在 jobs state（只在 visibleJobs 里），按池快照单独判定：只有
+    // 排队项可停（running 批量没有服务端句柄，UI 也不渲染入口）。它的派发参数
+    // 不在本页签，无法固化成可重试的本地卡，出队后随投影自然消失。
+    if (id.startsWith("active-")) {
+      const poolId = id.slice("active-".length);
+      if (!activeRunsRef.current.queued.some((q) => q.id === poolId)) return;
+      fetch("/api/active-runs/cancel", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: poolId }),
+      }).catch(() => {});
+      setActiveRuns((s) => ({
+        running: s.running.filter((r) => r.id !== poolId),
+        queued: s.queued.filter((q) => q.id !== poolId),
+      }));
+      return;
+    }
+
+    const job = jobsRef.current.find((j) => j.id === id);
+    if (!canStopJob(job)) return;
+
+    const now = Date.now();
+    patch(id, (j) => ({
+      ...j,
+      status: "error",
+      cancelledByUser: true,
+      phase: undefined,
+      queuedPos: undefined,
+      endedAt: now,
+      steps: capSteps([...j.steps, { kind: "status", label: t("jobs.stoppedByUser"), ts: now }]),
+    }));
+
+    // 批量：abort 本页签持有的 NDJSON 流 → 服务端流的 cancel() 终止整批。
+    const controller = batchControllers.current.get(id);
+    if (controller) {
+      batchControllers.current.delete(id);
+      controller.abort();
+      return;
+    }
+
+    // 单条（本地卡 / adopt 卡）：runId → /api/run/cancel（排队中出队，运行中杀
+    // CLI 进程树）。映射保留到终态事件到达，finishJob 还要凭它找卡片；
+    // terminalRunIds 防轮询把收尾中的 run 重建回「处理中」。
+    for (const [runId, jid] of runIds.current) {
+      if (jid !== id) continue;
+      terminalRunIds.current.add(runId);
+      fetch("/api/run/cancel", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ runId }),
+      }).catch(() => {});
+      return;
+    }
+
+    // POST /api/run 尚未返回 runId：登记 removed，派发拿到 runId 后立即取消。
+    removed.current.add(id);
+  }, [patch, t]);
+
+  // 兼容旧名：cancelJob 的语义已从「移除卡片」改为「停止任务」。
+  const cancelJob = stopJob;
 
   const clearFinished = useCallback(() => setJobs((js) => js.filter((j) => j.status === "running" || j.status === "queued")), []);
 
