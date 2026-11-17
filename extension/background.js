@@ -1164,6 +1164,10 @@ async function fetchDetailHtml(rawUrl) {
 
 const FOLLOWUP_CONTENT_RETRY = 3;
 const FOLLOWUP_CONTENT_RETRY_MS = 700;
+// 发送成功后先在招聘站页面停 5 秒再切回面板：回读校验通过只代表按钮点了、字进了
+// 聊天流，站点侧的收尾（提交、入库、状态同步）还没走完。立刻把页面切到后台
+// （失焦 + 定时器降频）会让这条消息停在半路发不出去。这 5 秒也留给用户看一眼回显。
+const FOLLOWUP_SETTLE_MS = 5000;
 
 /** URL → 比较键（origin + 去尾斜杠的路径）；非法 URL 返回 null。 */
 function urlMatchKey(raw) {
@@ -1254,7 +1258,11 @@ async function sendFollowup(msg, sender) {
       if (res && typeof res === "object") {
         // 只有 sent 才切走：uncertain 要留在招聘页核对回显（followup-send.js 的口径），
         // failed 要留在原地补救（ADR-0100：从岗位页点继续沟通再试）。招聘站 tab 不关不动。
-        if (res.status === "sent") await refocusWebTab(webTabId);
+        // 切走前先停留 5 秒——消息发出去不等于站点收完，见 FOLLOWUP_SETTLE_MS。
+        if (res.status === "sent") {
+          await new Promise((resolve) => setTimeout(resolve, FOLLOWUP_SETTLE_MS));
+          await refocusWebTab(webTabId);
+        }
         return { ...res, tabId: tab.id };
       }
     } catch (err) {
