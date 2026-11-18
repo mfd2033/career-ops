@@ -539,6 +539,22 @@ test("buildPrompt: the checkup prompt without a skill pointer keeps the legacy p
   assert.ok(prompt.includes("本报告由 career-ops 公司体检技能生成"), "固定页脚保留");
 });
 
+test("buildPrompt: 首次体检不带 RE-CHECK，旧 prompt 不被动到", () => {
+  const prompt = buildPrompt({ kind: "checkup", ...ARGS });
+  assert.ok(!prompt.includes("RE-CHECK"), "当天没有体检行时不应出现复检指令");
+});
+
+test("buildPrompt: 当天已有体检 → RE-CHECK 强制覆盖 HTML 并追加新台账行（#1360）", () => {
+  // 2026-11-18：残缺产物（bsk 不可用 / 全维未获取到）曾被 already-current 固化成当天终态。
+  // 服务端判出「当天已有该行」后必须把这个事实写死在 prompt 里，worker 才不能跳过写。
+  const prompt = buildPrompt({ kind: "checkup", ...ARGS, checkupRecheck: { star: 2.5 } });
+  assert.match(prompt, /RE-CHECK \(server-decided, binding\)/);
+  assert.match(prompt, /★2\.5/);
+  assert.match(prompt, /shortcut does NOT apply/);
+  assert.match(prompt, /append a NEW ledger row/);
+  assert.match(prompt, /never carry the old outage note forward/);
+});
+
 test("buildPrompt: the checkup prompt with a skill pointer names path, version, and workflow precedence", () => {
   // 有指针 → 第一条指令先读技能正文；workflow 12 条仍是安全与持久化铁律，冲突时
   // workflow 优先；页脚换成技能模板带版本号那句（版本溯源缺口收口）。

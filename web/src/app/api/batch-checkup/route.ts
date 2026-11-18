@@ -41,6 +41,7 @@ import {
   fatalStopMessage,
   makeCheckupHtmlProbe,
   checkupArtifactRowCountForTracker,
+  checkupArtifactTodayForTracker,
   batchCheckupFinalEvent,
 } from "@/lib/run-cli-support.mjs";
 import { resolveWorkerInvocation } from "@/lib/worker-invocation.mjs";
@@ -291,6 +292,9 @@ export async function POST(req: Request) {
             };
             const poolHandle = acquire({ url: `#${t.n}`, title: t.company, reportNum: Number(t.n), source: "batch", cliId, model: model || undefined });
             poolHandles.add(poolHandle);
+            // 当天已有该行的台账行 = 这一项是复检（同 /api/run，2026-11-18 #1360 后续）：
+            // prompt 据此要求覆盖 HTML 并追加新行，避免 already-current 把残缺产物固化。
+            const priorStarToday = checkupArtifactTodayForTracker(readCheckupLedger(), t.n, today, htmlExists);
             const prompt = buildPrompt({
               kind: "checkup",
               input: t.n,
@@ -298,6 +302,7 @@ export async function POST(req: Request) {
               today,
               checkupCompany: t.company,
               checkupSkill,
+              checkupRecheck: priorStarToday != null ? { star: priorStarToday } : undefined,
             });
             // ADR-0054: worker argv comes from the shared spec-driven selector —
             // streamArgsFor (claude/qoder-cn/codebuddy audited per-kind permission

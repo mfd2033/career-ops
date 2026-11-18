@@ -56,6 +56,15 @@ function logEvalTiming(reportNum: string, phase: "start" | "end") {
   );
 }
 
+/** 体检台账原文；文件不存在/读失败 → undefined（今日判定函数会返回 null）。 */
+function readCheckupLedgerText(): string | undefined {
+  try {
+    return fs.readFileSync(path.join(careerOpsRoot(), "data", "company-checkups.tsv"), "utf8");
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * 单任务 evaluate 派发时预占一个独占报告号（ADR-0089 跟进）。
  *
@@ -555,7 +564,14 @@ async function runPipeline({
       ? (resolveSkillCopy(scanSkillRegistry({ extraDirs: readAppConfig().skillDirs ?? [] }), OFFER_CHECKUP_SKILL_NAME) ??
         undefined)
       : undefined;
-  const prompt = buildPrompt({ kind, input, memory: readMemory(), today, postedAt, unknownEmployer: readAppConfig().unknownEmployer, checkupCompany, checkupSkill, jdText, company: employer, cardSalary, reportNum: reservedReportNum != null ? String(reservedReportNum).padStart(3, "0") : pdfPaths?.reportNum, reportFile: pdfPaths?.reportFile, marketMode: resolveMarketMode({ raw: readMarketModesDir(), available: listMarketModes() }) });
+  // 当天已有该 tracker 的体检台账行 = 本轮是用户主动复检（2026-11-18 #1360 后续）：
+  // 把「已有当天产物」这个事实交给 prompt，要求覆盖 HTML 并追加新行。否则 worker
+  // 会按「already-current」跳写，复检也刷新不了那条「bsk 不可用」的残缺产物。
+  const checkupPriorStarToday =
+    kind === "checkup"
+      ? checkupArtifactTodayForTracker(readCheckupLedgerText(), String(input), today, makeCheckupHtmlProbe(careerOpsRoot()))
+      : null;
+  const prompt = buildPrompt({ kind, input, memory: readMemory(), today, postedAt, unknownEmployer: readAppConfig().unknownEmployer, checkupCompany, checkupSkill, checkupRecheck: checkupPriorStarToday != null ? { star: checkupPriorStarToday } : undefined, jdText, company: employer, cardSalary, reportNum: reservedReportNum != null ? String(reservedReportNum).padStart(3, "0") : pdfPaths?.reportNum, reportFile: pdfPaths?.reportFile, marketMode: resolveMarketMode({ raw: readMarketModesDir(), available: listMarketModes() }) });
 
   // Which tools each kind gets, and the whole argv for every runtime that HAS an
   // audited scope, live with those runtimes: claude-invocation.mjs (declared on

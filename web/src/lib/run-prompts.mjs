@@ -172,7 +172,7 @@ function employerDirective(policy) {
  * inline instead of writing it), and a guard that greps route.ts for the marker
  * text matched the route's own comments instead. See test-all.mjs §55.6.
  *
- * @param {{kind: string, input: string, memory: string, today: string, postedAt?: string, unknownEmployer?: string, checkupCompany?: string, checkupSkill?: {path: string, version: string | null}, jdText?: string, company?: string, cardSalary?: string, reportNum?: string, reportFile?: string, marketMode?: {dir: string|null, evalFile: string, sharedFile: string, warning: string|null}}} args
+ * @param {{kind: string, input: string, memory: string, today: string, postedAt?: string, unknownEmployer?: string, checkupCompany?: string, checkupSkill?: {path: string, version: string | null}, checkupRecheck?: {star?: number} | null, jdText?: string, company?: string, cardSalary?: string, reportNum?: string, reportFile?: string, marketMode?: {dir: string|null, evalFile: string, sharedFile: string, warning: string|null}}} args
  *   reportNum — the report number the row's Report cell actually links (a
  *   re-evaluated row keeps its tracker `#` but links a new report file, so the two
  *   differ). The pdf prompt reads the report at an exact server-resolved path
@@ -197,7 +197,7 @@ function employerDirective(policy) {
  *   `modes/oferta.md`（旧行为逐字节一致）。warning 存在时在 prompt 末尾附一行回落说明。
  * @returns {string}
  */
-export function buildPrompt({ kind, input, memory, today, postedAt, unknownEmployer, checkupCompany, checkupSkill, jdText, company, reportNum, reportFile, marketMode, cardSalary }) {
+export function buildPrompt({ kind, input, memory, today, postedAt, unknownEmployer, checkupCompany, checkupSkill, checkupRecheck, jdText, company, reportNum, reportFile, marketMode, cardSalary }) {
   const mem = memory.trim() ? `\n\nDurable notes about the user (from their profile):\n${memory.trim()}\n` : "";
   if (kind === "research") {
     return `You are investigating the user's OWN work / portfolio to surface job-search-relevant strengths, headless. Investigate the target (use WebFetch for URLs; read local files if referenced) and report: what it is, why it is impressive, and how to leverage it in their job search — which roles/claims it supports and how to frame it on a CV. Be specific, honest, and encouraging. Report only: never submit, send, or click Apply anywhere, and contact no one — you are investigating the user's own work, not acting on it.${mem}
@@ -289,6 +289,15 @@ End with EXACTLY one final line: VERDICT: {5 if now live, else 1}/5 — {what yo
         : null;
     const skillVersion = rawVersion ?? "未标注";
     const footerVersion = rawVersion ? `v${rawVersion}` : "（版本未标注）";
+    // 2026-11-18（#1360 后续）：当天该 tracker 已有台账行 = 用户主动复检。服务端把这个
+    // 事实写进 prompt，worker 才能把它与「同一轮内的重复写入」区分开——否则旧规则会把
+    // 一次「bsk 不可用、全维未获取到」的残缺产物当成当天终态，复检也只是命中
+    // already-current、什么都不重写。
+    const recheckLine = checkupRecheck
+      ? `   - RE-CHECK (server-decided, binding): this tracker ALREADY has a checkup persisted today${
+          typeof checkupRecheck.star === "number" ? ` (★${checkupRecheck.star})` : ""
+        }. This run is the user's explicit re-check, so the "already current, skip writing" shortcut does NOT apply: rewrite the today-dated HTML report (overwriting it is expected) and append a NEW ledger row. If the previous HTML recorded a capture-channel outage (bsk unavailable / 全维未获取到), the rewrite must state what THIS run actually obtained instead — never carry the old outage note forward.\n`
+      : "";
     const headerLine = checkupSkill
       ? `1. FIRST action — SKILL POINTER (ADR-0056, server-resolved): Read the offer体检 skill at "${checkupSkill.path}" (version ${skillVersion}), and follow the skill body and its references/ for the 7-dimension research, scoring, and report structure. LAYERING: the workflow doc's 12 rules below remain the safety & persistence authority — on ANY conflict the workflow rules win (report path, ledger, gates); the footer TEXT follows the skill template with the version above. If the skill file cannot be read, say so in your final report and continue with the workflow rules — do not fabricate skill content. THEN read modes/_custom.md, find the「公司体检（offer体检）」Custom Workflow section, and follow its rules EXACTLY for target tracker #${input}:
 `
@@ -298,7 +307,7 @@ End with EXACTLY one final line: VERDICT: {5 if now live, else 1}/5 — {what yo
       ? `   - Report format, 照抄不要自己发明: <title>{company} · offer体检报告</title>、<h1>{company}</h1>、页脚按技能模板（assets/report_template.html）填入版本号，即 「本报告由 WorkBuddy · offer体检 技能 ${footerVersion} 生成。数据来源于公开网络检索，仅供参考，不构成入职决策唯一依据。」；日期一律用上面给的 ${today}，不要自己编「生成时间」`
       : `   - Report format, 照抄不要自己发明: <title>{company} · offer体检报告</title>、<h1>{company}</h1>、页脚固定为 「本报告由 career-ops 公司体检技能生成。数据来源于公开网络检索，仅供参考，不构成入职决策唯一依据。」；日期一律用上面给的 ${today}，不要自己编「生成时间」`;
     return `You are running the OFFICIAL career-ops COMPANY CHECKUP (公司体检, ADR-0025/0027), HEADLESS, on the user's own machine. Today is ${today}.
-${headerLine}${targetLine}   - Run the full 7-dimension research per the rules (independent budget — the evaluate mode's 5-query cap does NOT apply here). The button press already confirmed this run: do not ask the user anything.
+${headerLine}${targetLine}${recheckLine}   - Run the full 7-dimension research per the rules (independent budget — the evaluate mode's 5-query cap does NOT apply here). The button press already confirmed this run: do not ask the user anything.
    - RESEARCH BUDGET (hard): at most 25 tool calls and roughly 12 minutes of wall clock. Past two-thirds of that, a missing dimension is 「未获取到」 — finalize what you have, persist, and stop. A partial report that LANDED beats a perfect one that timed out (2026-09-17: #582/#682 spent the whole 30-minute cap and persisted nothing).
    - NEVER hand-roll HTTP/curl scrapers against anti-bot sites — that is exactly how the budget above gets burned and how a run ends with zero artifacts (2026-09-17 #582). Use the rules' extraction channel (bsk / browser-extract); if it is blocked, write 「未获取到」 and move on. Do not re-search a channel that returned empty.
 ${footerLine}
