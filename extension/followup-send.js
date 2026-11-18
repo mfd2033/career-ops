@@ -442,8 +442,12 @@
     // 刚 dispatch 完就点「发送」，处理器读到的可能还是空内容（点了等于没点）。
     await sleep(300);
 
-    // 有些站点的「发送」要等编辑器拿到内容、重新渲染后才出现，给一拍再找一次。
-    let button = buttonBefore || findSendButton(input);
+    // 必须**填字后重新找**，不能复用 buttonBefore：智联聊天页空框时给「发送」
+    // 原生 disabled，打分直接判死（-1），而同高度的工具栏「换微信」会顶上 3 分，
+    // 点它等于弹「绑定微信号」（2026-11-18 实证）。填字前那次只用于判断本站空框
+    // 是否禁用发送（gatedByButton），不作点击目标。
+    // 也有些站点的「发送」要等编辑器拿到内容、重新渲染后才出现，给一拍再找。
+    let button = findSendButton(input);
     if (!button) {
       await sleep(400);
       button = findSendButton(input);

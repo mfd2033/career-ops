@@ -171,6 +171,38 @@ test("隐藏/禁用/过小的按钮不选；全部不达标返回 null", () => {
   assert.equal(pickSendCandidate([{ text: "取消", tag: "button", visible: true, width: 60, height: 28 }]), null);
 });
 
+test("智联空框：工具栏「换微信」不能顶替禁用的发送按钮（2026-11-18 实测 DOM）", () => {
+  // 现场实测（i.zhaopin.com/im）：空框时 BUTTON.im-sender__send-btn 原生 disabled，
+  // 同高度还有 BUTTON.im-send-wechat__chip「换微信」。旧打分为换微信 3 分、发送 -1，
+  // 于是自动跟进点开了「绑定微信号」弹窗，话却留在输入框里。
+  const wechat = { text: "换微信", tag: "button", visible: true, disabled: false, width: 48, height: 24, classText: "im-send-wechat__chip" };
+  const sendDisabled = { text: "发送", tag: "button", visible: true, disabled: true, width: 48, height: 28, classText: "im-sender__send-btn" };
+  assert.equal(scoreSendCandidate(wechat), -1, "换微信不该被当成发送按钮");
+  assert.equal(
+    scoreSendCandidate({ text: "交换手机号", tag: "button", visible: true, disabled: false, width: 80, height: 24, classText: "im-send-phone__chip" }),
+    -1,
+  );
+  assert.equal(pickSendCandidate([wechat, sendDisabled]), null, "空框时无可发目标，调用方必须填字后重找");
+  // 填字后发送按钮解除原生 disabled，才是唯一可取的目标
+  const sendEnabled = { ...sendDisabled, disabled: false };
+  assert.equal(pickSendCandidate([wechat, sendEnabled]).index, 1);
+});
+
+test("类名里的 send 必须独立成词：im-sender 外壳没有发送语义", () => {
+  // 智联输入区外壳 im-sender / im-sender__input-wrapper 含 "send" 子串，裸 includes
+  // 会把它们当发送件加分。
+  assert.ok(
+    scoreSendCandidate({ text: "", tag: "div", visible: true, disabled: false, width: 100, height: 40, classText: "im-sender__input-wrapper" }) < 3,
+  );
+  // 真正的发送件仍然认得：BOSS 的 btn-send、常见 send-btn、智联 im-sender__send-btn
+  for (const classText of ["btn-send", "send-btn", "im-sender__send-btn"]) {
+    assert.ok(
+      scoreSendCandidate({ text: "", tag: "button", visible: true, disabled: false, width: 48, height: 28, classText }) >= 3,
+      `${classText} 应被识别为发送按钮`,
+    );
+  }
+});
+
 // ---- 回读校验 --------------------------------------------------------------
 
 test("输入框清空 + 聊天流出现该句 = 已发送", () => {

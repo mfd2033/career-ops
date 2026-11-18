@@ -42,9 +42,14 @@
 
   // 发送按钮文案：整词匹配优先（4 分），含关键词次之。
   const SEND_TEXT_RE = /^(发送|发送消息|发送信息|发消息|send)$/i;
-  const SEND_KEYWORDS = ["send", "发送", "submit"];
-  // 危险文案：投递/申请类按钮一律不点。代发跟进消息绝不等于代投简历。
-  const SEND_ANTI_TEXT = /简历|投递|申请|报名|apply|resume|submit/i;
+  // 类名里的发送语义必须作为独立词出现（send / send-btn / btn-send），不能用裸
+  // includes：`im-sender`、`im-send-wechat`、`im-send-resume` 都含 "send" 子串，
+  // 会把输入区外壳和工具栏动作一起抬进候选（2026-11-18 智联实证）。
+  const SEND_KEYWORD_RE = /(^|[^a-z])(send|submit)(?=[^a-z]|$)|发送/i;
+  // 危险文案：投递/申请类按钮一律不点。代发跟进消息绝不等于代投简历；聊天页工具栏
+  // 上的「换微信」「交换手机号」也不是发送——智联把它们和「发送」摆在同一高度，
+  // 空框时真发送按钮禁用，就轮到它们顶上（2026-11-18 实证）。
+  const SEND_ANTI_TEXT = /简历|投递|申请|报名|换微信|微信|交换|电话|手机|apply|resume|submit/i;
 
   const CONTACT_KEYWORDS = ["name", "nick", "hr", "boss", "recruit", "姓名", "招聘", "昵称"];
   // 联系人反特征：页面导航、会话列表预览、状态词；以及聊天头部的操作标签——
@@ -171,7 +176,7 @@
     else if (text && text.length <= 6 && /发送|send/i.test(text)) score += 3;
 
     const hay = `${c.classText || ""} ${c.idText || ""} ${c.ariaLabel || ""} ${c.title || ""}`.toLowerCase();
-    if (SEND_KEYWORDS.some((k) => hay.includes(k))) score += 2;
+    if (SEND_KEYWORD_RE.test(hay)) score += 2;
     if (String(c.tag || "").toLowerCase() === "button") score += 1;
     return score;
   }
