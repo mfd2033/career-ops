@@ -64,6 +64,7 @@ export function CheckupRequestButton({
       });
       const j = (await res.json().catch(() => ({}))) as {
         error?: string;
+        code?: string;
         running?: RunningCheckup[];
         unconfirmed?: boolean;
       };
@@ -77,6 +78,9 @@ export function CheckupRequestButton({
           input: n,
           page: `/pipeline/${n}`,
         });
+      } else if (j.code === "bsk-unavailable") {
+        // 抓取通道没就绪：服务端在派发前就拒了，不会产出一份「全维未获取到」的体检。
+        setNote(t("pipeline.checkupBskOffline"));
       } else if (res.status === 409 && Array.isArray(j.running)) {
         // 在跑：服务端说了才算（跨标签页/跨浏览器也拦得住）。就地展开面板，
         // 让用户裁决——不再是一句「今天已派发过」的死胡同。

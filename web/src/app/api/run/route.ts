@@ -15,6 +15,7 @@ import { spawnHeadlessCli, terminateCli } from "@/lib/spawn-cli.mjs";
 import { careerOpsRoot, readMemory, findReportFile, readInbox, readScanDates, findCheckupTarget, readApplications, rootScript, readMarketModesDir, listMarketModes, type InboxJob } from "@/lib/career-ops";
 import { checkupDispatchText } from "@/lib/checkup-request.mjs";
 import { registerCheckup, markCheckupRunning, clearCheckup, attachCheckupExit } from "@/lib/checkup-live.mjs";
+import { probeBskDaemon, isBskBoardUrl, bskUnavailableBody } from "@/lib/bsk-daemon.mjs";
 import { OFFER_CHECKUP_SKILL_NAME, resolveSkillCopy, scanSkillRegistry } from "@/lib/skill-registry.mjs";
 import { readAppConfig } from "@/lib/app-config";
 import { normalizeUrl } from "@/lib/core/url-key.mjs";
@@ -176,6 +177,21 @@ export async function POST(req: Request) {
       JSON.stringify({ error: "Add your CV first so I can score this against you — drop it on the home page." }),
       { status: 400, headers: { "Content-Type": "application/json" } },
     );
+  }
+
+  // bsk 是体检七维调研与国内招聘站 JD 抽取的唯一通道，派发前先确认它真的能用。
+  // 2026-11-18 #1360：守护进程在 worker 宿主里起不来，却照样派发，最后交了一份
+  // 「全维未获取到」的体检。带内联 JD 的评估（浏览器扩展直传）不需要 bsk。
+  const needsBsk =
+    kind === "checkup" || (kind === "evaluate" && !jdText && isBskBoardUrl(String(input)));
+  if (needsBsk) {
+    const bsk = await probeBskDaemon();
+    if (!bsk.ok) {
+      return new Response(JSON.stringify(bskUnavailableBody(bsk)), {
+        status: 409,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
   }
 
   // ADR-0089 跟进：单任务 evaluate 的报告号在派发端预占（早于并发池排队），

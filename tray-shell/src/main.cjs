@@ -19,6 +19,7 @@ const { buildSnapshot, createBusinessFetcher } = require("./snapshot.cjs");
 const { trayStateOf, trayTooltip } = require("./state.cjs");
 const { drawTrayIcon } = require("./tray-icon.cjs");
 const { computeFlyoutPosition } = require("./flyout-position.cjs");
+const bskDaemon = require("./bsk-daemon.cjs");
 
 const FLYOUT_WIDTH = 384;
 // 透明留白：theme.css 的 body 有 10px padding 用来装 box-shadow。窗口宽 = 卡片 384 + 2×PAD，
@@ -158,6 +159,12 @@ function bootstrap() {
   startTimers();
   pushSnapshot();
   if (!DEBUG_STATE) {
+    // #1360：web worker 所在宿主给命令套了不允许 breakaway 的 Job Object，bsk 客户端自己
+    // 起的 daemon 会立刻被拒或随 shell 消失。壳本身不在那个 Job 里，所以由这里兜底拉起并
+    // 常驻；只影响体检与国内招聘站抓取，失败也只写日志，不挡托盘与服务启动。
+    bskDaemon
+      .ensureBskDaemon({ logs: sink })
+      .catch((err) => sink.line("launcher", `bsk 守护进程检查异常：${err?.message || err}`));
     // 起服期间业务数据必然拉不到（端口还没应答），所以就绪后立刻补一次：
     // 否则面板第一眼全是「—」，得等下一个 15s 轮回填。
     service.start().then((ready) => {

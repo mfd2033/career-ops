@@ -19,6 +19,7 @@ import { findCheckupTarget } from "@/lib/career-ops";
 import { decideCheckupPreflight, checkupReplaceBody } from "@/lib/checkup-request.mjs";
 import { listLiveCheckups, awaitCheckupGone } from "@/lib/checkup-live.mjs";
 import { cancelRun } from "@/lib/core/run-events";
+import { probeBskDaemon, bskUnavailableBody } from "@/lib/bsk-daemon.mjs";
 
 export const runtime = "nodejs";
 
@@ -44,6 +45,14 @@ export async function POST(req: Request) {
   const meta = { company: target.company, target: target.source };
 
   const decision = decideCheckupPreflight({ live: listLiveCheckups(n), replace: body.replace });
+
+  // 派发前确认抓取通道：体检的七维调研全部依赖 bsk。通道不在时宁可拒绝派发，也不让
+  // worker 交一份「全维未获取到」的体检（2026-11-18 #1360）。只拦「真会派发」的两种
+  // 决定；有在跑（blocked）时先由用户裁决，不去动那条已存在的 run。
+  if (decision.action !== "blocked") {
+    const bsk = await probeBskDaemon();
+    if (!bsk.ok) return Response.json(bskUnavailableBody(bsk), { status: 409 });
+  }
 
   if (decision.action === "dispatch") {
     return Response.json({ ok: true, ...meta });

@@ -49,6 +49,7 @@ import { spawnHeadlessCli, terminateCli } from "@/lib/spawn-cli.mjs";
 import { careerOpsRoot, readMemory, findCheckupTarget } from "@/lib/career-ops";
 import { listLiveCheckups } from "@/lib/checkup-live.mjs";
 import { decideBatchCheckupConflict } from "@/lib/checkup-request.mjs";
+import { probeBskDaemon, bskUnavailableBody } from "@/lib/bsk-daemon.mjs";
 import { readAppConfig } from "@/lib/app-config";
 import { buildPrompt } from "@/lib/run-prompts.mjs";
 import { acquire, release, __setSizeSource, DEFAULT_POOL_SIZE, type PoolHandle } from "@/lib/core/concurrency-pool";
@@ -177,6 +178,18 @@ export async function POST(req: Request) {
     const verdict = decideBatchCheckupConflict({ live: listLiveCheckups(t.n) });
     if (verdict.action === "dispatch") targets.push(t);
     else skippedRunning.push(t);
+  }
+
+  // 批量体检与单个走同一条 bsk 通道：整批都会白跑时直接拒绝整批，而不是产出 N 张
+  // 「全维未获取到」的失败卡（#1360 在批量路径上的形态）。
+  if (targets.length > 0) {
+    const bsk = await probeBskDaemon();
+    if (!bsk.ok) {
+      return new Response(JSON.stringify(bskUnavailableBody(bsk)), {
+        status: 409,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
   }
 
   const checkupLedgerPath = path.join(root, "data", "company-checkups.tsv");

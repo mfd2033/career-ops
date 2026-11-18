@@ -820,12 +820,14 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
             });
             if (!res.ok) {
               const e = await res.json().catch(() => ({}));
+              const reason =
+                e.code === "bsk-unavailable" ? t("jobs.bskUnavailable") : e.error || t("jobs.stepFailedToStart");
               accs.current.delete(id);
               patch(id, (j) => ({
                 ...j,
                 status: "error",
                 endedAt: Date.now(),
-                steps: [...j.steps, { kind: "status", label: e.error || t("jobs.stepFailedToStart"), ts: Date.now() }],
+                steps: [...j.steps, { kind: "status", label: reason, ts: Date.now() }],
               }));
               return;
             }
@@ -958,7 +960,10 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
           });
           if (!res.ok || !res.body) {
             const e = await res.json().catch(() => ({}));
-            finish("error", e.error || t("jobs.stepFailedToStart"));
+            finish(
+              "error",
+              e.code === "bsk-unavailable" ? t("jobs.bskUnavailable") : e.error || t("jobs.stepFailedToStart"),
+            );
             return;
           }
           const reader = res.body.getReader();
