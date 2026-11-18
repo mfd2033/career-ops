@@ -13,6 +13,8 @@ import { useI18n } from "@/lib/i18n/context";
 import { useJobTiming } from "@/lib/eval-duration-client";
 import { EvalTimingPanel } from "@/components/eval-timing-panel";
 import { ReportNumLink } from "@/components/report-num-link";
+import { CheckupReportChip } from "@/components/checkup-report-chip";
+import { useCheckupReport } from "@/lib/checkup-report-client";
 import { goBackOr } from "@/lib/nav-history";
 import { formatRunEngine } from "@/lib/cli-labels.mjs";
 import { fmtStartedAt } from "@/lib/started-at.mjs";
@@ -82,6 +84,9 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
   const job = jobs.find((j) => j.id === id);
   // Hooks before the not-found early return; an unknown id just yields nulls.
   const { reportNum, entry } = useJobTiming(job ?? {});
+  // 体检任务：产物是独立 HTML（/api/checkup-report），不是 #N 的评估报告页。
+  // Hooks 必须在 not-found / ledger 早退之前调用。
+  const checkupReport = useCheckupReport(job ?? null);
   const subtitleIsNum = !!job?.subtitle && /^#\d+$/.test(job.subtitle);
   const running = job?.status === "running";
   // 用户主动停止：status 仍是 error，展示口径以标记为准（已停止 · 用户中断）。
@@ -204,17 +209,7 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
             )}
             {/* ADR-0046：子任务行给报告跳转（evaluate 站内 /report/{num}，checkup 新标签
                 /api/checkup-report）与返回父批量入口；无报告目标（异常缺字段）不显示死链。 */}
-            {(e.reportNum != null || checkupHref) && (
-              <p className="mt-3 flex flex-wrap items-center gap-3">
-                {e.reportNum != null && <ReportNumLink n={String(e.reportNum)} className="text-sm" />}
-                {e.reportNum != null && <span className="text-sm text-muted">{t("jobs.viewReport")}</span>}
-                {e.reportNum == null && checkupHref && (
-                  <Link href={checkupHref} target="_blank" rel="noreferrer" className="text-sm text-brand transition-colors hover:underline">
-                    {t("jobs.viewReport")}
-                  </Link>
-                )}
-              </p>
-            )}
+            {(e.reportNum != null || checkupHref) && <LedgerReportJump entry={e} checkupHref={checkupHref} />}
             {isChild && (
               <p className="mt-3">
                 <Link href={`/jobs/${e.parentId}`} className="inline-flex items-center gap-1 text-sm text-muted transition-colors hover:text-brand">
@@ -367,14 +362,26 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
             {/* The report jump, exactly once: the /jobs rows carry it beside the
                 title, and pool cards carry it AS the "#N" subtitle below — never
                 both (ADR-0018). */}
-            {reportNum && !subtitleIsNum && (
+            {checkupReport ? (
               <>
                 {" "}
-                <ReportNumLink
-                  n={reportNum}
-                  className="align-middle text-sm font-normal text-faint transition-colors hover:text-brand"
+                <CheckupReportChip
+                  n={checkupReport.num}
+                  href={checkupReport.href}
+                  className="align-middle text-sm font-normal"
                 />
               </>
+            ) : (
+              reportNum &&
+              !subtitleIsNum && (
+                <>
+                  {" "}
+                  <ReportNumLink
+                    n={reportNum}
+                    className="align-middle text-sm font-normal text-faint transition-colors hover:text-brand"
+                  />
+                </>
+              )
             )}
           </h1>
           {subtitleIsNum && reportNum ? (
@@ -485,4 +492,48 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
       )}
     </div>
   );
+}
+// 台账视图的报告入口（独立组件：台账分支在组件早退之后，不能直接调 hook）。
+// 体检行给体检 HTML 的 chip —— HTML 存在性由 /api/checkup-report 的 HEAD 探测
+// 回答，缺失就不渲染，不造死链；其余行保持原来的「#N + 查看报告」。批量子行的
+// trackerN 走 checkupHref（服务端已有的子任务报告目标），口径不变。
+function LedgerReportJump({
+  entry,
+  checkupHref,
+}: {
+  entry: RunLedgerEntry;
+  checkupHref: string | null;
+}) {
+  const { t } = useI18n();
+  const checkupReport = useCheckupReport(entry);
+  if (checkupReport) {
+    return (
+      <p className="mt-3 flex flex-wrap items-center gap-3">
+        <CheckupReportChip n={checkupReport.num} href={checkupReport.href} className="text-sm" />
+      </p>
+    );
+  }
+  if (entry.reportNum != null) {
+    return (
+      <p className="mt-3 flex flex-wrap items-center gap-3">
+        <ReportNumLink n={String(entry.reportNum)} className="text-sm" />
+        <span className="text-sm text-muted">{t("jobs.viewReport")}</span>
+      </p>
+    );
+  }
+  if (checkupHref) {
+    return (
+      <p className="mt-3 flex flex-wrap items-center gap-3">
+        <Link
+          href={checkupHref}
+          target="_blank"
+          rel="noreferrer"
+          className="text-sm text-brand transition-colors hover:underline"
+        >
+          {t("jobs.viewReport")}
+        </Link>
+      </p>
+    );
+  }
+  return null;
 }

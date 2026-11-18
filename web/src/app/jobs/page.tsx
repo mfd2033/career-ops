@@ -11,6 +11,8 @@ import { fmtDuration } from "@/lib/format";
 import { fmtStartedAt } from "@/lib/started-at.mjs";
 import { doneDurationSeconds, useJobTiming } from "@/lib/eval-duration-client";
 import { ReportNumLink } from "@/components/report-num-link";
+import { CheckupReportChip } from "@/components/checkup-report-chip";
+import { useCheckupReport } from "@/lib/checkup-report-client";
 import { formatRunEngine } from "@/lib/cli-labels.mjs";
 import { batchSummary } from "@/lib/batch-summary.mjs";
 import { mergeBatchItems, shouldPollBatch } from "@/lib/batch-live.mjs";
@@ -84,6 +86,8 @@ function JobsRow({ job: j }: { job: Job }) {
   // 用户停止是主动终态：状态列读「已停止」，图标用中性方块而非红色失败三角。
   const stopped = isStopped(j);
   const { reportNum, entry } = useJobTiming(j);
+  // 体检行：报告是独立的 HTML（/api/checkup-report），不是 #N 的评估报告页。
+  const checkupReport = useCheckupReport(j);
   const secs = j.status === "done" ? doneDurationSeconds(entry, j) : null;
   // The pool cards carry "#N" as their subtitle — the report number now lives in
   // its own column, so a bare "#N" subtitle is suppressed instead of duplicated.
@@ -212,7 +216,11 @@ function JobsRow({ job: j }: { job: Job }) {
         )}
         {/* 报告号独立成列（原先是标题旁的附属 span）：移动端也保留——它是这一行
             的关键标识，短且不参与标题 truncate。 */}
-        {reportNum && <ReportNumLink n={reportNum} className="text-xs" />}
+        {checkupReport ? (
+          <CheckupReportChip n={checkupReport.num} href={checkupReport.href} className="text-xs" />
+        ) : (
+          reportNum && <ReportNumLink n={reportNum} className="text-xs" />
+        )}
         {j.result?.score != null && (
           <span className={cn("shrink-0 rounded-md px-1.5 py-0.5 text-xs font-semibold tabular-nums", TONE_CHIP[tone])}>
             {j.result.score}/5

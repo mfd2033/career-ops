@@ -11,6 +11,8 @@ import { fmtStartedAt } from "@/lib/started-at.mjs";
 import { doneDurationSeconds, useJobTiming } from "@/lib/eval-duration-client";
 import { formatRunEngine } from "@/lib/cli-labels.mjs";
 import { ReportNumLink } from "@/components/report-num-link";
+import { CheckupReportChip } from "@/components/checkup-report-chip";
+import { useCheckupReport } from "@/lib/checkup-report-client";
 
 // Humanize raw agent tool names into what the user actually cares about, so a
 // multi-minute evaluation reads as progress instead of a cryptic tool dump (#8).
@@ -111,6 +113,7 @@ export function WorkerCard({
       ? job.result.summary
       : last;
   const inline = variant === "inline";
+  const isTray = variant === "tray";
   const hasScore = job.result?.score != null;
   const authError = isAuthError(job);
   const tokens = job.status === "done" ? job.cost?.tokens ?? 0 : 0;
@@ -118,6 +121,9 @@ export function WorkerCard({
   // TSV-sourced duration (resolving the report via /api/report-status), falling
   // back to the local startedAt→endedAt wall time when no report is resolvable.
   const { reportNum, entry } = useJobTiming(job);
+  // 体检卡的报告是另一份产物（HTML，/api/checkup-report），不是 #N 指向的评估
+  // 报告页。有真产物才渲染 chip；没有就退回原 #N，不造死链。
+  const checkupReport = useCheckupReport(job);
   const doneSecs = job.status === "done" ? doneDurationSeconds(entry, job) : null;
   // ADR-0043 运行引擎（派发时请求的运行时+模型，不是实际加载的）：有就显示，
   // 没有就不占位（列表里缺失 = 无记录，只有详情页才明说「未记录」）。
@@ -141,7 +147,18 @@ export function WorkerCard({
           <Check className={cn("size-3 shrink-0", tone.icon)} />
         )}
         <span className={cn("truncate font-medium", inline ? "text-sm" : "text-xs")}>{job.title}</span>
-        {reportNum && <ReportNumLink n={reportNum} className={cn("shrink-0 cursor-pointer tabular-nums text-faint transition-colors hover:text-brand", inline ? "text-xs" : "text-[10px]")} />}
+        {/* 托盘宽 240：chip 与整条公司名同排会把标题截成「公司体检：中…」，故托盘把
+            chip 让到摘要行右端（卡高不变），列表/助手内联保留在标题后。 */}
+        {checkupReport && !isTray ? (
+          <CheckupReportChip
+            n={checkupReport.num}
+            href={checkupReport.href}
+            className={cn("shrink-0", inline ? "text-xs" : "text-[10px]")}
+          />
+        ) : (
+          !isTray &&
+          reportNum && <ReportNumLink n={reportNum} className={cn("shrink-0 cursor-pointer tabular-nums text-faint transition-colors hover:text-brand", inline ? "text-xs" : "text-[10px]")} />
+        )}
         {hasScore && (
           <span
             className={cn(
@@ -166,22 +183,36 @@ export function WorkerCard({
           <div className={cn("h-full w-full rounded-full", tone.bar)} />
         )}
       </div>
-      {(bottom || running || queued) && (
-        <div className={cn("mt-1 truncate text-faint", inline ? "text-xs" : "text-[10px]")}
-          title={running && startedClock ? t("jobs.startedAt", { time: startedClock }) : undefined}
-        >
-          {queued
-            ? `${t("jobs.queued")}${
-                job.queuedPos != null ? ` · ${t("jobs.queuedPos", { n: job.queuedPos })}` : ""
-              }${fmtStartedAt(job.enqueuedAt ?? job.startedAt) ? ` · ${t("jobs.queuedSince", { time: fmtStartedAt(job.enqueuedAt ?? job.startedAt)! })}` : ""}`
-            : running
-              ? // ADR-0042 决议 1：收尾段比最后一步更「新」。ADR-0044 三段式：
-                // 始于 · 阶段 · tick（裸时钟置于最前，缺失时退回两段）。
-                `${startedClock ? `${startedClock} · ` : ""}${
-                  job.phase === "finalizing" ? t("jobs.phaseFinalizing") : (last ?? t("jobs.working"))
-                } · ${fmtElapsed(elapsed)}`
-              : bottom}
+      {isTray && checkupReport ? (
+        // 托盘（240px）的体检卡：标题行留给完整公司名，chip 落在摘要行；没有摘要
+        // 时 chip 自占一行、左对齐，不与标题抢宽度。
+        <div className={cn("mt-1 flex items-center gap-2 text-faint", inline ? "text-xs" : "text-[10px]")}>
+          {bottom && <span className="min-w-0 flex-1 truncate">{bottom}</span>}
+          <CheckupReportChip
+            n={checkupReport.num}
+            href={checkupReport.href}
+            className="shrink-0 text-[10px]"
+          />
         </div>
+      ) : (
+        (bottom || running || queued) && (
+          <div
+            className={cn("mt-1 truncate text-faint", inline ? "text-xs" : "text-[10px]")}
+            title={running && startedClock ? t("jobs.startedAt", { time: startedClock }) : undefined}
+          >
+            {queued
+              ? `${t("jobs.queued")}${
+                  job.queuedPos != null ? ` · ${t("jobs.queuedPos", { n: job.queuedPos })}` : ""
+                }${fmtStartedAt(job.enqueuedAt ?? job.startedAt) ? ` · ${t("jobs.queuedSince", { time: fmtStartedAt(job.enqueuedAt ?? job.startedAt)! })}` : ""}`
+              : running
+                ? // ADR-0042 决议 1：收尾段比最后一步更「新」。ADR-0044 三段式：
+                  // 始于 · 阶段 · tick（裸时钟置于最前，缺失时退回两段）。
+                  `${startedClock ? `${startedClock} · ` : ""}${
+                    job.phase === "finalizing" ? t("jobs.phaseFinalizing") : (last ?? t("jobs.working"))
+                  } · ${fmtElapsed(elapsed)}`
+                : bottom}
+          </div>
+        )
       )}
       {authError && (
         <div className={cn("mt-1 text-amber-700 dark:text-amber-400", inline ? "text-xs" : "text-[10px]")}>
