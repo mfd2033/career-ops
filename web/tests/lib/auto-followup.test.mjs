@@ -33,6 +33,8 @@ const EXT_JS = stripComments(readRepo("extension/followup-send.js"));
 const BG = stripComments(readRepo("extension/background.js"));
 const MANIFEST = JSON.parse(readRepo("extension/manifest.json"));
 
+const SETTLE_BAR = stripComments(readRepo("extension/followup-settle-bar.js"));
+
 const count = (haystack, needle) => haystack.split(needle).length - 1;
 
 // ---- 入口 ------------------------------------------------------------------
@@ -223,9 +225,12 @@ test("manifest 挂上了发送脚本，版本已升到 0.2.0", () => {
   for (const block of siteBlocks) {
     assert.ok(block.js.includes("followup-send-pure.js"), `${block.matches[0]} 缺纯逻辑模块`);
     assert.ok(block.js.includes("followup-send.js"), `${block.matches[0]} 缺发送脚本`);
+    assert.ok(block.js.includes("followup-settle-bar.js"), `${block.matches[0]} 缺停留倒计时条`);
     const pure = block.js.indexOf("followup-send-pure.js");
     const send = block.js.indexOf("followup-send.js");
+    const settle = block.js.indexOf("followup-settle-bar.js");
     assert.ok(pure < send, `${block.matches[0]} 的纯逻辑必须排在发送脚本之前`);
+    assert.ok(send < settle, `${block.matches[0]} 的倒计时条排在发送脚本之后`);
   }
 });
 
@@ -238,19 +243,50 @@ test("SW 有 followup-send 分支，且转发给内容脚本", () => {
   assert.ok(BG.includes("sendFollowup(msg, sender)"), "分支必须调用 sendFollowup，并带上 sender");
 });
 
-test("发送成功后停留 5 秒再切回面板，失败/不确定留在招聘页", () => {
+test("发送成功后停留 5 秒再切回面板，用户点「留在本页」可取消", () => {
   // 直接读原文：常量定义行紧跟在 // 注释之后，会随注释一起被 stripComments 剥掉。
   const raw = readRepo("extension/background.js");
   assert.ok(raw.includes("sendFollowup(msg, sender)"), "sendFollowup 要接 sender，才知道发起面板的 tab");
   assert.ok(raw.includes("async function refocusWebTab"), "SW 要有还焦点的助手");
   assert.ok(/FOLLOWUP_SETTLE_MS\s*=\s*5000\s*;/.test(raw), "停留时长必须是 5 秒");
+  assert.ok(raw.includes("function beginSettleWait(tabId)"), "停留必须是可中断的等待，不能再直接 sleep");
   const sentAt = raw.indexOf('if (res.status === "sent")');
   assert.ok(sentAt > 0, "只有 sent 才切回面板：uncertain 要留在招聘页核对，failed 要留在原地补救");
-  const block = raw.slice(sentAt, sentAt + 500);
-  const settleAt = block.indexOf("setTimeout");
+  const block = raw.slice(sentAt, raw.indexOf("return { ...res", sentAt));
+  const waitAt = block.indexOf("beginSettleWait(tab.id)");
   const refocusAt = block.indexOf("refocusWebTab(webTabId)");
-  assert.ok(settleAt > 0, "发送成功后必须先停留，不能立刻切走");
-  assert.ok(refocusAt > settleAt, "停留要在 refocus 之前：立即切走会让消息发不出去");
+  assert.ok(waitAt > 0, "发送成功后必须先停留，不能立刻切走");
+  assert.ok(refocusAt > waitAt, "停留要在 refocus 之前：立即切走会让消息发不出去");
+  assert.ok(block.includes("if (!stayed)"), "用户中断（stayed）时必须不回切面板");
+});
+
+test("SW 接受页面中断消息，只认正在等待的那条 tab", () => {
+  const raw = readRepo("extension/background.js");
+  const at = raw.indexOf('case "followup-settle-stop"');
+  assert.ok(at > 0, "SW 必须有 followup-settle-stop 分支");
+  const block = raw.slice(at, raw.indexOf("case ", at + 10));
+  assert.ok(block.includes("settleWait.tabId !== tabId"), "中断要校验发起 tab，别让任意页面取消");
+  assert.ok(block.includes("settleWait.cancel()"), "中断必须真正结束等待");
+  assert.ok(block.includes("sendResponse({ ok: true })"), "中断成功要回执，页面据此提示「留在本页」");
+  const waitAt = raw.indexOf("function beginSettleWait");
+  const waitBody = raw.slice(waitAt, raw.indexOf("async function sendFollowup", waitAt));
+  assert.ok(
+    waitBody.includes('{ type: "followup-settle", ms: FOLLOWUP_SETTLE_MS }'),
+    "开始停留时要通知招聘页浮出倒计时条",
+  );
+  assert.ok(waitBody.includes("setTimeout(() => finish(false), FOLLOWUP_SETTLE_MS)"), "没人中断也要有 5 秒兜底");
+});
+
+test("停留条：顶部居中、G3-B 圆角、可中断、带降级", () => {
+  assert.ok(SETTLE_BAR.includes('msg.type !== "followup-settle"'), "只应答 followup-settle");
+  assert.ok(SETTLE_BAR.includes('type: "followup-settle-stop"'), "「留在本页」必须发中断消息");
+  assert.ok(SETTLE_BAR.includes('const BTN_STAY = "留在本页"'), "中断按钮文案是「留在本页」");
+  assert.ok(SETTLE_BAR.includes("corner-shape:squircle"), "圆角走 G3-B（squircle 曲率连续）");
+  assert.ok(SETTLE_BAR.includes("border-radius:18px"), "胶囊端头 18px");
+  assert.ok(SETTLE_BAR.includes("border-radius:11px"), "按钮 11px + squircle");
+  assert.ok(SETTLE_BAR.includes("position:fixed;top:14px;left:50%;translate:-50% 0"), "条固定在页面顶部居中");
+  assert.ok(SETTLE_BAR.includes("prefers-reduced-motion"), "动效要能降级");
+  assert.ok(SETTLE_BAR.includes("TEXT_CANCEL_FAILED"), "取消失败要如实回执，不能假成功");
 });
 
 test("内容脚本只在三站生效，且发送后做两项回读", () => {

@@ -29,7 +29,8 @@
         "core.js",
         "site-boss.js",
         "followup-send-pure.js",
-        "followup-send.js"
+        "followup-send.js",
+        "followup-settle-bar.js"
       ],
       "run_at": "document_idle"
     },
@@ -42,7 +43,8 @@
         "core.js",
         "site-liepin.js",
         "followup-send-pure.js",
-        "followup-send.js"
+        "followup-send.js",
+        "followup-settle-bar.js"
       ],
       "run_at": "document_idle"
     },
@@ -55,7 +57,8 @@
         "core.js",
         "site-zhaopin.js",
         "followup-send-pure.js",
-        "followup-send.js"
+        "followup-send.js",
+        "followup-settle-bar.js"
       ],
       "run_at": "document_idle"
     }

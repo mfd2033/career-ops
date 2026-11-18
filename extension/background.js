@@ -1219,6 +1219,38 @@ async function refocusWebTab(tabId) {
   }
 }
 
+/** 当前停留等待：{ tabId, cancel } | null。页面点「留在本页」时经 onMessage 取消。 */
+let settleWait = null;
+
+/**
+ * 发送成功后停在招聘页 N 毫秒；期间页面浮出倒计时条（followup-settle-bar.js）。
+ * 用户点「留在本页」→ 页面发 followup-settle-stop → 这里立即结束并回 true
+ * （不切回面板，用户继续待在招聘页）；没人中断则等满 5 秒回 false（照旧切回）。
+ * 页面拿不到通知（脚本缺失 / 扩展刚重载）也照样等满，只是没有中断入口。
+ */
+function beginSettleWait(tabId) {
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (stayed) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      if (settleWait && settleWait.cancel === cancel) settleWait = null;
+      resolve(stayed === true);
+    };
+    const cancel = () => finish(true);
+    const timer = setTimeout(() => finish(false), FOLLOWUP_SETTLE_MS);
+    settleWait = { tabId, cancel };
+    // 页面没挂脚本时这一步会失败：照样等满 5 秒，只是没有中断入口，不影响主流程。
+    try {
+      const p = chrome.tabs.sendMessage(tabId, { type: "followup-settle", ms: FOLLOWUP_SETTLE_MS });
+      if (p && typeof p.catch === "function") p.catch(() => {});
+    } catch {
+      /* 通知发不到：忽略 */
+    }
+  });
+}
+
 async function sendFollowup(msg, sender) {
   const url = typeof (msg && msg.url) === "string" ? msg.url.trim() : "";
   const text = typeof (msg && msg.text) === "string" ? msg.text : "";
@@ -1260,8 +1292,10 @@ async function sendFollowup(msg, sender) {
         // failed 要留在原地补救（ADR-0100：从岗位页点继续沟通再试）。招聘站 tab 不关不动。
         // 切走前先停留 5 秒——消息发出去不等于站点收完，见 FOLLOWUP_SETTLE_MS。
         if (res.status === "sent") {
-          await new Promise((resolve) => setTimeout(resolve, FOLLOWUP_SETTLE_MS));
-          await refocusWebTab(webTabId);
+          // 停留期间页面会浮出倒计时条；点「留在本页」就取消这次切回，只提前结束
+          // 等待、不动招聘页，用户继续在站点上看回显。
+          const stayed = await beginSettleWait(tab.id);
+          if (!stayed) await refocusWebTab(webTabId);
         }
         return { ...res, tabId: tab.id };
       }
@@ -1432,6 +1466,18 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         } catch (err) {
           sendResponse({ ok: false, status: "failed", reason: "exception", detail: (err && err.message) || String(err) });
         }
+        break;
+      }
+      case "followup-settle-stop": {
+        // 招聘页倒计时条的「留在本页」：只结束本次停留、不切回面板。
+        // 只认正在等待的那条 tab，别的页面发不来。
+        const tabId = sender && sender.tab && typeof sender.tab.id === "number" ? sender.tab.id : null;
+        if (!settleWait || tabId == null || settleWait.tabId !== tabId) {
+          sendResponse({ ok: false, reason: "no-settle" });
+          break;
+        }
+        settleWait.cancel();
+        sendResponse({ ok: true });
         break;
       }
       case "set-status": {
