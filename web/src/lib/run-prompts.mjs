@@ -58,6 +58,22 @@ const WEBFETCH_STEP = 'Use WebFetch to read the posting (you are headless — Pl
 const INLINE_JD_STEP = 'The FULL posting text is provided below (between the "POSTING TEXT (inline)" markers). Do NOT WebFetch it — the page is already read. Mark the report header "Verification: inline (DOM)".';
 
 /**
+ * Blocked-board section as written when the worker must fetch the JD itself.
+ *
+ * 猎聘/智联/BOSS 的页面正文只能靠用户登录态浏览器抽取，所以「先跑抽取器、
+ * 失败即 STOP」这条是硬协议。但只要内联正文已经在手，这条就与 step 1 的
+ * 「全文已给、不要抓取」直接冲突：2026-11-20 猎聘那次任务就是 JD 已在提示里，
+ * worker 仍按本段先跑抽取器，抽取失败后放弃整次评估。两条指令不能同时下发。
+ */
+const BLOCKED_BOARDS_STEP = `   BLOCKED BOARDS: postings on zhipin.com / kanzhun.com (BOSS直聘), zhaopin.com (智联) and liepin.com (猎聘) block plain WebFetch and headless/logged-out browsers with a captcha/login wall. The user's LOGGED-IN browser IS reachable via bsk, so for these domains run the extractor FIRST instead of plain WebFetch:
+   node browser-extract.mjs "<url>" --mode jd --extractor auto
+   \`--extractor auto\` routes the zh boards to bsk (the user's logged-in browser); if a slider captcha appears it hands it to the user via request-help, which is expected — wait for it. Use the returned \`text\` as the FULL JD. If it exits non-zero (e.g. code bsk_missing, session_failed, captcha help timeout, navigation_error) or returns empty \`text\`, then STOP — do NOT fabricate the JD/score, do NOT WebFetch (it only hits the same wall), do NOT ask the user to paste, do NOT write the report/TSV. This also covers the extractor command never RUNNING at all — e.g. your shell reports a \`node\`/command-not-found error because node is off the shell's PATH. That is a hard extraction FAILURE, NOT an environment for you to bootstrap: do NOT install node, do NOT edit PATH, do NOT improvise an alternative scraper, do NOT fall back to WebFetch or any other method. End with EXACTLY one terminal line on stdout, verbatim:
+   ERROR: cannot extract JD for {host} — {host} extraction via bsk failed ({code}); provide the JD text inline.`;
+
+/** Same section, replaced when the inline text is already in hand. */
+const INLINE_JD_BLOCKED_BOARDS_STEP = `   INLINE JD — SKIP THE EXTRACTOR: this posting's full text is already inlined below (extracted by the browser extension from the logged-in page), so the blocked-board extractor is NOT needed. Do NOT run \`browser-extract.mjs\`, do NOT WebFetch, and do NOT ask the user to paste — the inline text IS the JD.`;
+
+/**
  * Normalize the DOM-extracted posting text: trim, clamp to the extension's own
  * budget, and tolerate junk input. The server clamps because the extension is not
  * the only caller — a curl'd megabyte of text would otherwise buy a megabyte of
@@ -84,9 +100,16 @@ export function clampInlineEmployer(name) {
   return name.replace(/\s+/g, " ").trim().slice(0, 120);
 }
 
-/** Swap step 1 to the inline wording — no-op when there is no inline text. */
+/**
+ * Swap the fetch instructions to the inline wording — no-op when there is no
+ * inline text. Both the step-1 sentence AND the blocked-board section must be
+ * rewritten: leaving the latter in place tells the worker to run an extractor
+ * for a JD it already has, and a failed extraction then kills a run that had
+ * every fact it needed.
+ */
 function useInlineJdText(prompt, jd) {
-  return jd ? prompt.replace(WEBFETCH_STEP, INLINE_JD_STEP) : prompt;
+  if (!jd) return prompt;
+  return prompt.replace(WEBFETCH_STEP, INLINE_JD_STEP).replace(BLOCKED_BOARDS_STEP, INLINE_JD_BLOCKED_BOARDS_STEP);
 }
 
 /**
@@ -377,10 +400,7 @@ End with EXACTLY one final line: VERDICT: ★{star}/5 — {one-line recommendati
 
 1. Read ${evalRef} and follow it EXACTLY (blocks A–F, G posting-legitimacy, and the Machine Summary).${evalSharedHint} Ground the fit in THIS person: read cv.md, config/profile.yml and modes/_profile.md. ${WEBFETCH_STEP}
 
-   BLOCKED BOARDS: postings on zhipin.com / kanzhun.com (BOSS直聘), zhaopin.com (智联) and liepin.com (猎聘) block plain WebFetch and headless/logged-out browsers with a captcha/login wall. The user's LOGGED-IN browser IS reachable via bsk, so for these domains run the extractor FIRST instead of plain WebFetch:
-   node browser-extract.mjs "<url>" --mode jd --extractor auto
-   \`--extractor auto\` routes the zh boards to bsk (the user's logged-in browser); if a slider captcha appears it hands it to the user via request-help, which is expected — wait for it. Use the returned \`text\` as the FULL JD. If it exits non-zero (e.g. code bsk_missing, session_failed, captcha help timeout, navigation_error) or returns empty \`text\`, then STOP — do NOT fabricate the JD/score, do NOT WebFetch (it only hits the same wall), do NOT ask the user to paste, do NOT write the report/TSV. This also covers the extractor command never RUNNING at all — e.g. your shell reports a \`node\`/command-not-found error because node is off the shell's PATH. That is a hard extraction FAILURE, NOT an environment for you to bootstrap: do NOT install node, do NOT edit PATH, do NOT improvise an alternative scraper, do NOT fall back to WebFetch or any other method. End with EXACTLY one terminal line on stdout, verbatim:
-   ERROR: cannot extract JD for {host} — {host} extraction via bsk failed ({code}); provide the JD text inline.
+${BLOCKED_BOARDS_STEP}
 
 2. Persist the result CANONICALLY so the web and the CLI share ONE source of truth:
 ${reserveStep}

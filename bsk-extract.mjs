@@ -333,6 +333,10 @@ async function runBsk(args, timeoutMs = DEFAULT_TIMEOUT_MS) {
         : `bsk ${args.join(' ')} failed: ${detail || err.message}`;
     const e = new Error(msg);
     e.code = code;
+    // 保留底层失败类型（'exit' = bsk 正常退出但退出码非零，其余是 spawn 层
+    // 错误如 EINVAL/ENOENT）。协议拒绝与「进程根本没起来」在这里必须能分开：
+    // 前者可以重新 sync 再读，后者重试也只会重复同一个环境故障。
+    e.spawnCode = err.code ?? '';
     throw e;
   }
 }
@@ -532,8 +536,39 @@ export function isObservationRefusal(err) {
     // did not name the observation it acts on. Same recovery as the two above
     // (re-sync, re-fire) — and without this match the refusal skipped the
     // retry loop entirely and surfaced as a terminal `bsk_command_failed`.
-    m.includes('this action needs an explicit current observation')
+    m.includes('this action needs an explicit current observation') ||
+    // bsk 0.5.0 (protocol 1.9) words the same condition differently: the frame
+    // changed under the borrowed tab. Matching it here keeps the error message
+    // honest ("page kept changing"); the retry gate below no longer depends on
+    // any of these strings.
+    m.includes('the control context no longer belongs to the current document or control state')
   );
+}
+
+/**
+ * 这次 DOM 读取失败能不能靠「重新 cooperate sync 再读一次」恢复。
+ *
+ * bsk 0.4/0.5 把「观察窗口已失效」表达为 evaluate 非零退出（spawnCode `exit`），
+ * 但措辞随版本变——0.4.x 三种说法，0.5.0 又新增 "the control context no longer
+ * belongs to the current document or control state"。按文案白名单做重试 gate
+ * 会漏掉新措辞，把一次本可恢复的首读当成终态失败（2026-11-20 猎聘 JD 抽取即
+ * 此：首读撞上页面帧变化 → 文案未匹配 → 直接 bsk_command_failed，任务空跑）。
+ *
+ * evaluate 是只读 DOM 读取，重复执行没有副作用，所以这里按失败类别判定而非
+ * 文案：只排除环境级不可恢复项（daemon 离线 / CLI 缺失 / 超时 / 进程未起来），
+ * bsk 自身非零退出的一律允许重新 sync 再读。文案 continue 只服务错误消息。
+ *
+ * Pure — exported for tests.
+ *
+ * @param {unknown} err
+ * @returns {boolean}
+ */
+export function isRetryableEvaluateFailure(err) {
+  const code = String(err?.code ?? '');
+  if (!code) return false;
+  if (code === 'bsk_missing' || code === 'bsk_timeout' || code === 'bsk_daemon_offline') return false;
+  if (code !== 'bsk_command_failed') return false;
+  return err?.spawnCode === 'exit';
 }
 
 /** readDomViaBsk: run the DOM reader in the page via bsk evaluate. */
@@ -552,8 +587,8 @@ async function readDomViaBsk(sessionId) {
     try {
       ({ stdout } = await runBsk(args, 20_000));
     } catch (err) {
-      if (attempt < COOPERATE_RETRIES && isObservationRefusal(err)) continue;
-      if (isObservationRefusal(err)) {
+      if (attempt < COOPERATE_RETRIES && isRetryableEvaluateFailure(err)) continue;
+      if (isRetryableEvaluateFailure(err)) {
         const e = new Error(
           `bsk refused the DOM read ${attempt}× — the page kept changing between cooperate sync and evaluate (a churning SPA or an anti-bot loop): ${err.message}`,
         );

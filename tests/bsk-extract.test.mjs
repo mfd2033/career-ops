@@ -24,7 +24,7 @@ import { tmpdir } from 'node:os';
 
 import { pass, fail, ROOT } from './helpers.mjs';
 import { pickExtractor } from '../browser-extract.mjs';
-import { extractWithBsk, parseSessionId, zhListingAnchors, listingWithCities, extractCityFromText, extractSalaryFromText, shouldReloadListing, isObservationRefusal, parseSyncOutput, execWithHardTimeout } from '../bsk-extract.mjs';
+import { extractWithBsk, parseSessionId, zhListingAnchors, listingWithCities, extractCityFromText, extractSalaryFromText, shouldReloadListing, isObservationRefusal, isRetryableEvaluateFailure, parseSyncOutput, execWithHardTimeout } from '../bsk-extract.mjs';
 import { isZhJobDetailUrl } from '../lib/zh-jobs.mjs';
 
 const NODE = process.execPath;
@@ -322,6 +322,8 @@ const refusalCases = [
   ['observation wording (sync-side)', 'error: The observed page or control state changed; synchronize', true],
   // bsk 0.4.1 (protocol 1.8) strict policy — same recovery, different wording
   ['strict observation wording', 'error: this action needs an explicit current observation', true],
+  // bsk 0.5.0 (protocol 1.9) — the frame changed under the borrowed tab
+  ['frame-change wording', 'error: the control context no longer belongs to the current document or control state', true],
   ['daemon offline -> NOT retried', 'bsk daemon not reachable — start browser-skill (`bsk status`) and re-run', false],
   ['missing CLI -> NOT retried', 'bsk CLI not found on PATH (install browser-skill, or check `bsk status`)', false],
   ['empty message -> NOT retried', '', false],
@@ -332,6 +334,30 @@ for (const [desc, message, expected] of refusalCases) {
     pass(`isObservationRefusal(${desc}) -> ${expected}`);
   } else {
     fail(`isObservationRefusal(${desc}) -> ${got}, expected ${expected}`);
+  }
+}
+
+// ── S9b2: isRetryableEvaluateFailure (class-based retry gate) ────────────
+// 重试 gate 不能按错误文案白名单判定：bsk 0.5.0 换了措辞，猎聘首读被误解为终态
+// 失败，整次评估空跑（2026-11-20）。只区分「协议拒绝（可重新 sync 再读）」与
+// 「环境不可恢复（重试无意义）」。
+const retryableCases = [
+  // [desc, err, expected]
+  ['frame-change refusal (exit) -> retried', { code: 'bsk_command_failed', spawnCode: 'exit' }, true],
+  ['old wording refusal (exit) -> retried', { code: 'bsk_command_failed', spawnCode: 'exit' }, true],
+  ['daemon offline -> NOT retried', { code: 'bsk_daemon_offline' }, false],
+  ['missing CLI -> NOT retried', { code: 'bsk_missing' }, false],
+  ['timeout -> NOT retried', { code: 'bsk_timeout' }, false],
+  ['spawn-level failure (EINVAL) -> NOT retried', { code: 'bsk_command_failed', spawnCode: 'EINVAL' }, false],
+  ['unknown error without code -> NOT retried', {}, false],
+  ['undefined -> NOT retried', undefined, false],
+];
+for (const [desc, err, expected] of retryableCases) {
+  const got = isRetryableEvaluateFailure(err);
+  if (got === expected) {
+    pass(`isRetryableEvaluateFailure(${desc}) -> ${expected}`);
+  } else {
+    fail(`isRetryableEvaluateFailure(${desc}) -> ${got}, expected ${expected}`);
   }
 }
 

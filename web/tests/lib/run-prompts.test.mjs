@@ -387,17 +387,33 @@ test("buildPrompt: has BLOCKED BOARDS instruction for headless evaluation", () =
   assert.match(p, /do NOT fall back to WebFetch/);
 });
 
-test("buildBatchPrompt: BLOCKED BOARDS instruction preserved when jdText is present", () => {
+test("buildBatchPrompt: blocked-board extractor dropped when jdText is present", () => {
   const p = buildBatchPrompt("042", {
     input: "https://www.zhipin.com/job_detail/123.html",
     memory: "",
     today: "2026-08-14",
     jdText: "JD 全文在这里",
   });
-  // The BLOCKED BOARDS text lives in buildPrompt, which is wrapped by buildBatchPrompt.
-  // The jdText replacement only changes the first step of buildPrompt.
-  assert.match(p, /BLOCKED BOARDS/);
-  assert.match(p, /ERROR: cannot extract JD/);
+  // 内联正文已在手时，blocked-board 抽取协议必须让位：两段同时下发会互相冲突，
+  // worker 会为一份已经在提示里的 JD 去跑抽取器，抽取失败就放弃整次评估
+  // （2026-11-20 猎聘 Java架构师任务空跑）。
+  assert.doesNotMatch(p, /BLOCKED BOARDS/);
+  assert.doesNotMatch(p, /ERROR: cannot extract JD/);
+  assert.match(p, /INLINE JD — SKIP THE EXTRACTOR/);
+  assert.match(p, /the inline text IS the JD/);
+});
+
+test("buildPrompt: blocked-board extractor dropped when jdText is present", () => {
+  const p = buildPrompt({
+    kind: "evaluate",
+    input: "https://www.liepin.com/job/1986766655.shtml",
+    memory: "",
+    today: "2026-08-14",
+    jdText: "JD 全文在这里",
+  });
+  assert.doesNotMatch(p, /BLOCKED BOARDS/);
+  assert.doesNotMatch(p, /ERROR: cannot extract JD/);
+  assert.match(p, /INLINE JD — SKIP THE EXTRACTOR/);
 });
 
 // ── 评估耗时埋点 (ADR-0016/0017) ─────────────────────────────────────────────
