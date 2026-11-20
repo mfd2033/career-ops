@@ -34,6 +34,7 @@
     - 另有一个 `electron.exe`（开发态 `npm run tray`）时：只杀 **exe 路径在 `career-tray/` 下**的那些。脚本用 CIM 查 `ExecutablePath` 过滤后按 PID 杀；CIM 不可用就跳过，交给端口兜底。
     - 端口兜底：`Get-NetTCPConnection -LocalPort 3000 -State Listen` 取 PID → `taskkill /F /PID <pid>`，确认无 Listen 记录再继续。
     - **浏览器进程绝不杀（2026-11-03，用户要求）**：`msedge.exe` / `chrome.exe` / `firefox.exe` 等出现在 dev 端口或 3000 上时，`pack-launcher.mjs` 只打印「跳过浏览器进程 …请自行关闭该标签页后重跑」并停下，由用户自己关窗口——打包不替用户关浏览器。
+  - 0.2b **career-tray 目录句柄**：目录本身被进程当作工作目录或长期句柄打开时，改名和递归删除都会直接 EPERM，报错里只有目录名，看不出占用者。2026-11-20 实测是 bsk 守护进程把 `career-tray/` 带成了自己的工作目录，两次打包都死在 `pack.mjs` 的 `rmSync`。`pack-launcher.mjs` 的 `releaseTrayDirLock()` 现在先做 rename 往返探测；命中就 `bsk daemon stop` 释放句柄并复查，仍锁则直接报出排查方向，不再让下游裸抛 EPERM。
   - 0.3 **为什么必须先停**：`build-dashboard-ui.mjs` 第 5c 步会先 `rmSync` 再重建 `.dashboard-runtime\v{cacheVersion}\`。重打同版本时 cacheVersion 相同 → 旧实例正在用的 runtime 目录被直接删：Windows 下文件被占用 → 脚本抛错；未抛错则旧实例静默失效。
   - 0.4 **环境清理**：`web/node_modules` 缺失才 `npm install`（registry 已指 npmmirror）；先按命令行停掉本仓 dev server（见上一条 ②），再删 `web/.next`（删不掉时脚本会报占用并给下一步，不再裸抛 ENOTEMPTY）。冷删可能要 2 分钟以上。
 
