@@ -188,6 +188,8 @@ export type FollowupScript = {
   name: string;
   group: string;
   scenario: string;
+  /** 适用岗位关键词；`["通用"]` 表示任何岗位可用（ADR-0080 修订 1）。 */
+  appliesTo: string[];
   lines: FollowupScriptLine[];
   /** 取不到值的占位符（含 {城市}{原因}{时间} 这种无数据源的手填键），原样留在文本里。 */
   missing: string[];

@@ -11,6 +11,21 @@
 /** 四个场景桶，顺序即 UI 一级 chips 的顺序（ADR-0080 决策 5）。 */
 export const SCRIPT_GROUPS = ["首轮跟进", "二轮保岗", "售前问出差", "留档"];
 
+/** 「适用」的通用值：没写 `- 适用:` 的模板对任何岗位可用（ADR-0080 修订 1）。 */
+export const APPLIES_TO_ANY = "通用";
+
+/**
+ * `- 适用:` 原始文本 → 关键词数组。中英文逗号、顿号、斜杠都当分隔符；空值
+ * 回落成「通用」——用户漏写一行不该让模板从所有岗位消失。
+ */
+export function splitApplies(raw) {
+  const parts = String(raw ?? "")
+    .split(/[,，、/]/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  return parts.length ? parts : [APPLIES_TO_ANY];
+}
+
 /** 正文固定三行，顺序即渲染顺序；左栏标签与正文同 line-height 对齐。 */
 export const LINE_LABELS = ["事实", "意向", "下一步"];
 
@@ -81,14 +96,14 @@ export function fillText(text, row) {
 }
 
 const NAME_RE = /^##\s+(.+?)\s*$/;
-const FIELD_RE = /^-\s*(分组|场景|事实|意向|下一步)\s*[:：]\s*(.*)$/;
+const FIELD_RE = /^-\s*(分组|场景|适用|事实|意向|下一步)\s*[:：]\s*(.*)$/;
 
 /**
  * 解析 templates/followup-scripts.md → 模板数组。
  *
- * 只认 `##` 标题与那四条 bullet：文件头的说明 bullet（`- **自动填充的占位符**…`）
- * 天然不匹配 FIELD_RE，因此不会污染正文。缺正文（只有标题）的块被跳过——空模板
- * 进 UI 只会是空面板。
+ * 只认 `##` 标题与那五条 bullet（`适用` 可选）：文件头的说明 bullet（`- **自动填充
+ * 的占位符**…`）天然不匹配 FIELD_RE，因此不会污染正文。缺正文（只有标题）的块被
+ * 跳过——空模板进 UI 只会是空面板。
  */
 export function parseScripts(markdown) {
   const scripts = [];
@@ -106,7 +121,7 @@ export function parseScripts(markdown) {
     const nameMatch = NAME_RE.exec(line);
     if (nameMatch) {
       flush();
-      current = { name: nameMatch[1], group: "", scenario: "", lines: {} };
+      current = { name: nameMatch[1], group: "", scenario: "", appliesRaw: "", lines: {} };
       continue;
     }
     if (!current) continue;
@@ -115,12 +130,14 @@ export function parseScripts(markdown) {
     const [, label, value] = fieldMatch;
     if (label === "分组") current.group = value.trim();
     else if (label === "场景") current.scenario = value.trim();
+    else if (label === "适用") current.appliesRaw = value.trim();
     else current.lines[label] = value.trim();
   }
   flush();
 
-  return scripts.map((script) => ({
+  return scripts.map(({ appliesRaw, ...script }) => ({
     ...script,
+    appliesTo: splitApplies(appliesRaw),
     placeholders: LINE_LABELS.flatMap((label) => placeholderKeys(script.lines[label] ?? "")),
   }));
 }
@@ -140,6 +157,9 @@ export function fillScript(script, row) {
     name: script.name,
     group: script.group,
     scenario: script.scenario,
+    // 适用条件必须随填充结果一起出到前端——选择器在 fillScripts 之后运行，
+    // 这里丢了字段，岗位过滤就整体失效（ADR-0080 修订 1）。
+    appliesTo: Array.isArray(script.appliesTo) && script.appliesTo.length ? script.appliesTo : [APPLIES_TO_ANY],
     lines,
     missing,
   };
@@ -169,49 +189,71 @@ export function scriptsInGroup(scripts, group) {
   return scripts.filter((script) => script.group === group);
 }
 
-// 按推进情况自动挑话术的规则表（用户决策：不让用户选轮次，UI 直接显示当前阶段）。
+// 按推进情况自动挑话术的规则表（ADR-0080 修订 1：状态 → 候选桶序列）。
 // 顺序即优先级——freezeSuggested 要在「已跟进」之前判，冻结优先于常规再触达。
-// prefer 是变体关键词：在目标桶里按模板名匹配，匹配不到落桶内第一条。
+// 每个候选桶一次只回答「这个桶里有没有适用于本岗位的模板」；不适用就换下一个
+// 桶。prefer 只做桶内变体关键词匹配，匹配不到落该桶内第一条适用模板。
 const STAGE_RULES = [
   {
     when: (row) => row.status === "applied" && (row.followupCount ?? 0) === 0,
-    group: "首轮跟进",
-    prefer: "投递",
+    buckets: [{ group: "首轮跟进", prefer: "投递" }],
   },
   {
     when: (row) => row.status === "applied" && row.freezeSuggested === true,
-    group: "二轮保岗",
-    prefer: "关闭",
+    buckets: [{ group: "二轮保岗", prefer: "关闭" }],
   },
   {
     when: (row) => row.status === "applied",
-    group: "首轮跟进",
-    prefer: "已读",
+    buckets: [{ group: "首轮跟进", prefer: "已读" }],
   },
   {
     when: (row) => row.status === "responded",
-    group: "售前问出差",
-    prefer: "约面",
+    // 售前类岗位先问出差；其余岗位「售前问出差」整桶不适用，落到通用的
+    // 「对方已回」——1336（IT研发负责人）就是这条的回退路径。
+    buckets: [
+      { group: "售前问出差", prefer: "约面" },
+      { group: "首轮跟进", prefer: "已回" },
+    ],
   },
   {
     when: (row) => row.status === "interview",
-    group: "二轮保岗",
-    prefer: "面",
+    buckets: [{ group: "二轮保岗", prefer: "面" }],
   },
 ];
 
 /**
+ * 岗位名是否命中模板的适用条件。只做包含判断，不猜语义：
+ * `通用`（或没写适用行）对任何岗位成立，其余关键词任一出现在岗位名里即成立。
+ */
+export function appliesToRole(script, role) {
+  const applies = Array.isArray(script?.appliesTo) && script.appliesTo.length ? script.appliesTo : [APPLIES_TO_ANY];
+  if (applies.includes(APPLIES_TO_ANY)) return true;
+  const name = String(role ?? "");
+  if (!name) return false;
+  return applies.some((keyword) => keyword && name.includes(keyword));
+}
+
+/** 在一个候选桶里挑一条：先过滤适用岗位，再按 prefer 名称匹配，最后落桶内第一条。 */
+function pickFromBucket(list, bucket, role) {
+  const inGroup = scriptsInGroup(list, bucket.group).filter((script) => appliesToRole(script, role));
+  if (!inGroup.length) return null;
+  const preferred = inGroup.find((script) => String(script.name ?? "").includes(bucket.prefer));
+  return preferred ?? inGroup[0];
+}
+
+/**
  * 按本行推进情况自动挑一条话术。返回 scripts 的下标；空数组返回 -1。
  *
- * 规则（由 tracker 行的 status/followupCount/freezeSuggested 推导）：
+ * 规则（由 tracker 行的 status/followupCount/freezeSuggested/role 推导）：
  * - applied 且从未跟进过 → 首轮跟进·投递后无回应
  * - applied 且已跟进、引擎判定该冻结 → 二轮保岗·岗位或将关闭
  * - applied 且已跟进（其余情况）→ 首轮跟进·已读不回再触达
- * - responded（对方已回，约面阶段）→ 售前问出差·约面先问清
+ * - responded → 售前类岗位：售前问出差·约面先问清；其余岗位：首轮跟进·对方已回
  * - interview（面后在等结果）→ 二轮保岗·面后等结果
  *
- * 模板名由用户随时改写，prefer 关键词只做「尽量」：目标桶里匹配不到就落桶内
- * 第一条，目标桶整个不存在就落第一条——绝不因名字变了而空手而归。
+ * 模板名由用户随时改写，prefer 关键词只做「尽量」：桶内匹配不到就落桶内第一条
+ * 适用模板；候选桶全部没有适用模板，就退回全库第一条适用模板——绝不因名字或
+ * 岗位不同而空手而归。
  */
 export function suggestScriptIndex(scripts, row) {
   const list = Array.isArray(scripts) ? scripts : [];
@@ -219,11 +261,12 @@ export function suggestScriptIndex(scripts, row) {
   const r = row && typeof row === "object" ? row : {};
   const status = String(r.status ?? "").toLowerCase();
   const rule = STAGE_RULES.find(({ when }) => when({ ...r, status }));
-  if (!rule) return 0;
-  const inGroup = scriptsInGroup(list, rule.group);
-  if (!inGroup.length) return 0;
-  const preferred = inGroup.find((script) => String(script.name ?? "").includes(rule.prefer));
-  return list.indexOf(preferred ?? inGroup[0]);
+  for (const bucket of rule?.buckets ?? []) {
+    const picked = pickFromBucket(list, bucket, r.role);
+    if (picked) return list.indexOf(picked);
+  }
+  const anyFit = list.find((script) => appliesToRole(script, r.role));
+  return list.indexOf(anyFit ?? list[0]);
 }
 
 /**

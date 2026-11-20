@@ -17,6 +17,8 @@ import {
   LINE_LABELS,
   AUTO_PLACEHOLDER_MAP,
   MANUAL_PLACEHOLDERS,
+  APPLIES_TO_ANY,
+  splitApplies,
   placeholderKeys,
   fillText,
   parseScripts,
@@ -34,8 +36,8 @@ const SHIPPED = readFileSync(new URL("../../../templates/followup-scripts.md", i
 
 // ---- 随包文件的结构（内容由用户改写，结构不许漂移）---------------------------
 
-test("随包模板文件解析出 7 条话术（任务 career-ops-50 的口径）", () => {
-  assert.equal(parseScripts(SHIPPED).length, 7);
+test("随包模板文件解析出 8 条话术（career-ops-50 的 7 条 + 修订 1 的「对方已回」）", () => {
+  assert.equal(parseScripts(SHIPPED).length, 8);
 });
 
 test("四个场景桶齐备且顺序稳定（分组顺序即 UI 一级 chips 顺序）", () => {
@@ -78,6 +80,27 @@ test("自动与手填占位符没有交集——同一个键不能既自动又�
 });
 
 // ---- parseScripts：窄解析，不猜不丢 -----------------------------------------
+
+test("「适用」行按中英文逗号/顿号拆成关键词；没写这一行就落「通用」", () => {
+  const md = [
+    "## 甲",
+    "- 分组: 售前问出差",
+    "- 适用: 售前, 解决方案、FAE",
+    "- 事实: a",
+    "## 乙",
+    "- 分组: 首轮跟进",
+    "- 事实: b",
+  ].join("\n");
+  const [first, second] = parseScripts(md);
+  assert.deepEqual(first.appliesTo, ["售前", "解决方案", "FAE"]);
+  assert.deepEqual(second.appliesTo, [APPLIES_TO_ANY]);
+});
+
+test("splitApplies 对空值、重复分隔符都稳定，不产生空关键词", () => {
+  assert.deepEqual(splitApplies(undefined), [APPLIES_TO_ANY]);
+  assert.deepEqual(splitApplies(""), [APPLIES_TO_ANY]);
+  assert.deepEqual(splitApplies("售前，，FAE"), ["售前", "FAE"]);
+});
 
 test("文件头的说明 bullet 不进正文（只认分组/场景/事实/意向/下一步）", () => {
   const md = [
@@ -201,6 +224,11 @@ test("fillScript 返回三行 + 合并后的缺值清单", () => {
   assert.deepEqual(filled.missing, []);
 });
 
+test("fillScript 透传适用条件——前端选择器靠这个字段过滤岗位", () => {
+  const script = parseScripts(SHIPPED).find((s) => s.name.includes("约面先问清"));
+  assert.deepEqual(fillScript(script, ROW).appliesTo, ["售前", "解决方案", "FAE"]);
+});
+
 test("fillScript 不改动原模板（纯函数）", () => {
   const scripts = parseScripts(SHIPPED);
   const before = JSON.stringify(scripts);
@@ -230,9 +258,10 @@ test("未知分组沉底而不是消失——用户在文件里新加一个桶�
 test("scriptsInGroup 保持文件里的顺序", () => {
   const scripts = parseScripts(SHIPPED);
   const first = scriptsInGroup(scripts, "首轮跟进");
-  assert.equal(first.length, 2);
+  assert.equal(first.length, 3);
   assert.match(first[0].name, /投递后无回应/);
   assert.match(first[1].name, /已读不回/);
+  assert.match(first[2].name, /对方已回/);
 });
 
 // ---- 二级 chips 短名 + 分组显示翻译 ------------------------------------------
@@ -293,10 +322,26 @@ test("applied 且已跟进、引擎判定冻结 → 二轮保岗·岗位或将�
   assert.match(scripts[idx].name, /岗位或将关闭/);
 });
 
-test("responded（约面阶段）→ 售前问出差·约面先问清", () => {
+test("responded + 售前类岗位 → 售前问出差·约面先问清", () => {
+  const scripts = parseScripts(SHIPPED);
+  const idx = suggestScriptIndex(scripts, ENTRY({ status: "responded", role: "售前工程师" }));
+  assert.match(scripts[idx].name, /约面先问清/);
+});
+
+test("responded + 非售前岗位 → 首轮跟进·对方已回，断不问出差（报告 1336）", () => {
+  const scripts = parseScripts(SHIPPED);
+  const idx = suggestScriptIndex(scripts, ENTRY({ status: "responded", role: "IT研发负责人" }));
+  assert.match(scripts[idx].name, /对方已回/);
+  for (const line of LINE_LABELS) {
+    assert.ok(!/出差/.test(scripts[idx].lines[line] ?? ""), `非售前岗的「${line}」不该出现出差问句`);
+  }
+});
+
+test("responded + 缺 role → 回落到通用话术，不返回 -1", () => {
   const scripts = parseScripts(SHIPPED);
   const idx = suggestScriptIndex(scripts, ENTRY({ status: "responded" }));
-  assert.match(scripts[idx].name, /约面先问清/);
+  assert.ok(idx >= 0);
+  assert.match(scripts[idx].name, /对方已回/);
 });
 
 test("interview（面后等结果）→ 二轮保岗·面后等结果", () => {
