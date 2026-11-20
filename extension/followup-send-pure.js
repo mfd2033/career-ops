@@ -58,6 +58,30 @@
   const CONTACT_ANTI =
     /搜索|消息|我的|简历|职位|公司|在线|离线|已读|未读|设置|更多|聊天|发送|交换|手机|微信|电话|沟通|招呼/;
 
+  // 会话列表 / 推荐位容器：这些区域同样挂着 `name` 类节点，且排在会话头部上方，
+  // 位置分比身份分更容易赢。1273、1270 都因此被填成上一个会话的「孙女士」
+  // （2026-11-20 实证）。命中即整条候选排除，不靠位置分兜。
+  const CONTACT_SCOPE_ANTI =
+    /(session|recent|recommend|suggest|sidebar|side-bar|conversation-?list|contact-?list|list-item|list__item|history-list|guess)/i;
+  // 会话头部本身就是人名最该出现的位置，命中后压过位置分。
+  const CONTACT_HEADER_HINT = /(chat-header|dialog-header|conversation-header|session-header|chat-title|dialog-title|contact-header)/i;
+
+  // 三站职位详情页的招聘者姓名节点（2026-11-20 真机实测：1273 猎聘 / 1282 BOSS /
+  // 1148 智联）。聊天页联系人靠猜，「本次要沟通的人」在职位页上是有确定答案的。
+  const JOB_CONTACT_SELECTORS = {
+    boss: [".job-boss-info h2.name", ".job-boss-info .name"],
+    liepin: [".recruiter-container .name-box .name", ".recruiter-container .name"],
+    zhaopin: [".publisher-seo-card .publisher-seo__name", ".publisher-seo__name"],
+  };
+  // 职位页招聘者只认「姓 + 称呼」：挡住「创始人」「信息化总监」这类同区域的文字。
+  // 前缀限 1–4 字（欧阳女士、Mary 都在内），更长的整句标题不进候选人名。
+  const JOB_POSTER_NAME_RE = /^[A-Za-z\u4e00-\u9fa5·.\s]{1,4}(女士|先生|小姐|老师)$/;
+
+  function isJobPosterName(text) {
+    const s = String(text == null ? "" : text).replace(/\s+/g, "").trim();
+    return s.length >= 3 && s.length <= 9 && JOB_POSTER_NAME_RE.test(s);
+  }
+
   // ---- 会话作用域（读联系人 / 找发送按钮的落脚点）---------------------------
   //
   // 三站的输入框都裹在「组合器」外壳里，而外壳类名往往带着 chat / im 前缀。
@@ -212,7 +236,9 @@
       if (text.length < 2 || text.length > 24) continue;
       if (CONTACT_ANTI.test(text)) continue;
       const hay = String(c.classText || "").toLowerCase();
+      if (CONTACT_SCOPE_ANTI.test(hay)) continue;
       let score = CONTACT_KEYWORDS.some((k) => hay.includes(k)) ? 3 : 0;
+      if (CONTACT_HEADER_HINT.test(hay)) score += 4;
       if (typeof c.top === "number") score -= Math.min(Math.max(c.top, 0), 800) / 400;
       if (!best || score > best.score) best = { text, score };
     }
@@ -253,10 +279,12 @@
     SITES,
     INPUT_MIN_SCORE,
     SEND_MIN_SCORE,
+    JOB_CONTACT_SELECTORS,
     siteForUrl,
     joinMessage,
     placeholderTokens,
     fingerprint,
+    isJobPosterName,
     scoreInputCandidate,
     scoreSendCandidate,
     pickInputCandidate,

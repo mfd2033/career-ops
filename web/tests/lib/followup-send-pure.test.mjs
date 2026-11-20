@@ -16,10 +16,12 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 const mod = await import(pathToFileURL(join(ROOT, "extension", "followup-send-pure.js")).href);
 const {
   SITES,
+  JOB_CONTACT_SELECTORS,
   siteForUrl,
   joinMessage,
   placeholderTokens,
   fingerprint,
+  isJobPosterName,
   scoreInputCandidate,
   scoreSendCandidate,
   pickInputCandidate,
@@ -256,6 +258,50 @@ test("猎聘聊天头的操作标签不进联系人（实证 2026-11-16 #6）", 
     "王莉娜",
   );
   assert.equal(pickContactCandidate([leak]), null);
+});
+
+test("会话列表首项不得压过当前会话头部（#1273 / #1270，2026-11-20）", () => {
+  // 聊天作用域里同时挂着左侧会话列表，列表首项（上一个会话的孙女士）比头部更靠上，
+  // 旧打分（类名 3 分 - 位置）必然选她。旧值就是这么被回填进跟进记录的。
+  const picked = pickContactCandidate([
+    { text: "孙女士", classText: "im-session-item__name", top: 40, visible: true },
+    { text: "周先生", classText: "im-chat-header__name", top: 140, visible: true },
+  ]);
+  assert.equal(picked, "周先生");
+
+  // 即便列表节点的类名不含排除词，头部身份分也要压过位置差。
+  const byHeaderWeight = pickContactCandidate([
+    { text: "孙女士", classText: "im-peer-name", top: 30, visible: true },
+    { text: "周先生", classText: "im-chat-header__name", top: 140, visible: true },
+  ]);
+  assert.equal(byHeaderWeight, "周先生");
+});
+
+test("推荐位的 HR 姓名不得进入联系人", () => {
+  // 猎聘职位页「猜你喜欢」里也挂着「孙女士 HR」。只靠位置分时推荐位会赢。
+  assert.equal(
+    pickContactCandidate([
+      { text: "孙女士", classText: "recommend-hr-name", top: 20, visible: true },
+      { text: "周先生", classText: "recruiter-name", top: 160, visible: true },
+    ]),
+    "周先生",
+  );
+  assert.equal(pickContactCandidate([{ text: "孙女士", classText: "recommend-hr-name", top: 20, visible: true }]), null);
+});
+
+test("职位页招聘者姓名只认「姓 + 称呼」", () => {
+  for (const name of ["周先生", "赵女士", "徐先生", "欧阳女士", "Mary女士"]) {
+    assert.equal(isJobPosterName(name), true, `${name} 应被当作招聘者姓名`);
+  }
+  for (const noise of ["创始人", "信息化总监", "项目经理", "孙女士HR", "交换手机号", "已认证", "高级猎头顾问张女士"]) {
+    assert.equal(isJobPosterName(noise), false, `${noise} 不该被当作招聘者姓名`);
+  }
+});
+
+test("三站职位页联系人选择器与实测位置一致", () => {
+  assert.ok(JOB_CONTACT_SELECTORS.boss.some((s) => s.includes(".job-boss-info")), "BOSS 在 .job-boss-info");
+  assert.ok(JOB_CONTACT_SELECTORS.liepin.some((s) => s.includes(".recruiter-container")), "猎聘在 .recruiter-container");
+  assert.ok(JOB_CONTACT_SELECTORS.zhaopin.some((s) => s.includes(".publisher-seo__name")), "智联在 .publisher-seo__name");
 });
 
 // ---- 会话作用域 ------------------------------------------------------------

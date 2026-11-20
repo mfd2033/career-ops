@@ -172,8 +172,21 @@ test("BOSS 聊天页只在本次从岗位页点进去时才发（ADR-0100 修订
 test("联系人读不到时回落到岗位页（用户口径 2026-11-12）", () => {
   assert.ok(EXT_JS.includes("function readJobPageContact"), "要能从岗位页读招聘者姓名");
   assert.ok(EXT_JS.includes("msg.jobContact"), "聊天窗读不到时要吃 SW 带回来的岗位页姓名");
-  assert.ok(EXT_JS.includes("entryContact: readJobPageContact()"), "点入口那一跳要把岗位页姓名交回去");
+  assert.ok(
+    EXT_JS.includes("readJobPageContact(site ? site.id : null)"),
+    "点入口那一跳要按站点把岗位页姓名交回去",
+  );
+  assert.ok(EXT_JS.includes("P.JOB_CONTACT_SELECTORS"), "三站职位页的联系人位置走纯逻辑选择器表");
   assert.ok(BG.includes("jobContact"), "SW 要把它接力给第二段");
+});
+
+test("聊天页联系人只从会话头部读，不再全容器按位置猜", () => {
+  assert.ok(EXT_JS.includes("CHAT_HEADER_SELECTOR"), "要有会话头部选择器");
+  assert.ok(EXT_JS.includes("chatHeaderOf(scope)"), "readContact 必须先定位头部容器");
+  assert.ok(
+    EXT_JS.includes("if (!header) return \"\""),
+    "头部找不到就留空，交给岗位页兜底，不能退回全容器扫描",
+  );
 });
 
 test("送达状态读取随「对方未读」一起下线，不再回传 readState", () => {

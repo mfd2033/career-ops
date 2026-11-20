@@ -330,22 +330,36 @@
 
   /**
    * 聊天头部招聘方名字；读不到返回空串（记录里那格留空，不编人名）。
-   * 容器同 readMessages；另外**跳过按钮/链接里的文字**——那是「交换手机号」「求简历」
-   * 这类操作标签，不是人名，早先真被填进过联系人。
+   * 人名只从会话头部取：聊天区里同时挂着左侧会话列表（首项是上一个会话的人）和
+   * 推荐位，按类名 + 位置在整块区域里挑，列表首项必然压过当前会话头部
+   * （2026-11-20 #1273/#1270 实证：读到上一个会话的孙女士）。头部找不到就留空，
+   * 交给岗位页读到的招聘者姓名兜底。
    */
+  const CHAT_HEADER_SELECTOR =
+    '[class*="chat-header"],[class*="dialog-header"],[class*="conversation-header"],[class*="session-header"],[class*="chat-title"],[class*="dialog-title"],[class*="contact-header"]';
+
+  function chatHeaderOf(scope) {
+    if (!scope) return null;
+    if (typeof scope.matches === "function" && scope.matches(CHAT_HEADER_SELECTOR)) return scope;
+    return scope.querySelector(CHAT_HEADER_SELECTOR);
+  }
+
   function readContact(inputEl) {
     const scope = chatScopeOf(inputEl);
     if (!scope || scope === document.body) return "";
-    const nodes = scope.querySelectorAll('[class*="name"],[class*="nick"],[class*="title"],[class*="hr"]');
+    const header = chatHeaderOf(scope);
+    if (!header) return "";
+    const nodes = header.querySelectorAll('[class*="name"],[class*="nick"],[class*="title"],[class*="hr"]');
     const candidates = [];
+    // 头部容器自己可能就是名字节点（例如猎聘 dialog-header-title）。
+    const own = { text: String(header.innerText || "").trim(), classText: classTextOf(header), top: header.getBoundingClientRect().top, visible: isVisible(header) };
+    if (own.text && own.text.length <= 40) candidates.push(own);
     let scanned = 0;
     for (const node of nodes) {
       if (scanned++ > MAX_CONTACT_SCAN) break;
       if (node.closest("button, a, [role='button']")) continue;
       // 消息流里的节点也带 name/title 类名（智联 im-message__name-wrapper、
-      // im-msg-11__title）。作用域放宽到整个会话容器后它们会进候选池，而
-      // 视口上方（top<0）的节点还会因位置得分被抬高 —— 一条短消息能压过
-      // 会话头部的真名。人名只在头部，消息区一律不看。
+      // im-msg-11__title），头部容器内也可能夹着消息预览。
       if (node.closest('[class*="timeline"],[class*="message"],[class*="msg"],[class*="bubble"]')) continue;
       const text = String(node.innerText || "").trim();
       if (!text || text.length > 40) continue;
@@ -356,20 +370,32 @@
   }
 
   /**
-   * 岗位详情页上的招聘者姓名——聊天窗读不到时的回退来源。
-   * BOSS 把它写成标题「赵女士」，紧跟「· 小猎吧」「猎头顾问」。只认 2–7 字、
-   * 以称呼结尾的短文本；别的站没这种写法就返回空串，不猜。
+   * 岗位详情页上的招聘者姓名——本次要沟通的人，在职位页上是确定值。
+   * 三站位置（2026-11-20 真机实测）：猎聘 `.recruiter-container .name-box .name`、
+   * BOSS `.job-boss-info h2.name`、智联 `.publisher-seo__name`。选择器读不到再退回
+   * 通用扫描，但只在 main 内且跳过推荐 / 猜你喜欢区——那里也摆着别的 HR 姓名
+   * （1273 职位页的「孙女士 HR」就在推荐位）。
    */
-  function readJobPageContact() {
-    const pattern = /^[\u4e00-\u9fa5A-Za-z]{1,5}(女士|先生|小姐|老师)$/;
-    const nodes = document.querySelectorAll("h1, h2, h3, h4, [class*='boss'], [class*='hr'], [class*='recruit']");
+  function readJobPageContact(siteId) {
+    const selectors = (P.JOB_CONTACT_SELECTORS && P.JOB_CONTACT_SELECTORS[siteId]) || [];
+    for (const sel of selectors) {
+      for (const el of document.querySelectorAll(sel)) {
+        if (!isVisible(el)) continue;
+        const text = String(el.innerText || el.textContent || "").replace(/\s+/g, "").trim();
+        if (P.isJobPosterName(text)) return text;
+      }
+    }
+    const root = document.querySelector("main") || document.body;
+    const noise = '[class*="recommend"],[class*="suggest"],[class*="guess"],[class*="like"]';
+    const nodes = root.querySelectorAll("h1, h2, h3, h4, [class*='boss'], [class*='hr'], [class*='recruit']");
     let scanned = 0;
     for (const el of nodes) {
       if (scanned++ > MAX_CONTACT_SCAN) break;
+      if (el.closest(noise)) continue;
       if (!isVisible(el)) continue;
       if (el.closest("a, button, [role='button']")) continue;
       const text = String(el.innerText || "").replace(/\s+/g, "").trim();
-      if (!pattern.test(text)) continue;
+      if (!P.isJobPosterName(text)) continue;
       return text;
     }
     return "";
@@ -400,7 +426,7 @@
           status: "navigating",
           reason: "chat-entry-clicked",
           site: site ? site.id : null,
-          entryContact: readJobPageContact(),
+          entryContact: readJobPageContact(site ? site.id : null),
         };
       }
     }
